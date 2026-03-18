@@ -85,7 +85,14 @@ func (c *Config) AddWhatsApp(entry WhatsAppConfig) {
 	c.WhatsApp = append(c.WhatsApp, entry)
 }
 
-// AddSlack appends a Slack configuration entry.
+// AddSlack upserts a Slack configuration entry by team ID.
+// If a workspace with the same team ID already exists, it is overwritten.
 func (c *Config) AddSlack(entry SlackConfig) {
+	for i, existing := range c.Slack {
+		if existing.TeamID == entry.TeamID {
+			c.Slack[i] = entry
+			return
+		}
+	}
 	c.Slack = append(c.Slack, entry)
 }
