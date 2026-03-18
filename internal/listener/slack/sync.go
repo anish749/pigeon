@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -66,6 +67,11 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 	if err != nil {
 		return fmt.Errorf("list conversations: %w", err)
 	}
+
+	// Sort: DMs first, then group IMs, then private channels, then public channels
+	sort.SliceStable(conversations, func(i, j int) bool {
+		return channelPriority(conversations[i]) < channelPriority(conversations[j])
+	})
 
 	slog.InfoContext(ctx, "slack sync: found user conversations",
 		"total", len(conversations), "workspace", workspace)
@@ -218,4 +224,18 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 		all[i], all[j] = all[j], all[i]
 	}
 	return all, nil
+}
+
+// channelPriority returns a sort key: DMs(0) < group IMs(1) < private channels(2) < public(3).
+func channelPriority(ch goslack.Channel) int {
+	if ch.IsIM {
+		return 0
+	}
+	if ch.IsMpIM {
+		return 1
+	}
+	if ch.IsPrivate {
+		return 2
+	}
+	return 3
 }
