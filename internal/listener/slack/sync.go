@@ -103,40 +103,31 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		resolver.RegisterConversation(ctx, ch)
 	}
 
-	gate.total = len(conversations)
+	// Track per-category progress
+	var doneDMs, doneMpIMs, donePrivate, donePublic int
 
 	var synced, totalMessages int
-	for i, ch := range conversations {
+	for _, ch := range conversations {
 		if ctx.Err() != nil {
 			saveCursors(workspace, cursors)
 			return ctx.Err()
 		}
 
-		gate.current = i + 1
 		gate.channel = resolver.ChannelName(ctx, ch.ID)
+		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
+			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
 
-		// If we have a cursor, resume from there. Otherwise, probe the last
-		// 30 days first — if empty, skip. If active, go back the full 90 days.
-		// This saves a full history fetch for every inactive channel at the
-		// cost of one cheap call that returns at most one page.
+		// Use cursor if resuming, otherwise go back 90 days.
+		// The first page of fetchHistory doubles as the activity check —
+		// if it comes back empty, we move on. No separate probe call.
 		oldest := defaultOldest
 		if cursor, ok := cursors[ch.ID]; ok {
 			oldest = cursor
-		} else {
-			probe, err := fetchHistory(ctx, api, gate, ch.ID, fmt.Sprintf("%d", activityCutoff.Unix()))
-			if err != nil {
-				slog.WarnContext(ctx, "slack sync: probe failed",
-					"channel", ch.ID, "error", err)
-				continue
-			}
-			if len(probe) == 0 {
-				continue
-			}
 		}
 
 		channelName := resolver.ChannelName(ctx, ch.ID)
 
-		msgs, err := fetchHistory(ctx, api, gate, ch.ID, oldest)
+		msgs, err := fetchHistory(ctx, api, gate, ch.ID, oldest, activityCutoff)
 		if err != nil {
 			slog.WarnContext(ctx, "slack sync: fetch failed",
 				"channel", channelName, "error", err)
@@ -173,6 +164,17 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			totalMessages += written
 			slog.InfoContext(ctx, "slack sync: channel done",
 				"channel", channelName, "messages", written, "workspace", workspace)
+		}
+
+		switch channelPriority(ch) {
+		case 0:
+			doneDMs++
+		case 1:
+			doneMpIMs++
+		case 2:
+			donePrivate++
+		case 3:
+			donePublic++
 		}
 	}
 
@@ -216,12 +218,18 @@ func listUserConversations(ctx context.Context, api *goslack.Client, gate *rateL
 	return all, nil
 }
 
-// fetchHistory retrieves all messages in a channel since the given Slack timestamp,
+// fetchHistory retrieves messages in a channel since the given Slack timestamp,
 // returned in chronological order. The oldest parameter is exclusive (messages
 // strictly after it are returned).
-func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate, channelID string, oldest string) ([]goslack.Message, error) {
+//
+// activityCutoff controls pagination: after the first page, if the newest message
+// in that page is older than activityCutoff, pagination stops. This avoids
+// fetching the full 90-day history for channels with no recent activity.
+// Pass a zero time to always fetch everything.
+func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate, channelID string, oldest string, activityCutoff time.Time) ([]goslack.Message, error) {
 	var all []goslack.Message
 	cursor := ""
+	firstPage := true
 
 	for {
 		if err := gate.wait(ctx); err != nil {
@@ -231,7 +239,7 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 		resp, err := api.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
 			ChannelID: channelID,
 			Oldest:    oldest,
-			Limit:     200,
+			Limit:     1000,
 			Cursor:    cursor,
 		})
 		if gate.update(err) {
@@ -241,6 +249,18 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 			return all, err
 		}
 		all = append(all, resp.Messages...)
+
+		// After the first page, check if the channel has recent activity.
+		// Slack returns newest-first, so Messages[0] is the most recent.
+		// If it's older than the cutoff, don't bother paginating further.
+		if firstPage && !activityCutoff.IsZero() && len(resp.Messages) > 0 {
+			newest := ParseTimestamp(resp.Messages[0].Timestamp)
+			if newest.Before(activityCutoff) {
+				break
+			}
+		}
+		firstPage = false
+
 		if !resp.HasMore {
 			break
 		}
