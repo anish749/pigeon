@@ -7,6 +7,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/slack-go/slack v0.19.0
 	go.mau.fi/whatsmeow v0.0.0-20260305215846-fc65416c22c4
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

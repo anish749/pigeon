@@ -12,36 +12,14 @@ const usage = `cmu — messaging data CLI for AI agents
 Reads locally-stored messaging data (WhatsApp, Slack, etc.) and provides
 listeners that receive real-time messages and save them as text files.
 
-DATA DIRECTORY
+COMMANDS — SETUP
 
-  Default: ~/.local/share/cmu/
-  Override: set CMU_DATA_DIR environment variable
+  setup-whatsapp    Pair a WhatsApp device via QR code, save to config
+  setup-slack       Save Slack workspace credentials to config
 
-  Layout:
+COMMANDS — DAEMON
 
-    <data-dir>/
-    ├── whatsapp/
-    │   ├── +14155551234/                  # account (phone number)
-    │   │   ├── +14155559876_Alice/        # conversation (phone_name)
-    │   │   │   ├── 2026-03-15.txt         # messages by date
-    │   │   │   └── 2026-03-16.txt
-    │   │   └── +14155550000_Bob/
-    │   │       └── 2026-03-16.txt
-    │   └── +919876543210/                 # second WhatsApp number
-    │       └── ...
-    ├── slack/
-    │   ├── acme-corp/                     # workspace name
-    │   │   ├── #engineering/              # channel
-    │   │   │   └── 2026-03-16.txt
-    │   │   └── @dave/                     # DM
-    │   │       └── 2026-03-16.txt
-    │   └── side-project/                  # second workspace
-    │       └── ...
-
-  Hierarchy: platform / account / conversation / YYYY-MM-DD.txt
-
-  Message format (one per line):
-    [2026-03-16 09:15:02] Alice: Hey, are you free?
+  daemon start      Start all configured listeners
 
 COMMANDS — READING
 
@@ -49,47 +27,109 @@ COMMANDS — READING
   read              Read messages from a conversation
   search            Search across conversations by keyword
 
-COMMANDS — LISTENERS
-
-  setup-whatsapp    Pair a WhatsApp device via QR code
-  listen-whatsapp   Listen for WhatsApp messages and save to files
-  listen-slack      Listen for Slack messages and save to files
-
 OTHER
 
   help              Show this help
 
 ─────────────────────────────────────────────────────────
 
+CONFIG
+
+  Config file: ~/.config/cmu/config.yaml (override: CMU_CONFIG_DIR)
+  Data directory: ~/.local/share/cmu/ (override: CMU_DATA_DIR)
+
+  The setup commands save listener credentials to config.yaml.
+  The daemon reads this config to start all listeners at once.
+
+  Example config.yaml:
+
+    whatsapp:
+      - device_jid: "14155551234:5@s.whatsapp.net"
+        db: "~/.local/share/cmu/whatsapp.db"
+        account: "+14155551234"
+
+    slack:
+      - workspace: "acme-corp"
+        app_token: "xapp-1-..."
+        bot_token: "xoxb-..."
+
+DATA LAYOUT
+
+    <data-dir>/
+    ├── whatsapp/
+    │   ├── +14155551234/                  # account (phone number)
+    │   │   ├── +14155559876_Alice/        # conversation (phone_name)
+    │   │   │   └── 2026-03-16.txt
+    │   │   └── +14155550000_Bob/
+    │   │       └── 2026-03-16.txt
+    ├── slack/
+    │   ├── acme-corp/                     # workspace
+    │   │   ├── #engineering/              # channel
+    │   │   │   └── 2026-03-16.txt
+    │   │   └── @dave/                     # DM
+    │   │       └── 2026-03-16.txt
+
+  Hierarchy: platform / account / conversation / YYYY-MM-DD.txt
+  Message format: [2026-03-16 09:15:02] Alice: Hey, are you free?
+
+─────────────────────────────────────────────────────────
+
+SETUP-WHATSAPP
+
+  cmu setup-whatsapp
+    Pair using default database (~/.local/share/cmu/whatsapp.db).
+
+  cmu setup-whatsapp -db=/path/to/whatsapp.db
+    Pair using a custom database path.
+
+  Options:
+    -db   SQLite database path (default: <data-dir>/whatsapp.db)
+
+SETUP-SLACK
+
+  cmu setup-slack -workspace=acme-corp -token=xapp-... -bot-token=xoxb-...
+    Save Slack credentials for a workspace.
+
+  Tokens can also come from environment variables:
+    SLACK_APP_TOKEN=xapp-...
+    SLACK_BOT_TOKEN=xoxb-...
+
+  Options:
+    -workspace   Workspace name [required]
+    -token       Slack app-level token (or SLACK_APP_TOKEN env var)
+    -bot-token   Slack bot token (or SLACK_BOT_TOKEN env var)
+
+  To create a Slack app, use the manifest at manifests/slack-app.yaml:
+    1. Go to https://api.slack.com/apps
+    2. Click "Create New App" → "From a manifest"
+    3. Paste the contents of manifests/slack-app.yaml
+    4. Install the app to your workspace
+    5. Copy the app-level token (xapp-...) and bot token (xoxb-...)
+    6. Run: cmu setup-slack -workspace=<name> -token=<xapp> -bot-token=<xoxb>
+
+DAEMON
+
+  cmu daemon start
+    Start all listeners configured in ~/.config/cmu/config.yaml.
+    Runs until Ctrl+C.
+
+─────────────────────────────────────────────────────────
+
 LIST
 
   cmu list
-    Show all platforms and their accounts.
-
   cmu list -platform=whatsapp
-    Show accounts for a specific platform.
-
   cmu list -platform=whatsapp -account=+14155551234
-    Show conversations for a specific account.
 
   Options:
-    -platform   Filter by platform name (whatsapp, slack, ...)
-    -account    Filter by account name (phone number, workspace, ...)
+    -platform   Filter by platform name
+    -account    Filter by account name
 
 READ
 
   cmu read -platform=whatsapp -account=+14155551234 -contact=Alice
-    Read today's messages with Alice. Contact is matched by substring
-    (case-insensitive) against directory name, display name, or identifier.
-
-  cmu read -platform=whatsapp -account=+14155551234 -contact=Alice -date=2026-03-15
-    Read messages from a specific date.
-
   cmu read -platform=slack -account=acme-corp -contact=#engineering -last=50
-    Read the last 50 messages in a channel.
-
   cmu read -platform=whatsapp -account=+14155551234 -contact=Bob -since=2h
-    Read messages from the last 2 hours.
 
   Options:
     -platform   Platform name [required]
@@ -102,13 +142,8 @@ READ
 SEARCH
 
   cmu search -q="deploy"
-    Search all platforms for "deploy".
-
   cmu search -q="bug" -platform=slack -account=acme-corp
-    Search a specific workspace.
-
   cmu search -q="lunch" -since=7d
-    Search only recent messages.
 
   Options:
     -q          Search query [required]
@@ -118,94 +153,19 @@ SEARCH
 
 ─────────────────────────────────────────────────────────
 
-SETUP-WHATSAPP
+WORKFLOW
 
-  Pair a new WhatsApp device by scanning a QR code. This stores device
-  credentials in a local SQLite database and outputs the device JID
-  needed for listen-whatsapp.
+  First-time setup:
 
-  cmu setup-whatsapp
-    Pair using default database (~/.local/share/cmu/whatsapp.db).
+    1. cmu setup-whatsapp          # scan QR code
+    2. cmu setup-slack -workspace=acme-corp -token=... -bot-token=...
+    3. cmu daemon start            # starts all listeners
 
-  cmu setup-whatsapp -db=/path/to/whatsapp.db
-    Pair using a custom database path.
+  Reading messages (from a different terminal or agent):
 
-  Options:
-    -db   SQLite database path (default: <data-dir>/whatsapp.db)
-
-  After pairing, you'll get a device JID like "14155551234:5@s.whatsapp.net".
-  Use it with listen-whatsapp.
-
-LISTEN-WHATSAPP
-
-  Connect to WhatsApp and save incoming messages as text files.
-  Long-running process — press Ctrl+C to stop.
-
-  cmu listen-whatsapp -device=14155551234:5@s.whatsapp.net
-    Listen using the paired device. Account directory defaults to
-    the phone number from the JID (e.g. +14155551234).
-
-  cmu listen-whatsapp -device=14155551234:5@s.whatsapp.net -account=personal
-    Use a custom account directory name.
-
-  Options:
-    -device     Device JID from setup-whatsapp [required]
-    -db         SQLite database path (default: <data-dir>/whatsapp.db)
-    -account    Account label for directory name (default: +phone from JID)
-
-LISTEN-SLACK
-
-  Connect to Slack via Socket Mode and save incoming messages as text files.
-  Long-running process — press Ctrl+C to stop.
-
-  Requires:
-    1. A Slack app with Socket Mode enabled
-    2. An app-level token (xapp-...) with connections:write scope
-    3. A bot token (xoxb-...) with channels:history, users:read, etc.
-
-  cmu listen-slack -workspace=acme-corp -token=xapp-... -bot-token=xoxb-...
-    Listen to a Slack workspace.
-
-  Tokens can also be set via environment variables:
-    SLACK_APP_TOKEN=xapp-...
-    SLACK_BOT_TOKEN=xoxb-...
-
-  cmu listen-slack -workspace=acme-corp
-    Listen using tokens from environment variables.
-
-  Options:
-    -workspace   Workspace name for directory [required]
-    -token       Slack app-level token (or SLACK_APP_TOKEN env var)
-    -bot-token   Slack bot token (or SLACK_BOT_TOKEN env var)
-
-─────────────────────────────────────────────────────────
-
-AGENT WORKFLOW
-
-  1. Discover what's available:
-       cmu list
-
-  2. Find a specific conversation:
-       cmu list -platform=whatsapp -account=+14155551234
-
-  3. Read recent messages:
-       cmu read -platform=whatsapp -account=+14155551234 -contact=Alice -last=20
-
-  4. Search for something specific:
-       cmu search -q="meeting" -since=24h
-
-SETUP WORKFLOW
-
-  1. Pair your WhatsApp:
-       cmu setup-whatsapp
-
-  2. Start listening (in a separate terminal):
-       cmu listen-whatsapp -device=<JID from step 1>
-
-  3. Start listening to Slack (in another terminal):
-       cmu listen-slack -workspace=my-company
-
-  4. Now use the reader commands to browse messages.
+    1. cmu list                    # see what's available
+    2. cmu read -platform=whatsapp -account=+14155551234 -contact=Alice -last=20
+    3. cmu search -q="meeting" -since=24h
 `
 
 func main() {
@@ -227,10 +187,10 @@ func main() {
 		err = commands.RunSearch(args)
 	case "setup-whatsapp":
 		err = commands.RunSetupWhatsApp(args)
-	case "listen-whatsapp":
-		err = commands.RunListenWhatsApp(args)
-	case "listen-slack":
-		err = commands.RunListenSlack(args)
+	case "setup-slack":
+		err = commands.RunSetupSlack(args)
+	case "daemon":
+		err = commands.RunDaemon(args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:

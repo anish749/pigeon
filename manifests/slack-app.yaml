@@ -1,0 +1,33 @@
+display_information:
+  name: Anish's Assistant
+  description: Provides Anish with API-based access to his own Slack messages for personal productivity workflows and integrations.
+  background_color: "#2d2d2d"
+
+features:
+  bot_user:
+    display_name: CMU Listener
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - users:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

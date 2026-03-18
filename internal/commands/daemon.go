@@ -1,0 +1,131 @@
+package commands
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	_ "github.com/mattn/go-sqlite3"
+	goslack "github.com/slack-go/slack"
+	"github.com/slack-go/slack/socketmode"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
+
+	"github.com/anish/claude-msg-utils/internal/config"
+	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
+	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
+	"github.com/anish/claude-msg-utils/internal/walog"
+)
+
+func RunDaemon(args []string) error {
+	if len(args) < 1 || args[0] != "start" {
+		return fmt.Errorf("usage: cmu daemon start")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 {
+		return fmt.Errorf("no listeners configured in %s\nRun 'cmu setup-whatsapp' or 'cmu setup-slack' first", config.ConfigPath())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var started int
+
+	// Start WhatsApp listeners
+	for _, wa := range cfg.WhatsApp {
+		jid, err := types.ParseJID(wa.DeviceJID)
+		if err != nil {
+			slog.ErrorContext(ctx, "invalid WhatsApp device JID, skipping", "jid", wa.DeviceJID, "error", err)
+			continue
+		}
+
+		client, err := connectWhatsApp(ctx, wa.DB, jid)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to create WhatsApp client, skipping", "account", wa.Account, "error", err)
+			continue
+		}
+
+		listener := walistener.New(client, wa.Account)
+		client.AddEventHandler(listener.EventHandler(ctx))
+
+		if err := client.Connect(); err != nil {
+			slog.ErrorContext(ctx, "failed to connect WhatsApp, skipping", "account", wa.Account, "error", err)
+			continue
+		}
+
+		slog.InfoContext(ctx, "whatsapp listener started", "account", wa.Account, "device", wa.DeviceJID)
+		started++
+	}
+
+	// Start Slack listeners
+	for _, sl := range cfg.Slack {
+		api, smClient := createSlackClients(sl.BotToken, sl.AppToken)
+
+		resolver := slacklistener.NewResolver(api)
+		if err := resolver.Load(ctx); err != nil {
+			slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
+		}
+
+		listener := slacklistener.New(smClient, resolver, sl.Workspace)
+		go listener.Run(ctx)
+
+		// Run Socket Mode connection in background
+		go func(workspace string) {
+			if err := smClient.RunContext(ctx); err != nil {
+				slog.ErrorContext(ctx, "slack socket mode error", "workspace", workspace, "error", err)
+			}
+		}(sl.Workspace)
+
+		slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace)
+		started++
+	}
+
+	if started == 0 {
+		return fmt.Errorf("no listeners could be started — check config and credentials")
+	}
+
+	fmt.Printf("Daemon running with %d listener(s). Press Ctrl+C to stop.\n", started)
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+
+	fmt.Println("\nShutting down...")
+	cancel()
+	return nil
+}
+
+// connectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
+func connectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsmeow.Client, error) {
+	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
+	container, err := sqlstore.New(ctx, "sqlite3", dsn, walog.New(ctx, "whatsapp-db"))
+	if err != nil {
+		return nil, fmt.Errorf("create device store: %w", err)
+	}
+
+	device, err := container.GetDevice(ctx, jid)
+	if err != nil {
+		return nil, fmt.Errorf("get device for JID %s: %w", jid.String(), err)
+	}
+	if device == nil {
+		return nil, fmt.Errorf("no device found for JID %s — run setup-whatsapp first", jid.String())
+	}
+
+	return whatsmeow.NewClient(device, walog.New(ctx, "whatsapp")), nil
+}
+
+// createSlackClients creates a Slack API client and Socket Mode client.
+func createSlackClients(botToken, appToken string) (*goslack.Client, *socketmode.Client) {
+	api := goslack.New(botToken, goslack.OptionAppLevelToken(appToken))
+	smClient := socketmode.New(api)
+	return api, smClient
+}

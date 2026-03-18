@@ -14,6 +14,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 
+	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/store"
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
@@ -56,10 +57,30 @@ func RunSetupWhatsApp(args []string) error {
 		case "success":
 			slog.InfoContext(ctx, "QR code scanned successfully")
 			deviceJID := client.Store.ID.String()
+			account := "+" + client.Store.ID.User
+
+			// Save to config
+			cfg, err := config.Load()
+			if err != nil {
+				slog.WarnContext(ctx, "failed to load config, creating new", "error", err)
+				cfg = &config.Config{}
+			}
+			cfg.AddWhatsApp(config.WhatsAppConfig{
+				DeviceJID: deviceJID,
+				DB:        *dbPath,
+				Account:   account,
+			})
+			if err := config.Save(cfg); err != nil {
+				slog.ErrorContext(ctx, "failed to save config", "error", err)
+			} else {
+				fmt.Printf("\nSaved to config: %s\n", config.ConfigPath())
+			}
+
 			fmt.Printf("\nDevice paired successfully!\n\n")
-			fmt.Printf("Device JID: %s\n\n", deviceJID)
-			fmt.Printf("Use this to start listening:\n\n")
-			fmt.Printf("  cmu listen-whatsapp -device=%s\n\n", deviceJID)
+			fmt.Printf("  Device JID: %s\n", deviceJID)
+			fmt.Printf("  Account:    %s\n\n", account)
+			fmt.Printf("Start listening with:\n")
+			fmt.Printf("  cmu daemon start\n\n")
 			fmt.Println("Press Ctrl+C to exit.")
 
 			c := make(chan os.Signal, 1)
