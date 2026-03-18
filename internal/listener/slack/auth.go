@@ -2,11 +2,14 @@ package slack
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	goslack "github.com/slack-go/slack"
@@ -32,7 +35,8 @@ var botScopes = []string{
 // OnInstall is called when a new workspace is successfully installed via OAuth.
 type OnInstall func(entry config.SlackConfig)
 
-// AuthServer runs a localhost HTTP server that handles the Slack OAuth redirect flow.
+// AuthServer runs a localhost HTTPS server that handles the Slack OAuth redirect flow.
+// Requires mkcert-generated TLS certificates in the config directory.
 type AuthServer struct {
 	clientID     string
 	clientSecret string
@@ -52,6 +56,23 @@ func NewAuthServer(clientID, clientSecret string, onInstall OnInstall) *AuthServ
 	}
 }
 
+// CertPath returns the expected path for the TLS certificate.
+func CertPath() string {
+	return filepath.Join(config.ConfigDir(), "localhost.pem")
+}
+
+// KeyPath returns the expected path for the TLS private key.
+func KeyPath() string {
+	return filepath.Join(config.ConfigDir(), "localhost-key.pem")
+}
+
+// HasTLSCerts checks whether the mkcert certificates exist.
+func HasTLSCerts() bool {
+	_, errCert := os.Stat(CertPath())
+	_, errKey := os.Stat(KeyPath())
+	return errCert == nil && errKey == nil
+}
+
 // InstallURL returns the Slack authorize URL that the user should visit.
 func (s *AuthServer) InstallURL() string {
 	params := url.Values{
@@ -67,15 +88,24 @@ func (s *AuthServer) Installed() <-chan config.SlackConfig {
 	return s.installed
 }
 
-// Start starts the HTTP server. Blocks until ctx is cancelled.
+// Start starts the HTTPS server. Blocks until ctx is cancelled.
 func (s *AuthServer) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/slack/install", s.handleInstall)
 	mux.HandleFunc("/slack/oauth/callback", s.handleCallback)
 
+	cert, err := tls.LoadX509KeyPair(CertPath(), KeyPath())
+	if err != nil {
+		return fmt.Errorf("load TLS certs: %w\n\nGenerate them with:\n  mkcert -cert-file %s -key-file %s localhost",
+			err, CertPath(), KeyPath())
+	}
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
 		Handler: mux,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		},
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
@@ -86,8 +116,8 @@ func (s *AuthServer) Start(ctx context.Context) error {
 		srv.Close()
 	}()
 
-	slog.InfoContext(ctx, "slack oauth server started", "port", s.port)
-	err := srv.ListenAndServe()
+	slog.InfoContext(ctx, "slack oauth server started (HTTPS)", "port", s.port)
+	err = srv.ListenAndServeTLS("", "")
 	if err == http.ErrServerClosed {
 		return nil
 	}
@@ -135,6 +165,18 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "slack workspace installed",
 		"workspace", entry.Workspace, "team_id", entry.TeamID)
 
+	// Write response to browser BEFORE signaling, so the server stays alive
+	// long enough for the browser to receive the success page.
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html><body>
+<h2>Workspace "%s" installed successfully!</h2>
+<p>You can close this tab and return to the terminal.</p>
+</body></html>`, resp.Team.Name)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
 	if s.onInstall != nil {
 		s.onInstall(entry)
 	}
@@ -142,15 +184,8 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	case s.installed <- entry:
 	default:
 	}
-
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html><body>
-<h2>Workspace "%s" installed successfully!</h2>
-<p>You can close this tab and return to the terminal.</p>
-</body></html>`, resp.Team.Name)
 }
 
 func (s *AuthServer) redirectURI() string {
-	return fmt.Sprintf("http://localhost:%d/slack/oauth/callback", s.port)
+	return fmt.Sprintf("https://localhost:%d/slack/oauth/callback", s.port)
 }

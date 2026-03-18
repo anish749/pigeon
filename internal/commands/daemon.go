@@ -76,7 +76,7 @@ func RunDaemon(args []string) error {
 		}
 
 		// Start OAuth server for adding new workspaces at runtime
-		if cfg.SlackApp.ClientID != "" && cfg.SlackApp.ClientSecret != "" {
+		if cfg.SlackApp.ClientID != "" && cfg.SlackApp.ClientSecret != "" && slacklistener.HasTLSCerts() {
 			oauthSrv := slacklistener.NewAuthServer(cfg.SlackApp.ClientID, cfg.SlackApp.ClientSecret, func(entry config.SlackConfig) {
 				slog.InfoContext(ctx, "new slack workspace installed via OAuth", "workspace", entry.Workspace)
 				startSlackListener(ctx, entry, appToken)
@@ -86,12 +86,14 @@ func RunDaemon(args []string) error {
 					slog.ErrorContext(ctx, "slack oauth server error", "error", err)
 				}
 			}()
-			fmt.Printf("Slack OAuth server running at http://localhost:9876/slack/install\n")
+			fmt.Printf("Slack OAuth server running at https://localhost:9876/slack/install\n")
+		} else if cfg.SlackApp.ClientID != "" && !slacklistener.HasTLSCerts() {
+			slog.WarnContext(ctx, "TLS certs not found, OAuth server disabled. Run 'cmu setup-slack' for instructions.")
 		}
 	}
 
 	if started == 0 && cfg.SlackApp != nil {
-		fmt.Printf("No listeners running yet. Install a Slack workspace at:\n  http://localhost:9876/slack/install\n\n")
+		fmt.Printf("No listeners running yet. Install a Slack workspace at:\n  https://localhost:9876/slack/install\n\n")
 	} else if started == 0 {
 		return fmt.Errorf("no listeners could be started — check config and credentials")
 	}

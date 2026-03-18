@@ -16,7 +16,7 @@ features:
 
 oauth_config:
   redirect_urls:
-    - http://localhost:9876/slack/oauth/callback
+    - https://localhost:9876/slack/oauth/callback
   scopes:
     bot:
       - channels:history

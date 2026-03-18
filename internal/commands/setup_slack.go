@@ -45,7 +45,7 @@ func RunSetupSlack(args []string) error {
   -client-secret (or SLACK_CLIENT_SECRET env var)
   -app-token     (or SLACK_APP_TOKEN env var)
 
-To create the Slack app:
+Step 1: Create the Slack app
 
   1. Go to https://api.slack.com/apps
   2. Click "Create New App" → "From a manifest" → pick any workspace
@@ -54,25 +54,25 @@ To create the Slack app:
   5. Under "Socket Mode" (left sidebar), enable it and create an
      app-level token with scope "connections:write" → copy it (xapp-...)
 
-Then run:
+Step 2: Run setup
 
   cmu setup-slack \
     -client-id=<Client ID> \
     -client-secret=<Client Secret> \
     -app-token=<xapp-...>
 
-To install in additional workspaces:
+  HTTPS certificates for the OAuth callback will be generated
+  automatically using mkcert (installed via Homebrew if needed).
 
-  The app can be installed in any workspace you have admin access to.
+Multi-workspace installation:
+
+  After the first install, add more workspaces by running:
+    cmu setup-slack
+
   To install in workspaces you don't own, enable distribution:
-
   1. Go to https://api.slack.com/apps → your app → "Manage Distribution"
-  2. Under "Share Your App with Other Workspaces", click "Activate Public Distribution"
-     (you may need to check off the required steps first)
-
-  After that, just run "cmu setup-slack" again — each run installs into
-  one more workspace. All workspaces are saved to config and started
-  together with "cmu daemon start".`)
+  2. Click "Activate Public Distribution"
+  3. Run "cmu setup-slack" — pick the new workspace in the browser`)
 		}
 
 		cfg.SlackApp = &config.SlackApp{
@@ -84,6 +84,13 @@ To install in additional workspaces:
 			return fmt.Errorf("save config: %w", err)
 		}
 		fmt.Printf("Slack app credentials saved to %s\n\n", config.ConfigPath())
+	}
+
+	// Ensure TLS certs exist — install mkcert and generate if needed
+	if !slacklistener.HasTLSCerts() {
+		if err := ensureMkcert(); err != nil {
+			return err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,6 +119,46 @@ To install in additional workspaces:
 	fmt.Printf("\nWorkspace %q (team: %s) installed and saved to config.\n\n", entry.Workspace, entry.TeamID)
 	fmt.Printf("To add another workspace, run:\n  cmu setup-slack\n\n")
 	fmt.Printf("To start listening on all workspaces:\n  cmu daemon start\n")
+	return nil
+}
+
+// ensureMkcert checks for mkcert, installs it if missing, and generates localhost certs.
+func ensureMkcert() error {
+	// Check if mkcert is installed
+	if _, err := exec.LookPath("mkcert"); err != nil {
+		fmt.Println("mkcert not found. Installing via Homebrew...")
+		cmd := exec.Command("brew", "install", "mkcert")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to install mkcert: %w\n\nInstall it manually: brew install mkcert", err)
+		}
+		fmt.Println()
+	}
+
+	// Install the local CA (if not already done)
+	fmt.Println("Installing mkcert CA into system trust store (may ask for password)...")
+	cmd := exec.Command("mkcert", "-install")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("mkcert -install failed: %w", err)
+	}
+	fmt.Println()
+
+	// Generate localhost cert
+	fmt.Println("Generating HTTPS certificate for localhost...")
+	cmd = exec.Command("mkcert",
+		"-cert-file", slacklistener.CertPath(),
+		"-key-file", slacklistener.KeyPath(),
+		"localhost")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("mkcert cert generation failed: %w", err)
+	}
+	fmt.Println()
+
 	return nil
 }
 
