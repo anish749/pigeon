@@ -81,12 +81,17 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		resolver.RegisterConversation(ctx, ch)
 	}
 
+	gate.total = len(conversations)
+
 	var synced, totalMessages int
-	for _, ch := range conversations {
+	for i, ch := range conversations {
 		if ctx.Err() != nil {
 			saveCursors(workspace, cursors)
 			return ctx.Err()
 		}
+
+		gate.current = i + 1
+		gate.channel = resolver.ChannelName(ctx, ch.ID)
 
 		// If we have a cursor, resume from there. Otherwise, probe the last
 		// 30 days first — if empty, skip. If active, go back the full 90 days.

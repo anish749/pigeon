@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -16,6 +17,9 @@ type rateLimitGate struct {
 	mu        sync.Mutex
 	deadline  time.Time
 	workspace string
+	current   int    // channels processed so far
+	total     int    // total channels to process
+	channel   string // current channel being synced
 }
 
 // wait blocks until the current rate limit window has passed, or ctx is cancelled.
@@ -29,12 +33,15 @@ func (g *rateLimitGate) wait(ctx context.Context) error {
 		return nil
 	}
 
-	slog.InfoContext(ctx, "slack sync: rate limited, waiting", "workspace", g.workspace, "duration", wait.Round(time.Second))
+	slog.InfoContext(ctx, "slack sync: rate limited, waiting",
+		"workspace", g.workspace, "progress", fmt.Sprintf("%d/%d", g.current, g.total),
+		"channel", g.channel, "duration", wait.Round(time.Second))
 	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
 	case <-t.C:
-		slog.InfoContext(ctx, "slack sync: rate limit wait done, resuming", "workspace", g.workspace)
+		slog.InfoContext(ctx, "slack sync: rate limit wait done, resuming",
+			"workspace", g.workspace, "progress", fmt.Sprintf("%d/%d", g.current, g.total))
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
