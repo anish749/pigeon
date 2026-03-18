@@ -23,7 +23,7 @@ import (
 
 func RunDaemon(args []string) error {
 	if len(args) < 1 || args[0] != "start" {
-		return fmt.Errorf("usage: cmu daemon start")
+		return fmt.Errorf("usage: pigeon daemon start")
 	}
 
 	cfg, err := config.Load()
@@ -32,7 +32,7 @@ func RunDaemon(args []string) error {
 	}
 
 	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 && cfg.SlackApp == nil {
-		return fmt.Errorf("no listeners configured in %s\nRun 'cmu setup-whatsapp' or 'cmu setup-slack' first", config.ConfigPath())
+		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", config.ConfigPath())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -88,7 +88,7 @@ func RunDaemon(args []string) error {
 			}()
 			fmt.Printf("Slack OAuth server running at https://localhost:9876/slack/install\n")
 		} else if cfg.SlackApp.ClientID != "" && !slacklistener.HasTLSCerts() {
-			slog.WarnContext(ctx, "TLS certs not found, OAuth server disabled. Run 'cmu setup-slack' for instructions.")
+			slog.WarnContext(ctx, "TLS certs not found, OAuth server disabled. Run 'pigeon setup-slack' for instructions.")
 		}
 	}
 

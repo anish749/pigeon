@@ -56,7 +56,7 @@ Step 1: Create the Slack app
 
 Step 2: Run setup
 
-  cmu setup-slack \
+  pigeon setup-slack \
     -client-id=<Client ID> \
     -client-secret=<Client Secret> \
     -app-token=<xapp-...>
@@ -67,12 +67,12 @@ Step 2: Run setup
 Multi-workspace installation:
 
   After the first install, add more workspaces by running:
-    cmu setup-slack
+    pigeon setup-slack
 
   To install in workspaces you don't own, enable distribution:
   1. Go to https://api.slack.com/apps → your app → "Manage Distribution"
   2. Click "Activate Public Distribution"
-  3. Run "cmu setup-slack" — pick the new workspace in the browser`)
+  3. Run "pigeon setup-slack" — pick the new workspace in the browser`)
 		}
 
 		cfg.SlackApp = &config.SlackApp{
@@ -117,8 +117,8 @@ Multi-workspace installation:
 	cancel()
 
 	fmt.Printf("\nWorkspace %q (team: %s) installed and saved to config.\n\n", entry.Workspace, entry.TeamID)
-	fmt.Printf("To add another workspace, run:\n  cmu setup-slack\n\n")
-	fmt.Printf("To start listening on all workspaces:\n  cmu daemon start\n")
+	fmt.Printf("To add another workspace, run:\n  pigeon setup-slack\n\n")
+	fmt.Printf("To start listening on all workspaces:\n  pigeon daemon start\n")
 	return nil
 }
 

@@ -80,7 +80,7 @@ func RunSetupWhatsApp(args []string) error {
 			fmt.Printf("  Device JID: %s\n", deviceJID)
 			fmt.Printf("  Account:    %s\n\n", account)
 			fmt.Printf("Start listening with:\n")
-			fmt.Printf("  cmu daemon start\n\n")
+			fmt.Printf("  pigeon daemon start\n\n")
 			fmt.Println("Press Ctrl+C to exit.")
 
 			c := make(chan os.Signal, 1)

@@ -11,13 +11,13 @@ import (
 )
 
 // DataDir returns the root directory for message data.
-// Respects CMU_DATA_DIR env var, defaults to ~/.local/share/cmu/
+// Respects PIGEON_DATA_DIR env var, defaults to ~/.local/share/pigeon/
 func DataDir() string {
-	if d := os.Getenv("CMU_DATA_DIR"); d != "" {
+	if d := os.Getenv("PIGEON_DATA_DIR"); d != "" {
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "cmu")
+	return filepath.Join(home, ".local", "share", "pigeon")
 }
 
 // ListPlatforms returns platform directory names (e.g. "whatsapp", "slack").

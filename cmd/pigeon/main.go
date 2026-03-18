@@ -7,7 +7,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/commands"
 )
 
-const usage = `cmu — messaging data CLI for AI agents
+const usage = `pigeon — messaging data CLI for AI agents
 
 Reads locally-stored messaging data (WhatsApp, Slack, etc.) and provides
 listeners that receive real-time messages and save them as text files.
@@ -35,8 +35,8 @@ OTHER
 
 CONFIG
 
-  Config file: ~/.config/cmu/config.yaml (override: CMU_CONFIG_DIR)
-  Data directory: ~/.local/share/cmu/ (override: CMU_DATA_DIR)
+  Config file: ~/.config/pigeon/config.yaml (override: PIGEON_CONFIG_DIR)
+  Data directory: ~/.local/share/pigeon/ (override: PIGEON_DATA_DIR)
 
   The setup commands save listener credentials to config.yaml.
   The daemon reads this config to start all listeners at once.
@@ -45,7 +45,7 @@ CONFIG
 
     whatsapp:
       - device_jid: "14155551234:5@s.whatsapp.net"
-        db: "~/.local/share/cmu/whatsapp.db"
+        db: "~/.local/share/pigeon/whatsapp.db"
         account: "+14155551234"
 
     slack:
@@ -76,10 +76,10 @@ DATA LAYOUT
 
 SETUP-WHATSAPP
 
-  cmu setup-whatsapp
-    Pair using default database (~/.local/share/cmu/whatsapp.db).
+  pigeon setup-whatsapp
+    Pair using default database (~/.local/share/pigeon/whatsapp.db).
 
-  cmu setup-whatsapp -db=/path/to/whatsapp.db
+  pigeon setup-whatsapp -db=/path/to/whatsapp.db
     Pair using a custom database path.
 
   Options:
@@ -92,11 +92,11 @@ SETUP-SLACK
 
   First time (provide app credentials):
 
-    cmu setup-slack -client-id=12345.67890 -client-secret=abc123 -app-token=xapp-1-...
+    pigeon setup-slack -client-id=12345.67890 -client-secret=abc123 -app-token=xapp-1-...
 
   Subsequent workspaces (credentials already saved):
 
-    cmu setup-slack
+    pigeon setup-slack
 
   Options:
     -client-id       Slack app client ID (first time only, or SLACK_CLIENT_ID)
@@ -109,13 +109,13 @@ SETUP-SLACK
     3. Paste the contents of manifests/slack-app.yaml
     4. Under "Basic Information", copy client ID and client secret
     5. Under "Socket Mode", enable it and create an app-level token (xapp-...)
-    6. Run: cmu setup-slack -client-id=... -client-secret=... -app-token=...
+    6. Run: pigeon setup-slack -client-id=... -client-secret=... -app-token=...
     7. Your browser opens — pick a workspace and approve
-    8. Done! Add more workspaces by running: cmu setup-slack
+    8. Done! Add more workspaces by running: pigeon setup-slack
 
 DAEMON
 
-  cmu daemon start
+  pigeon daemon start
     Start all configured listeners. Also runs a local HTTP server on
     port 9876 for adding new Slack workspaces at runtime via:
       http://localhost:9876/slack/install
@@ -125,9 +125,9 @@ DAEMON
 
 LIST
 
-  cmu list
-  cmu list -platform=whatsapp
-  cmu list -platform=whatsapp -account=+14155551234
+  pigeon list
+  pigeon list -platform=whatsapp
+  pigeon list -platform=whatsapp -account=+14155551234
 
   Options:
     -platform   Filter by platform name
@@ -135,9 +135,9 @@ LIST
 
 READ
 
-  cmu read -platform=whatsapp -account=+14155551234 -contact=Alice
-  cmu read -platform=slack -account=acme-corp -contact=#engineering -last=50
-  cmu read -platform=whatsapp -account=+14155551234 -contact=Bob -since=2h
+  pigeon read -platform=whatsapp -account=+14155551234 -contact=Alice
+  pigeon read -platform=slack -account=acme-corp -contact=#engineering -last=50
+  pigeon read -platform=whatsapp -account=+14155551234 -contact=Bob -since=2h
 
   Options:
     -platform   Platform name [required]
@@ -149,9 +149,9 @@ READ
 
 SEARCH
 
-  cmu search -q="deploy"
-  cmu search -q="bug" -platform=slack -account=acme-corp
-  cmu search -q="lunch" -since=7d
+  pigeon search -q="deploy"
+  pigeon search -q="bug" -platform=slack -account=acme-corp
+  pigeon search -q="lunch" -since=7d
 
   Options:
     -q          Search query [required]
@@ -165,15 +165,15 @@ WORKFLOW
 
   First-time setup:
 
-    1. cmu setup-whatsapp          # scan QR code
-    2. cmu setup-slack -workspace=acme-corp -token=... -bot-token=...
-    3. cmu daemon start            # starts all listeners
+    1. pigeon setup-whatsapp          # scan QR code
+    2. pigeon setup-slack -workspace=acme-corp -token=... -bot-token=...
+    3. pigeon daemon start            # starts all listeners
 
   Reading messages (from a different terminal or agent):
 
-    1. cmu list                    # see what's available
-    2. cmu read -platform=whatsapp -account=+14155551234 -contact=Alice -last=20
-    3. cmu search -q="meeting" -since=24h
+    1. pigeon list                    # see what's available
+    2. pigeon read -platform=whatsapp -account=+14155551234 -contact=Alice -last=20
+    3. pigeon search -q="meeting" -since=24h
 `
 
 func main() {
@@ -202,7 +202,7 @@ func main() {
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\nRun 'cmu help' for usage.\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command: %s\nRun 'pigeon help' for usage.\n", cmd)
 		os.Exit(1)
 	}
 

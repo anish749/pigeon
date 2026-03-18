@@ -35,13 +35,13 @@ type SlackConfig struct {
 }
 
 // ConfigDir returns the config directory path.
-// Respects CMU_CONFIG_DIR env var, defaults to ~/.config/cmu/
+// Respects PIGEON_CONFIG_DIR env var, defaults to ~/.config/pigeon/
 func ConfigDir() string {
-	if d := os.Getenv("CMU_CONFIG_DIR"); d != "" {
+	if d := os.Getenv("PIGEON_CONFIG_DIR"); d != "" {
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "cmu")
+	return filepath.Join(home, ".config", "pigeon")
 }
 
 // ConfigPath returns the full path to config.yaml.
