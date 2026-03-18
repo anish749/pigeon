@@ -68,12 +68,36 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		return fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Filter out DMs that have never been used. conversations.list returns an
-	// entry for every person in the workspace, but unused DMs have Updated == 0.
-	var conversations []goslack.Channel
+	// Count by type before filtering
+	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
 	for _, ch := range allConversations {
-		if ch.IsIM && ch.Latest == nil {
-			continue
+		switch channelPriority(ch) {
+		case 0:
+			totalDMs++
+		case 1:
+			totalMpIMs++
+		case 2:
+			totalPrivate++
+		case 3:
+			totalPublic++
+		}
+	}
+
+	// Filter out DMs that have never been used. conversations.list returns an
+	// entry for every person in the workspace, but unused ones have IsOpen=false
+	// and no LastRead timestamp.
+	var conversations []goslack.Channel
+	var skippedDMs, skippedMpIMs int
+	for _, ch := range allConversations {
+		if !ch.IsOpen && ch.LastRead == "" {
+			if ch.IsIM {
+				skippedDMs++
+				continue
+			}
+			if ch.IsMpIM {
+				skippedMpIMs++
+				continue
+			}
 		}
 		conversations = append(conversations, ch)
 	}
@@ -83,9 +107,14 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		return channelPriority(conversations[i]) < channelPriority(conversations[j])
 	})
 
-	slog.InfoContext(ctx, "slack sync: found user conversations",
-		"total", len(conversations), "skipped_unused_dms", len(allConversations)-len(conversations),
-		"workspace", workspace)
+	slog.InfoContext(ctx, "slack sync: conversations",
+		"workspace", workspace,
+		"dms", fmt.Sprintf("%d/%d", totalDMs-skippedDMs, totalDMs),
+		"group_ims", fmt.Sprintf("%d/%d", totalMpIMs-skippedMpIMs, totalMpIMs),
+		"private", totalPrivate,
+		"public", totalPublic,
+		"syncing", len(conversations),
+	)
 
 	// Register all channel names in resolver so real-time listener knows about them
 	for _, ch := range conversations {
