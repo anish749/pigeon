@@ -3,7 +3,6 @@ package slack
 import (
 	"context"
 	"log/slog"
-	"sync"
 
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -11,36 +10,18 @@ import (
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-// workspaceHandler holds the per-workspace state needed to process events.
-type workspaceHandler struct {
+// Listener receives Slack Socket Mode events and writes messages to local text files.
+// Each listener handles a single workspace with its own Socket Mode connection.
+type Listener struct {
+	client    *socketmode.Client
 	resolver  *Resolver
 	workspace string
+	teamID    string
 }
 
-// Listener receives Slack Socket Mode events and routes them to the correct
-// workspace handler based on team ID. A single Socket Mode connection serves
-// all workspaces since they share the same app token.
-type Listener struct {
-	client   *socketmode.Client
-	mu       sync.RWMutex
-	handlers map[string]*workspaceHandler // team ID → handler
-}
-
-// New creates a Slack listener backed by a single Socket Mode connection.
-func New(client *socketmode.Client) *Listener {
-	return &Listener{
-		client:   client,
-		handlers: make(map[string]*workspaceHandler),
-	}
-}
-
-// AddWorkspace registers a workspace so its events are handled.
-// Safe to call while Run is active (e.g. after an OAuth install).
-func (l *Listener) AddWorkspace(teamID, workspace string, resolver *Resolver) {
-	l.mu.Lock()
-	l.handlers[teamID] = &workspaceHandler{resolver: resolver, workspace: workspace}
-	l.mu.Unlock()
-	slog.Info("slack listener: workspace registered", "workspace", workspace, "team_id", teamID)
+// New creates a Slack listener for a single workspace.
+func New(client *socketmode.Client, resolver *Resolver, workspace, teamID string) *Listener {
+	return &Listener{client: client, resolver: resolver, workspace: workspace, teamID: teamID}
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -55,7 +36,7 @@ func (l *Listener) Run(ctx context.Context) {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeConnected:
-				slog.InfoContext(ctx, "slack: connected via Socket Mode")
+				slog.InfoContext(ctx, "slack: connected via Socket Mode", "workspace", l.workspace)
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
@@ -64,45 +45,40 @@ func (l *Listener) Run(ctx context.Context) {
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
 			case socketmode.EventTypeErrorBadMessage:
-				slog.WarnContext(ctx, "slack: bad message")
+				slog.WarnContext(ctx, "slack: bad message", "workspace", l.workspace)
 			case socketmode.EventTypeIncomingError:
-				slog.ErrorContext(ctx, "slack: incoming error")
+				slog.ErrorContext(ctx, "slack: incoming error", "workspace", l.workspace)
 			}
 		}
 	}
 }
 
 func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEvent) {
-	l.mu.RLock()
-	handler, ok := l.handlers[evt.TeamID]
-	l.mu.RUnlock()
-	if !ok {
-		slog.WarnContext(ctx, "slack: event from unknown team, ignoring", "team_id", evt.TeamID)
+	// Safety check: ignore events from other teams (shouldn't happen with per-app connections)
+	if l.teamID != "" && evt.TeamID != l.teamID {
 		return
 	}
-
 	switch innerEvt := evt.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
-		handler.handleMessage(ctx, innerEvt)
+		l.handleMessage(ctx, innerEvt)
 	}
 }
 
-func (h *workspaceHandler) handleMessage(ctx context.Context, msg *slackevents.MessageEvent) {
-	// Skip bot messages and subtypes (edits, deletes, joins, etc.)
+func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEvent) {
 	if msg.BotID != "" || msg.SubType != "" || msg.Text == "" {
 		return
 	}
 
-	userName := h.resolver.UserName(ctx, msg.User)
-	channelName := h.resolver.ChannelName(ctx, msg.Channel)
-	text := h.resolver.ResolveText(ctx, msg.Text)
+	userName := l.resolver.UserName(ctx, msg.User)
+	channelName := l.resolver.ChannelName(ctx, msg.Channel)
+	text := l.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
 
-	if err := store.WriteMessage("slack", h.workspace, channelName, userName, text, ts); err != nil {
-		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", h.workspace)
+	if err := store.WriteMessage("slack", l.workspace, channelName, userName, text, ts); err != nil {
+		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
 		return
 	}
 
 	slog.InfoContext(ctx, "slack message saved",
-		"from", userName, "channel", channelName, "workspace", h.workspace, "text_len", len(msg.Text))
+		"from", userName, "channel", channelName, "workspace", l.workspace, "text_len", len(msg.Text))
 }
