@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 
@@ -177,13 +178,18 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 
-	if s.onInstall != nil {
-		s.onInstall(entry)
-	}
-	select {
-	case s.installed <- entry:
-	default:
-	}
+	// Delay signaling so the HTTP handler fully returns and the server
+	// finishes the TLS response to the browser before setup_slack cancels it.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if s.onInstall != nil {
+			s.onInstall(entry)
+		}
+		select {
+		case s.installed <- entry:
+		default:
+		}
+	}()
 }
 
 func (s *AuthServer) redirectURI() string {
