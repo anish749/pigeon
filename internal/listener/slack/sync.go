@@ -82,20 +82,23 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			return ctx.Err()
 		}
 
-		active, err := hasRecentActivity(ctx, api, gate, ch.ID, activityCutoff)
-		if err != nil {
-			slog.WarnContext(ctx, "slack sync: activity check failed",
-				"channel", ch.ID, "error", err)
-			continue
-		}
-		if !active {
-			continue
-		}
-
-		// Use cursor if we've synced this channel before, otherwise go back 90 days
+		// If we have a cursor, resume from there. Otherwise, probe the last
+		// 30 days first — if empty, skip. If active, go back the full 90 days.
+		// This saves a full history fetch for every inactive channel at the
+		// cost of one cheap call that returns at most one page.
 		oldest := defaultOldest
 		if cursor, ok := cursors[ch.ID]; ok {
 			oldest = cursor
+		} else {
+			probe, err := fetchHistory(ctx, api, gate, ch.ID, fmt.Sprintf("%d", activityCutoff.Unix()))
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: probe failed",
+					"channel", ch.ID, "error", err)
+				continue
+			}
+			if len(probe) == 0 {
+				continue
+			}
 		}
 
 		channelName := resolver.ChannelName(ctx, ch.ID)
@@ -177,28 +180,6 @@ func listUserConversations(ctx context.Context, api *goslack.Client, gate *rateL
 		cursor = nextCursor
 	}
 	return all, nil
-}
-
-// hasRecentActivity checks if a conversation has any messages since the cutoff.
-func hasRecentActivity(ctx context.Context, api *goslack.Client, gate *rateLimitGate, channelID string, since time.Time) (bool, error) {
-	for {
-		if err := gate.wait(ctx); err != nil {
-			return false, err
-		}
-
-		resp, err := api.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
-			ChannelID: channelID,
-			Oldest:    fmt.Sprintf("%d", since.Unix()),
-			Limit:     1,
-		})
-		if gate.update(err) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		return len(resp.Messages) > 0, nil
-	}
 }
 
 // fetchHistory retrieves all messages in a channel since the given Slack timestamp,
