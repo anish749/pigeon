@@ -33,6 +33,20 @@ var botScopes = []string{
 	"users:read",
 }
 
+// User scopes grant the app permission to act on behalf of the installing user,
+// giving access to their DMs and all conversations they can see.
+var userScopes = []string{
+	"channels:history",
+	"channels:read",
+	"groups:history",
+	"groups:read",
+	"im:history",
+	"im:read",
+	"mpim:history",
+	"mpim:read",
+	"users:read",
+}
+
 // OnInstall is called when a new workspace is successfully installed via OAuth.
 type OnInstall func(entry config.SlackConfig)
 
@@ -79,6 +93,7 @@ func (s *AuthServer) InstallURL() string {
 	params := url.Values{
 		"client_id":    {s.clientID},
 		"scope":        {strings.Join(botScopes, ",")},
+		"user_scope":   {strings.Join(userScopes, ",")},
 		"redirect_uri": {s.redirectURI()},
 	}
 	return "https://slack.com/oauth/v2/authorize?" + params.Encode()
@@ -148,6 +163,7 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	entry := config.SlackConfig{
 		Workspace: resp.Team.Name,
 		BotToken:  resp.AccessToken,
+		UserToken: resp.AuthedUser.AccessToken,
 		TeamID:    resp.Team.ID,
 	}
 

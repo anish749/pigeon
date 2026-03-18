@@ -18,6 +18,16 @@ oauth_config:
   redirect_urls:
     - https://localhost:9876/slack/oauth/callback
   scopes:
+    user:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - users:read
     bot:
       - channels:history
       - channels:read
@@ -31,6 +41,11 @@ oauth_config:
 
 settings:
   event_subscriptions:
+    user_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
     bot_events:
       - message.channels
       - message.groups

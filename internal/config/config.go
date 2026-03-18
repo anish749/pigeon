@@ -31,6 +31,7 @@ type SlackApp struct {
 type SlackConfig struct {
 	Workspace string `yaml:"workspace"`
 	BotToken  string `yaml:"bot_token"`
+	UserToken string `yaml:"user_token,omitempty"`
 	TeamID    string `yaml:"team_id"`
 }
 
