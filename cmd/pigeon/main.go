@@ -31,6 +31,10 @@ COMMANDS — READING
   read              Read messages from a conversation
   search            Search across conversations by keyword
 
+COMMANDS — MAINTENANCE
+
+  reset             Delete all synced data for a platform/account
+
 OTHER
 
   help              Show this help
@@ -163,6 +167,17 @@ SEARCH
     -account    Filter by account
     -since      Only search messages from last duration (e.g. 2h, 7d)
 
+RESET
+
+  pigeon reset -platform=slack -account=acme-corp
+
+  Deletes all synced message data and sync cursors for a workspace/account.
+  The next daemon start will re-sync from scratch.
+
+  Options:
+    -platform   Platform name [required]
+    -account    Account/workspace name [required]
+
 ─────────────────────────────────────────────────────────
 
 WORKFLOW
@@ -208,6 +223,8 @@ func main() {
 		err = commands.RunSetupSlack(args)
 	case "daemon":
 		err = commands.RunDaemon(args)
+	case "reset":
+		err = commands.RunReset(args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:
