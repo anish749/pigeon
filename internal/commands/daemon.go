@@ -118,6 +118,15 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, appToken str
 		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
 	}
 
+	// Sync historical messages if user token is available
+	if sl.UserToken != "" {
+		go func() {
+			if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace); err != nil {
+				slog.ErrorContext(ctx, "slack sync failed", "workspace", sl.Workspace, "error", err)
+			}
+		}()
+	}
+
 	listener := slacklistener.New(smClient, resolver, sl.Workspace)
 	go listener.Run(ctx)
 

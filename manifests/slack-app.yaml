@@ -2,11 +2,11 @@ display_information:
   name: Anish's Pigeon
   description: Carrier pigeon. Picks up messages, flies them to Anish. No pecking, no replies.
   long_description: >-
-    Coo! This pigeon sits in your Slack workspace and carries
-    messages home so Anish can read them later. It won't post,
-    react, or ruffle any feathers — it simply listens and flies
-    off with the goods. Think of it as a very well-behaved bird
-    with read-only access and zero opinions.
+    Coo! This is Anish's personal carrier pigeon. It picks up
+    messages and flies them home so Anish can catch up whenever
+    he likes. Quiet, reliable, never makes a fuss. Won't peck
+    at your threads or leave droppings in your channels. Just a
+    well-behaved bird doing its one job: carrying messages.
   background_color: "#2d2d2d"
 
 features:

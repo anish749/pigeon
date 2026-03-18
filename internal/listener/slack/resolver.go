@@ -65,6 +65,14 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 	return len(r.users), len(r.channels), nil
 }
 
+// RegisterChannel adds a channel name to the cache. Used by backfill to register
+// channels discovered via the user token that the bot token may not see.
+func (r *Resolver) RegisterChannel(channelID, name string) {
+	r.mu.Lock()
+	r.channels[channelID] = name
+	r.mu.Unlock()
+}
+
 // UserName resolves a Slack user ID to a display name. Falls back to API lookup on cache miss.
 func (r *Resolver) UserName(ctx context.Context, userID string) string {
 	r.mu.RLock()
