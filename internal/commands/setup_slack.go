@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -20,12 +21,23 @@ func RunSetupSlack(args []string) error {
 	fmt.Println("=====================")
 	fmt.Println()
 	fmt.Println("Each workspace needs its own internal Slack app.")
-	fmt.Println("If you haven't created one yet, follow these steps:")
 	fmt.Println()
-	fmt.Println("  1. Go to https://api.slack.com/apps")
-	fmt.Println("  2. Click \"Create New App\" → \"From a manifest\"")
-	fmt.Println("  3. Pick the target workspace")
-	fmt.Println("  4. Paste the contents of manifests/slack-app.yaml → Create")
+
+	// Copy manifest to clipboard and open Slack app creation page
+	if err := copyManifestToClipboard(); err != nil {
+		fmt.Printf("  (Could not copy manifest to clipboard: %v)\n", err)
+		fmt.Println("  Manually copy the contents of manifests/slack-app.yaml")
+	} else {
+		fmt.Println("  The app manifest has been copied to your clipboard.")
+	}
+
+	fmt.Println("  Opening the Slack app creation page...")
+	fmt.Println()
+	openBrowser("https://api.slack.com/apps?new_app=1")
+
+	fmt.Println("  1. Click \"From a manifest\"")
+	fmt.Println("  2. Pick the target workspace")
+	fmt.Println("  3. Paste the manifest from your clipboard → Create")
 	fmt.Println()
 	fmt.Println("Once the app is created:")
 	fmt.Println()
@@ -87,6 +99,29 @@ func RunSetupSlack(args []string) error {
 	fmt.Printf("\nWorkspace %q (team: %s) installed and saved to config.\n\n", entry.Workspace, entry.TeamID)
 	fmt.Printf("To start listening:\n  pigeon daemon start\n")
 	return nil
+}
+
+func copyManifestToClipboard() error {
+	// Find manifest relative to the binary's directory
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// Resolve symlinks to get the real path
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(filepath.Dir(exe), "manifests", "slack-app.yaml")
+
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(string(data))
+	return cmd.Run()
 }
 
 func openBrowser(url string) {
