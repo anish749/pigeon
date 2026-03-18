@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -68,12 +69,15 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		return fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Filter out public channels the user hasn't joined
+	// Filter out public channels the user hasn't joined and Slackbot
 	var conversations []goslack.Channel
 	var skippedPublic int
 	for _, ch := range allConversations {
 		if !ch.IsIM && !ch.IsMpIM && !ch.IsPrivate && !ch.IsMember {
 			skippedPublic++
+			continue
+		}
+		if ch.IsIM && ch.User == "USLACKBOT" {
 			continue
 		}
 		conversations = append(conversations, ch)
@@ -140,8 +144,14 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 
 		msgs, err := fetchHistory(ctx, api, gate, ch.ID, oldest, activityCutoff)
 		if err != nil {
-			slog.WarnContext(ctx, "slack sync: fetch failed",
-				"channel", channelName, "error", err)
+			errStr := err.Error()
+			if strings.Contains(errStr, "channel_not_found") || strings.Contains(errStr, "is_archived") {
+				cursors[ch.ID] = oldest
+				saveCursors(workspace, cursors)
+			} else {
+				slog.WarnContext(ctx, "slack sync: fetch failed",
+					"channel", channelName, "error", err)
+			}
 			continue
 		}
 
