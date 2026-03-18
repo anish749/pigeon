@@ -63,9 +63,19 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
 	defaultOldest := fmt.Sprintf("%d", time.Now().AddDate(0, 0, -syncDays).Unix())
 
-	conversations, err := listUserConversations(ctx, api, gate)
+	allConversations, err := listUserConversations(ctx, api, gate)
 	if err != nil {
 		return fmt.Errorf("list conversations: %w", err)
+	}
+
+	// Filter out DMs that have never been used. conversations.list returns an
+	// entry for every person in the workspace, but unused DMs have Updated == 0.
+	var conversations []goslack.Channel
+	for _, ch := range allConversations {
+		if ch.IsIM && ch.Latest == nil {
+			continue
+		}
+		conversations = append(conversations, ch)
 	}
 
 	// Sort: DMs first, then group IMs, then private channels, then public channels
@@ -74,7 +84,8 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 	})
 
 	slog.InfoContext(ctx, "slack sync: found user conversations",
-		"total", len(conversations), "workspace", workspace)
+		"total", len(conversations), "skipped_unused_dms", len(allConversations)-len(conversations),
+		"workspace", workspace)
 
 	// Register all channel names in resolver so real-time listener knows about them
 	for _, ch := range conversations {
@@ -132,9 +143,10 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			}
 
 			userName := resolver.UserName(ctx, msg.User)
+			text := resolver.ResolveText(ctx, msg.Text)
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := store.WriteMessage("slack", workspace, channelName, userName, msg.Text, ts); err != nil {
+			if err := store.WriteMessage("slack", workspace, channelName, userName, text, ts); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
