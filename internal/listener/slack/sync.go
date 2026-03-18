@@ -68,9 +68,20 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		return fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Count by type before filtering
-	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
+	// Filter out public channels the user hasn't joined
+	var conversations []goslack.Channel
+	var skippedPublic int
 	for _, ch := range allConversations {
+		if !ch.IsIM && !ch.IsMpIM && !ch.IsPrivate && !ch.IsMember {
+			skippedPublic++
+			continue
+		}
+		conversations = append(conversations, ch)
+	}
+
+	// Count by type after filtering
+	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
+	for _, ch := range conversations {
 		switch channelPriority(ch) {
 		case 0:
 			totalDMs++
@@ -84,10 +95,9 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 	}
 
 	// Sort: DMs first, then group IMs, then private channels, then public channels
-	sort.SliceStable(allConversations, func(i, j int) bool {
-		return channelPriority(allConversations[i]) < channelPriority(allConversations[j])
+	sort.SliceStable(conversations, func(i, j int) bool {
+		return channelPriority(conversations[i]) < channelPriority(conversations[j])
 	})
-	conversations := allConversations
 
 	slog.InfoContext(ctx, "slack sync: conversations",
 		"workspace", workspace,
@@ -95,6 +105,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		"group_ims", totalMpIMs,
 		"private", totalPrivate,
 		"public", totalPublic,
+		"skipped_non_member", skippedPublic,
 		"total", len(conversations),
 	)
 
