@@ -18,6 +18,8 @@ type rateLimitGate struct {
 	workspace string
 	channel   string // current channel being synced
 	progress  string // e.g. "dms: 2/143 | group_ims: 0/212 | private: 0/23 | public: 0/950"
+	calls     int    // successful API calls since last 429
+	hits      int    // total 429s received
 }
 
 // wait blocks until the current rate limit window has passed, or ctx is cancelled.
@@ -51,6 +53,9 @@ func (g *rateLimitGate) wait(ctx context.Context) error {
 // Returns false for all other errors (caller should handle normally).
 func (g *rateLimitGate) update(err error) bool {
 	if err == nil {
+		g.mu.Lock()
+		g.calls++
+		g.mu.Unlock()
 		return false
 	}
 	rle, ok := err.(*goslack.RateLimitedError)
@@ -59,10 +64,19 @@ func (g *rateLimitGate) update(err error) bool {
 	}
 
 	g.mu.Lock()
+	g.hits++
 	newDeadline := time.Now().Add(rle.RetryAfter)
 	if newDeadline.After(g.deadline) {
 		g.deadline = newDeadline
 	}
 	g.mu.Unlock()
+
+	callsBeforeLimit := g.calls
+	g.calls = 0
+
+	slog.InfoContext(context.Background(), "slack sync: 429 received",
+		"workspace", g.workspace, "retry_after", rle.RetryAfter.Round(time.Second),
+		"calls_before_limit", callsBeforeLimit, "total_429s", g.hits,
+		"channel", g.channel, "progress", g.progress)
 	return true
 }

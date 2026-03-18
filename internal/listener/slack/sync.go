@@ -157,6 +157,16 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 
 		if lastTS != "" {
 			cursors[ch.ID] = lastTS
+		} else if _, hasCursor := cursors[ch.ID]; !hasCursor {
+			// Mark empty channels so we don't re-probe them on next restart.
+			// Use the current oldest as a sentinel — next run will resume from here
+			// and immediately get an empty response.
+			cursors[ch.ID] = oldest
+		}
+
+		// Save after every channel so progress survives crashes
+		if err := saveCursors(workspace, cursors); err != nil {
+			slog.WarnContext(ctx, "slack sync: failed to save cursors", "error", err)
 		}
 
 		if written > 0 {
@@ -176,10 +186,6 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		case 3:
 			donePublic++
 		}
-	}
-
-	if err := saveCursors(workspace, cursors); err != nil {
-		slog.WarnContext(ctx, "slack sync: failed to save cursors", "error", err)
 	}
 
 	slog.InfoContext(ctx, "slack sync: complete",
