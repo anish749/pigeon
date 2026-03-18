@@ -58,19 +58,36 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 	}
 	r.mu.Lock()
 	for _, ch := range chanList {
-		r.channels[ch.ID] = FormatChannelName(ch)
+		name := FormatChannelName(ch)
+		// Resolve IM user IDs to display names (we already hold the lock
+		// so read r.users directly instead of calling UserName).
+		if ch.IsIM {
+			if userName, ok := r.users[ch.User]; ok {
+				name = "@" + userName
+			}
+		}
+		r.channels[ch.ID] = name
 	}
 	r.mu.Unlock()
 
 	return len(r.users), len(r.channels), nil
 }
 
-// RegisterChannel adds a channel name to the cache. Used by backfill to register
-// channels discovered via the user token that the bot token may not see.
+// RegisterChannel adds a channel name to the cache.
 func (r *Resolver) RegisterChannel(channelID, name string) {
 	r.mu.Lock()
 	r.channels[channelID] = name
 	r.mu.Unlock()
+}
+
+// RegisterConversation registers a channel in the cache, resolving IM user IDs
+// to display names. Used by sync to register channels discovered via the user token.
+func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel) {
+	name := FormatChannelName(ch)
+	if ch.IsIM {
+		name = "@" + r.UserName(ctx, ch.User)
+	}
+	r.RegisterChannel(ch.ID, name)
 }
 
 // UserName resolves a Slack user ID to a display name. Falls back to API lookup on cache miss.
@@ -117,6 +134,9 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 		return channelID
 	}
 	name = FormatChannelName(*ch)
+	if ch.IsIM {
+		name = "@" + r.UserName(ctx, ch.User)
+	}
 	r.mu.Lock()
 	r.channels[channelID] = name
 	r.mu.Unlock()

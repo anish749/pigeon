@@ -78,7 +78,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 
 	// Register all channel names in resolver so real-time listener knows about them
 	for _, ch := range conversations {
-		resolver.RegisterChannel(ch.ID, FormatChannelName(ch))
+		resolver.RegisterConversation(ctx, ch)
 	}
 
 	var synced, totalMessages int
