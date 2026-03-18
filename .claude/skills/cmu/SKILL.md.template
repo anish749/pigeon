@@ -1,0 +1,17 @@
+---
+name: cmu
+description: Read and search locally-stored messaging data (WhatsApp, Slack, etc.). Use when the user asks about messages, chats, conversations, or wants to find something someone said.
+argument-hint: <command> [options]
+---
+
+# cmu — Messaging Data Reader
+
+The cmu binary is at: __CMU_PATH__
+
+Before doing anything else, run `__CMU_PATH__ help` to discover available commands and their options.
+
+## Task
+
+$ARGUMENTS
+
+Use `cmu` to accomplish the task. Follow the help output precisely. Start with `cmu list` to discover available platforms and accounts, then drill down with `cmu read` or `cmu search`.
