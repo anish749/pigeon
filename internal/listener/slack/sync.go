@@ -83,37 +83,19 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		}
 	}
 
-	// Filter out DMs that have never been used. conversations.list returns an
-	// entry for every person in the workspace, but unused ones have IsOpen=false
-	// and no LastRead timestamp.
-	var conversations []goslack.Channel
-	var skippedDMs, skippedMpIMs int
-	for _, ch := range allConversations {
-		if !ch.IsOpen && ch.LastRead == "" {
-			if ch.IsIM {
-				skippedDMs++
-				continue
-			}
-			if ch.IsMpIM {
-				skippedMpIMs++
-				continue
-			}
-		}
-		conversations = append(conversations, ch)
-	}
-
 	// Sort: DMs first, then group IMs, then private channels, then public channels
-	sort.SliceStable(conversations, func(i, j int) bool {
-		return channelPriority(conversations[i]) < channelPriority(conversations[j])
+	sort.SliceStable(allConversations, func(i, j int) bool {
+		return channelPriority(allConversations[i]) < channelPriority(allConversations[j])
 	})
+	conversations := allConversations
 
 	slog.InfoContext(ctx, "slack sync: conversations",
 		"workspace", workspace,
-		"dms", fmt.Sprintf("%d/%d", totalDMs-skippedDMs, totalDMs),
-		"group_ims", fmt.Sprintf("%d/%d", totalMpIMs-skippedMpIMs, totalMpIMs),
+		"dms", totalDMs,
+		"group_ims", totalMpIMs,
 		"private", totalPrivate,
 		"public", totalPublic,
-		"syncing", len(conversations),
+		"total", len(conversations),
 	)
 
 	// Register all channel names in resolver so real-time listener knows about them
