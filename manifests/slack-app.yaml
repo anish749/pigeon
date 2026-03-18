@@ -1,14 +1,22 @@
 display_information:
-  name: Anish's Assistant
-  description: Provides Anish with API-based access to his own Slack messages for personal productivity workflows and integrations.
+  name: Anish's Pigeon
+  description: Carrier pigeon. Picks up messages, flies them to Anish. No pecking, no replies.
+  long_description: >-
+    Coo! This pigeon sits in your Slack workspace and carries
+    messages home so Anish can read them later. It won't post,
+    react, or ruffle any feathers — it simply listens and flies
+    off with the goods. Think of it as a very well-behaved bird
+    with read-only access and zero opinions.
   background_color: "#2d2d2d"
 
 features:
   bot_user:
-    display_name: CMU Listener
+    display_name: Anish's Pigeon
     always_online: true
 
 oauth_config:
+  redirect_urls:
+    - http://localhost:9876/slack/oauth/callback
   scopes:
     bot:
       - channels:history
@@ -31,3 +39,4 @@ settings:
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
+  is_hosted: false

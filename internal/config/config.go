@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	WhatsApp []WhatsAppConfig `yaml:"whatsapp,omitempty"`
+	SlackApp *SlackApp        `yaml:"slack_app,omitempty"`
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 }
 
@@ -19,10 +20,18 @@ type WhatsAppConfig struct {
 	Account   string `yaml:"account"`
 }
 
+// SlackApp holds the app-level credentials shared across all workspaces.
+type SlackApp struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	AppToken     string `yaml:"app_token"`
+}
+
+// SlackConfig holds per-workspace credentials obtained via OAuth.
 type SlackConfig struct {
 	Workspace string `yaml:"workspace"`
-	AppToken  string `yaml:"app_token"`
 	BotToken  string `yaml:"bot_token"`
+	TeamID    string `yaml:"team_id"`
 }
 
 // ConfigDir returns the config directory path.

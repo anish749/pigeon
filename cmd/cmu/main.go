@@ -87,30 +87,38 @@ SETUP-WHATSAPP
 
 SETUP-SLACK
 
-  cmu setup-slack -workspace=acme-corp -token=xapp-... -bot-token=xoxb-...
-    Save Slack credentials for a workspace.
+  Installs the Slack app in a workspace via OAuth. Opens your browser
+  to Slack's authorization page — pick a workspace and approve.
 
-  Tokens can also come from environment variables:
-    SLACK_APP_TOKEN=xapp-...
-    SLACK_BOT_TOKEN=xoxb-...
+  First time (provide app credentials):
+
+    cmu setup-slack -client-id=12345.67890 -client-secret=abc123 -app-token=xapp-1-...
+
+  Subsequent workspaces (credentials already saved):
+
+    cmu setup-slack
 
   Options:
-    -workspace   Workspace name [required]
-    -token       Slack app-level token (or SLACK_APP_TOKEN env var)
-    -bot-token   Slack bot token (or SLACK_BOT_TOKEN env var)
+    -client-id       Slack app client ID (first time only, or SLACK_CLIENT_ID)
+    -client-secret   Slack app client secret (first time only, or SLACK_CLIENT_SECRET)
+    -app-token       Slack app-level token (first time only, or SLACK_APP_TOKEN)
 
-  To create a Slack app, use the manifest at manifests/slack-app.yaml:
+  To create a Slack app:
     1. Go to https://api.slack.com/apps
     2. Click "Create New App" → "From a manifest"
     3. Paste the contents of manifests/slack-app.yaml
-    4. Install the app to your workspace
-    5. Copy the app-level token (xapp-...) and bot token (xoxb-...)
-    6. Run: cmu setup-slack -workspace=<name> -token=<xapp> -bot-token=<xoxb>
+    4. Under "Basic Information", copy client ID and client secret
+    5. Under "Socket Mode", enable it and create an app-level token (xapp-...)
+    6. Run: cmu setup-slack -client-id=... -client-secret=... -app-token=...
+    7. Your browser opens — pick a workspace and approve
+    8. Done! Add more workspaces by running: cmu setup-slack
 
 DAEMON
 
   cmu daemon start
-    Start all listeners configured in ~/.config/cmu/config.yaml.
+    Start all configured listeners. Also runs a local HTTP server on
+    port 9876 for adding new Slack workspaces at runtime via:
+      http://localhost:9876/slack/install
     Runs until Ctrl+C.
 
 ─────────────────────────────────────────────────────────
