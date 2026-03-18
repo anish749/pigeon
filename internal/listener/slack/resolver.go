@@ -29,13 +29,14 @@ func NewResolver(api *goslack.Client) *Resolver {
 }
 
 // Load preloads user and channel name caches from the Slack API.
-func (r *Resolver) Load(ctx context.Context) error {
-	users, err := r.api.GetUsersContext(ctx)
+// Returns the number of users and channels loaded.
+func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error) {
+	userList, err := r.api.GetUsersContext(ctx)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	r.mu.Lock()
-	for _, u := range users {
+	for _, u := range userList {
 		name := u.Profile.DisplayName
 		if name == "" {
 			name = u.RealName
@@ -47,22 +48,21 @@ func (r *Resolver) Load(ctx context.Context) error {
 	}
 	r.mu.Unlock()
 
-	channels, _, err := r.api.GetConversationsContext(ctx, &goslack.GetConversationsParameters{
+	chanList, _, err := r.api.GetConversationsContext(ctx, &goslack.GetConversationsParameters{
 		Types:           []string{"public_channel", "private_channel", "mpim", "im"},
 		ExcludeArchived: true,
 		Limit:           1000,
 	})
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	r.mu.Lock()
-	for _, ch := range channels {
+	for _, ch := range chanList {
 		r.channels[ch.ID] = FormatChannelName(ch)
 	}
 	r.mu.Unlock()
 
-	slog.InfoContext(ctx, "slack resolver loaded", "users", len(r.users), "channels", len(r.channels))
-	return nil
+	return len(r.users), len(r.channels), nil
 }
 
 // UserName resolves a Slack user ID to a display name. Falls back to API lookup on cache miss.

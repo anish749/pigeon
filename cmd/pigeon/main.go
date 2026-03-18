@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
+
+	"github.com/lmittmann/tint"
 
 	"github.com/anish/claude-msg-utils/internal/commands"
 )
@@ -177,6 +181,11 @@ WORKFLOW
 `
 
 func main() {
+	slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
+		Level:      slog.LevelInfo,
+		TimeFormat: time.Kitchen,
+	})))
+
 	if len(os.Args) < 2 {
 		fmt.Print(usage)
 		os.Exit(0)

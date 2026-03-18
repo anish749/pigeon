@@ -113,7 +113,8 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, appToken str
 	api, smClient := createSlackClients(sl.BotToken, appToken)
 
 	resolver := slacklistener.NewResolver(api)
-	if err := resolver.Load(ctx); err != nil {
+	users, channels, err := resolver.Load(ctx)
+	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
 	}
 
@@ -126,7 +127,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, appToken str
 		}
 	}()
 
-	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace)
+	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
 }
 
 // connectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
