@@ -66,20 +66,37 @@ func RunDaemon(args []string) error {
 		started++
 	}
 
-	// Start Slack listeners (need app token from SlackApp)
+	// Start Slack: one Socket Mode connection serves all workspaces
 	if cfg.SlackApp != nil && cfg.SlackApp.AppToken != "" {
 		appToken := cfg.SlackApp.AppToken
 
+		// Pick a bot token for the SM connection (SM only uses the app token
+		// for the WebSocket, but slack-go requires an API client to create it).
+		smBotToken := ""
+		if len(cfg.Slack) > 0 {
+			smBotToken = cfg.Slack[0].BotToken
+		}
+		smClient := createSocketModeClient(smBotToken, appToken)
+		listener := slacklistener.New(smClient)
+
+		// Register each workspace
 		for _, sl := range cfg.Slack {
-			startSlackListener(ctx, sl, appToken)
+			registerSlackWorkspace(ctx, listener, sl)
 			started++
 		}
+
+		go listener.Run(ctx)
+		go func() {
+			if err := smClient.RunContext(ctx); err != nil {
+				slog.ErrorContext(ctx, "slack socket mode error", "error", err)
+			}
+		}()
 
 		// Start OAuth server for adding new workspaces at runtime
 		if cfg.SlackApp.ClientID != "" && cfg.SlackApp.ClientSecret != "" && slacklistener.HasTLSCerts() {
 			oauthSrv := slacklistener.NewAuthServer(cfg.SlackApp.ClientID, cfg.SlackApp.ClientSecret, func(entry config.SlackConfig) {
 				slog.InfoContext(ctx, "new slack workspace installed via OAuth", "workspace", entry.Workspace)
-				startSlackListener(ctx, entry, appToken)
+				registerSlackWorkspace(ctx, listener, entry)
 			})
 			go func() {
 				if err := oauthSrv.Start(ctx); err != nil {
@@ -109,16 +126,17 @@ func RunDaemon(args []string) error {
 	return nil
 }
 
-func startSlackListener(ctx context.Context, sl config.SlackConfig, appToken string) {
-	api, smClient := createSlackClients(sl.BotToken, appToken)
-
+// registerSlackWorkspace sets up a resolver for a workspace, adds it to the
+// listener, and kicks off a background sync if a user token is available.
+func registerSlackWorkspace(ctx context.Context, listener *slacklistener.Listener, sl config.SlackConfig) {
+	api := goslack.New(sl.BotToken)
 	resolver := slacklistener.NewResolver(api)
-	users, channels, err := resolver.Load(ctx)
-	if err != nil {
+	if _, _, err := resolver.Load(ctx); err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
 	}
 
-	// Sync historical messages if user token is available
+	listener.AddWorkspace(sl.TeamID, sl.Workspace, resolver)
+
 	if sl.UserToken != "" {
 		go func() {
 			if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace); err != nil {
@@ -126,17 +144,6 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, appToken str
 			}
 		}()
 	}
-
-	listener := slacklistener.New(smClient, resolver, sl.Workspace)
-	go listener.Run(ctx)
-
-	go func() {
-		if err := smClient.RunContext(ctx); err != nil {
-			slog.ErrorContext(ctx, "slack socket mode error", "workspace", sl.Workspace, "error", err)
-		}
-	}()
-
-	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
 }
 
 // connectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
@@ -158,9 +165,9 @@ func connectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsm
 	return whatsmeow.NewClient(device, walog.New(ctx, "whatsapp")), nil
 }
 
-// createSlackClients creates a Slack API client and Socket Mode client.
-func createSlackClients(botToken, appToken string) (*goslack.Client, *socketmode.Client) {
+// createSocketModeClient creates a Socket Mode client. The bot token is used to
+// satisfy slack-go's API client requirement; only the app token matters for SM.
+func createSocketModeClient(botToken, appToken string) *socketmode.Client {
 	api := goslack.New(botToken, goslack.OptionAppLevelToken(appToken))
-	smClient := socketmode.New(api)
-	return api, smClient
+	return socketmode.New(api)
 }

@@ -160,7 +160,7 @@ func listUserConversations(ctx context.Context, api *goslack.Client, gate *rateL
 		params := &goslack.GetConversationsParameters{
 			Types:           []string{"public_channel", "private_channel", "mpim", "im"},
 			ExcludeArchived: true,
-			Limit:           200,
+			Limit:           1000,
 			Cursor:          cursor,
 		}
 		channels, nextCursor, err := api.GetConversationsContext(ctx, params)
