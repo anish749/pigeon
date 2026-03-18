@@ -3,6 +3,7 @@ package commands
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,7 +52,9 @@ func RunRead(args []string) error {
 		return nil
 	}
 
+	dir := filepath.Join(store.DataDir(), *platform, *account, conv.DirName)
 	fmt.Printf("--- %s/%s/%s ---\n", *platform, *account, conv.DisplayName)
+	fmt.Printf("    %s\n", dir)
 	fmt.Println(strings.Join(lines, "\n"))
 	return nil
 }

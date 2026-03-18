@@ -3,6 +3,7 @@ package commands
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/anish/claude-msg-utils/internal/store"
@@ -42,7 +43,8 @@ func RunSearch(args []string) error {
 
 	fmt.Printf("%d match(es) found:\n\n", len(results))
 	for _, r := range results {
-		fmt.Printf("[%s/%s/%s %s]\n  %s\n\n", r.Platform, r.Account, r.Conversation, r.Date, r.Line)
+		dir := filepath.Join(store.DataDir(), r.Platform, r.Account, r.Conversation)
+		fmt.Printf("[%s/%s/%s %s]\n    %s\n  %s\n\n", r.Platform, r.Account, r.Conversation, r.Date, dir, r.Line)
 	}
 	return nil
 }
