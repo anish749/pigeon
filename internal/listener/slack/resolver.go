@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +11,26 @@ import (
 
 	goslack "github.com/slack-go/slack"
 )
+
+// mentionRe matches Slack user mentions: <@U12345678> or <@U12345678|displayname>
+var mentionRe = regexp.MustCompile(`<@(U[A-Z0-9]+)(?:\|[^>]*)?>`)
+
+// channelMentionRe matches Slack channel mentions: <#C12345678|channel-name>
+var channelMentionRe = regexp.MustCompile(`<#(C[A-Z0-9]+)\|([^>]+)>`)
+
+// ResolveText replaces Slack markup in message text with human-readable names.
+// Converts <@U12345678> to @displayname and <#C12345678|name> to #name.
+func (r *Resolver) ResolveText(ctx context.Context, text string) string {
+	text = mentionRe.ReplaceAllStringFunc(text, func(match string) string {
+		sub := mentionRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		return "@" + r.UserName(ctx, sub[1])
+	})
+	text = channelMentionRe.ReplaceAllString(text, "#$2")
+	return text
+}
 
 // Resolver caches Slack user and channel name lookups.
 type Resolver struct {

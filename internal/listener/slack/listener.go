@@ -95,9 +95,10 @@ func (h *workspaceHandler) handleMessage(ctx context.Context, msg *slackevents.M
 
 	userName := h.resolver.UserName(ctx, msg.User)
 	channelName := h.resolver.ChannelName(ctx, msg.Channel)
+	text := h.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
 
-	if err := store.WriteMessage("slack", h.workspace, channelName, userName, msg.Text, ts); err != nil {
+	if err := store.WriteMessage("slack", h.workspace, channelName, userName, text, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", h.workspace)
 		return
 	}
