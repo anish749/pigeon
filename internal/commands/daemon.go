@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -38,7 +39,7 @@ func RunDaemon(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var started int
+	var whatsappCount, slackCount int
 
 	// Start WhatsApp listeners
 	for _, wa := range cfg.WhatsApp {
@@ -63,7 +64,7 @@ func RunDaemon(args []string) error {
 		}
 
 		slog.InfoContext(ctx, "whatsapp listener started", "account", wa.Account, "device", wa.DeviceJID)
-		started++
+		whatsappCount++
 	}
 
 	// Start Slack: one Socket Mode connection serves all workspaces
@@ -82,7 +83,7 @@ func RunDaemon(args []string) error {
 		// Register each workspace
 		for _, sl := range cfg.Slack {
 			registerSlackWorkspace(ctx, listener, sl)
-			started++
+			slackCount++
 		}
 
 		go listener.Run(ctx)
@@ -109,13 +110,20 @@ func RunDaemon(args []string) error {
 		}
 	}
 
-	if started == 0 && cfg.SlackApp != nil {
+	if whatsappCount == 0 && slackCount == 0 && cfg.SlackApp != nil {
 		fmt.Printf("No listeners running yet. Install a Slack workspace at:\n  https://localhost:9876/slack/install\n\n")
-	} else if started == 0 {
+	} else if whatsappCount == 0 && slackCount == 0 {
 		return fmt.Errorf("no listeners could be started — check config and credentials")
 	}
 
-	fmt.Printf("Daemon running with %d listener(s). Press Ctrl+C to stop.\n", started)
+	var parts []string
+	if whatsappCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d WhatsApp account(s)", whatsappCount))
+	}
+	if slackCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d Slack workspace(s)", slackCount))
+	}
+	fmt.Printf("Daemon running: %s. Press Ctrl+C to stop.\n", strings.Join(parts, ", "))
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
