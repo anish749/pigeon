@@ -10,17 +10,27 @@ import (
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
 // Each listener handles a single workspace with its own Socket Mode connection.
+// On every Socket Mode connect (including reconnects), it runs a sync to backfill
+// any messages missed while disconnected.
 type Listener struct {
 	client    *socketmode.Client
 	resolver  *Resolver
 	messages  *MessageStore
+	userToken string
 	workspace string
 	teamID    string
 }
 
-// New creates a Slack listener for a single workspace.
-func New(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string) *Listener {
-	return &Listener{client: client, resolver: resolver, messages: messages, workspace: workspace, teamID: teamID}
+// NewListener creates a Slack listener for a single workspace.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, workspace, teamID string) *Listener {
+	return &Listener{
+		client:    client,
+		resolver:  resolver,
+		messages:  messages,
+		userToken: userToken,
+		workspace: workspace,
+		teamID:    teamID,
+	}
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -35,7 +45,12 @@ func (l *Listener) Run(ctx context.Context) {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeConnected:
-				slog.InfoContext(ctx, "slack: connected via Socket Mode", "workspace", l.workspace)
+				slog.InfoContext(ctx, "slack: connected, triggering sync", "workspace", l.workspace)
+				go func() {
+					if err := Sync(ctx, l.userToken, l.resolver, l.workspace, l.messages); err != nil {
+						slog.ErrorContext(ctx, "slack sync failed", "workspace", l.workspace, "error", err)
+					}
+				}()
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {

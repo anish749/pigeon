@@ -222,6 +222,7 @@ func SearchMessages(query, platform, account string, since time.Duration) ([]Sea
 }
 
 // WriteMessage appends a formatted message line to the appropriate date file.
+// Deduplicates by skipping writes if the exact line already exists in the file.
 // Creates parent directories if needed. Safe for concurrent use (O_APPEND).
 func WriteMessage(platform, account, conversation, sender, text string, ts time.Time) error {
 	dir := filepath.Join(DataDir(), platform, account, conversation)
@@ -229,13 +230,23 @@ func WriteMessage(platform, account, conversation, sender, text string, ts time.
 		return fmt.Errorf("create conversation dir %s: %w", dir, err)
 	}
 	filename := filepath.Join(dir, ts.Format("2006-01-02")+".txt")
+	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05"), sender, text)
+
+	// Check for duplicate
+	if existing, err := os.ReadFile(filename); err == nil {
+		for _, existingLine := range strings.Split(string(existing), "\n") {
+			if existingLine == line {
+				return nil
+			}
+		}
+	}
+
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", filename, err)
 	}
 	defer f.Close()
-	line := fmt.Sprintf("[%s] %s: %s\n", ts.Format("2006-01-02 15:04:05"), sender, text)
-	_, err = f.WriteString(line)
+	_, err = f.WriteString(line + "\n")
 	return err
 }
 
