@@ -47,7 +47,7 @@ func (l *Listener) Run(ctx context.Context) {
 			case socketmode.EventTypeErrorBadMessage:
 				slog.WarnContext(ctx, "slack: bad message", "workspace", l.workspace)
 			case socketmode.EventTypeIncomingError:
-				slog.ErrorContext(ctx, "slack: incoming error", "workspace", l.workspace)
+				slog.ErrorContext(ctx, "slack: incoming error", "workspace", l.workspace, "error", evt.Data)
 			}
 		}
 	}
