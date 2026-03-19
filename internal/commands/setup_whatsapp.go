@@ -8,13 +8,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/anish/claude-msg-utils/internal/config"
+	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/store"
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
@@ -59,6 +62,21 @@ func RunSetupWhatsApp(args []string) error {
 			deviceJID := client.Store.ID.String()
 			account := "+" + client.Store.ID.User
 
+			// Register listener to capture history sync events during setup.
+			listener := walistener.New(client, account)
+			client.AddEventHandler(listener.EventHandler(ctx))
+
+			// Track sync activity so we can detect completion.
+			syncEvent := make(chan struct{}, 1)
+			client.AddEventHandler(func(evt any) {
+				if _, ok := evt.(*events.HistorySync); ok {
+					select {
+					case syncEvent <- struct{}{}:
+					default:
+					}
+				}
+			})
+
 			// Save to config
 			cfg, err := config.Load()
 			if err != nil {
@@ -79,15 +97,45 @@ func RunSetupWhatsApp(args []string) error {
 			fmt.Printf("\nDevice paired successfully!\n\n")
 			fmt.Printf("  Device JID: %s\n", deviceJID)
 			fmt.Printf("  Account:    %s\n\n", account)
-			fmt.Printf("Start listening with:\n")
-			fmt.Printf("  pigeon daemon start\n\n")
-			fmt.Println("Press Ctrl+C to exit.")
 
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-			<-c
-			client.Disconnect()
-			return nil
+			// Block until history sync completes (30s idle) or interrupted.
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+			fmt.Println("Waiting for history sync...")
+
+			const idleTimeout = 30 * time.Second
+
+			// Wait for first sync event (or bail after 30s / signal).
+			select {
+			case <-syncEvent:
+			case <-time.After(idleTimeout):
+				fmt.Println("No history sync data received.")
+				client.Disconnect()
+				return nil
+			case <-sigCh:
+				fmt.Println("\nInterrupted.")
+				client.Disconnect()
+				return nil
+			}
+
+			// Got first event — keep resetting the idle timer on each new event.
+			for {
+				select {
+				case <-syncEvent:
+					// more data arriving, keep waiting
+				case <-time.After(idleTimeout):
+					fmt.Println("History sync complete!")
+					fmt.Printf("\nStart listening with:\n")
+					fmt.Printf("  pigeon daemon start\n")
+					client.Disconnect()
+					return nil
+				case <-sigCh:
+					fmt.Println("\nInterrupted.")
+					client.Disconnect()
+					return nil
+				}
+			}
 		case "timeout":
 			return fmt.Errorf("QR code pairing timed out — run setup-whatsapp again")
 		}
