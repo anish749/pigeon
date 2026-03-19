@@ -16,6 +16,9 @@ import (
 // handleHistorySync processes a history sync event from whatsmeow, writing all
 // messages to the local text-file store. WhatsApp sends these events when a new
 // device is linked, delivering historical conversations in chunks.
+//
+// Names are saved to the contact store first so that both this handler and the
+// real-time listener resolve names identically via the shared Resolver.
 func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySync) {
 	data := evt.Data
 	if data == nil {
@@ -31,20 +34,16 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 		"pushnames", len(data.GetPushnames()),
 	)
 
-	// Build pushname lookup from sync metadata.
-	pushnames := make(map[string]string)
-	for _, pn := range data.GetPushnames() {
-		if pn.GetID() != "" && pn.GetPushname() != "" {
-			pushnames[pn.GetID()] = pn.GetPushname()
-		}
-	}
+	// Phase 1: Persist all names so the resolver can find them.
+	l.saveNamesFromSync(ctx, data)
 
+	// Phase 2: Process messages using the shared resolver.
 	var totalMessages int
 	for _, conv := range data.GetConversations() {
 		if conv.GetID() == "" {
 			continue
 		}
-		totalMessages += l.syncConversation(ctx, conv, pushnames)
+		totalMessages += l.syncConversation(ctx, conv)
 	}
 
 	slog.InfoContext(ctx, "whatsapp: history sync complete",
@@ -54,8 +53,66 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 	)
 }
 
+// saveNamesFromSync persists push names, contact display names, and group names
+// from a history sync event so the resolver can use them.
+func (l *Listener) saveNamesFromSync(ctx context.Context, data *waHistorySync.HistorySync) {
+	// Save push names to the contact store.
+	for _, pn := range data.GetPushnames() {
+		if pn.GetID() == "" || pn.GetPushname() == "" {
+			continue
+		}
+		jid, err := types.ParseJID(pn.GetID())
+		if err != nil {
+			continue
+		}
+		if _, _, err := l.client.Store.Contacts.PutPushName(ctx, jid, pn.GetPushname()); err != nil {
+			slog.WarnContext(ctx, "whatsapp: history sync: failed to save push name",
+				"jid", pn.GetID(), "error", err)
+		}
+	}
+
+	// Save conversation-level names.
+	for _, conv := range data.GetConversations() {
+		if conv.GetID() == "" {
+			continue
+		}
+		chatJID, err := types.ParseJID(conv.GetID())
+		if err != nil {
+			continue
+		}
+
+		switch {
+		case chatJID.Server == types.GroupServer:
+			// Cache group name for the resolver.
+			if name := conv.GetName(); name != "" {
+				l.resolver.SetGroupName(chatJID, name)
+			}
+
+		case chatJID.Server == types.BroadcastServer || chatJID.Server == types.NewsletterServer:
+			// Skip.
+
+		default:
+			// DM: resolve LID if needed, save display name as contact name.
+			resolved := chatJID
+			if chatJID.Server == types.HiddenUserServer {
+				if pnJID := conv.GetPnJID(); pnJID != "" {
+					if parsed, err := types.ParseJID(pnJID); err == nil {
+						resolved = parsed
+					}
+				}
+			}
+			if displayName := conv.GetDisplayName(); displayName != "" {
+				if err := l.client.Store.Contacts.PutContactName(ctx, resolved, displayName, ""); err != nil {
+					slog.WarnContext(ctx, "whatsapp: history sync: failed to save contact name",
+						"jid", resolved.String(), "error", err)
+				}
+			}
+		}
+	}
+}
+
 // syncConversation writes all messages from a single history-sync conversation.
-func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Conversation, pushnames map[string]string) int {
+func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Conversation) int {
 	chatJID, err := types.ParseJID(conv.GetID())
 	if err != nil {
 		slog.WarnContext(ctx, "whatsapp: history sync: invalid JID",
@@ -73,12 +130,13 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	}
 
 	// Skip broadcasts (including status) and newsletters.
-	if chatJID.Server == types.BroadcastServer || chatJID.Server == types.NewsletterServer {
+	switch chatJID.Server {
+	case types.BroadcastServer, types.NewsletterServer:
 		return 0
 	}
 
 	isGroup := chatJID.Server == types.GroupServer
-	convDir := l.buildConvDir(chatJID, conv, pushnames, isGroup)
+	convDir := l.resolver.ConvDir(ctx, chatJID)
 
 	var written int
 	for _, hsMsg := range conv.GetMessages() {
@@ -98,7 +156,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 		}
 		ts := time.Unix(int64(msgTS), 0)
 
-		senderName := l.resolveSender(ctx, chatJID, wmi, pushnames, isGroup)
+		senderName := l.resolveHistorySender(ctx, chatJID, wmi, isGroup)
 
 		if err := store.WriteMessage("whatsapp", l.account, convDir, senderName, text, ts); err != nil {
 			slog.ErrorContext(ctx, "whatsapp: history sync: write failed",
@@ -116,57 +174,31 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	return written
 }
 
-// buildConvDir returns the conversation directory name for file storage.
-// DMs use "+phone_Name" (matching the real-time handler), groups use the group name.
-func (l *Listener) buildConvDir(chatJID types.JID, conv *waHistorySync.Conversation, pushnames map[string]string, isGroup bool) string {
-	if isGroup {
-		name := conv.GetName()
-		if name == "" {
-			name = conv.GetDisplayName()
-		}
-		if name == "" {
-			name = chatJID.User
-		}
-		return SanitizeFilename(name)
-	}
+// resolveHistorySender returns the display name for a history sync message sender.
+// Uses the shared resolver (backed by the contact store) for consistency with real-time.
+func (l *Listener) resolveHistorySender(ctx context.Context, chatJID types.JID, wmi *waWeb.WebMessageInfo, isGroup bool) string {
+	key := wmi.GetKey()
 
-	// DM: +phone_Name format
-	phone := "+" + chatJID.User
-	name := pushnames[conv.GetID()]
-	if name == "" {
-		name = conv.GetDisplayName()
-	}
-	if name == "" {
-		name = conv.GetName()
-	}
-	if name == "" {
-		name = chatJID.User
-	}
-	return phone + "_" + SanitizeFilename(name)
-}
-
-// resolveSender returns the display name for a message sender.
-func (l *Listener) resolveSender(ctx context.Context, chatJID types.JID, wmi *waWeb.WebMessageInfo, pushnames map[string]string, isGroup bool) string {
-	if wmi.GetKey().GetFromMe() {
+	if key.GetFromMe() {
 		if l.client.Store.ID != nil {
-			return "+" + l.client.Store.ID.User
+			return l.resolver.ContactName(ctx, *l.client.Store.ID)
 		}
 		return "me"
 	}
 
-	// Determine the sender JID string.
+	// Determine sender JID.
 	var senderJIDStr string
 	if isGroup {
 		senderJIDStr = wmi.GetParticipant()
 		if senderJIDStr == "" {
-			senderJIDStr = wmi.GetKey().GetParticipant()
+			senderJIDStr = key.GetParticipant()
 		}
 	} else {
-		senderJIDStr = wmi.GetKey().GetRemoteJID()
+		senderJIDStr = key.GetRemoteJID()
 	}
 
 	if senderJIDStr == "" {
-		return "+" + chatJID.User
+		return l.resolver.ContactName(ctx, chatJID)
 	}
 
 	senderJID, err := types.ParseJID(senderJIDStr)
@@ -174,20 +206,5 @@ func (l *Listener) resolveSender(ctx context.Context, chatJID types.JID, wmi *wa
 		return senderJIDStr
 	}
 
-	// Resolve LID to phone JID.
-	if senderJID.Server == types.HiddenUserServer {
-		pnJID, err := l.client.Store.LIDs.GetPNForLID(ctx, senderJID)
-		if err == nil && !pnJID.IsEmpty() {
-			senderJID = pnJID
-		}
-	}
-
-	// Try: message push name → sync pushnames → phone number.
-	if name := wmi.GetPushName(); name != "" {
-		return name
-	}
-	if name, ok := pushnames[senderJIDStr]; ok {
-		return name
-	}
-	return "+" + senderJID.User
+	return l.resolver.ContactName(ctx, senderJID)
 }

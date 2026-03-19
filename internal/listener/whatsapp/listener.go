@@ -13,13 +13,18 @@ import (
 
 // Listener receives WhatsApp events and writes messages to local text files.
 type Listener struct {
-	client  *whatsmeow.Client
-	account string
+	client   *whatsmeow.Client
+	account  string
+	resolver *Resolver
 }
 
 // New creates a WhatsApp listener for the given client and account directory name.
 func New(client *whatsmeow.Client, account string) *Listener {
-	return &Listener{client: client, account: account}
+	return &Listener{
+		client:   client,
+		account:  account,
+		resolver: NewResolver(client),
+	}
 }
 
 // EventHandler returns a function suitable for client.AddEventHandler.
@@ -30,6 +35,12 @@ func (l *Listener) EventHandler(ctx context.Context) func(any) {
 			l.handleMessage(ctx, v)
 		case *events.HistorySync:
 			l.handleHistorySync(ctx, v)
+		case *events.JoinedGroup:
+			l.resolver.SetGroupName(v.JID, v.GroupInfo.GroupName.Name)
+		case *events.GroupInfo:
+			if v.Name != nil {
+				l.resolver.SetGroupName(v.JID, v.Name.Name)
+			}
 		case *events.Connected:
 			slog.InfoContext(ctx, "whatsapp: connected", "account", l.account)
 		case *events.Disconnected:
@@ -43,8 +54,9 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		return
 	}
 
-	// Skip broadcast and self-messages
-	if evt.Info.Chat.Server == "broadcast" {
+	// Skip broadcasts, newsletters, and self-messages.
+	switch evt.Info.Chat.Server {
+	case types.BroadcastServer, types.NewsletterServer:
 		return
 	}
 	if evt.Info.Sender.User == l.client.Store.ID.User {
@@ -56,28 +68,8 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		return
 	}
 
-	senderJID := evt.Info.Sender
-	// Resolve LID to phone JID if needed
-	if senderJID.Server == types.HiddenUserServer {
-		pnJID, err := l.client.Store.LIDs.GetPNForLID(ctx, senderJID)
-		if err == nil && !pnJID.IsEmpty() {
-			senderJID = pnJID
-		}
-	}
-
-	// Build conversation directory name: +phone_PushName
-	phone := "+" + senderJID.User
-	pushName := evt.Info.PushName
-	if pushName == "" {
-		pushName = senderJID.User
-	}
-	pushName = SanitizeFilename(pushName)
-	convDir := phone + "_" + pushName
-
-	senderName := evt.Info.PushName
-	if senderName == "" {
-		senderName = phone
-	}
+	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
+	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
 
 	if err := store.WriteMessage("whatsapp", l.account, convDir, senderName, text, evt.Info.Timestamp); err != nil {
 		slog.ErrorContext(ctx, "failed to write message", "error", err, "account", l.account)
