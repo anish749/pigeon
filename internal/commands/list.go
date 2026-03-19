@@ -17,7 +17,8 @@ func RunList(args []string) error {
 
 	// Level 3: list conversations for a specific account
 	if *platform != "" && *account != "" {
-		convs, err := store.ListConversations(*platform, *account)
+		aliases := loadAliases(*platform, *account)
+		convs, err := store.ListConversations(*platform, *account, aliases)
 		if err != nil {
 			return err
 		}

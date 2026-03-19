@@ -44,7 +44,9 @@ type Conversation struct {
 }
 
 // ListConversations returns conversations for a platform/account.
-func ListConversations(platform, account string) ([]Conversation, error) {
+// aliases maps directory names to searchable name variants (first entry = display name).
+// Pass nil if no name enrichment is needed.
+func ListConversations(platform, account string, aliases map[string][]string) ([]Conversation, error) {
 	dir := filepath.Join(DataDir(), platform, account)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -55,15 +57,20 @@ func ListConversations(platform, account string) ([]Conversation, error) {
 		if !e.IsDir() {
 			continue
 		}
-		convs = append(convs, parseConversationDir(e.Name()))
+		c := parseConversationDir(e.Name())
+		if names, ok := aliases[c.DirName]; ok && len(names) > 0 {
+			c.DisplayName = names[0]
+		}
+		convs = append(convs, c)
 	}
 	return convs, nil
 }
 
-// FindConversation finds a conversation by substring match on directory name or display name.
-// Returns the first match. Case-insensitive.
-func FindConversation(platform, account, query string) (*Conversation, error) {
-	convs, err := ListConversations(platform, account)
+// FindConversation finds a conversation by substring match on directory name,
+// display name, or any alias. Returns the first match. Case-insensitive.
+// aliases maps directory names to searchable name variants. Pass nil if not needed.
+func FindConversation(platform, account, query string, aliases map[string][]string) (*Conversation, error) {
+	convs, err := ListConversations(platform, account, aliases)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +80,12 @@ func FindConversation(platform, account, query string) (*Conversation, error) {
 			strings.Contains(strings.ToLower(c.DisplayName), q) ||
 			strings.Contains(strings.ToLower(c.Identifier), q) {
 			return &c, nil
+		}
+		// Also match against all aliases (push name, contact name, etc.)
+		for _, name := range aliases[c.DirName] {
+			if strings.Contains(strings.ToLower(name), q) {
+				return &c, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("no conversation matching %q in %s/%s", query, platform, account)
@@ -190,7 +203,7 @@ func SearchMessages(query, platform, account string, since time.Duration) ([]Sea
 			}
 		}
 		for _, acct := range accounts {
-			convs, err := ListConversations(plat, acct)
+			convs, err := ListConversations(plat, acct, nil)
 			if err != nil {
 				continue
 			}

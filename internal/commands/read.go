@@ -26,7 +26,8 @@ func RunRead(args []string) error {
 		return fmt.Errorf("required flags: -platform, -account, -contact")
 	}
 
-	conv, err := store.FindConversation(*platform, *account, *contact)
+	aliases := loadAliases(*platform, *account)
+	conv, err := store.FindConversation(*platform, *account, *contact, aliases)
 	if err != nil {
 		return err
 	}

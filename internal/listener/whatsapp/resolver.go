@@ -77,19 +77,14 @@ func (r *Resolver) SetGroupName(jid types.JID, name string) {
 }
 
 // ConvDir returns the conversation directory name for file storage.
-// DMs produce "+phone_Name"; groups produce the sanitized group name.
+// DMs produce "+phone" (phone number only); groups produce the sanitized group name.
 func (r *Resolver) ConvDir(ctx context.Context, chatJID types.JID) string {
 	if chatJID.Server == types.GroupServer {
 		return SanitizeFilename(r.GroupName(ctx, chatJID))
 	}
 
 	jid := r.ResolveJID(ctx, chatJID)
-	phone := "+" + jid.User
-	name := r.ContactName(ctx, jid)
-	if name == phone {
-		return phone
-	}
-	return phone + "_" + SanitizeFilename(name)
+	return "+" + jid.User
 }
 
 // ResolveJID converts a LID (hidden user) JID to a phone-number JID if possible.
