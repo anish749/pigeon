@@ -69,8 +69,12 @@ func RunDaemon(args []string) error {
 
 	// Start Slack listeners — one independent Socket Mode connection per workspace
 	for _, sl := range cfg.Slack {
-		if sl.AppToken == "" || sl.BotToken == "" {
-			slog.ErrorContext(ctx, "slack workspace missing app_token or bot_token, skipping", "workspace", sl.Workspace)
+		if sl.AppToken == "" || sl.BotToken == "" || sl.UserToken == "" {
+			slog.ErrorContext(ctx, "slack workspace missing required token(s), skipping",
+				"workspace", sl.Workspace,
+				"has_app_token", sl.AppToken != "",
+				"has_bot_token", sl.BotToken != "",
+				"has_user_token", sl.UserToken != "")
 			continue
 		}
 		startSlackWorkspace(ctx, sl)
@@ -121,13 +125,11 @@ func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
 		}
 	}()
 
-	if sl.UserToken != "" {
-		go func() {
-			if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace, messages); err != nil {
-				slog.ErrorContext(ctx, "slack sync failed", "workspace", sl.Workspace, "error", err)
-			}
-		}()
-	}
+	go func() {
+		if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace, messages); err != nil {
+			slog.ErrorContext(ctx, "slack sync failed", "workspace", sl.Workspace, "error", err)
+		}
+	}()
 
 	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
 }
