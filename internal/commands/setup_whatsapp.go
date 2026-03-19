@@ -63,7 +63,7 @@ func RunSetupWhatsApp(args []string) error {
 			account := "+" + client.Store.ID.User
 
 			// Register listener to capture history sync events during setup.
-			listener := walistener.New(client, account)
+			listener := walistener.New(client, account, nil)
 			client.AddEventHandler(listener.EventHandler(ctx))
 
 			// Track sync activity so we can detect completion.

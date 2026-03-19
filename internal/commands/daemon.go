@@ -55,7 +55,16 @@ func RunDaemon(args []string) error {
 			continue
 		}
 
-		listener := walistener.New(client, wa.Account)
+		waAccount := wa.Account
+		onLogout := func() {
+			slog.InfoContext(ctx, "removing logged-out account from config", "account", waAccount)
+			cfg, err := config.Load()
+			if err == nil {
+				cfg.RemoveWhatsApp(waAccount)
+				config.Save(cfg)
+			}
+		}
+		listener := walistener.New(client, wa.Account, onLogout)
 		client.AddEventHandler(listener.EventHandler(ctx))
 
 		if err := client.Connect(); err != nil {

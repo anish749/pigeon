@@ -225,6 +225,8 @@ func main() {
 		err = commands.RunDaemon(args)
 	case "reset":
 		err = commands.RunReset(args)
+	case "reset-whatsapp":
+		err = commands.RunResetWhatsApp(args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:

@@ -77,9 +77,25 @@ func Save(cfg *Config) error {
 	return nil
 }
 
-// AddWhatsApp appends a WhatsApp configuration entry.
+// AddWhatsApp upserts a WhatsApp configuration entry by account.
 func (c *Config) AddWhatsApp(entry WhatsAppConfig) {
+	for i, existing := range c.WhatsApp {
+		if existing.Account == entry.Account {
+			c.WhatsApp[i] = entry
+			return
+		}
+	}
 	c.WhatsApp = append(c.WhatsApp, entry)
+}
+
+// RemoveWhatsApp removes a WhatsApp configuration entry by account.
+func (c *Config) RemoveWhatsApp(account string) {
+	for i, existing := range c.WhatsApp {
+		if existing.Account == account {
+			c.WhatsApp = append(c.WhatsApp[:i], c.WhatsApp[i+1:]...)
+			return
+		}
+	}
 }
 
 // AddSlack upserts a Slack configuration entry by team ID.

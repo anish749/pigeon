@@ -2,7 +2,10 @@ package whatsapp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
@@ -14,18 +17,21 @@ import (
 
 // Listener receives WhatsApp events and writes messages to local text files.
 type Listener struct {
-	client   *whatsmeow.Client
-	account  string
-	resolver *Resolver
-	syncing  atomic.Bool // true while history sync is in progress
+	client    *whatsmeow.Client
+	account   string
+	resolver  *Resolver
+	syncing   atomic.Bool // true while history sync is in progress
+	onLogout  func()      // called when device is unpaired remotely
 }
 
 // New creates a WhatsApp listener for the given client and account directory name.
-func New(client *whatsmeow.Client, account string) *Listener {
+// onLogout is called when the device is unpaired from the phone (may be nil).
+func New(client *whatsmeow.Client, account string, onLogout func()) *Listener {
 	return &Listener{
 		client:   client,
 		account:  account,
 		resolver: NewResolver(client),
+		onLogout: onLogout,
 	}
 }
 
@@ -43,11 +49,38 @@ func (l *Listener) EventHandler(ctx context.Context) func(any) {
 			if v.Name != nil {
 				l.resolver.SetGroupName(v.JID, v.Name.Name)
 			}
+		case *events.LoggedOut:
+			l.handleLoggedOut(ctx, v)
 		case *events.Connected:
 			slog.InfoContext(ctx, "whatsapp: connected", "account", l.account)
 		case *events.Disconnected:
 			slog.WarnContext(ctx, "whatsapp: disconnected", "account", l.account)
 		}
+	}
+}
+
+func (l *Listener) handleLoggedOut(ctx context.Context, evt *events.LoggedOut) {
+	slog.WarnContext(ctx, "whatsapp: device logged out remotely",
+		"account", l.account, "reason", evt.Reason.String())
+
+	// Delete device data from whatsmeow's store.
+	if err := l.client.Store.Delete(ctx); err != nil {
+		slog.ErrorContext(ctx, "whatsapp: failed to delete device store",
+			"account", l.account, "error", err)
+	}
+
+	// Delete message data.
+	dataDir := filepath.Join(store.DataDir(), "whatsapp", l.account)
+	if err := os.RemoveAll(dataDir); err != nil {
+		slog.ErrorContext(ctx, "whatsapp: failed to delete message data",
+			"account", l.account, "error", err)
+	} else {
+		fmt.Printf("Deleted message data for %s (device was unlinked remotely).\n", l.account)
+	}
+
+	// Notify the daemon to clean up config.
+	if l.onLogout != nil {
+		l.onLogout()
 	}
 }
 
