@@ -28,6 +28,8 @@ func (l *Listener) EventHandler(ctx context.Context) func(any) {
 		switch v := evt.(type) {
 		case *events.Message:
 			l.handleMessage(ctx, v)
+		case *events.HistorySync:
+			l.handleHistorySync(ctx, v)
 		case *events.Connected:
 			slog.InfoContext(ctx, "whatsapp: connected", "account", l.account)
 		case *events.Disconnected:
