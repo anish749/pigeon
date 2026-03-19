@@ -11,16 +11,27 @@ import (
 // Listener receives Slack Socket Mode events and writes messages to local text files.
 // Each listener handles a single workspace with its own Socket Mode connection.
 type Listener struct {
-	client    *socketmode.Client
-	resolver  *Resolver
-	messages  *MessageStore
-	workspace string
-	teamID    string
+	client       *socketmode.Client
+	resolver     *Resolver
+	messages     *MessageStore
+	workspace    string
+	teamID       string
+	onReconnect  func(ctx context.Context)
+	hasConnected bool
 }
 
-// New creates a Slack listener for a single workspace.
-func New(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string) *Listener {
-	return &Listener{client: client, resolver: resolver, messages: messages, workspace: workspace, teamID: teamID}
+// NewListener creates a Slack listener for a single workspace. The onReconnect
+// callback is invoked (in a goroutine) each time Socket Mode reconnects after
+// the initial connection, allowing sync to backfill any gap.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string, onReconnect func(ctx context.Context)) *Listener {
+	return &Listener{
+		client:      client,
+		resolver:    resolver,
+		messages:    messages,
+		workspace:   workspace,
+		teamID:      teamID,
+		onReconnect: onReconnect,
+	}
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -35,7 +46,13 @@ func (l *Listener) Run(ctx context.Context) {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeConnected:
-				slog.InfoContext(ctx, "slack: connected via Socket Mode", "workspace", l.workspace)
+				if l.hasConnected && l.onReconnect != nil {
+					slog.InfoContext(ctx, "slack: reconnected, triggering sync", "workspace", l.workspace)
+					go l.onReconnect(ctx)
+				} else {
+					slog.InfoContext(ctx, "slack: connected via Socket Mode", "workspace", l.workspace)
+				}
+				l.hasConnected = true
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {

@@ -116,7 +116,14 @@ func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
 	}
 
 	messages := slacklistener.NewMessageStore(sl.Workspace)
-	listener := slacklistener.New(smClient, resolver, messages, sl.Workspace, sl.TeamID)
+
+	syncFn := func(ctx context.Context) {
+		if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace, messages); err != nil {
+			slog.ErrorContext(ctx, "slack sync failed", "workspace", sl.Workspace, "error", err)
+		}
+	}
+
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.Workspace, sl.TeamID, syncFn)
 	go listener.Run(ctx)
 
 	go func() {
@@ -125,11 +132,7 @@ func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
 		}
 	}()
 
-	go func() {
-		if err := slacklistener.Sync(ctx, sl.UserToken, resolver, sl.Workspace, messages); err != nil {
-			slog.ErrorContext(ctx, "slack sync failed", "workspace", sl.Workspace, "error", err)
-		}
-	}()
+	go syncFn(ctx)
 
 	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
 }

@@ -71,13 +71,10 @@ func NewMessageStore(workspace string) *MessageStore {
 	}
 }
 
-// Write persists a message to the appropriate date file and advances the cursor.
+// Write persists a message to the appropriate date file. Does not advance the
+// cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, text string, ts time.Time, slackTS string) error {
-	if err := store.WriteMessage("slack", ms.workspace, channelName, sender, text, ts); err != nil {
-		return err
-	}
-	ms.AdvanceCursor(channelID, slackTS)
-	return nil
+	return store.WriteMessage("slack", ms.workspace, channelName, sender, text, ts)
 }
 
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
