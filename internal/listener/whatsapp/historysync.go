@@ -25,6 +25,10 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 		return
 	}
 
+	// Suppress real-time message writes while syncing to avoid duplicates.
+	l.syncing.Store(true)
+	defer l.syncing.Store(false)
+
 	syncType := data.GetSyncType().String()
 
 	slog.InfoContext(ctx, "whatsapp: history sync received",

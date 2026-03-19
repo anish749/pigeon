@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -16,6 +17,7 @@ type Listener struct {
 	client   *whatsmeow.Client
 	account  string
 	resolver *Resolver
+	syncing  atomic.Bool // true while history sync is in progress
 }
 
 // New creates a WhatsApp listener for the given client and account directory name.
@@ -51,6 +53,13 @@ func (l *Listener) EventHandler(ctx context.Context) func(any) {
 
 func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	if l.client.Store.ID == nil {
+		return
+	}
+
+	// While history sync is running, skip real-time messages — they'll already
+	// be in the sync data, and writing them here risks duplicates (the contact
+	// store may not have names yet, producing a different sender string).
+	if l.syncing.Load() {
 		return
 	}
 

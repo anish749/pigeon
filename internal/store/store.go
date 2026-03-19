@@ -7,8 +7,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
+
+// fileLocks provides per-file mutexes so the dedup check + write in WriteMessage
+// is atomic. Without this, concurrent writers (e.g. history sync and real-time)
+// can both pass the dedup check and produce duplicate lines.
+var fileLocks sync.Map
 
 // DataDir returns the root directory for message data.
 // Respects PIGEON_DATA_DIR env var, defaults to ~/.local/share/pigeon/
@@ -232,7 +238,14 @@ func WriteMessage(platform, account, conversation, sender, text string, ts time.
 	filename := filepath.Join(dir, ts.Format("2006-01-02")+".txt")
 	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05"), sender, text)
 
-	// Check for duplicate
+	// Per-file lock: makes the dedup read + append atomic so concurrent
+	// writers (history sync + real-time) cannot both pass the check.
+	lockVal, _ := fileLocks.LoadOrStore(filename, &sync.Mutex{})
+	mu := lockVal.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check for exact duplicate.
 	if existing, err := os.ReadFile(filename); err == nil {
 		for _, existingLine := range strings.Split(string(existing), "\n") {
 			if existingLine == line {
