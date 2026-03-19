@@ -45,11 +45,59 @@ func RunSearch(args []string) error {
 
 	fmt.Printf("%d match(es) found:\n\n", len(results))
 	printSearchSummary(results, sinceDur)
-	for _, r := range results {
-		dir := filepath.Join(store.DataDir(), r.Platform, r.Account, r.Conversation)
-		fmt.Printf("[%s/%s/%s %s]\n    %s\n  %s\n\n", r.Platform, r.Account, r.Conversation, r.Date, dir, r.Line)
-	}
+	printGroupedResults(results)
 	return nil
+}
+
+func printGroupedResults(results []store.SearchResult) {
+	type groupKey struct {
+		platform, account, conversation string
+	}
+	type group struct {
+		key   groupKey
+		dates []string
+		lines []string
+	}
+
+	var order []groupKey
+	groups := make(map[groupKey]*group)
+	for _, r := range results {
+		k := groupKey{r.Platform, r.Account, r.Conversation}
+		g, ok := groups[k]
+		if !ok {
+			g = &group{key: k}
+			groups[k] = g
+			order = append(order, k)
+		}
+		g.lines = append(g.lines, r.Line)
+		g.dates = append(g.dates, r.Date)
+	}
+
+	for _, k := range order {
+		g := groups[k]
+		// Determine date range
+		minDate, maxDate := g.dates[0], g.dates[0]
+		for _, d := range g.dates[1:] {
+			if d < minDate {
+				minDate = d
+			}
+			if d > maxDate {
+				maxDate = d
+			}
+		}
+		dateStr := minDate
+		if minDate != maxDate {
+			dateStr = minDate + " to " + maxDate
+		}
+
+		dir := filepath.Join(store.DataDir(), k.platform, k.account, k.conversation)
+		fmt.Printf("%s/%s/%s (%s, %d matches)\n", k.platform, k.account, k.conversation, dateStr, len(g.lines))
+		fmt.Printf("    %s\n", dir)
+		for _, line := range g.lines {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
+	}
 }
 
 type timeBucket struct {
