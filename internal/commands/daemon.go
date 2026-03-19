@@ -105,7 +105,7 @@ func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
 	api := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(api)
 
-	resolver := slacklistener.NewResolver(goslack.New(sl.BotToken))
+	resolver := slacklistener.NewResolver(goslack.New(sl.UserToken))
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
