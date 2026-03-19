@@ -252,7 +252,7 @@ func WriteMessage(platform, account, conversation, sender, text string, ts time.
 		return fmt.Errorf("create conversation dir %s: %w", dir, err)
 	}
 	filename := filepath.Join(dir, ts.Format("2006-01-02")+".txt")
-	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05"), sender, text)
+	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05 -07:00"), sender, text)
 
 	// Per-file lock: makes the dedup read + append atomic so concurrent
 	// writers (history sync + real-time) cannot both pass the check.
@@ -413,11 +413,11 @@ func buildSections(lines []string, q string) []section {
 }
 
 func filterLinesSince(lines []string, cutoff time.Time) []string {
-	// Parse timestamps like [2026-03-16 09:15:02]
+	// Parse timestamps like [2026-03-16 09:15:02 -04:00]
 	var result []string
 	for _, line := range lines {
-		if len(line) > 21 && line[0] == '[' {
-			ts, err := time.ParseInLocation("2006-01-02 15:04:05", line[1:20], time.Local)
+		if len(line) > 28 && line[0] == '[' {
+			ts, err := time.Parse("2006-01-02 15:04:05 -07:00", line[1:27])
 			if err == nil && ts.Before(cutoff) {
 				continue
 			}

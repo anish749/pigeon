@@ -168,14 +168,14 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 }
 
 func parseResultLine(line string) (time.Time, string) {
-	if len(line) < 22 || line[0] != '[' {
+	if len(line) < 29 || line[0] != '[' {
 		return time.Time{}, ""
 	}
-	ts, err := time.ParseInLocation("2006-01-02 15:04:05", line[1:20], time.Local)
+	ts, err := time.Parse("2006-01-02 15:04:05 -07:00", line[1:27])
 	if err != nil {
 		return time.Time{}, ""
 	}
-	rest := line[22:]
+	rest := line[29:]
 	idx := strings.Index(rest, ": ")
 	if idx < 0 {
 		return ts, ""
