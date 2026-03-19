@@ -160,13 +160,17 @@ func ReadMessages(platform, account, conversation string, opts ReadOpts) ([]stri
 	return readFileLines(files[len(files)-1])
 }
 
-// SearchResult is a single matching line.
+// contextLines is the number of messages to show before and after each match.
+const contextLines = 3
+
+// SearchResult is a section of conversation around one or more matches.
 type SearchResult struct {
 	Platform     string
 	Account      string
 	Conversation string
 	Date         string
-	Line         string
+	Lines        []string // section of chat (context + matches)
+	MatchCount   int      // number of matching lines in this section
 }
 
 // SearchMessages searches for a query string across message files.
@@ -222,16 +226,15 @@ func SearchMessages(query, platform, account string, since time.Duration) ([]Sea
 					if err != nil {
 						continue
 					}
-					for _, line := range lines {
-						if strings.Contains(strings.ToLower(line), q) {
-							results = append(results, SearchResult{
-								Platform:     plat,
-								Account:      acct,
-								Conversation: conv.DirName,
-								Date:         date,
-								Line:         line,
-							})
-						}
+					for _, sec := range buildSections(lines, q) {
+						results = append(results, SearchResult{
+							Platform:     plat,
+							Account:      acct,
+							Conversation: conv.DirName,
+							Date:         date,
+							Lines:        sec.lines,
+							MatchCount:   sec.matchCount,
+						})
 					}
 				}
 			}
@@ -356,6 +359,57 @@ func readLastNLines(files []string, n int) ([]string, error) {
 		all = all[len(all)-n:]
 	}
 	return all, nil
+}
+
+type section struct {
+	lines      []string
+	matchCount int
+}
+
+// buildSections finds lines matching the query and groups them into sections
+// with contextLines of surrounding messages. Overlapping windows are merged.
+func buildSections(lines []string, q string) []section {
+	// Find matching indices.
+	var matchIdx []int
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), q) {
+			matchIdx = append(matchIdx, i)
+		}
+	}
+	if len(matchIdx) == 0 {
+		return nil
+	}
+
+	// Build merged ranges: [start, end) with context.
+	type rng struct{ start, end, matches int }
+	var ranges []rng
+	for _, idx := range matchIdx {
+		start := idx - contextLines
+		if start < 0 {
+			start = 0
+		}
+		end := idx + contextLines + 1
+		if end > len(lines) {
+			end = len(lines)
+		}
+		if len(ranges) > 0 && start <= ranges[len(ranges)-1].end {
+			// Merge with previous range.
+			ranges[len(ranges)-1].end = end
+			ranges[len(ranges)-1].matches++
+		} else {
+			ranges = append(ranges, rng{start, end, 1})
+		}
+	}
+
+	// Build sections from ranges.
+	sections := make([]section, len(ranges))
+	for i, r := range ranges {
+		sections[i] = section{
+			lines:      append([]string(nil), lines[r.start:r.end]...),
+			matchCount: r.matches,
+		}
+	}
+	return sections
 }
 
 func filterLinesSince(lines []string, cutoff time.Time) []string {

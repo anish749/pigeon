@@ -47,7 +47,11 @@ func RunSearch(args []string) error {
 	// and resolve conversation directory names to display names.
 	enrichSearchResults(results, *platform, *account)
 
-	fmt.Printf("%d match(es) found:\n\n", len(results))
+	var totalMatches int
+	for _, r := range results {
+		totalMatches += r.MatchCount
+	}
+	fmt.Printf("%d match(es) found:\n\n", totalMatches)
 	printSearchSummary(results, sinceDur)
 	printGroupedResults(results)
 	return nil
@@ -58,9 +62,10 @@ func printGroupedResults(results []store.SearchResult) {
 		platform, account, conversation string
 	}
 	type group struct {
-		key   groupKey
-		dates []string
-		lines []string
+		key      groupKey
+		dates    []string
+		sections [][]string // each section is a slice of lines
+		matches  int
 	}
 
 	var order []groupKey
@@ -73,7 +78,8 @@ func printGroupedResults(results []store.SearchResult) {
 			groups[k] = g
 			order = append(order, k)
 		}
-		g.lines = append(g.lines, r.Line)
+		g.sections = append(g.sections, r.Lines)
+		g.matches += r.MatchCount
 		g.dates = append(g.dates, r.Date)
 	}
 
@@ -95,10 +101,15 @@ func printGroupedResults(results []store.SearchResult) {
 		}
 
 		dir := filepath.Join(store.DataDir(), k.platform, k.account, k.conversation)
-		fmt.Printf("%s/%s/%s (%s, %d matches)\n", k.platform, k.account, k.conversation, dateStr, len(g.lines))
+		fmt.Printf("%s/%s/%s (%s, %d matches)\n", k.platform, k.account, k.conversation, dateStr, g.matches)
 		fmt.Printf("    %s\n", dir)
-		for _, line := range g.lines {
-			fmt.Printf("  %s\n", line)
+		for i, section := range g.sections {
+			if i > 0 {
+				fmt.Println("  ...")
+			}
+			for _, line := range section {
+				fmt.Printf("  %s\n", line)
+			}
 		}
 		fmt.Println()
 	}
@@ -121,9 +132,11 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 	}
 	var msgs []msgInfo
 	for _, r := range results {
-		ts, sender := parseResultLine(r.Line)
-		if !ts.IsZero() {
-			msgs = append(msgs, msgInfo{ts: ts, sender: sender})
+		for _, line := range r.Lines {
+			ts, sender := parseResultLine(line)
+			if !ts.IsZero() {
+				msgs = append(msgs, msgInfo{ts: ts, sender: sender})
+			}
 		}
 	}
 	if len(msgs) == 0 {

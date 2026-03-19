@@ -60,9 +60,8 @@ func enrichSearchResults(results []store.SearchResult, platform, account string)
 			aliasCache[k] = aliases
 		}
 
-		// Enrich the message line.
-		enriched := enrichLines([]string{r.Line}, aliases)
-		results[i].Line = enriched[0]
+		// Enrich message lines in the section.
+		results[i].Lines = enrichLines(r.Lines, aliases)
 
 		// Resolve conversation dir to display name.
 		if names, ok := aliases[r.Conversation]; ok && len(names) > 0 {
