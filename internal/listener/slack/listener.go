@@ -6,8 +6,6 @@ import (
 
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
-
-	"github.com/anish/claude-msg-utils/internal/store"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
@@ -15,13 +13,14 @@ import (
 type Listener struct {
 	client    *socketmode.Client
 	resolver  *Resolver
+	messages  *MessageStore
 	workspace string
 	teamID    string
 }
 
 // New creates a Slack listener for a single workspace.
-func New(client *socketmode.Client, resolver *Resolver, workspace, teamID string) *Listener {
-	return &Listener{client: client, resolver: resolver, workspace: workspace, teamID: teamID}
+func New(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string) *Listener {
+	return &Listener{client: client, resolver: resolver, messages: messages, workspace: workspace, teamID: teamID}
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -74,7 +73,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	text := l.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
 
-	if err := store.WriteMessage("slack", l.workspace, channelName, userName, text, ts); err != nil {
+	if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
 		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
 		return
 	}

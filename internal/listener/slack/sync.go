@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	gosync "sync"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -53,14 +54,55 @@ func saveCursors(workspace string, c syncCursors) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+// MessageStore is the single write path for Slack messages. It writes message
+// files and maintains per-channel cursors so that both sync and the real-time
+// listener stay consistent.
+type MessageStore struct {
+	workspace string
+	mu        gosync.Mutex
+	cursors   syncCursors
+}
+
+// NewMessageStore creates a MessageStore, loading any existing cursors from disk.
+func NewMessageStore(workspace string) *MessageStore {
+	return &MessageStore{
+		workspace: workspace,
+		cursors:   loadCursors(workspace),
+	}
+}
+
+// Write persists a message to the appropriate date file and advances the cursor.
+func (ms *MessageStore) Write(channelID, channelName, sender, text string, ts time.Time, slackTS string) error {
+	if err := store.WriteMessage("slack", ms.workspace, channelName, sender, text, ts); err != nil {
+		return err
+	}
+	ms.AdvanceCursor(channelID, slackTS)
+	return nil
+}
+
+// AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
+func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.cursors[channelID] = slackTS
+	saveCursors(ms.workspace, ms.cursors)
+}
+
+// Cursor returns the stored cursor for a channel.
+func (ms *MessageStore) Cursor(channelID string) (string, bool) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	v, ok := ms.cursors[channelID]
+	return v, ok
+}
+
 // Sync fetches historical messages for conversations the user was active in
 // during the last 30 days. On first run, syncs the last 90 days. On subsequent
 // runs, picks up from where it left off using stored cursors per channel.
 // Uses the user token to access DMs and all user-visible conversations.
-func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace string) error {
+func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace string, ms *MessageStore) error {
 	api := goslack.New(userToken)
 	gate := &rateLimitGate{workspace: workspace}
-	cursors := loadCursors(workspace)
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
 	defaultOldest := fmt.Sprintf("%d", time.Now().AddDate(0, 0, -syncDays).Unix())
 
@@ -124,7 +166,6 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 	var synced, totalMessages int
 	for _, ch := range conversations {
 		if ctx.Err() != nil {
-			saveCursors(workspace, cursors)
 			return ctx.Err()
 		}
 
@@ -136,7 +177,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		// The first page of fetchHistory doubles as the activity check —
 		// if it comes back empty, we move on. No separate probe call.
 		oldest := defaultOldest
-		if cursor, ok := cursors[ch.ID]; ok {
+		if cursor, ok := ms.Cursor(ch.ID); ok {
 			oldest = cursor
 		}
 
@@ -146,8 +187,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "channel_not_found") || strings.Contains(errStr, "is_archived") {
-				cursors[ch.ID] = oldest
-				saveCursors(workspace, cursors)
+				ms.AdvanceCursor(ch.ID, oldest)
 			} else {
 				slog.WarnContext(ctx, "slack sync: fetch failed",
 					"channel", channelName, "error", err)
@@ -169,7 +209,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			text := resolver.ResolveText(ctx, msg.Text)
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := store.WriteMessage("slack", workspace, channelName, userName, text, ts); err != nil {
+			if err := ms.Write(ch.ID, channelName, userName, text, ts, msg.Timestamp); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -177,17 +217,12 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		}
 
 		if lastTS != "" {
-			cursors[ch.ID] = lastTS
-		} else if _, hasCursor := cursors[ch.ID]; !hasCursor {
+			ms.AdvanceCursor(ch.ID, lastTS)
+		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
 			// Mark empty channels so we don't re-probe them on next restart.
 			// Use the current oldest as a sentinel — next run will resume from here
 			// and immediately get an empty response.
-			cursors[ch.ID] = oldest
-		}
-
-		// Save after every channel so progress survives crashes
-		if err := saveCursors(workspace, cursors); err != nil {
-			slog.WarnContext(ctx, "slack sync: failed to save cursors", "error", err)
+			ms.AdvanceCursor(ch.ID, oldest)
 		}
 
 		if written > 0 {
