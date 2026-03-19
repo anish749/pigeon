@@ -43,6 +43,10 @@ func RunSearch(args []string) error {
 		return nil
 	}
 
+	// Enrich results: replace phone senders with contact names,
+	// and resolve conversation directory names to display names.
+	enrichSearchResults(results, *platform, *account)
+
 	fmt.Printf("%d match(es) found:\n\n", len(results))
 	printSearchSummary(results, sinceDur)
 	printGroupedResults(results)

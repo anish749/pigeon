@@ -53,6 +53,8 @@ func RunRead(args []string) error {
 		return nil
 	}
 
+	lines = enrichLines(lines, aliases)
+
 	dir := filepath.Join(store.DataDir(), *platform, *account, conv.DirName)
 	fmt.Printf("--- %s/%s/%s ---\n", *platform, *account, conv.DisplayName)
 	fmt.Printf("    %s\n", dir)
