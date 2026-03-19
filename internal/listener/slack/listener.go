@@ -16,21 +16,20 @@ type Listener struct {
 	messages     *MessageStore
 	workspace    string
 	teamID       string
-	onReconnect  func(ctx context.Context)
-	hasConnected bool
+	doSync func(ctx context.Context) error
 }
 
-// NewListener creates a Slack listener for a single workspace. The onReconnect
-// callback is invoked (in a goroutine) each time Socket Mode reconnects after
-// the initial connection, allowing sync to backfill any gap.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string, onReconnect func(ctx context.Context)) *Listener {
+// NewListener creates a Slack listener for a single workspace. The doSync
+// callback is invoked (in a goroutine) each time Socket Mode connects,
+// including the initial connection and any subsequent reconnects.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, workspace, teamID string, doSync func(ctx context.Context)) *Listener {
 	return &Listener{
 		client:      client,
 		resolver:    resolver,
 		messages:    messages,
 		workspace:   workspace,
 		teamID:      teamID,
-		onReconnect: onReconnect,
+		doSync: doSync,
 	}
 }
 
@@ -46,13 +45,8 @@ func (l *Listener) Run(ctx context.Context) {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeConnected:
-				if l.hasConnected && l.onReconnect != nil {
-					slog.InfoContext(ctx, "slack: reconnected, triggering sync", "workspace", l.workspace)
-					go l.onReconnect(ctx)
-				} else {
-					slog.InfoContext(ctx, "slack: connected via Socket Mode", "workspace", l.workspace)
-				}
-				l.hasConnected = true
+				slog.InfoContext(ctx, "slack: connected via Socket Mode, triggering sync", "workspace", l.workspace)
+				go l.doSync(ctx)
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
