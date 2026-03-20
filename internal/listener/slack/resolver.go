@@ -165,26 +165,48 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 	return name
 }
 
+// ChannelMatch represents a channel that matched a search query.
+type ChannelMatch struct {
+	ID   string
+	Name string
+}
+
+// AmbiguousChannelError is returned when a channel query matches multiple channels.
+// The caller should enrich matches with activity info before displaying.
+type AmbiguousChannelError struct {
+	Query   string
+	Matches []ChannelMatch
+}
+
+func (e *AmbiguousChannelError) Error() string {
+	return fmt.Sprintf("multiple channels match %q (%d matches)", e.Query, len(e.Matches))
+}
+
 // FindChannelID searches the channel cache for a channel matching the query.
-// Matches case-insensitively against channel names (with and without prefix).
-// Returns an error listing all matches if the query is ambiguous.
+// Accepts channel IDs directly (e.g. "D1234567890") or matches case-insensitively
+// against channel names (with and without prefix).
+// Returns AmbiguousChannelError if multiple matches, so the caller can enrich and display.
 func (r *Resolver) FindChannelID(query string) (string, string, error) {
-	q := strings.ToLower(query)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	type match struct{ id, name string }
-	var matches []match
+	// Exact channel ID match.
+	if name, ok := r.channels[query]; ok {
+		return query, name, nil
+	}
+
+	q := strings.ToLower(query)
+	var matches []ChannelMatch
 
 	for id, name := range r.channels {
 		lower := strings.ToLower(name)
 		if strings.Contains(lower, q) {
-			matches = append(matches, match{id, name})
+			matches = append(matches, ChannelMatch{id, name})
 			continue
 		}
 		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') {
 			if strings.Contains(lower[1:], q) {
-				matches = append(matches, match{id, name})
+				matches = append(matches, ChannelMatch{id, name})
 			}
 		}
 	}
@@ -193,16 +215,10 @@ func (r *Resolver) FindChannelID(query string) (string, string, error) {
 		return "", "", fmt.Errorf("no channel matching %q", query)
 	}
 	if len(matches) == 1 {
-		return matches[0].id, matches[0].name, nil
+		return matches[0].ID, matches[0].Name, nil
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "multiple channels match %q:\n", query)
-	for _, m := range matches {
-		fmt.Fprintf(&b, "  %s\n", m.name)
-	}
-	b.WriteString("use a more specific name to disambiguate")
-	return "", "", fmt.Errorf("%s", b.String())
+	return "", "", &AmbiguousChannelError{Query: query, Matches: matches}
 }
 
 // FormatChannelName returns a human-readable channel name with prefix (# for channels, @ for DMs).

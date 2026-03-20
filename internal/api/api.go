@@ -192,6 +192,10 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	// Resolve contact/channel query to channel ID.
 	channelID, channelName, err := sender.Resolver.FindChannelID(req.Contact)
 	if err != nil {
+		var ambErr *slacklistener.AmbiguousChannelError
+		if errors.As(err, &ambErr) {
+			return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
+		}
 		return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
 	}
 
@@ -214,6 +218,40 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// formatAmbiguousChannels builds a disambiguation message for Slack channels,
+// enriched with activity info from the Slack API (last message, open status).
+func formatAmbiguousChannels(ctx context.Context, err *slacklistener.AmbiguousChannelError, sender *SlackSender) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "multiple channels match %q:\n", err.Query)
+
+	for _, m := range err.Matches {
+		fmt.Fprintf(&b, "  %s  %s", m.ID, m.Name)
+
+		ch, apiErr := sender.API.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+			ChannelID: m.ID,
+		})
+		if apiErr == nil {
+			if ch.Latest != nil && ch.Latest.Timestamp != "" {
+				lastMsg := slacklistener.ParseTimestamp(ch.Latest.Timestamp)
+				fmt.Fprintf(&b, "  (last msg: %s", lastMsg.Format("2006-01-02"))
+				if ch.Latest.Text != "" {
+					preview := ch.Latest.Text
+					if len(preview) > 50 {
+						preview = preview[:50] + "..."
+					}
+					fmt.Fprintf(&b, ", %q", preview)
+				}
+				b.WriteString(")")
+			} else {
+				b.WriteString("  (no messages)")
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("use a channel ID (e.g. D1234567890) to disambiguate")
+	return b.String()
 }
 
 // formatAmbiguousContacts builds a disambiguation message enriched with
