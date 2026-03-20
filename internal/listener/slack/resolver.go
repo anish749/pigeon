@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -162,6 +163,46 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 	r.channels[channelID] = name
 	r.mu.Unlock()
 	return name
+}
+
+// FindChannelID searches the channel cache for a channel matching the query.
+// Matches case-insensitively against channel names (with and without prefix).
+// Returns an error listing all matches if the query is ambiguous.
+func (r *Resolver) FindChannelID(query string) (string, string, error) {
+	q := strings.ToLower(query)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	type match struct{ id, name string }
+	var matches []match
+
+	for id, name := range r.channels {
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, q) {
+			matches = append(matches, match{id, name})
+			continue
+		}
+		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') {
+			if strings.Contains(lower[1:], q) {
+				matches = append(matches, match{id, name})
+			}
+		}
+	}
+
+	if len(matches) == 0 {
+		return "", "", fmt.Errorf("no channel matching %q", query)
+	}
+	if len(matches) == 1 {
+		return matches[0].id, matches[0].name, nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "multiple channels match %q:\n", query)
+	for _, m := range matches {
+		fmt.Fprintf(&b, "  %s\n", m.name)
+	}
+	b.WriteString("use a more specific name to disambiguate")
+	return "", "", fmt.Errorf("%s", b.String())
 }
 
 // FormatChannelName returns a human-readable channel name with prefix (# for channels, @ for DMs).

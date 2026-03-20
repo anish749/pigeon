@@ -35,6 +35,12 @@ func New(client *whatsmeow.Client, account string, onLogout func()) *Listener {
 	}
 }
 
+// Resolver returns the listener's name resolver.
+func (l *Listener) Resolver() *Resolver { return l.resolver }
+
+// Client returns the underlying whatsmeow client.
+func (l *Listener) Client() *whatsmeow.Client { return l.client }
+
 // EventHandler returns a function suitable for client.AddEventHandler.
 func (l *Listener) EventHandler(ctx context.Context) func(any) {
 	return func(evt any) {

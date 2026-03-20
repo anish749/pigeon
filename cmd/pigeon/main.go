@@ -31,6 +31,10 @@ COMMANDS — READING
   read              Read messages from a conversation
   search            Search across conversations by keyword
 
+COMMANDS — SENDING
+
+  send              Send a message (requires daemon to be running)
+
 COMMANDS — MAINTENANCE
 
   reset             Delete all synced data for a platform/account
@@ -167,6 +171,23 @@ SEARCH
     -account    Filter by account
     -since      Only search messages from last duration (e.g. 2h, 7d)
 
+SEND
+
+  pigeon send -platform=whatsapp -account=+14155551234 -contact=Alice -m "hey, are you free?"
+  pigeon send -platform=slack -account=acme-corp -contact=#engineering -m "deploying now"
+
+  Sends a message through the daemon's connected clients. The daemon must
+  be running (pigeon daemon start) for this to work.
+
+  Options:
+    -platform   Platform name [required]
+    -account    Account name [required]
+    -contact    Contact name, phone, or channel [required]
+    -m          Message text [required]
+
+  Note: Slack sending requires chat:write scope. If your Slack app was
+  installed before this feature, re-run 'pigeon setup-slack' to update scopes.
+
 RESET
 
   pigeon reset -platform=slack -account=acme-corp
@@ -217,6 +238,8 @@ func main() {
 		err = commands.RunRead(args)
 	case "search":
 		err = commands.RunSearch(args)
+	case "send":
+		err = commands.RunSend(args)
 	case "setup-whatsapp":
 		err = commands.RunSetupWhatsApp(args)
 	case "setup-slack":

@@ -16,6 +16,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
@@ -38,6 +39,8 @@ func RunDaemon(args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	apiServer := api.NewServer()
 
 	var whatsappCount, slackCount int
 
@@ -72,6 +75,12 @@ func RunDaemon(args []string) error {
 			continue
 		}
 
+		apiServer.RegisterWhatsApp(&api.WhatsAppSender{
+			Client:   client,
+			Account:  wa.Account,
+			Resolver: listener.Resolver(),
+		})
+
 		slog.InfoContext(ctx, "whatsapp listener started", "account", wa.Account, "device", wa.DeviceJID)
 		whatsappCount++
 	}
@@ -86,13 +95,18 @@ func RunDaemon(args []string) error {
 				"has_user_token", sl.UserToken != "")
 			continue
 		}
-		startSlackWorkspace(ctx, sl)
+		slackSender := startSlackWorkspace(ctx, sl)
+		if slackSender != nil {
+			apiServer.RegisterSlack(slackSender)
+		}
 		slackCount++
 	}
 
 	if whatsappCount == 0 && slackCount == 0 {
 		return fmt.Errorf("no listeners could be started — check config and credentials")
 	}
+
+	go apiServer.Start(ctx)
 
 	var parts []string
 	if whatsappCount > 0 {
@@ -113,15 +127,24 @@ func RunDaemon(args []string) error {
 }
 
 // startSlackWorkspace creates an independent Socket Mode connection, resolver,
-// listener, and sync for a single workspace.
-func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
-	api := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
-	smClient := socketmode.New(api)
+// listener, and sync for a single workspace. Returns a SlackSender for the API server.
+func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) *api.SlackSender {
+	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
+	smClient := socketmode.New(botAPI)
 
-	resolver := slacklistener.NewResolver(goslack.New(sl.UserToken))
+	userAPI := goslack.New(sl.UserToken)
+	resolver := slacklistener.NewResolver(userAPI)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
+	}
+
+	// Resolve the authenticated user's display name for sent messages.
+	var userName string
+	if authResp, err := userAPI.AuthTestContext(ctx); err == nil {
+		userName = resolver.UserName(ctx, authResp.UserID)
+	} else {
+		slog.WarnContext(ctx, "failed to get Slack auth info", "workspace", sl.Workspace, "error", err)
 	}
 
 	messages := slacklistener.NewMessageStore(sl.Workspace)
@@ -135,6 +158,14 @@ func startSlackWorkspace(ctx context.Context, sl config.SlackConfig) {
 	}()
 
 	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
+
+	return &api.SlackSender{
+		API:       userAPI,
+		Resolver:  resolver,
+		Messages:  messages,
+		Workspace: sl.Workspace,
+		UserName:  userName,
+	}
 }
 
 // connectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().

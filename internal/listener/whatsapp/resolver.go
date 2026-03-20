@@ -2,12 +2,18 @@ package whatsapp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )
+
+func containsLower(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), substr)
+}
 
 // Resolver provides consistent name resolution for WhatsApp contacts and groups.
 // It reads from whatsmeow's ContactStore (persisted in SQLite) and maintains an
@@ -85,6 +91,67 @@ func (r *Resolver) ConvDir(ctx context.Context, chatJID types.JID) string {
 
 	jid := r.ResolveJID(ctx, chatJID)
 	return "+" + jid.User
+}
+
+// ContactMatch represents a contact that matched a search query.
+type ContactMatch struct {
+	JID   types.JID
+	Name  string
+	Phone string // "+14155559876"
+}
+
+// FindJID searches the contact store for a JID matching the query string.
+// Matches case-insensitively against FullName, PushName, BusinessName, and phone number.
+// If exactly one match, returns it. If multiple, returns all matches via ErrAmbiguous.
+func (r *Resolver) FindJID(ctx context.Context, query string) (types.JID, error) {
+	contacts, err := r.client.Store.Contacts.GetAllContacts(ctx)
+	if err != nil {
+		return types.JID{}, fmt.Errorf("load contacts: %w", err)
+	}
+	q := strings.ToLower(query)
+
+	var matches []ContactMatch
+
+	for jid, info := range contacts {
+		phone := "+" + jid.User
+		if containsLower(info.FullName, q) ||
+			containsLower(info.PushName, q) ||
+			containsLower(info.BusinessName, q) ||
+			containsLower(phone, q) {
+			name := info.FullName
+			if name == "" {
+				name = info.PushName
+			}
+			if name == "" {
+				name = info.BusinessName
+			}
+			matches = append(matches, ContactMatch{
+				JID:   jid,
+				Name:  name,
+				Phone: phone,
+			})
+		}
+	}
+
+	if len(matches) == 0 {
+		return types.JID{}, fmt.Errorf("no contact matching %q", query)
+	}
+	if len(matches) == 1 {
+		return types.NewJID(matches[0].JID.User, types.DefaultUserServer), nil
+	}
+
+	return types.JID{}, &AmbiguousContactError{Query: query, Matches: matches}
+}
+
+// AmbiguousContactError is returned when a contact query matches multiple people.
+// The caller should enrich Matches with conversation activity before displaying.
+type AmbiguousContactError struct {
+	Query   string
+	Matches []ContactMatch
+}
+
+func (e *AmbiguousContactError) Error() string {
+	return fmt.Sprintf("multiple contacts match %q (%d matches)", e.Query, len(e.Matches))
 }
 
 // ResolveJID converts a LID (hidden user) JID to a phone-number JID if possible.

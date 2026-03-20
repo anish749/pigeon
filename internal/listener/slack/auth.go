@@ -35,6 +35,7 @@ var botScopes = []string{
 var userScopes = []string{
 	"channels:history",
 	"channels:read",
+	"chat:write",
 	"groups:history",
 	"groups:read",
 	"im:history",
