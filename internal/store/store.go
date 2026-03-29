@@ -208,6 +208,90 @@ func InterleaveThreads(platform, account, conversation string, lines []string) [
 	return result
 }
 
+// AppendActiveThreads appends full thread content for threads that had activity
+// within the given cutoff time but whose parent wasn't already shown in the channel
+// lines. This ensures thread replies are visible in time-filtered reads even when
+// the parent message is older than the time window.
+func AppendActiveThreads(platform, account, conversation string, lines []string, since time.Duration) []string {
+	if since <= 0 {
+		return lines
+	}
+
+	threadTSs, err := ListThreads(platform, account, conversation)
+	if err != nil || len(threadTSs) == 0 {
+		return lines
+	}
+
+	cutoff := time.Now().Add(-since)
+
+	// Build set of thread TSs already interleaved (their parent was in channel lines)
+	shownParents := make(map[string]struct{})
+	for _, ts := range threadTSs {
+		threadLines, err := ReadThread(platform, account, conversation, ts)
+		if err != nil || len(threadLines) == 0 {
+			continue
+		}
+		for _, line := range lines {
+			if line == threadLines[0] {
+				shownParents[ts] = struct{}{}
+				break
+			}
+		}
+	}
+
+	// Find threads with recent activity that weren't already shown
+	var activeThreads []struct {
+		ts    string
+		lines []string
+	}
+	for _, ts := range threadTSs {
+		if _, shown := shownParents[ts]; shown {
+			continue
+		}
+		threadLines, err := ReadThread(platform, account, conversation, ts)
+		if err != nil || len(threadLines) == 0 {
+			continue
+		}
+		// Check if any line in the thread is within the time window
+		hasRecent := false
+		for _, tl := range threadLines {
+			if lineTS := parseLineTime(tl); !lineTS.IsZero() && !lineTS.Before(cutoff) {
+				hasRecent = true
+				break
+			}
+		}
+		if hasRecent {
+			activeThreads = append(activeThreads, struct {
+				ts    string
+				lines []string
+			}{ts, threadLines})
+		}
+	}
+
+	if len(activeThreads) == 0 {
+		return lines
+	}
+
+	for _, t := range activeThreads {
+		lines = append(lines, "") // blank line separator
+		lines = append(lines, t.lines...)
+	}
+	return lines
+}
+
+// parseLineTime parses the timestamp from a message line (handles indented lines too).
+func parseLineTime(line string) time.Time {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(trimmed) < 28 || trimmed[0] != '[' {
+		return time.Time{}
+	}
+	ts, err := time.Parse("2006-01-02 15:04:05 -07:00", trimmed[1:27])
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
 // contextLines is the number of messages to show before and after each match.
 const contextLines = 3
 
