@@ -33,12 +33,14 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) string {
 	return text
 }
 
-// Resolver caches Slack user and channel name lookups.
+// Resolver caches Slack user and channel name lookups and tracks
+// which channels the authenticated user is a member of.
 type Resolver struct {
 	api      *goslack.Client
 	mu       sync.RWMutex
 	users    map[string]string // user ID → display name
 	channels map[string]string // channel ID → name
+	members  map[string]bool   // channel IDs the user has joined
 }
 
 // NewResolver creates a new Slack name resolver.
@@ -47,6 +49,7 @@ func NewResolver(api *goslack.Client) *Resolver {
 		api:      api,
 		users:    make(map[string]string),
 		channels: make(map[string]string),
+		members:  make(map[string]bool),
 	}
 }
 
@@ -93,6 +96,28 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 	r.mu.Unlock()
 
 	return len(r.users), len(r.channels), nil
+}
+
+// AddMember marks a channel as one the user has joined.
+func (r *Resolver) AddMember(channelID string) {
+	r.mu.Lock()
+	r.members[channelID] = true
+	r.mu.Unlock()
+}
+
+// RemoveMember marks a channel as one the user has left.
+func (r *Resolver) RemoveMember(channelID string) {
+	r.mu.Lock()
+	delete(r.members, channelID)
+	r.mu.Unlock()
+}
+
+// IsMember reports whether the user is a member of the given channel.
+func (r *Resolver) IsMember(channelID string) bool {
+	r.mu.RLock()
+	ok := r.members[channelID]
+	r.mu.RUnlock()
+	return ok
 }
 
 // RegisterChannel adds a channel name to the cache.

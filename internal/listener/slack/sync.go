@@ -152,9 +152,11 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 		"total", len(conversations),
 	)
 
-	// Register all channel names in resolver so real-time listener knows about them
+	// Register all channel names and membership in resolver so real-time
+	// listener knows about them and can filter non-member public channels.
 	for _, ch := range conversations {
 		resolver.RegisterConversation(ctx, ch)
+		resolver.AddMember(ch.ID)
 	}
 
 	// Track per-category progress
