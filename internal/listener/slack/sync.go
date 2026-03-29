@@ -77,6 +77,21 @@ func (ms *MessageStore) Write(channelID, channelName, sender, text string, ts ti
 	return store.WriteMessage("slack", ms.workspace, channelName, sender, text, ts)
 }
 
+// WriteThreadMessage writes a message to a thread file.
+func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, text string, ts time.Time, isReply bool) error {
+	return store.WriteThreadMessage("slack", ms.workspace, channelName, threadTS, sender, text, ts, isReply)
+}
+
+// WriteThreadContext writes a channel context message to a thread file.
+func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, text string, ts time.Time) error {
+	return store.WriteThreadContext("slack", ms.workspace, channelName, threadTS, sender, text, ts)
+}
+
+// EnsureThreadContextSeparator writes the separator line to a thread file.
+func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS string) error {
+	return store.EnsureThreadContextSeparator("slack", ms.workspace, channelName, threadTS)
+}
+
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
 func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
 	ms.mu.Lock()
@@ -215,6 +230,9 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			written++
 		}
 
+		// Sync thread replies for messages with threads
+		threadsSynced := syncThreads(ctx, api, gate, resolver, ms, ch.ID, channelName, msgs)
+
 		if lastTS != "" {
 			ms.AdvanceCursor(ch.ID, lastTS)
 		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
@@ -224,11 +242,12 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			ms.AdvanceCursor(ch.ID, oldest)
 		}
 
-		if written > 0 {
+		if written > 0 || threadsSynced > 0 {
 			synced++
 			totalMessages += written
 			slog.InfoContext(ctx, "slack sync: channel done",
-				"channel", channelName, "messages", written, "workspace", workspace)
+				"channel", channelName, "messages", written,
+				"threads", threadsSynced, "workspace", workspace)
 		}
 
 		switch channelPriority(ch) {
@@ -331,6 +350,122 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 	// Reverse: API returns newest-first, we want chronological order
 	for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
 		all[i], all[j] = all[j], all[i]
+	}
+	return all, nil
+}
+
+// contextMessages is the number of channel messages after a thread parent to
+// include as surrounding context in the thread file.
+const contextMessages = 10
+
+// syncThreads fetches thread replies for messages with ReplyCount > 0,
+// writing them to separate thread files along with surrounding channel context.
+// Returns the number of threads synced.
+func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, resolver *Resolver, ms *MessageStore, channelID, channelName string, msgs []goslack.Message) int {
+	// Build index from timestamp to position for channel context lookup
+	msgIndex := make(map[string]int, len(msgs))
+	for i, msg := range msgs {
+		msgIndex[msg.Timestamp] = i
+	}
+
+	var synced int
+	for _, msg := range msgs {
+		if ctx.Err() != nil {
+			break
+		}
+		if msg.ReplyCount == 0 {
+			continue
+		}
+
+		replies, err := fetchThreadReplies(ctx, api, gate, channelID, msg.Timestamp)
+		if err != nil {
+			slog.WarnContext(ctx, "slack sync: thread fetch failed",
+				"channel", channelName, "thread_ts", msg.Timestamp, "error", err)
+			continue
+		}
+
+		// Write parent message (first reply from conversations.replies is the parent)
+		// Then write each reply indented
+		for _, reply := range replies {
+			if reply.BotID != "" || reply.Text == "" {
+				continue
+			}
+			// Skip subtypes except thread_broadcast
+			if reply.SubType != "" && reply.SubType != "thread_broadcast" {
+				continue
+			}
+			userName := resolver.UserName(ctx, reply.User)
+			text := resolver.ResolveText(ctx, reply.Text)
+			ts := ParseTimestamp(reply.Timestamp)
+			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
+			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, text, ts, isReply); err != nil {
+				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
+			}
+		}
+
+		// Write surrounding channel context: the next N messages after the parent
+		if idx, ok := msgIndex[msg.Timestamp]; ok {
+			contextStart := idx + 1
+			contextEnd := contextStart + contextMessages
+			if contextEnd > len(msgs) {
+				contextEnd = len(msgs)
+			}
+			if contextStart < contextEnd {
+				if err := ms.EnsureThreadContextSeparator(channelName, msg.Timestamp); err != nil {
+					slog.WarnContext(ctx, "slack sync: thread context separator failed", "error", err)
+				}
+				for _, ctxMsg := range msgs[contextStart:contextEnd] {
+					// Stop at the next thread parent to avoid crossing topic boundaries
+					if ctxMsg.ReplyCount > 0 {
+						break
+					}
+					if ctxMsg.BotID != "" || ctxMsg.Text == "" {
+						continue
+					}
+					if ctxMsg.SubType != "" && ctxMsg.SubType != "thread_broadcast" {
+						continue
+					}
+					userName := resolver.UserName(ctx, ctxMsg.User)
+					text := resolver.ResolveText(ctx, ctxMsg.Text)
+					ts := ParseTimestamp(ctxMsg.Timestamp)
+					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, text, ts); err != nil {
+						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
+					}
+				}
+			}
+		}
+
+		synced++
+	}
+	return synced
+}
+
+// fetchThreadReplies retrieves all replies in a thread, returned in chronological order.
+// The first message in the result is the thread parent (conversations.replies always includes it).
+func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimitGate, channelID, threadTS string) ([]goslack.Message, error) {
+	var all []goslack.Message
+	cursor := ""
+	for {
+		if err := gate.wait(ctx); err != nil {
+			return all, err
+		}
+		msgs, hasMore, nextCursor, err := api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
+			ChannelID: channelID,
+			Timestamp: threadTS,
+			Limit:     1000,
+			Cursor:    cursor,
+		})
+		if gate.update(err) {
+			continue
+		}
+		if err != nil {
+			return all, err
+		}
+		all = append(all, msgs...)
+		if !hasMore {
+			break
+		}
+		cursor = nextCursor
 	}
 	return all, nil
 }

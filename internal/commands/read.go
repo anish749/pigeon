@@ -53,6 +53,11 @@ func RunRead(args []string) error {
 		return nil
 	}
 
+	// Interleave thread replies for Slack conversations
+	if *platform == "slack" {
+		lines = store.InterleaveThreads(*platform, *account, conv.DirName, lines)
+	}
+
 	lines = enrichLines(lines, aliases)
 
 	dir := filepath.Join(store.DataDir(), *platform, *account, conv.DirName)

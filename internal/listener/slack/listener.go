@@ -101,9 +101,19 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	text := l.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
 
+	// Always write to the channel date file
 	if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
 		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
 		return
+	}
+
+	// If this is a thread reply, also write to the thread file
+	if msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp {
+		isReply := true
+		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, text, ts, isReply); err != nil {
+			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
+				"workspace", l.workspace, "thread_ts", msg.ThreadTimeStamp)
+		}
 	}
 
 	slog.InfoContext(ctx, "slack message saved",

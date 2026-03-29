@@ -54,7 +54,7 @@ func ListConversations(platform, account string, aliases map[string][]string) ([
 	}
 	var convs []Conversation
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || e.Name() == "threads" {
 			continue
 		}
 		c := parseConversationDir(e.Name())
@@ -160,6 +160,54 @@ func ReadMessages(platform, account, conversation string, opts ReadOpts) ([]stri
 	return readFileLines(files[len(files)-1])
 }
 
+// InterleaveThreads enriches channel message lines with thread content.
+// For each channel line that matches a thread parent (by comparing text content),
+// the thread replies and channel context are inserted after the parent line.
+func InterleaveThreads(platform, account, conversation string, lines []string) []string {
+	threadsDir := ThreadDir(platform, account, conversation)
+	if _, err := os.Stat(threadsDir); os.IsNotExist(err) {
+		return lines
+	}
+
+	threadTSs, err := ListThreads(platform, account, conversation)
+	if err != nil || len(threadTSs) == 0 {
+		return lines
+	}
+
+	// Read the first line (parent) of each thread file and map it to the thread TS
+	parentToThread := make(map[string]string) // parent line text → thread TS
+	for _, ts := range threadTSs {
+		threadLines, err := ReadThread(platform, account, conversation, ts)
+		if err != nil || len(threadLines) == 0 {
+			continue
+		}
+		parentToThread[threadLines[0]] = ts
+	}
+	if len(parentToThread) == 0 {
+		return lines
+	}
+
+	var result []string
+	for _, line := range lines {
+		result = append(result, line)
+
+		ts, ok := parentToThread[line]
+		if !ok {
+			continue
+		}
+
+		// Read thread file and append content after parent (skip first line = parent)
+		threadLines, err := ReadThread(platform, account, conversation, ts)
+		if err != nil || len(threadLines) <= 1 {
+			continue
+		}
+		for _, tl := range threadLines[1:] {
+			result = append(result, tl)
+		}
+	}
+	return result
+}
+
 // contextLines is the number of messages to show before and after each match.
 const contextLines = 3
 
@@ -237,10 +285,50 @@ func SearchMessages(query, platform, account string, since time.Duration) ([]Sea
 						})
 					}
 				}
+				// Also search thread files for this conversation
+				threadFiles, err := listThreadTxtFiles(convDir)
+				if err == nil {
+					for _, f := range threadFiles {
+						threadTS := strings.TrimSuffix(filepath.Base(f), ".txt")
+						lines, err := readFileLines(f)
+						if err != nil {
+							continue
+						}
+						// Check cutoff by parsing the first line's timestamp
+						if cutoffDate != "" && len(lines) > 0 {
+							if firstTS := parseLineDate(lines[0]); firstTS != "" && firstTS < cutoffDate {
+								continue
+							}
+						}
+						for _, sec := range buildSections(lines, q) {
+							results = append(results, SearchResult{
+								Platform:     plat,
+								Account:      acct,
+								Conversation: conv.DirName,
+								Date:         "thread:" + threadTS,
+								Lines:        sec.lines,
+								MatchCount:   sec.matchCount,
+							})
+						}
+					}
+				}
 			}
 		}
 	}
 	return results, nil
+}
+
+// parseLineDate extracts the YYYY-MM-DD portion from a message line.
+func parseLineDate(line string) string {
+	if len(line) > 11 && line[0] == '[' {
+		return line[1:11]
+	}
+	// Handle indented thread reply lines
+	trimmed := strings.TrimLeft(line, " ")
+	if len(trimmed) > 11 && trimmed[0] == '[' {
+		return trimmed[1:11]
+	}
+	return ""
 }
 
 // WriteMessage appends a formatted message line to the appropriate date file.
@@ -253,15 +341,91 @@ func WriteMessage(platform, account, conversation, sender, text string, ts time.
 	}
 	filename := filepath.Join(dir, ts.Format("2006-01-02")+".txt")
 	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05 -07:00"), sender, text)
+	return appendDedup(filename, line)
+}
 
-	// Per-file lock: makes the dedup read + append atomic so concurrent
-	// writers (history sync + real-time) cannot both pass the check.
+// ThreadDir returns the path to the threads directory for a conversation.
+func ThreadDir(platform, account, conversation string) string {
+	return filepath.Join(DataDir(), platform, account, conversation, "threads")
+}
+
+// ThreadFilePath returns the path to a specific thread file.
+func ThreadFilePath(platform, account, conversation, threadTS string) string {
+	return filepath.Join(ThreadDir(platform, account, conversation), threadTS+".txt")
+}
+
+// WriteThreadMessage appends a message to a thread file. If isReply is true,
+// the line is indented with two spaces. Deduplicates like WriteMessage.
+func WriteThreadMessage(platform, account, conversation, threadTS, sender, text string, ts time.Time, isReply bool) error {
+	dir := ThreadDir(platform, account, conversation)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create threads dir %s: %w", dir, err)
+	}
+	filename := filepath.Join(dir, threadTS+".txt")
+	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05 -07:00"), sender, text)
+	if isReply {
+		line = "  " + line
+	}
+	return appendDedup(filename, line)
+}
+
+// WriteThreadContext appends a channel context line to a thread file.
+// These lines appear after a "--- channel context ---" separator and represent
+// messages posted in the channel shortly after the thread parent.
+func WriteThreadContext(platform, account, conversation, threadTS, sender, text string, ts time.Time) error {
+	dir := ThreadDir(platform, account, conversation)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create threads dir %s: %w", dir, err)
+	}
+	filename := filepath.Join(dir, threadTS+".txt")
+	line := fmt.Sprintf("[%s] %s: %s", ts.Format("2006-01-02 15:04:05 -07:00"), sender, text)
+	return appendDedup(filename, line)
+}
+
+// EnsureThreadContextSeparator writes the "--- channel context ---" separator
+// to a thread file if it doesn't already exist.
+func EnsureThreadContextSeparator(platform, account, conversation, threadTS string) error {
+	dir := ThreadDir(platform, account, conversation)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create threads dir %s: %w", dir, err)
+	}
+	filename := filepath.Join(dir, threadTS+".txt")
+	return appendDedup(filename, "--- channel context ---")
+}
+
+// ReadThread reads all lines from a thread file.
+func ReadThread(platform, account, conversation, threadTS string) ([]string, error) {
+	filename := ThreadFilePath(platform, account, conversation, threadTS)
+	return readFileLines(filename)
+}
+
+// ListThreads returns thread timestamps for a conversation by listing thread files.
+func ListThreads(platform, account, conversation string) ([]string, error) {
+	dir := ThreadDir(platform, account, conversation)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var threads []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".txt") {
+			threads = append(threads, strings.TrimSuffix(e.Name(), ".txt"))
+		}
+	}
+	return threads, nil
+}
+
+// appendDedup appends a line to a file, skipping if it already exists.
+// Safe for concurrent use via per-file locks.
+func appendDedup(filename, line string) error {
 	lockVal, _ := fileLocks.LoadOrStore(filename, &sync.Mutex{})
 	mu := lockVal.(*sync.Mutex)
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Check for exact duplicate.
 	if existing, err := os.ReadFile(filename); err == nil {
 		for _, existingLine := range strings.Split(string(existing), "\n") {
 			if existingLine == line {
@@ -325,6 +489,26 @@ func listTxtFiles(dir string) ([]string, error) {
 		}
 	}
 	sort.Strings(files) // sorts by date since filenames are YYYY-MM-DD.txt
+	return files, nil
+}
+
+// listThreadTxtFiles returns all .txt files in the threads subdirectory.
+func listThreadTxtFiles(dir string) ([]string, error) {
+	threadsDir := filepath.Join(dir, "threads")
+	entries, err := os.ReadDir(threadsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".txt") {
+			files = append(files, filepath.Join(threadsDir, e.Name()))
+		}
+	}
+	sort.Strings(files)
 	return files, nil
 }
 
