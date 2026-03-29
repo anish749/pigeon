@@ -75,11 +75,24 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 	switch innerEvt := evt.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
 		l.handleMessage(ctx, innerEvt)
+	case *slackevents.MemberJoinedChannelEvent:
+		l.resolver.AddMember(innerEvt.Channel)
+		slog.InfoContext(ctx, "slack: member joined channel",
+			"channel", innerEvt.Channel, "user", innerEvt.User, "workspace", l.workspace)
+	case *slackevents.MemberLeftChannelEvent:
+		l.resolver.RemoveMember(innerEvt.Channel)
+		slog.InfoContext(ctx, "slack: member left channel",
+			"channel", innerEvt.Channel, "user", innerEvt.User, "workspace", l.workspace)
 	}
 }
 
 func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEvent) {
 	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+		return
+	}
+
+	// Skip messages from channels the user hasn't joined.
+	if !l.resolver.IsMember(msg.Channel) {
 		return
 	}
 
