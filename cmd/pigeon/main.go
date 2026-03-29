@@ -38,6 +38,7 @@ COMMANDS — SENDING
 COMMANDS — MAINTENANCE
 
   reset             Delete all synced data for a platform/account
+  sync-manifest     Create or update Slack app manifest and reinstall
 
 OTHER
 
@@ -83,6 +84,29 @@ DATA LAYOUT
 
   Hierarchy: platform / account / conversation / YYYY-MM-DD.txt
   Message format: [2026-03-16 09:15:02] Alice: Hey, are you free?
+
+─────────────────────────────────────────────────────────
+
+SYNC-MANIFEST
+
+  pigeon sync-manifest -username=Anish
+  pigeon sync-manifest -username=Anish -workspace=acme-corp
+
+  Renders the manifest template (manifests/slack-app.yaml) with the given
+  username and workspace name, then syncs with Slack via the Slack CLI.
+
+  Behavior depends on whether the workspace is already in pigeon's config:
+
+    Configured workspace  →  update manifest + reinstall app
+    New workspace         →  create app from manifest
+
+  Without -workspace, syncs all configured workspaces at once.
+
+  Requires the Slack CLI (slack) to be installed and authenticated.
+
+  Options:
+    -username    Display name for the bot owner [required]
+    -workspace   Slack workspace name (default: all configured)
 
 ─────────────────────────────────────────────────────────
 
@@ -250,6 +274,8 @@ func main() {
 		err = commands.RunReset(args)
 	case "reset-whatsapp":
 		err = commands.RunResetWhatsApp(args)
+	case "sync-manifest":
+		err = commands.RunSyncManifest(args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:
