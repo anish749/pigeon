@@ -48,6 +48,16 @@ func RunRead(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Interleave thread replies for Slack conversations, and append
+	// threads with recent activity whose parent is outside the time window.
+	if *platform == "slack" {
+		lines = store.InterleaveThreads(*platform, *account, conv.DirName, lines)
+		if opts.Since > 0 {
+			lines = store.AppendActiveThreads(*platform, *account, conv.DirName, lines, opts.Since)
+		}
+	}
+
 	if len(lines) == 0 {
 		fmt.Println("No messages found.")
 		return nil

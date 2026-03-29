@@ -3,9 +3,13 @@ package slack
 import (
 	"context"
 	"log/slog"
+	"os"
 
+	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+
+	"github.com/anish/claude-msg-utils/internal/store"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
@@ -101,11 +105,61 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	text := l.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
 
-	if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
-		slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
-		return
+	isThreadReply := msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp
+
+	// Write to channel date file unless it's a thread-only reply.
+	// thread_broadcast replies appear in both channel and thread.
+	if !isThreadReply || msg.SubType == "thread_broadcast" {
+		if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
+			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
+			return
+		}
+	}
+
+	// Write thread replies to the thread file
+	if isThreadReply {
+		// If thread file doesn't exist yet, fetch and write the parent message first
+		threadPath := store.ThreadFilePath("slack", l.workspace, channelName, msg.ThreadTimeStamp)
+		if _, err := os.Stat(threadPath); os.IsNotExist(err) {
+			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
+		}
+
+		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, text, ts, true); err != nil {
+			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
+				"workspace", l.workspace, "thread_ts", msg.ThreadTimeStamp)
+		}
 	}
 
 	slog.InfoContext(ctx, "slack message saved",
 		"from", userName, "channel", channelName, "workspace", l.workspace, "text_len", len(msg.Text))
+}
+
+// ensureThreadParent fetches the parent message of a thread and writes it to the
+// thread file. Called when a real-time thread reply arrives but no thread file exists.
+func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelName, threadTS string) {
+	api := goslack.New(l.userToken)
+	msgs, _, _, err := api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
+		ChannelID: channelID,
+		Timestamp: threadTS,
+		Limit:     1,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to fetch thread parent", "error", err,
+			"workspace", l.workspace, "thread_ts", threadTS)
+		return
+	}
+	if len(msgs) == 0 {
+		return
+	}
+	parent := msgs[0]
+	if parent.Text == "" {
+		return
+	}
+	userName := l.resolver.UserName(ctx, parent.User)
+	text := l.resolver.ResolveText(ctx, parent.Text)
+	ts := ParseTimestamp(parent.Timestamp)
+	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, text, ts, false); err != nil {
+		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
+			"workspace", l.workspace, "thread_ts", threadTS)
+	}
 }
