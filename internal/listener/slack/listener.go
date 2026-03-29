@@ -79,7 +79,7 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 }
 
 func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEvent) {
-	if msg.BotID != "" || msg.SubType != "" || msg.Text == "" {
+	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
 		return
 	}
 

@@ -198,7 +198,7 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			if msg.BotID != "" || msg.SubType != "" || msg.Text == "" {
+			if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
 				continue
 			}
 
