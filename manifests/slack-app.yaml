@@ -1,5 +1,5 @@
 display_information:
-  name: "${USERNAME}'s Pigeon (${WORKSPACE_NAME})"
+  name: "${USERNAME}'s ${WORKSPACE_NAME} Pigeon"
   description: Carrier pigeon. Picks up messages, flies them to ${USERNAME}. No pecking, no replies.
   long_description: >-
     Coo! This is ${USERNAME}'s personal carrier pigeon for the
@@ -12,7 +12,7 @@ display_information:
 
 features:
   bot_user:
-    display_name: "${USERNAME}'s Pigeon (${WORKSPACE_NAME})"
+    display_name: "${USERNAME}'s ${WORKSPACE_NAME} Pigeon"
     always_online: true
 
 oauth_config:

@@ -35,6 +35,10 @@ COMMANDS — SENDING
 
   send              Send a message (requires daemon to be running)
 
+COMMANDS — SLACK
+
+  generate-manifest Generate a Slack app manifest for a workspace
+
 COMMANDS — MAINTENANCE
 
   reset             Delete all synced data for a platform/account
@@ -86,6 +90,20 @@ DATA LAYOUT
 
 ─────────────────────────────────────────────────────────
 
+GENERATE-MANIFEST
+
+  pigeon generate-manifest -username=Anish -workspace=acme-corp
+
+  Renders the Slack app manifest template (manifests/slack-app.yaml) with
+  the given username and workspace name, prints it to stdout, and copies
+  it to the clipboard. Use this before creating or updating a Slack app.
+
+  Options:
+    -username    Display name for the bot owner [required]
+    -workspace   Slack workspace name [required]
+
+─────────────────────────────────────────────────────────
+
 SETUP-WHATSAPP
 
   pigeon setup-whatsapp
@@ -116,9 +134,9 @@ SETUP-SLACK
     -app-token       Slack app-level token (first time only, or SLACK_APP_TOKEN)
 
   To create a Slack app:
-    1. Go to https://api.slack.com/apps
-    2. Click "Create New App" → "From a manifest"
-    3. Paste the contents of manifests/slack-app.yaml
+    1. Run: pigeon generate-manifest -username=You -workspace=acme-corp
+    2. Go to https://api.slack.com/apps → "Create New App" → "From a manifest"
+    3. Paste the manifest from your clipboard
     4. Under "Basic Information", copy client ID and client secret
     5. Under "Socket Mode", enable it and create an app-level token (xapp-...)
     6. Run: pigeon setup-slack -client-id=... -client-secret=... -app-token=...
@@ -250,6 +268,8 @@ func main() {
 		err = commands.RunReset(args)
 	case "reset-whatsapp":
 		err = commands.RunResetWhatsApp(args)
+	case "generate-manifest":
+		err = commands.RunGenerateManifest(args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 	default:
