@@ -89,14 +89,26 @@ WORKFLOW — FIRST-TIME SETUP
 
 WORKFLOW — READING MESSAGES
 
-  pigeon list                             # see what's available
-  pigeon list --platform=whatsapp         # filter by platform
+  Discover what's available:
 
-  pigeon read --platform=whatsapp --account=+14155551234 --contact=Alice --last=20
-  pigeon read --platform=slack --account=acme-corp --contact=#engineering --since=2h
+    pigeon list                             # all platforms and accounts
+    pigeon list --platform=whatsapp         # accounts in a platform
+    pigeon list --platform=whatsapp --account=+14155551234   # conversations
 
-  pigeon search -q "meeting" --since=24h
-  pigeon search -q "deploy" --platform=slack
+  Read messages from a conversation:
+
+    pigeon read --platform=whatsapp --account=+14155551234 --contact=Alice --last=20
+    pigeon read --platform=slack --account=acme-corp --contact=#engineering --since=2h
+    pigeon read --platform=whatsapp --account=+14155551234 --contact=Bob --date=2026-03-16
+
+    Modes: --last=N (last N messages), --since=DURATION (e.g. 30m, 2h, 7d),
+           --date=YYYY-MM-DD (specific day). Default: today's messages.
+
+  Search across conversations:
+
+    pigeon search -q "meeting" --since=24h
+    pigeon search -q "deploy" --platform=slack
+    pigeon search -q "bug" --platform=slack --account=acme-corp --since=7d
 
 ─────────────────────────────────────────────────────────
 
