@@ -36,7 +36,7 @@ COMMANDS — READING
 
 COMMANDS — SENDING
 
-  send              Send a message (auto-starts daemon if needed)
+  send              Send a message
 
 COMMANDS — SLACK
 
@@ -145,16 +145,6 @@ SETUP-SLACK
     6. Run: pigeon setup-slack -client-id=... -client-secret=... -app-token=...
     7. Your browser opens — pick a workspace and approve
     8. Done! Add more workspaces by running: pigeon setup-slack
-
-DAEMON
-
-  pigeon daemon start     Start the daemon in the background
-  pigeon daemon stop      Stop the daemon
-  pigeon daemon restart   Restart the daemon
-  pigeon daemon status    Check if the daemon is running
-
-  The daemon starts automatically when running read, send, search,
-  or list commands. Logs are written to ~/.local/state/pigeon/daemon.log.
 
 ─────────────────────────────────────────────────────────
 
