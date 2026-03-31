@@ -78,7 +78,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/send", s.handleSend)
 
 	srv := &http.Server{
-		Addr:    ":9876",
+		Addr:    ":9877",
 		Handler: mux,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
@@ -90,7 +90,7 @@ func (s *Server) Start(ctx context.Context) error {
 		srv.Close()
 	}()
 
-	slog.InfoContext(ctx, "api server started", "port", 9876)
+	slog.InfoContext(ctx, "api server started", "port", 9877)
 	err := srv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil

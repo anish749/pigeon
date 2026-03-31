@@ -30,7 +30,7 @@ func RunSend(args []string) error {
 		"message":  *message,
 	})
 
-	resp, err := http.Post("http://localhost:9876/api/send", "application/json", bytes.NewReader(body))
+	resp, err := http.Post("http://localhost:9877/api/send", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("daemon not reachable (is 'pigeon daemon start' running?): %w", err)
 	}
