@@ -2,21 +2,15 @@ package commands
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
 	"runtime"
 	"strings"
-	"time"
 
-	"github.com/anish/claude-msg-utils/internal/config"
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
 
@@ -116,13 +110,6 @@ func RunSetupSlack(args []string) error {
 	fmt.Println("Your browser will open — approve the installation and you're done.")
 	fmt.Println()
 
-	if daemonRunning() {
-		return setupViaDaemon(clientID, clientSecret, appToken)
-	}
-	return setupStandalone(clientID, clientSecret, appToken)
-}
-
-func setupStandalone(clientID, clientSecret, appToken string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -136,6 +123,7 @@ func setupStandalone(clientID, clientSecret, appToken string) error {
 
 	installURL := srv.InstallURL()
 	fmt.Printf("If the browser doesn't open, visit:\n  %s\n\n", installURL)
+
 	openBrowser(installURL)
 
 	entry := <-srv.Installed()
@@ -144,59 +132,6 @@ func setupStandalone(clientID, clientSecret, appToken string) error {
 	fmt.Printf("\nWorkspace %q (team: %s) installed and saved to config.\n\n", entry.Workspace, entry.TeamID)
 	fmt.Printf("To start listening:\n  pigeon daemon start\n")
 	return nil
-}
-
-func setupViaDaemon(clientID, clientSecret, appToken string) error {
-	fmt.Println("  Daemon is running — using it for OAuth.")
-	fmt.Println()
-
-	// POST credentials to the daemon's /slack/setup endpoint.
-	body, _ := json.Marshal(map[string]string{
-		"client_id":     clientID,
-		"client_secret": clientSecret,
-		"app_token":     appToken,
-	})
-	resp, err := http.Post("http://localhost:9876/slack/setup", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("could not reach daemon: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var setupResp struct {
-		InstallURL string `json:"install_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&setupResp); err != nil {
-		return fmt.Errorf("invalid response from daemon: %w", err)
-	}
-
-	fmt.Printf("If the browser doesn't open, visit:\n  %s\n\n", setupResp.InstallURL)
-	openBrowser(setupResp.InstallURL)
-
-	// Wait for the daemon to complete the OAuth flow (long-poll).
-	client := &http.Client{Timeout: 5 * time.Minute}
-	waitResp, err := client.Get("http://localhost:9876/slack/setup/wait")
-	if err != nil {
-		return fmt.Errorf("failed waiting for OAuth: %w", err)
-	}
-	defer waitResp.Body.Close()
-
-	var entry config.SlackConfig
-	if err := json.NewDecoder(waitResp.Body).Decode(&entry); err != nil {
-		return fmt.Errorf("invalid OAuth result from daemon: %w", err)
-	}
-
-	fmt.Printf("\nWorkspace %q (team: %s) installed and saved to config.\n", entry.Workspace, entry.TeamID)
-	fmt.Println("The daemon is already listening on the new workspace.")
-	return nil
-}
-
-func daemonRunning() bool {
-	conn, err := net.DialTimeout("tcp", "localhost:9876", time.Second)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }
 
 // suggestUsername returns a name suggestion from the OS user's display name,

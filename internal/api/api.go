@@ -48,7 +48,6 @@ type Server struct {
 	mu       sync.RWMutex
 	whatsapp map[string]*WhatsAppSender // account → sender
 	slack    map[string]*SlackSender    // workspace → sender
-	auth     *slacklistener.AuthServer
 }
 
 // NewServer creates a new API server.
@@ -56,14 +55,7 @@ func NewServer() *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),
-		auth:     slacklistener.NewAuthServer("", "", "", nil),
 	}
-}
-
-// SetOnSlackInstall sets a callback invoked when a new Slack workspace is
-// installed via the daemon's OAuth flow.
-func (s *Server) SetOnSlackInstall(fn slacklistener.OnInstall) {
-	s.auth.SetOnInstall(fn)
 }
 
 // RegisterWhatsApp registers a WhatsApp client for sending.
@@ -84,9 +76,6 @@ func (s *Server) RegisterSlack(sender *SlackSender) {
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
-	mux.HandleFunc("POST /slack/setup", s.handleSlackSetup)
-	mux.HandleFunc("GET /slack/setup/wait", s.handleSlackSetupWait)
-	s.auth.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:    ":9876",
@@ -120,36 +109,6 @@ type sendResponse struct {
 	OK        bool   `json:"ok"`
 	Timestamp string `json:"timestamp,omitempty"`
 	Error     string `json:"error,omitempty"`
-}
-
-type slackSetupRequest struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	AppToken     string `json:"app_token"`
-}
-
-func (s *Server) handleSlackSetup(w http.ResponseWriter, r *http.Request) {
-	var req slackSetupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
-	if req.ClientID == "" || req.ClientSecret == "" || req.AppToken == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_id, client_secret, and app_token are required"})
-		return
-	}
-
-	s.auth.Configure(req.ClientID, req.ClientSecret, req.AppToken)
-	writeJSON(w, http.StatusOK, map[string]string{"install_url": s.auth.InstallURL()})
-}
-
-func (s *Server) handleSlackSetupWait(w http.ResponseWriter, r *http.Request) {
-	select {
-	case entry := <-s.auth.Installed():
-		writeJSON(w, http.StatusOK, entry)
-	case <-r.Context().Done():
-		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "timeout"})
-	}
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {

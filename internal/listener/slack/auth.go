@@ -87,27 +87,6 @@ func (s *AuthServer) Installed() <-chan config.SlackConfig {
 	return s.installed
 }
 
-// Configure sets the OAuth credentials for a pending setup flow.
-// Resets the installed channel so callers can wait on a fresh flow.
-func (s *AuthServer) Configure(clientID, clientSecret, appToken string) {
-	s.clientID = clientID
-	s.clientSecret = clientSecret
-	s.appToken = appToken
-	s.installed = make(chan config.SlackConfig, 1)
-}
-
-// SetOnInstall sets the callback invoked after a successful OAuth install.
-func (s *AuthServer) SetOnInstall(fn OnInstall) {
-	s.onInstall = fn
-}
-
-// RegisterRoutes mounts the OAuth handlers on an existing mux.
-// Use this instead of Start when embedding in another HTTP server.
-func (s *AuthServer) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/slack/install", s.handleInstall)
-	mux.HandleFunc("/slack/oauth/callback", s.handleCallback)
-}
-
 // Start starts the HTTP server. Blocks until ctx is cancelled.
 func (s *AuthServer) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
