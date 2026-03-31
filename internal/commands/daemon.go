@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -16,8 +15,6 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
-
-	"github.com/fsnotify/fsnotify"
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
@@ -111,15 +108,29 @@ func RunDaemon(args []string) error {
 
 	go apiServer.Start(ctx)
 
-	// Track running Slack workspaces by TeamID.
+	// Watch for new Slack workspaces added to config at runtime.
 	runningSlack := make(map[string]bool)
 	for _, sl := range cfg.Slack {
-		if sl.TeamID != "" {
-			runningSlack[sl.TeamID] = true
-		}
+		runningSlack[sl.TeamID] = true
 	}
-
-	go watchConfig(ctx, apiServer, runningSlack)
+	go func() {
+		for updated := range config.Watch(ctx) {
+			for _, sl := range updated.Slack {
+				if runningSlack[sl.TeamID] {
+					continue
+				}
+				if sl.AppToken == "" || sl.BotToken == "" || sl.UserToken == "" {
+					continue
+				}
+				slog.InfoContext(ctx, "new slack workspace detected", "workspace", sl.Workspace)
+				sender := startSlackWorkspace(ctx, sl)
+				if sender != nil {
+					apiServer.RegisterSlack(sender)
+					runningSlack[sl.TeamID] = true
+				}
+			}
+		}
+	}()
 
 	var parts []string
 	if whatsappCount > 0 {
@@ -137,67 +148,6 @@ func RunDaemon(args []string) error {
 	fmt.Println("\nShutting down...")
 	cancel()
 	return nil
-}
-
-// watchConfig watches the config file for changes and starts listeners for
-// any new Slack workspaces that appear.
-func watchConfig(ctx context.Context, apiServer *api.Server, running map[string]bool) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to create config watcher", "error", err)
-		return
-	}
-	defer watcher.Close()
-
-	// Watch the config directory (not the file directly) because editors
-	// often write to a temp file and rename, which removes the watch.
-	if err := watcher.Add(filepath.Dir(config.ConfigPath())); err != nil {
-		slog.ErrorContext(ctx, "failed to watch config directory", "error", err)
-		return
-	}
-
-	configFile := filepath.Base(config.ConfigPath())
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if filepath.Base(event.Name) != configFile {
-				continue
-			}
-			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
-				continue
-			}
-			cfg, err := config.Load()
-			if err != nil {
-				slog.ErrorContext(ctx, "failed to reload config", "error", err)
-				continue
-			}
-			for _, sl := range cfg.Slack {
-				if running[sl.TeamID] {
-					continue
-				}
-				if sl.AppToken == "" || sl.BotToken == "" || sl.UserToken == "" {
-					continue
-				}
-				slog.InfoContext(ctx, "new slack workspace detected", "workspace", sl.Workspace)
-				sender := startSlackWorkspace(ctx, sl)
-				if sender != nil {
-					apiServer.RegisterSlack(sender)
-					running[sl.TeamID] = true
-				}
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			slog.ErrorContext(ctx, "config watcher error", "error", err)
-		}
-	}
 }
 
 // startSlackWorkspace creates an independent Socket Mode connection, resolver,
