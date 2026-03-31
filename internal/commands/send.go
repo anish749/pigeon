@@ -3,38 +3,19 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/daemon"
 )
 
-func RunSend(args []string) error {
-	fs := flag.NewFlagSet("send", flag.ExitOnError)
-	platform := fs.String("platform", "", "platform (e.g. whatsapp, slack) [required]")
-	account := fs.String("account", "", "account (e.g. +14155551234, acme-corp) [required]")
-	contact := fs.String("contact", "", "contact name, phone, or channel [required]")
-	message := fs.String("m", "", "message text [required]")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *platform == "" || *account == "" || *contact == "" || *message == "" {
-		return fmt.Errorf("required flags: -platform, -account, -contact, -m")
-	}
-
-	if err := daemon.EnsureRunning(); err != nil {
-		return err
-	}
-
+func RunSend(platform, account, contact, message string) error {
 	body, _ := json.Marshal(map[string]string{
-		"platform": *platform,
-		"account":  *account,
-		"contact":  *contact,
-		"message":  *message,
+		"platform": platform,
+		"account":  account,
+		"contact":  contact,
+		"message":  message,
 	})
 
 	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
@@ -57,6 +38,6 @@ func RunSend(args []string) error {
 		return fmt.Errorf("%s", result.Error)
 	}
 
-	fmt.Printf("Sent to %s at %s\n", *contact, result.Timestamp)
+	fmt.Printf("Sent to %s at %s\n", contact, result.Timestamp)
 	return nil
 }

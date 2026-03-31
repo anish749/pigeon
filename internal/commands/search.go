@@ -1,43 +1,33 @@
 package commands
 
 import (
-	"flag"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-func RunSearch(args []string) error {
-	fs := flag.NewFlagSet("search", flag.ExitOnError)
-	query := fs.String("q", "", "search query [required]")
-	platform := fs.String("platform", "", "filter by platform")
-	account := fs.String("account", "", "filter by account")
-	since := fs.String("since", "", "only search messages from last duration (e.g. 2h, 7d)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+type SearchParams struct {
+	Query    string
+	Platform string
+	Account  string
+	Since    string
+}
 
-	daemon.EnsureRunning()
-
-	if *query == "" {
-		return fmt.Errorf("required flag: -q")
-	}
-
+func RunSearch(p SearchParams) error {
 	var sinceDur time.Duration
-	if *since != "" {
-		d, err := parseDuration(*since)
+	if p.Since != "" {
+		d, err := parseDuration(p.Since)
 		if err != nil {
-			return fmt.Errorf("invalid -since value %q: %w", *since, err)
+			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
 		sinceDur = d
 	}
 
-	results, err := store.SearchMessages(*query, *platform, *account, sinceDur)
+	results, err := store.SearchMessages(p.Query, p.Platform, p.Account, sinceDur)
 	if err != nil {
 		return err
 	}
@@ -48,7 +38,7 @@ func RunSearch(args []string) error {
 
 	// Enrich results: replace phone senders with contact names,
 	// and resolve conversation directory names to display names.
-	enrichSearchResults(results, *platform, *account)
+	enrichSearchResults(results, p.Platform, p.Account)
 
 	var totalMatches int
 	for _, r := range results {

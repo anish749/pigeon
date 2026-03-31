@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,19 +21,13 @@ import (
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
 
-func RunSetupWhatsApp(args []string) error {
-	fs := flag.NewFlagSet("setup-whatsapp", flag.ExitOnError)
-	dbPath := fs.String("db", "", "SQLite database path (default: <data-dir>/whatsapp.db)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *dbPath == "" {
-		*dbPath = store.DefaultDBPath()
+func RunSetupWhatsApp(dbPath string) error {
+	if dbPath == "" {
+		dbPath = store.DefaultDBPath()
 	}
 
 	ctx := context.Background()
-	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", *dbPath)
+	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
 
 	container, err := sqlstore.New(ctx, "sqlite3", dsn, walog.New(ctx, "whatsapp-db"))
 	if err != nil {
@@ -85,7 +78,7 @@ func RunSetupWhatsApp(args []string) error {
 			}
 			cfg.AddWhatsApp(config.WhatsAppConfig{
 				DeviceJID: deviceJID,
-				DB:        *dbPath,
+				DB:        dbPath,
 				Account:   account,
 			})
 			if err := config.Save(cfg); err != nil {
