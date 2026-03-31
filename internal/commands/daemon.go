@@ -106,6 +106,14 @@ func RunDaemon(args []string) error {
 		return fmt.Errorf("no listeners could be started — check config and credentials")
 	}
 
+	apiServer.SetOnSlackInstall(func(entry config.SlackConfig) {
+		sender := startSlackWorkspace(ctx, entry)
+		if sender != nil {
+			apiServer.RegisterSlack(sender)
+			slog.InfoContext(ctx, "auto-started new slack workspace", "workspace", entry.Workspace)
+		}
+	})
+
 	go apiServer.Start(ctx)
 
 	var parts []string
