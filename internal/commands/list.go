@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -14,6 +15,8 @@ func RunList(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	daemon.EnsureRunning()
 
 	// Level 3: list conversations for a specific account
 	if *platform != "" && *account != "" {

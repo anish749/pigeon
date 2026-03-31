@@ -23,7 +23,10 @@ COMMANDS — SETUP
 
 COMMANDS — DAEMON
 
-  daemon start      Start all configured listeners
+  daemon start      Start the daemon in the background
+  daemon stop       Stop the daemon
+  daemon restart    Restart the daemon
+  daemon status     Check if the daemon is running
 
 COMMANDS — READING
 
@@ -33,7 +36,7 @@ COMMANDS — READING
 
 COMMANDS — SENDING
 
-  send              Send a message (requires daemon to be running)
+  send              Send a message (auto-starts daemon if needed)
 
 COMMANDS — SLACK
 
@@ -145,8 +148,13 @@ SETUP-SLACK
 
 DAEMON
 
-  pigeon daemon start
-    Start all configured listeners. Runs until Ctrl+C.
+  pigeon daemon start     Start the daemon in the background
+  pigeon daemon stop      Stop the daemon
+  pigeon daemon restart   Restart the daemon
+  pigeon daemon status    Check if the daemon is running
+
+  The daemon starts automatically when running read, send, search,
+  or list commands. Logs are written to ~/.local/state/pigeon/daemon.log.
 
 ─────────────────────────────────────────────────────────
 

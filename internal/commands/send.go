@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/anish/claude-msg-utils/internal/api"
+	"github.com/anish/claude-msg-utils/internal/daemon"
 )
 
 func RunSend(args []string) error {
@@ -23,6 +24,10 @@ func RunSend(args []string) error {
 
 	if *platform == "" || *account == "" || *contact == "" || *message == "" {
 		return fmt.Errorf("required flags: -platform, -account, -contact, -m")
+	}
+
+	if err := daemon.EnsureRunning(); err != nil {
+		return err
 	}
 
 	body, _ := json.Marshal(map[string]string{
