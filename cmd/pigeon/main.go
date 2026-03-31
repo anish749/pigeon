@@ -23,7 +23,10 @@ COMMANDS — SETUP
 
 COMMANDS — DAEMON
 
-  daemon start      Start all configured listeners
+  daemon start      Start the daemon in the background
+  daemon stop       Stop the daemon
+  daemon restart    Restart the daemon
+  daemon status     Check if the daemon is running
 
 COMMANDS — READING
 
@@ -33,7 +36,7 @@ COMMANDS — READING
 
 COMMANDS — SENDING
 
-  send              Send a message (requires daemon to be running)
+  send              Send a message
 
 COMMANDS — SLACK
 
@@ -142,11 +145,6 @@ SETUP-SLACK
     6. Run: pigeon setup-slack -client-id=... -client-secret=... -app-token=...
     7. Your browser opens — pick a workspace and approve
     8. Done! Add more workspaces by running: pigeon setup-slack
-
-DAEMON
-
-  pigeon daemon start
-    Start all configured listeners. Runs until Ctrl+C.
 
 ─────────────────────────────────────────────────────────
 

@@ -16,14 +16,77 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
 
 func RunDaemon(args []string) error {
-	if len(args) < 1 || args[0] != "start" {
-		return fmt.Errorf("usage: pigeon daemon start")
+	if len(args) < 1 {
+		return fmt.Errorf("usage: pigeon daemon [start|stop|status|restart]")
 	}
+
+	switch args[0] {
+	case "start":
+		return daemonStart()
+	case "stop":
+		return daemonStop()
+	case "status":
+		return daemonStatus()
+	case "restart":
+		return daemonRestart()
+	case "_run":
+		return daemonRun()
+	default:
+		return fmt.Errorf("unknown daemon command: %s", args[0])
+	}
+}
+
+func daemonStart() error {
+	if err := daemon.Start(); err != nil {
+		return err
+	}
+	fmt.Println("Daemon started.")
+	return nil
+}
+
+func daemonStop() error {
+	if err := daemon.Stop(); err != nil {
+		return err
+	}
+	fmt.Println("Daemon stopped.")
+	return nil
+}
+
+func daemonStatus() error {
+	running, pid := daemon.Status()
+	if running {
+		fmt.Printf("Running (pid=%d, log=%s)\n", pid, daemon.LogPath())
+	} else {
+		fmt.Println("Not running.")
+	}
+	return nil
+}
+
+func daemonRestart() error {
+	if daemon.IsRunning() {
+		if err := daemon.Stop(); err != nil {
+			return err
+		}
+	}
+	if err := daemon.Start(); err != nil {
+		return err
+	}
+	fmt.Println("Daemon restarted.")
+	return nil
+}
+
+// daemonRun is the actual daemon process, invoked via "daemon _run".
+func daemonRun() error {
+	if err := daemon.WritePID(); err != nil {
+		return fmt.Errorf("write PID file: %w", err)
+	}
+	defer daemon.RemovePID()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -99,13 +162,13 @@ func RunDaemon(args []string) error {
 	if len(cfg.Slack) > 0 {
 		parts = append(parts, fmt.Sprintf("%d Slack workspace(s)", len(cfg.Slack)))
 	}
-	fmt.Printf("Daemon running: %s. Press Ctrl+C to stop.\n", strings.Join(parts, ", "))
+	slog.Info("daemon started", "listeners", strings.Join(parts, ", "))
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 
-	fmt.Println("\nShutting down...")
+	slog.Info("shutting down")
 	cancel()
 	return nil
 }

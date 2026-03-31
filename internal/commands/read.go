@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -25,6 +26,8 @@ func RunRead(args []string) error {
 	if *platform == "" || *account == "" || *contact == "" {
 		return fmt.Errorf("required flags: -platform, -account, -contact")
 	}
+
+	daemon.EnsureRunning()
 
 	aliases := loadAliases(*platform, *account)
 	conv, err := store.FindConversation(*platform, *account, *contact, aliases)

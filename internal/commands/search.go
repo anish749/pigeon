@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -20,6 +21,8 @@ func RunSearch(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	daemon.EnsureRunning()
 
 	if *query == "" {
 		return fmt.Errorf("required flag: -q")
