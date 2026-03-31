@@ -62,6 +62,12 @@ func DaemonRestart() error {
 
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
 func DaemonRun() error {
+	// The daemon runs with stdout/stderr redirected to a log file,
+	// so disable colors and use a timestamp format suited for files.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	if err := daemon.WritePID(); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
