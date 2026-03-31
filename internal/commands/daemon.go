@@ -14,6 +14,8 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 
+	"gopkg.in/natefinch/lumberjack.v2"
+
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
@@ -62,6 +64,15 @@ func DaemonRestart() error {
 
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
 func DaemonRun() error {
+	logWriter := &lumberjack.Logger{
+		Filename:   daemon.LogPath(),
+		MaxSize:    10, // megabytes
+		MaxBackups: 2,
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	if err := daemon.WritePID(); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
