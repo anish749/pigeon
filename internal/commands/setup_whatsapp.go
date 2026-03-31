@@ -16,6 +16,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/store"
 	"github.com/anish/claude-msg-utils/internal/walog"
@@ -25,6 +26,13 @@ func RunSetupWhatsApp(dbPath string) error {
 	if dbPath == "" {
 		dbPath = store.DefaultDBPath()
 	}
+
+	// Acquire device lock to prevent daemon from using this device during pairing.
+	lock, err := daemon.LockDevice(dbPath)
+	if err != nil {
+		return fmt.Errorf("cannot pair while daemon is connected to this device — run 'pigeon daemon stop' first")
+	}
+	defer lock.Close()
 
 	ctx := context.Background()
 	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)

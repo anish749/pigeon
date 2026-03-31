@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -46,12 +47,19 @@ func RunResetWhatsApp(account string) error {
 
 	ctx := context.Background()
 
+	// Acquire device lock to ensure daemon isn't connected.
+	lock, err := daemon.LockDevice(wa.DB)
+	if err != nil {
+		return fmt.Errorf("cannot reset while daemon is connected to this device — run 'pigeon daemon stop' first")
+	}
+	defer lock.Close()
+
 	// Connect and logout from WhatsApp (unlinks device from phone + deletes from db).
 	jid, err := types.ParseJID(wa.DeviceJID)
 	if err != nil {
 		slog.WarnContext(ctx, "invalid device JID, skipping logout", "jid", wa.DeviceJID, "error", err)
 	} else {
-		client, err := connectWhatsApp(ctx, wa.DB, jid)
+		client, err := daemon.ConnectWhatsApp(ctx, wa.DB, jid)
 		if err != nil {
 			slog.WarnContext(ctx, "could not connect to WhatsApp, skipping logout", "error", err)
 		} else {
