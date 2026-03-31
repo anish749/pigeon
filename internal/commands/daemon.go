@@ -14,6 +14,8 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 
+	"gopkg.in/natefinch/lumberjack.v2"
+
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
@@ -62,9 +64,12 @@ func DaemonRestart() error {
 
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
 func DaemonRun() error {
-	// The daemon runs with stdout/stderr redirected to a log file,
-	// so disable colors and use a timestamp format suited for files.
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logWriter := &lumberjack.Logger{
+		Filename:   daemon.LogPath(),
+		MaxSize:    10, // megabytes
+		MaxBackups: 2,
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
 

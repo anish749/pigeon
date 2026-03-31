@@ -73,30 +73,30 @@ func Start() error {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
-	logFile, err := os.OpenFile(LogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
-	}
-
 	exe, err := os.Executable()
 	if err != nil {
-		logFile.Close()
 		return fmt.Errorf("find executable: %w", err)
 	}
 
+	// The daemon process manages its own log file via lumberjack,
+	// so we only need to suppress stdout/stderr here.
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		return fmt.Errorf("open devnull: %w", err)
+	}
+	defer devNull.Close()
+
 	cmd := exec.Command(exe, "daemon", "_run")
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
 	// Detach — we don't wait for the child.
 	cmd.Process.Release()
-	logFile.Close()
 
 	// Wait for the daemon to write its PID file.
 	for range 30 {
