@@ -27,6 +27,9 @@ import (
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
 
+// Port is the daemon API's listen port.
+const Port = 9877
+
 // WhatsAppSender holds everything needed to send a WhatsApp message.
 type WhatsAppSender struct {
 	Client   *whatsmeow.Client
@@ -78,7 +81,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/send", s.handleSend)
 
 	srv := &http.Server{
-		Addr:    ":9876",
+		Addr:    fmt.Sprintf(":%d", Port),
 		Handler: mux,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
@@ -90,7 +93,7 @@ func (s *Server) Start(ctx context.Context) error {
 		srv.Close()
 	}()
 
-	slog.InfoContext(ctx, "api server started", "port", 9876)
+	slog.InfoContext(ctx, "api server started", "port", Port)
 	err := srv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil

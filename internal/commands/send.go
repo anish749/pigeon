@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/anish/claude-msg-utils/internal/api"
 )
 
 func RunSend(args []string) error {
@@ -30,7 +32,7 @@ func RunSend(args []string) error {
 		"message":  *message,
 	})
 
-	resp, err := http.Post("http://localhost:9876/api/send", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("daemon not reachable (is 'pigeon daemon start' running?): %w", err)
 	}

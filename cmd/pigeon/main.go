@@ -146,10 +146,7 @@ SETUP-SLACK
 DAEMON
 
   pigeon daemon start
-    Start all configured listeners. Also runs a local HTTP server on
-    port 9876 for adding new Slack workspaces at runtime via:
-      http://localhost:9876/slack/install
-    Runs until Ctrl+C.
+    Start all configured listeners. Runs until Ctrl+C.
 
 ─────────────────────────────────────────────────────────
 
