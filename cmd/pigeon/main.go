@@ -146,8 +146,7 @@ SETUP-SLACK
 DAEMON
 
   pigeon daemon start
-    Start all configured listeners. Also runs a local HTTP server on
-    port 9877 for the send API. Runs until Ctrl+C.
+    Start all configured listeners. Runs until Ctrl+C.
 
 ─────────────────────────────────────────────────────────
 
