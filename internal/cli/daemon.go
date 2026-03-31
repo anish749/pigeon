@@ -7,8 +7,9 @@ import (
 )
 
 var daemonCmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "Manage the background daemon",
+	Use:     "daemon",
+	Short:   "Manage the background daemon",
+	GroupID: groupDaemon,
 }
 
 var daemonStartCmd = &cobra.Command{

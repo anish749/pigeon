@@ -7,8 +7,9 @@ import (
 )
 
 var searchCmd = &cobra.Command{
-	Use:   "search",
-	Short: "Search across conversations by keyword",
+	Use:     "search",
+	Short:   "Search across conversations by keyword",
+	GroupID: groupReading,
 	Example: `  pigeon search -q "deploy"
   pigeon search -q "bug" --platform=slack --account=acme-corp
   pigeon search -q "lunch" --since=7d`,

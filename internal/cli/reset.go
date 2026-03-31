@@ -7,8 +7,9 @@ import (
 )
 
 var resetCmd = &cobra.Command{
-	Use:   "reset",
-	Short: "Delete all synced data for a platform/account",
+	Use:     "reset",
+	Short:   "Delete all synced data for a platform/account",
+	GroupID: groupMaintenance,
 	Long: `Deletes all synced message data and sync cursors for a workspace/account.
 The next daemon start will re-sync from scratch.`,
 	Example: `  pigeon reset --platform=slack --account=acme-corp`,

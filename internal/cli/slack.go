@@ -7,8 +7,9 @@ import (
 )
 
 var generateManifestCmd = &cobra.Command{
-	Use:   "generate-manifest",
-	Short: "Generate a Slack app manifest for a workspace",
+	Use:     "generate-manifest",
+	Short:   "Generate a Slack app manifest for a workspace",
+	GroupID: groupSlack,
 	Long: `Renders the Slack app manifest template (manifests/slack-app.yaml) with
 the given username and workspace name, prints it to stdout, and copies
 it to the clipboard. Use this before creating or updating a Slack app.`,

@@ -7,8 +7,9 @@ import (
 )
 
 var readCmd = &cobra.Command{
-	Use:   "read",
-	Short: "Read messages from a conversation",
+	Use:     "read",
+	Short:   "Read messages from a conversation",
+	GroupID: groupReading,
 	Example: `  pigeon read --platform=whatsapp --account=+14155551234 --contact=Alice
   pigeon read --platform=slack --account=acme-corp --contact=#engineering --last=50
   pigeon read --platform=whatsapp --account=+14155551234 --contact=Bob --since=2h`,

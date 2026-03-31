@@ -138,6 +138,27 @@ MAINTENANCE
 	},
 }
 
+// Command group IDs for categorized help output.
+const (
+	groupSetup       = "setup"
+	groupDaemon      = "daemon"
+	groupReading     = "reading"
+	groupSending     = "sending"
+	groupSlack       = "slack"
+	groupMaintenance = "maintenance"
+)
+
+func init() {
+	rootCmd.AddGroup(
+		&cobra.Group{ID: groupSetup, Title: "Setup:"},
+		&cobra.Group{ID: groupDaemon, Title: "Daemon:"},
+		&cobra.Group{ID: groupReading, Title: "Reading:"},
+		&cobra.Group{ID: groupSending, Title: "Sending:"},
+		&cobra.Group{ID: groupSlack, Title: "Slack:"},
+		&cobra.Group{ID: groupMaintenance, Title: "Maintenance:"},
+	)
+}
+
 // ensureDaemon is a PreRunE hook for commands that benefit from the daemon running.
 func ensureDaemon(cmd *cobra.Command, args []string) error {
 	return daemon.EnsureRunning()

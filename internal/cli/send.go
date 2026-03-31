@@ -7,8 +7,9 @@ import (
 )
 
 var sendCmd = &cobra.Command{
-	Use:   "send",
-	Short: "Send a message",
+	Use:     "send",
+	Short:   "Send a message",
+	GroupID: groupSending,
 	Long: `Send a message through the daemon's connected clients.
 
 Slack sending requires chat:write scope. If your Slack app was installed

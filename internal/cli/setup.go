@@ -7,8 +7,9 @@ import (
 )
 
 var setupWhatsAppCmd = &cobra.Command{
-	Use:   "setup-whatsapp",
-	Short: "Pair a WhatsApp device via QR code, save to config",
+	Use:     "setup-whatsapp",
+	Short:   "Pair a WhatsApp device via QR code, save to config",
+	GroupID: groupSetup,
 	Example: `  pigeon setup-whatsapp
   pigeon setup-whatsapp --db=/path/to/whatsapp.db`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -18,8 +19,9 @@ var setupWhatsAppCmd = &cobra.Command{
 }
 
 var setupSlackCmd = &cobra.Command{
-	Use:   "setup-slack",
-	Short: "Install a Slack app in a workspace via OAuth",
+	Use:     "setup-slack",
+	Short:   "Install a Slack app in a workspace via OAuth",
+	GroupID: groupSetup,
 	Long: `Installs the Slack app in a workspace via OAuth. Opens your browser
 to Slack's authorization page — pick a workspace and approve.
 

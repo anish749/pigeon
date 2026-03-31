@@ -7,8 +7,9 @@ import (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List platforms, accounts, or conversations",
+	Use:     "list",
+	Short:   "List platforms, accounts, or conversations",
+	GroupID: groupReading,
 	Example: `  pigeon list
   pigeon list --platform=whatsapp
   pigeon list --platform=whatsapp --account=+14155551234`,
