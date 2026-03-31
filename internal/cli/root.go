@@ -95,8 +95,8 @@ WORKFLOW — READING MESSAGES
   pigeon read --platform=whatsapp --account=+14155551234 --contact=Alice --last=20
   pigeon read --platform=slack --account=acme-corp --contact=#engineering --since=2h
 
-  pigeon search -q="meeting" --since=24h
-  pigeon search -q="deploy" --platform=slack
+  pigeon search -q "meeting" --since=24h
+  pigeon search -q "deploy" --platform=slack
 
 ─────────────────────────────────────────────────────────
 
