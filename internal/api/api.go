@@ -48,7 +48,10 @@ type Server struct {
 	mu       sync.RWMutex
 	whatsapp map[string]*WhatsAppSender // account → sender
 	slack    map[string]*SlackSender    // workspace → sender
-	auth     *slacklistener.AuthServer
+
+	oauthMu        sync.Mutex
+	oauth          *slacklistener.AuthServer // nil until POST /slack/setup
+	onSlackInstall slacklistener.OnInstall
 }
 
 // NewServer creates a new API server.
@@ -56,14 +59,15 @@ func NewServer() *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),
-		auth:     slacklistener.NewAuthServer("", "", "", nil),
 	}
 }
 
 // SetOnSlackInstall sets a callback invoked when a new Slack workspace is
 // installed via the daemon's OAuth flow.
 func (s *Server) SetOnSlackInstall(fn slacklistener.OnInstall) {
-	s.auth.SetOnInstall(fn)
+	s.oauthMu.Lock()
+	s.onSlackInstall = fn
+	s.oauthMu.Unlock()
 }
 
 // RegisterWhatsApp registers a WhatsApp client for sending.
@@ -86,7 +90,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/send", s.handleSend)
 	mux.HandleFunc("POST /slack/setup", s.handleSlackSetup)
 	mux.HandleFunc("GET /slack/setup/wait", s.handleSlackSetupWait)
-	s.auth.RegisterRoutes(mux)
+	mux.HandleFunc("/slack/install", s.serveOAuth)
+	mux.HandleFunc("/slack/oauth/callback", s.serveOAuth)
 
 	srv := &http.Server{
 		Addr:    ":9876",
@@ -139,17 +144,40 @@ func (s *Server) handleSlackSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.auth.Configure(req.ClientID, req.ClientSecret, req.AppToken)
-	writeJSON(w, http.StatusOK, map[string]string{"install_url": s.auth.InstallURL()})
+	s.oauthMu.Lock()
+	s.oauth = slacklistener.NewAuthServer(req.ClientID, req.ClientSecret, req.AppToken, s.onSlackInstall)
+	s.oauthMu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]string{"install_url": s.oauth.InstallURL()})
 }
 
 func (s *Server) handleSlackSetupWait(w http.ResponseWriter, r *http.Request) {
+	s.oauthMu.Lock()
+	oauth := s.oauth
+	s.oauthMu.Unlock()
+	if oauth == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no setup in progress — POST /slack/setup first"})
+		return
+	}
 	select {
-	case entry := <-s.auth.Installed():
+	case entry := <-oauth.Installed():
 		writeJSON(w, http.StatusOK, entry)
 	case <-r.Context().Done():
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "timeout"})
 	}
+}
+
+// serveOAuth delegates /slack/install and /slack/oauth/callback to the
+// AuthServer, which is created lazily when POST /slack/setup provides credentials.
+func (s *Server) serveOAuth(w http.ResponseWriter, r *http.Request) {
+	s.oauthMu.Lock()
+	oauth := s.oauth
+	s.oauthMu.Unlock()
+	if oauth == nil {
+		http.Error(w, "no OAuth setup in progress — POST /slack/setup first", http.StatusServiceUnavailable)
+		return
+	}
+	oauth.ServeHTTP(w, r)
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
