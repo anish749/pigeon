@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"os/user"
 	"runtime"
 	"strings"
 
@@ -23,10 +23,43 @@ func RunSetupSlack(args []string) error {
 	fmt.Println("Each workspace needs its own internal Slack app.")
 	fmt.Println()
 
-	// Copy manifest to clipboard and open Slack app creation page
-	if err := copyManifestToClipboard(); err != nil {
+	// Prompt for username with a suggestion from the OS
+	suggestion := suggestUsername()
+	if suggestion != "" {
+		fmt.Printf("  Your name [%s]: ", suggestion)
+	} else {
+		fmt.Print("  Your name: ")
+	}
+	username, _ := reader.ReadString('\n')
+	username = strings.TrimSpace(username)
+	if username == "" {
+		if suggestion != "" {
+			username = suggestion
+		} else {
+			return fmt.Errorf("name is required")
+		}
+	}
+
+	// Prompt for workspace name
+	fmt.Print("  Workspace name (e.g. acme-corp): ")
+	workspace, _ := reader.ReadString('\n')
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return fmt.Errorf("workspace name is required")
+	}
+	fmt.Println()
+
+	// Render manifest with user's values and copy to clipboard
+	rendered, err := renderManifest(username, workspace)
+	if err != nil {
+		fmt.Printf("  (Could not render manifest: %v)\n", err)
+		fmt.Println("  Run `pigeon generate-manifest` manually to create the manifest.")
+		return err
+	}
+	clip := exec.Command("pbcopy")
+	clip.Stdin = strings.NewReader(rendered)
+	if err := clip.Run(); err != nil {
 		fmt.Printf("  (Could not copy manifest to clipboard: %v)\n", err)
-		fmt.Println("  Manually copy the contents of manifests/slack-app.yaml")
 	} else {
 		fmt.Println("  The app manifest has been copied to your clipboard.")
 	}
@@ -101,27 +134,22 @@ func RunSetupSlack(args []string) error {
 	return nil
 }
 
-func copyManifestToClipboard() error {
-	// Find manifest relative to the binary's directory
-	exe, err := os.Executable()
+// suggestUsername returns a name suggestion from the OS user's display name,
+// or from an existing Slack config if available.
+func suggestUsername() string {
+	u, err := user.Current()
 	if err != nil {
-		return err
+		return ""
 	}
-	// Resolve symlinks to get the real path
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return err
+	// On macOS, Name is the full display name (e.g. "Anish Sharma")
+	if u.Name != "" {
+		// Use first name only
+		if first, _, ok := strings.Cut(u.Name, " "); ok {
+			return first
+		}
+		return u.Name
 	}
-	manifestPath := filepath.Join(filepath.Dir(exe), "manifests", "slack-app.yaml")
-
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return fmt.Errorf("read manifest: %w", err)
-	}
-
-	cmd := exec.Command("pbcopy")
-	cmd.Stdin = strings.NewReader(string(data))
-	return cmd.Run()
+	return u.Username
 }
 
 func openBrowser(url string) {

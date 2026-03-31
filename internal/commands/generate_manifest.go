@@ -21,23 +21,10 @@ func RunGenerateManifest(args []string) error {
 		return fmt.Errorf("both -username and -workspace are required")
 	}
 
-	exe, err := os.Executable()
+	rendered, err := renderManifest(*username, *workspace)
 	if err != nil {
-		return fmt.Errorf("find executable: %w", err)
+		return err
 	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
-	}
-	tmplPath := filepath.Join(filepath.Dir(exe), "manifests", "slack-app.yaml")
-
-	tmpl, err := os.ReadFile(tmplPath)
-	if err != nil {
-		return fmt.Errorf("read manifest template: %w", err)
-	}
-
-	rendered := strings.ReplaceAll(string(tmpl), "${USERNAME}", *username)
-	rendered = strings.ReplaceAll(rendered, "${WORKSPACE_NAME}", *workspace)
 
 	fmt.Print(rendered)
 
@@ -49,4 +36,26 @@ func RunGenerateManifest(args []string) error {
 	}
 
 	return nil
+}
+
+// renderManifest reads the manifest template and substitutes username/workspace.
+func renderManifest(username, workspace string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("find executable: %w", err)
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", fmt.Errorf("resolve executable: %w", err)
+	}
+	tmplPath := filepath.Join(filepath.Dir(exe), "manifests", "slack-app.yaml")
+
+	tmpl, err := os.ReadFile(tmplPath)
+	if err != nil {
+		return "", fmt.Errorf("read manifest template: %w", err)
+	}
+
+	rendered := strings.ReplaceAll(string(tmpl), "${USERNAME}", username)
+	rendered = strings.ReplaceAll(rendered, "${WORKSPACE_NAME}", workspace)
+	return rendered, nil
 }
