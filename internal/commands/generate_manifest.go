@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,19 +8,8 @@ import (
 	"strings"
 )
 
-func RunGenerateManifest(args []string) error {
-	fs := flag.NewFlagSet("generate-manifest", flag.ExitOnError)
-	username := fs.String("username", "", "display name for the bot owner")
-	workspace := fs.String("workspace", "", "Slack workspace name")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *username == "" || *workspace == "" {
-		return fmt.Errorf("both -username and -workspace are required")
-	}
-
-	rendered, err := renderManifest(*username, *workspace)
+func RunGenerateManifest(username, workspace string) error {
+	rendered, err := renderManifest(username, workspace)
 	if err != nil {
 		return err
 	}

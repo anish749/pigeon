@@ -21,28 +21,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
 
-func RunDaemon(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: pigeon daemon [start|stop|status|restart]")
-	}
-
-	switch args[0] {
-	case "start":
-		return daemonStart()
-	case "stop":
-		return daemonStop()
-	case "status":
-		return daemonStatus()
-	case "restart":
-		return daemonRestart()
-	case "_run":
-		return daemonRun()
-	default:
-		return fmt.Errorf("unknown daemon command: %s", args[0])
-	}
-}
-
-func daemonStart() error {
+func DaemonStart() error {
 	if err := daemon.Start(); err != nil {
 		return err
 	}
@@ -50,7 +29,7 @@ func daemonStart() error {
 	return nil
 }
 
-func daemonStop() error {
+func DaemonStop() error {
 	if err := daemon.Stop(); err != nil {
 		return err
 	}
@@ -58,7 +37,7 @@ func daemonStop() error {
 	return nil
 }
 
-func daemonStatus() error {
+func DaemonStatus() error {
 	running, pid := daemon.Status()
 	if running {
 		fmt.Printf("Running (pid=%d, log=%s)\n", pid, daemon.LogPath())
@@ -68,7 +47,7 @@ func daemonStatus() error {
 	return nil
 }
 
-func daemonRestart() error {
+func DaemonRestart() error {
 	if daemon.IsRunning() {
 		if err := daemon.Stop(); err != nil {
 			return err
@@ -81,8 +60,8 @@ func daemonRestart() error {
 	return nil
 }
 
-// daemonRun is the actual daemon process, invoked via "daemon _run".
-func daemonRun() error {
+// DaemonRun is the actual daemon process, invoked via "daemon _run".
+func DaemonRun() error {
 	if err := daemon.WritePID(); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
@@ -146,7 +125,7 @@ func daemonRun() error {
 	}
 
 	// Start Slack workspaces and watch for config changes.
-	slackMgr := NewSlackManager(apiServer)
+	slackMgr := daemon.NewSlackManager(apiServer)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	if whatsappCount == 0 && len(cfg.Slack) == 0 {

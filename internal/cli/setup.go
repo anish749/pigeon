@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"github.com/spf13/cobra"
@@ -12,7 +12,8 @@ var setupWhatsAppCmd = &cobra.Command{
 	Example: `  pigeon setup-whatsapp
   pigeon setup-whatsapp --db=/path/to/whatsapp.db`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunSetupWhatsApp(flagsToArgs(cmd, "db"))
+		db, _ := cmd.Flags().GetString("db")
+		return commands.RunSetupWhatsApp(db)
 	},
 }
 
@@ -23,12 +24,12 @@ var setupSlackCmd = &cobra.Command{
 to Slack's authorization page — pick a workspace and approve.
 
 To create a Slack app:
-  1. Run: pigeon generate-manifest -username=You -workspace=acme-corp
+  1. Run: pigeon generate-manifest --username=You --workspace=acme-corp
   2. Go to https://api.slack.com/apps → "Create New App" → "From a manifest"
   3. Paste the manifest from your clipboard
   4. Under "Basic Information", copy client ID and client secret
   5. Under "Socket Mode", enable it and create an app-level token (xapp-...)
-  6. Run: pigeon setup-slack
+  6. pigeon setup-slack
   7. Your browser opens — pick a workspace and approve
   8. Done! Add more workspaces by running: pigeon setup-slack`,
 	RunE: func(cmd *cobra.Command, args []string) error {

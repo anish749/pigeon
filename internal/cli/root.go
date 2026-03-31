@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"log/slog"
@@ -7,6 +7,8 @@ import (
 
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
+
+	"github.com/anish/claude-msg-utils/internal/daemon"
 )
 
 var rootCmd = &cobra.Command{
@@ -134,4 +136,14 @@ MAINTENANCE
 			TimeFormat: time.Kitchen,
 		})))
 	},
+}
+
+// ensureDaemon is a PreRunE hook for commands that benefit from the daemon running.
+func ensureDaemon(cmd *cobra.Command, args []string) error {
+	return daemon.EnsureRunning()
+}
+
+// Execute runs the root command.
+func Execute() error {
+	return rootCmd.Execute()
 }

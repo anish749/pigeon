@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"github.com/spf13/cobra"
@@ -12,8 +12,11 @@ var listCmd = &cobra.Command{
 	Example: `  pigeon list
   pigeon list --platform=whatsapp
   pigeon list --platform=whatsapp --account=+14155551234`,
+	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunList(flagsToArgs(cmd, "platform", "account"))
+		platform, _ := cmd.Flags().GetString("platform")
+		account, _ := cmd.Flags().GetString("account")
+		return commands.RunList(platform, account)
 	},
 }
 

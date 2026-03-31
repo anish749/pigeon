@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"github.com/spf13/cobra"
@@ -15,7 +15,7 @@ var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the daemon in the background",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunDaemon([]string{"start"})
+		return commands.DaemonStart()
 	},
 }
 
@@ -23,7 +23,7 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunDaemon([]string{"stop"})
+		return commands.DaemonStop()
 	},
 }
 
@@ -31,7 +31,7 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check if the daemon is running",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunDaemon([]string{"status"})
+		return commands.DaemonStatus()
 	},
 }
 
@@ -39,7 +39,7 @@ var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunDaemon([]string{"restart"})
+		return commands.DaemonRestart()
 	},
 }
 
@@ -47,7 +47,7 @@ var daemonRunCmd = &cobra.Command{
 	Use:    "_run",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunDaemon([]string{"_run"})
+		return commands.DaemonRun()
 	},
 }
 

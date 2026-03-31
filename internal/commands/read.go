@@ -1,63 +1,53 @@
 package commands
 
 import (
-	"flag"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-func RunRead(args []string) error {
-	fs := flag.NewFlagSet("read", flag.ExitOnError)
-	platform := fs.String("platform", "", "platform (e.g. whatsapp, slack) [required]")
-	account := fs.String("account", "", "account (e.g. +14155551234, acme-corp) [required]")
-	contact := fs.String("contact", "", "contact name, phone, or channel to search for [required]")
-	date := fs.String("date", "", "specific date (YYYY-MM-DD)")
-	last := fs.Int("last", 0, "show last N messages")
-	since := fs.String("since", "", "show messages from last duration (e.g. 2h, 30m, 7d)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+type ReadParams struct {
+	Platform string
+	Account  string
+	Contact  string
+	Date     string
+	Last     int
+	Since    string
+}
 
-	if *platform == "" || *account == "" || *contact == "" {
-		return fmt.Errorf("required flags: -platform, -account, -contact")
-	}
-
-	daemon.EnsureRunning()
-
-	aliases := loadAliases(*platform, *account)
-	conv, err := store.FindConversation(*platform, *account, *contact, aliases)
+func RunRead(p ReadParams) error {
+	aliases := loadAliases(p.Platform, p.Account)
+	conv, err := store.FindConversation(p.Platform, p.Account, p.Contact, aliases)
 	if err != nil {
 		return err
 	}
 
 	opts := store.ReadOpts{
-		Date: *date,
-		Last: *last,
+		Date: p.Date,
+		Last: p.Last,
 	}
-	if *since != "" {
-		d, err := parseDuration(*since)
+	if p.Since != "" {
+		d, err := parseDuration(p.Since)
 		if err != nil {
-			return fmt.Errorf("invalid -since value %q: %w", *since, err)
+			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
 		opts.Since = d
 	}
 
-	lines, err := store.ReadMessages(*platform, *account, conv.DirName, opts)
+	lines, err := store.ReadMessages(p.Platform, p.Account, conv.DirName, opts)
 	if err != nil {
 		return err
 	}
 
 	// Interleave thread replies for Slack conversations, and append
 	// threads with recent activity whose parent is outside the time window.
-	if *platform == "slack" {
-		lines = store.InterleaveThreads(*platform, *account, conv.DirName, lines)
+	if p.Platform == "slack" {
+		lines = store.InterleaveThreads(p.Platform, p.Account, conv.DirName, lines)
 		if opts.Since > 0 {
-			lines = store.AppendActiveThreads(*platform, *account, conv.DirName, lines, opts.Since)
+			lines = store.AppendActiveThreads(p.Platform, p.Account, conv.DirName, lines, opts.Since)
 		}
 	}
 
@@ -68,8 +58,8 @@ func RunRead(args []string) error {
 
 	lines = enrichLines(lines, aliases)
 
-	dir := filepath.Join(store.DataDir(), *platform, *account, conv.DirName)
-	fmt.Printf("--- %s/%s/%s ---\n", *platform, *account, conv.DisplayName)
+	dir := filepath.Join(store.DataDir(), p.Platform, p.Account, conv.DirName)
+	fmt.Printf("--- %s/%s/%s ---\n", p.Platform, p.Account, conv.DisplayName)
 	fmt.Printf("    %s\n", dir)
 	fmt.Println(strings.Join(lines, "\n"))
 	return nil

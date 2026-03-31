@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,13 +14,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-func RunResetWhatsApp(args []string) error {
-	fs := flag.NewFlagSet("reset-whatsapp", flag.ExitOnError)
-	account := fs.String("account", "", "WhatsApp account (e.g. +46725323840)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
+func RunResetWhatsApp(account string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -29,22 +22,22 @@ func RunResetWhatsApp(args []string) error {
 
 	// Find the matching config entry (or the only one).
 	var wa *config.WhatsAppConfig
-	if *account != "" {
+	if account != "" {
 		for i := range cfg.WhatsApp {
-			if cfg.WhatsApp[i].Account == *account {
+			if cfg.WhatsApp[i].Account == account {
 				wa = &cfg.WhatsApp[i]
 				break
 			}
 		}
 		if wa == nil {
-			return fmt.Errorf("no WhatsApp account %q in config", *account)
+			return fmt.Errorf("no WhatsApp account %q in config", account)
 		}
 	} else if len(cfg.WhatsApp) == 1 {
 		wa = &cfg.WhatsApp[0]
 	} else if len(cfg.WhatsApp) == 0 {
 		return fmt.Errorf("no WhatsApp accounts configured")
 	} else {
-		msg := "multiple accounts configured, specify -account:\n"
+		msg := "multiple accounts configured, specify --account:\n"
 		for _, w := range cfg.WhatsApp {
 			msg += fmt.Sprintf("  %s\n", w.Account)
 		}
