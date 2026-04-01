@@ -39,10 +39,12 @@ type WhatsAppSender struct {
 
 // SlackSender holds everything needed to send a Slack message.
 type SlackSender struct {
-	API       *goslack.Client
+	BotAPI    *goslack.Client // bot token client (default for sends)
+	UserAPI   *goslack.Client // user token client (--as-user sends)
 	Resolver  *slacklistener.Resolver
 	Messages  *slacklistener.MessageStore
 	Workspace string
+	BotName   string // the bot's display name
 	UserName  string // the authenticated user's display name
 }
 
@@ -102,10 +104,13 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 type sendRequest struct {
-	Platform string `json:"platform"`
-	Account  string `json:"account"`
-	Contact  string `json:"contact"`
-	Message  string `json:"message"`
+	Platform  string `json:"platform"`
+	Account   string `json:"account"`
+	Contact   string `json:"contact"`
+	Message   string `json:"message"`
+	Thread    string `json:"thread,omitempty"`
+	Broadcast bool   `json:"broadcast,omitempty"`
+	AsUser    bool   `json:"as_user,omitempty"`
 }
 
 type sendResponse struct {
@@ -192,26 +197,67 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		return sendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", req.Account)}
 	}
 
+	// Choose API client based on identity.
+	api := sender.BotAPI
+	senderName := sender.BotName
+	if req.AsUser {
+		api = sender.UserAPI
+		senderName = sender.UserName
+	}
+
 	// Resolve contact/channel query to channel ID.
 	channelID, channelName, err := sender.Resolver.FindChannelID(req.Contact)
 	if err != nil {
-		var ambErr *slacklistener.AmbiguousChannelError
-		if errors.As(err, &ambErr) {
-			return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
+		// If no cached channel matched an @-prefixed query, try opening a DM.
+		if strings.HasPrefix(req.Contact, "@") || !strings.HasPrefix(req.Contact, "#") {
+			if userID, userName, userErr := sender.Resolver.FindUserID(req.Contact); userErr == nil {
+				ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+					Users: []string{userID},
+				})
+				if openErr == nil {
+					channelID = ch.ID
+					channelName = "@" + userName
+					sender.Resolver.RegisterChannel(ch.ID, channelName)
+					err = nil
+				} else {
+					return sendResponse{Error: fmt.Sprintf("open DM with %s: %v", userName, openErr)}
+				}
+			}
 		}
-		return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+		if err != nil {
+			var ambErr *slacklistener.AmbiguousChannelError
+			if errors.As(err, &ambErr) {
+				return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
+			}
+			return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+		}
+	}
+
+	// Build message options.
+	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
+	if req.Thread != "" {
+		opts = append(opts, goslack.MsgOptionTS(req.Thread))
+		if req.Broadcast {
+			opts = append(opts, goslack.MsgOptionBroadcast())
+		}
 	}
 
 	// Send the message.
-	_, ts, err := sender.API.PostMessageContext(ctx, channelID, goslack.MsgOptionText(req.Message, false))
+	_, ts, err := api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
 		return sendResponse{Error: fmt.Sprintf("send: %v", err)}
 	}
 
 	// Store locally.
 	msgTS := slacklistener.ParseTimestamp(ts)
-	if err := store.WriteMessage("slack", sender.Workspace, channelName, sender.UserName, req.Message, msgTS); err != nil {
-		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
+	if req.Thread != "" {
+		if err := store.WriteThreadMessage("slack", sender.Workspace, channelName, req.Thread, senderName, req.Message, msgTS, true); err != nil {
+			slog.ErrorContext(ctx, "failed to store sent thread message", "error", err)
+		}
+	} else {
+		if err := store.WriteMessage("slack", sender.Workspace, channelName, senderName, req.Message, msgTS); err != nil {
+			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
+		}
 	}
 
 	return sendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
@@ -232,7 +278,7 @@ func formatAmbiguousChannels(ctx context.Context, err *slacklistener.AmbiguousCh
 	for _, m := range err.Matches {
 		fmt.Fprintf(&b, "  %s  %s", m.ID, m.Name)
 
-		ch, apiErr := sender.API.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+		ch, apiErr := sender.UserAPI.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
 			ChannelID: m.ID,
 		})
 		if apiErr == nil {

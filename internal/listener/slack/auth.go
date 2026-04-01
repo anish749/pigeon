@@ -21,6 +21,8 @@ const defaultPort = 9876
 var botScopes = []string{
 	"channels:history",
 	"channels:read",
+	"chat:write",
+	"chat:write.public",
 	"groups:history",
 	"groups:read",
 	"im:history",

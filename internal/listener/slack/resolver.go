@@ -190,6 +190,46 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 	return name
 }
 
+// UserMatch represents a user that matched a search query.
+type UserMatch struct {
+	ID   string
+	Name string
+}
+
+// AmbiguousUserError is returned when a user query matches multiple users.
+type AmbiguousUserError struct {
+	Query   string
+	Matches []UserMatch
+}
+
+func (e *AmbiguousUserError) Error() string {
+	return fmt.Sprintf("multiple users match %q (%d matches)", e.Query, len(e.Matches))
+}
+
+// FindUserID searches the user cache for a user matching the query by display name.
+// Accepts case-insensitive substring matches. Strips leading @ if present.
+func (r *Resolver) FindUserID(query string) (string, string, error) {
+	q := strings.ToLower(strings.TrimPrefix(query, "@"))
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var matches []UserMatch
+	for id, name := range r.users {
+		if strings.Contains(strings.ToLower(name), q) {
+			matches = append(matches, UserMatch{id, name})
+		}
+	}
+
+	if len(matches) == 0 {
+		return "", "", fmt.Errorf("no user matching %q", query)
+	}
+	if len(matches) == 1 {
+		return matches[0].ID, matches[0].Name, nil
+	}
+	return "", "", &AmbiguousUserError{Query: query, Matches: matches}
+}
+
 // ChannelMatch represents a channel that matched a search query.
 type ChannelMatch struct {
 	ID   string

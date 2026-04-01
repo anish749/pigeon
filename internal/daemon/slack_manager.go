@@ -118,6 +118,13 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig) *api.SlackSe
 		slog.WarnContext(ctx, "failed to get Slack auth info", "workspace", sl.Workspace, "error", err)
 	}
 
+	var botName string
+	if authResp, err := botAPI.AuthTestContext(ctx); err == nil {
+		botName = authResp.User
+	} else {
+		slog.WarnContext(ctx, "failed to get bot auth info", "workspace", sl.Workspace, "error", err)
+	}
+
 	messages := slacklistener.NewMessageStore(sl.Workspace)
 	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.Workspace, sl.TeamID)
 	go listener.Run(ctx)
@@ -131,10 +138,12 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig) *api.SlackSe
 	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
 
 	return &api.SlackSender{
-		API:       userAPI,
+		BotAPI:    botAPI,
+		UserAPI:   userAPI,
 		Resolver:  resolver,
 		Messages:  messages,
 		Workspace: sl.Workspace,
+		BotName:   botName,
 		UserName:  userName,
 	}
 }
