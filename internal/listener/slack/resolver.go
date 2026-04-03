@@ -262,22 +262,6 @@ func (r *Resolver) FindUserID(query string) (string, string, error) {
 	return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 }
 
-// ChannelMatch represents a channel that matched a search query.
-type ChannelMatch struct {
-	ID   string
-	Name string
-}
-
-// AmbiguousChannelError is returned when a channel query matches multiple channels.
-// The caller should enrich matches with activity info before displaying.
-type AmbiguousChannelError struct {
-	Query   string
-	Matches []ChannelMatch
-}
-
-func (e *AmbiguousChannelError) Error() string {
-	return fmt.Sprintf("multiple channels match %q (%d matches)", e.Query, len(e.Matches))
-}
 
 // FindChannelID resolves a channel for sending. Requires an exact match:
 // either a channel ID (e.g. "D1234567890") or an exact channel name
