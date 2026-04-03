@@ -210,14 +210,25 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		senderName = sender.UserName
 	}
 
-	// Resolve contact/channel query to channel ID.
-	channelID, channelName, err := sender.Resolver.FindChannelID(req.Contact)
-	if err != nil {
-		var ambErr *slacklistener.AmbiguousChannelError
-		if errors.As(err, &ambErr) {
-			return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
+	// Resolve contact to a channel ID.
+	// Try as a user ID first (exact match in user cache), then as a channel name.
+	var channelID, channelName string
+
+	if userID, userName, err := sender.Resolver.FindUserID(req.Contact); err == nil && userID == req.Contact {
+		// Exact user ID match — open a DM directly.
+		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{userID},
+		})
+		if openErr != nil {
+			return sendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", userName, userID, openErr)}
 		}
-		return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+		channelID = ch.ID
+		channelName = "@" + userName
+	} else {
+		channelID, channelName, err = sender.Resolver.FindChannelID(req.Contact)
+		if err != nil {
+			return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+		}
 	}
 
 	// For bot sends to DMs/group DMs, the cached channel ID is from the user
@@ -315,39 +326,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// formatAmbiguousChannels builds a disambiguation message for Slack channels,
-// enriched with activity info from the Slack API (last message, open status).
-func formatAmbiguousChannels(ctx context.Context, err *slacklistener.AmbiguousChannelError, sender *SlackSender) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "multiple channels match %q:\n", err.Query)
 
-	for _, m := range err.Matches {
-		fmt.Fprintf(&b, "  %s  %s", m.ID, m.Name)
-
-		ch, apiErr := sender.UserAPI.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
-			ChannelID: m.ID,
-		})
-		if apiErr == nil {
-			if ch.Latest != nil && ch.Latest.Timestamp != "" {
-				lastMsg := slacklistener.ParseTimestamp(ch.Latest.Timestamp)
-				fmt.Fprintf(&b, "  (last msg: %s", lastMsg.Format("2006-01-02"))
-				if ch.Latest.Text != "" {
-					preview := ch.Latest.Text
-					if len(preview) > 50 {
-						preview = preview[:50] + "..."
-					}
-					fmt.Fprintf(&b, ", %q", preview)
-				}
-				b.WriteString(")")
-			} else {
-				b.WriteString("  (no messages)")
-			}
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("use a channel ID (e.g. D1234567890) to disambiguate")
-	return b.String()
-}
 
 // formatAmbiguousContacts builds a disambiguation message enriched with
 // conversation activity (last message date, total messages) from the file store.
