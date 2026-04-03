@@ -235,7 +235,9 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			Users: []string{resolvedUserID},
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, resolvedUserID, openErr)}
+			return sendResponse{Error: fmt.Sprintf(
+				"open DM with %s (%s) failed: %v — for Slack Connect users, the bot must be a member of at least one shared channel with the recipient",
+				channelName, resolvedUserID, openErr)}
 		}
 		channelID = ch.ID
 		if !req.AsUser {
@@ -324,7 +326,7 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			"as_user", req.AsUser, "error", err)
 		if err.Error() == "channel_not_found" && !req.AsUser {
 			return sendResponse{Error: fmt.Sprintf(
-				"send to %s failed: %v (bot is not a member of this channel — ask the user to invite the bot to %s, or ask the user for permission to re-run with --as-user which sends as the logged-in user instead)",
+				"send to %s failed: %v — bot cannot access this channel. For Slack Connect users, ensure the bot is a member of at least one shared channel with the recipient. For private channels, ask the user to invite the bot to %s.",
 				channelName, err, channelName)}
 		}
 		return sendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
