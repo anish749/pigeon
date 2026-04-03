@@ -192,8 +192,10 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 
 // UserMatch represents a user that matched a search query.
 type UserMatch struct {
-	ID   string
-	Name string
+	ID          string
+	DisplayName string
+	RealName    string
+	Email       string
 }
 
 // AmbiguousUserError is returned when a user query matches multiple users.
@@ -203,29 +205,59 @@ type AmbiguousUserError struct {
 }
 
 func (e *AmbiguousUserError) Error() string {
-	return fmt.Sprintf("multiple users match %q (%d matches)", e.Query, len(e.Matches))
+	var b strings.Builder
+	fmt.Fprintf(&b, "multiple users match %q:\n", e.Query)
+	for _, m := range e.Matches {
+		fmt.Fprintf(&b, "  %s  %s", m.ID, m.DisplayName)
+		if m.RealName != "" && m.RealName != m.DisplayName {
+			fmt.Fprintf(&b, "  (%s)", m.RealName)
+		}
+		if m.Email != "" {
+			fmt.Fprintf(&b, "  <%s>", m.Email)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("ask the user to confirm which person to send to, then use their user ID")
+	return b.String()
 }
 
-// FindUserID searches the user cache for a user matching the query by display name.
-// Accepts case-insensitive substring matches. Strips leading @ if present.
+// FindUserID searches the user cache for a user matching the query.
+// Accepts exact user IDs (U...), or case-insensitive substring matches on display name.
+// Strips leading @ if present. On ambiguity, enriches matches with profile info via API.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
-	q := strings.ToLower(strings.TrimPrefix(query, "@"))
+	q := strings.TrimPrefix(query, "@")
 
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
+	// Exact user ID match.
+	if name, ok := r.users[q]; ok {
+		r.mu.RUnlock()
+		return q, name, nil
+	}
+
+	qLower := strings.ToLower(q)
 	var matches []UserMatch
 	for id, name := range r.users {
-		if strings.Contains(strings.ToLower(name), q) {
-			matches = append(matches, UserMatch{id, name})
+		if strings.Contains(strings.ToLower(name), qLower) {
+			matches = append(matches, UserMatch{ID: id, DisplayName: name})
 		}
 	}
+	r.mu.RUnlock()
 
 	if len(matches) == 0 {
 		return "", "", fmt.Errorf("no user matching %q", query)
 	}
 	if len(matches) == 1 {
-		return matches[0].ID, matches[0].Name, nil
+		return matches[0].ID, matches[0].DisplayName, nil
+	}
+
+	// Enrich with profile info for disambiguation.
+	for i, m := range matches {
+		user, err := r.api.GetUserInfoContext(context.Background(), m.ID)
+		if err == nil {
+			matches[i].RealName = user.RealName
+			matches[i].Email = user.Profile.Email
+		}
 	}
 	return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 }

@@ -25,6 +25,7 @@ oauth_config:
     user:
       - channels:history
       - channels:read
+      - chat:write
       - groups:history
       - groups:read
       - im:history
@@ -32,6 +33,7 @@ oauth_config:
       - mpim:history
       - mpim:read
       - users:read
+      - users:read.email
     bot:
       - channels:history
       - channels:read
@@ -46,6 +48,7 @@ oauth_config:
       - mpim:read
       - mpim:write
       - users:read
+      - users:read.email
 
 settings:
   event_subscriptions:

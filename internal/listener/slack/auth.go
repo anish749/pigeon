@@ -32,6 +32,7 @@ var botScopes = []string{
 	"mpim:read",
 	"mpim:write",
 	"users:read",
+	"users:read.email",
 }
 
 // User scopes grant the app permission to act on behalf of the installing user,
