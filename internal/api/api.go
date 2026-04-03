@@ -250,9 +250,10 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			"as_user", req.AsUser, "error", err)
 		if err.Error() == "channel_not_found" && !req.AsUser {
 			return sendResponse{Error: fmt.Sprintf(
-				"bot cannot access %s — invite the bot to this channel, or use --as-user to send as yourself", channelName)}
+				"send to %s failed: %v (bot is not a member of this channel — ask the user to invite the bot to %s, or ask the user for permission to re-run with --as-user which sends as the logged-in user instead)",
+				channelName, err, channelName)}
 		}
-		return sendResponse{Error: fmt.Sprintf("send to %s: %v", channelName, err)}
+		return sendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
 
 	// Store locally.
