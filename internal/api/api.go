@@ -230,13 +230,17 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	}
 
 	if resolvedUserID != "" {
+		// Open DM with the appropriate token.
 		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
 			Users: []string{resolvedUserID},
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf("open DM with %s: %v", channelName, openErr)}
+			return sendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, resolvedUserID, openErr)}
 		}
 		channelID = ch.ID
+		if !req.AsUser {
+			senderName = "sent by pigeon"
+		}
 	} else {
 		var err error
 		channelID, channelName, err = sender.Resolver.FindChannelID(req.Contact)
@@ -245,9 +249,10 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		}
 	}
 
-	// For bot sends to DMs/group DMs, the cached channel ID is from the user
-	// token and isn't accessible to the bot. Open the bot's own conversation.
-	if !req.AsUser && strings.HasPrefix(channelName, "@") {
+	// For bot sends to DMs/group DMs resolved via channel name (not user ID/email),
+	// the cached channel ID is from the user token and isn't accessible to the bot.
+	// Open the bot's own conversation.
+	if resolvedUserID == "" && !req.AsUser && strings.HasPrefix(channelName, "@") {
 		var userIDs []string
 
 		if strings.HasPrefix(channelName, "@mpdm-") {
@@ -272,11 +277,13 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			userIDs = []string{userID}
 		}
 
-		ch, _, _, openErr := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+		// Always use user token for conversations.open — bot token can't open
+		// DMs with Slack Connect users.
+		ch, _, _, openErr := sender.UserAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
 			Users: userIDs,
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf("open bot conversation with %s: %v", channelName, openErr)}
+			return sendResponse{Error: fmt.Sprintf("open conversation with %s: %v", channelName, openErr)}
 		}
 		channelID = ch.ID
 		senderName = "sent by pigeon"
