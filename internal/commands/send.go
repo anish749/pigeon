@@ -18,6 +18,7 @@ type SendParams struct {
 	Thread    string
 	Broadcast bool
 	AsUser    bool
+	DryRun    bool
 }
 
 func RunSend(p SendParams) error {
@@ -29,6 +30,7 @@ func RunSend(p SendParams) error {
 		"thread":    p.Thread,
 		"broadcast": p.Broadcast,
 		"as_user":   p.AsUser,
+		"dry_run":   p.DryRun,
 	})
 
 	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
@@ -38,9 +40,13 @@ func RunSend(p SendParams) error {
 	defer resp.Body.Close()
 
 	var result struct {
-		OK        bool   `json:"ok"`
-		Timestamp string `json:"timestamp"`
-		Error     string `json:"error"`
+		OK          bool   `json:"ok"`
+		Timestamp   string `json:"timestamp"`
+		Error       string `json:"error"`
+		ChannelID   string `json:"channel_id"`
+		ChannelName string `json:"channel_name"`
+		SendAs      string `json:"send_as"`
+		Email       string `json:"email"`
 	}
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -49,6 +55,15 @@ func RunSend(p SendParams) error {
 
 	if !result.OK {
 		return fmt.Errorf("%s", result.Error)
+	}
+
+	if p.DryRun {
+		fmt.Printf("Dry run — would send to %s (%s) as %s", result.ChannelName, result.ChannelID, result.SendAs)
+		if result.Email != "" {
+			fmt.Printf(" <%s>", result.Email)
+		}
+		fmt.Println()
+		return nil
 	}
 
 	fmt.Printf("Sent to %s at %s\n", p.Contact, result.Timestamp)
