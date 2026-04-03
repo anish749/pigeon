@@ -233,6 +233,39 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		}
 	}
 
+	// For bot sends to DMs/group DMs, the cached channel ID is from the user
+	// token and isn't accessible to the bot. Open the bot's own conversation.
+	if !req.AsUser && strings.HasPrefix(channelName, "@") {
+		var userIDs []string
+
+		if strings.HasPrefix(channelName, "@mpdm-") {
+			// Group DM: look up members via user token, then open with bot token.
+			members, _, err := sender.UserAPI.GetUsersInConversationContext(ctx, &goslack.GetUsersInConversationParameters{
+				ChannelID: channelID,
+			})
+			if err != nil {
+				return sendResponse{Error: fmt.Sprintf("get members of %s: %v", channelName, err)}
+			}
+			userIDs = members
+		} else {
+			// 1:1 DM: find the target user ID.
+			userID, _, userErr := sender.Resolver.FindUserID(channelName)
+			if userErr != nil {
+				return sendResponse{Error: fmt.Sprintf("resolve user %s: %v", channelName, userErr)}
+			}
+			userIDs = []string{userID}
+		}
+
+		ch, _, _, openErr := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: userIDs,
+		})
+		if openErr != nil {
+			return sendResponse{Error: fmt.Sprintf("open bot conversation with %s: %v", channelName, openErr)}
+		}
+		channelID = ch.ID
+		senderName = "sent by pigeon"
+	}
+
 	// Build message options.
 	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
 	if req.Thread != "" {
