@@ -245,7 +245,14 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	// Send the message.
 	_, ts, err := api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
-		return sendResponse{Error: fmt.Sprintf("send: %v", err)}
+		slog.ErrorContext(ctx, "slack send failed",
+			"channel_id", channelID, "channel_name", channelName,
+			"as_user", req.AsUser, "error", err)
+		if err.Error() == "channel_not_found" && !req.AsUser {
+			return sendResponse{Error: fmt.Sprintf(
+				"bot cannot access %s — invite the bot to this channel, or use --as-user to send as yourself", channelName)}
+		}
+		return sendResponse{Error: fmt.Sprintf("send to %s: %v", channelName, err)}
 	}
 
 	// Store locally.
