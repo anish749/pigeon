@@ -21,17 +21,19 @@ type Listener struct {
 	resolver  *Resolver
 	messages  *MessageStore
 	userToken string
+	botToken  string
 	workspace string
 	teamID    string
 }
 
 // NewListener creates a Slack listener for a single workspace.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, workspace, teamID string) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID string) *Listener {
 	return &Listener{
 		client:    client,
 		resolver:  resolver,
 		messages:  messages,
 		userToken: userToken,
+		botToken:  botToken,
 		workspace: workspace,
 		teamID:    teamID,
 	}
@@ -51,7 +53,7 @@ func (l *Listener) Run(ctx context.Context) {
 			case socketmode.EventTypeConnected:
 				slog.InfoContext(ctx, "slack: connected, triggering sync", "workspace", l.workspace)
 				go func() {
-					if err := Sync(ctx, l.userToken, l.resolver, l.workspace, l.messages); err != nil {
+					if err := Sync(ctx, l.userToken, l.botToken, l.resolver, l.workspace, l.messages); err != nil {
 						slog.ErrorContext(ctx, "slack sync failed", "workspace", l.workspace, "error", err)
 					}
 				}()

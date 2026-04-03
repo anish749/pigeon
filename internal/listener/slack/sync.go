@@ -111,8 +111,9 @@ func (ms *MessageStore) Cursor(channelID string) (string, bool) {
 // Sync fetches historical messages for conversations the user was active in
 // during the last 30 days. On first run, syncs the last 90 days. On subsequent
 // runs, picks up from where it left off using stored cursors per channel.
-// Uses the user token to access DMs and all user-visible conversations.
-func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace string, ms *MessageStore) error {
+// Syncs both user conversations (via user token) and bot DM conversations
+// (via bot token), interleaving them into the same contact directories.
+func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, workspace string, ms *MessageStore) error {
 	api := goslack.New(userToken)
 	gate := &rateLimitGate{workspace: workspace}
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
@@ -264,6 +265,120 @@ func Sync(ctx context.Context, userToken string, resolver *Resolver, workspace s
 
 	slog.InfoContext(ctx, "slack sync: complete",
 		"workspace", workspace, "channels", synced, "messages", totalMessages)
+
+	// Sync bot DM conversations so pigeon messages appear in the unified timeline.
+	if botToken != "" {
+		if err := syncBotDMs(ctx, botToken, resolver, workspace, ms, gate, defaultOldest, activityCutoff); err != nil {
+			slog.WarnContext(ctx, "slack sync: bot DM sync failed", "workspace", workspace, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// syncBotDMs syncs the bot's DM conversations. Messages are written to the same
+// contact directory as the user's DMs, with "sent to pigeon by" / "sent by pigeon"
+// labels so they interleave in the unified timeline.
+func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, workspace string, ms *MessageStore, gate *rateLimitGate, defaultOldest string, activityCutoff time.Time) error {
+	botAPI := goslack.New(botToken)
+
+	// List bot's DM and group DM conversations only.
+	var botDMs []goslack.Channel
+	cursor := ""
+	for {
+		if err := gate.wait(ctx); err != nil {
+			return err
+		}
+		params := &goslack.GetConversationsParameters{
+			Types:           []string{"im", "mpim"},
+			ExcludeArchived: true,
+			Limit:           1000,
+			Cursor:          cursor,
+		}
+		channels, nextCursor, err := botAPI.GetConversationsContext(ctx, params)
+		if gate.update(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("list bot conversations: %w", err)
+		}
+		botDMs = append(botDMs, channels...)
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	if len(botDMs) == 0 {
+		return nil
+	}
+
+	slog.InfoContext(ctx, "slack sync: bot DMs", "workspace", workspace, "count", len(botDMs))
+
+	for _, ch := range botDMs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Resolve channel name to "@Username" so bot DMs are stored in the
+		// same directory as the user's DMs with that contact.
+		var channelName string
+		if ch.IsIM {
+			channelName = "@" + resolver.UserName(ctx, ch.User)
+		} else {
+			channelName = FormatChannelName(ch)
+		}
+
+		oldest := defaultOldest
+		if c, ok := ms.Cursor(ch.ID); ok {
+			oldest = c
+		}
+
+		msgs, err := fetchHistory(ctx, botAPI, gate, ch.ID, oldest, activityCutoff)
+		if err != nil {
+			slog.WarnContext(ctx, "slack sync: bot DM fetch failed",
+				"channel", channelName, "error", err)
+			continue
+		}
+
+		var lastTS string
+		written := 0
+		for _, msg := range msgs {
+			lastTS = msg.Timestamp
+
+			if (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+				continue
+			}
+
+			text := resolver.ResolveText(ctx, msg.Text)
+			ts := ParseTimestamp(msg.Timestamp)
+
+			var senderName string
+			if msg.BotID != "" {
+				senderName = "sent by pigeon"
+			} else {
+				senderName = "sent to pigeon by " + resolver.UserName(ctx, msg.User)
+			}
+
+			if err := ms.Write(ch.ID, channelName, senderName, text, ts, msg.Timestamp); err != nil {
+				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
+				continue
+			}
+			written++
+		}
+
+		if lastTS != "" {
+			ms.AdvanceCursor(ch.ID, lastTS)
+		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
+			ms.AdvanceCursor(ch.ID, oldest)
+		}
+
+		if written > 0 {
+			slog.InfoContext(ctx, "slack sync: bot DM done",
+				"channel", channelName, "messages", written, "workspace", workspace)
+		}
+	}
+
 	return nil
 }
 
