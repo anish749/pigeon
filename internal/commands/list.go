@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -35,6 +37,7 @@ func RunList(platform, account string) error {
 			fmt.Println("No accounts found.")
 			return nil
 		}
+		accounts = canonicalAccountNames(platform, accounts)
 		fmt.Printf("Accounts in %s:\n\n", platform)
 		for _, a := range accounts {
 			fmt.Printf("  %s\n", a)
@@ -56,6 +59,7 @@ func RunList(platform, account string) error {
 		if err != nil {
 			continue
 		}
+		accounts = canonicalAccountNames(p, accounts)
 		fmt.Printf("%s:\n", p)
 		for _, a := range accounts {
 			fmt.Printf("  %s\n", a)
@@ -63,4 +67,40 @@ func RunList(platform, account string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// canonicalAccountNames replaces filesystem directory names with canonical names
+// from config. The filesystem is case-insensitive on macOS, so directory names
+// may not match the canonical casing from the Slack API / config file.
+func canonicalAccountNames(platform string, dirNames []string) []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return dirNames
+	}
+
+	var canonical map[string]string // lowercase dir name → config name
+	switch platform {
+	case "slack":
+		canonical = make(map[string]string, len(cfg.Slack))
+		for _, sl := range cfg.Slack {
+			canonical[strings.ToLower(sl.Workspace)] = sl.Workspace
+		}
+	case "whatsapp":
+		canonical = make(map[string]string, len(cfg.WhatsApp))
+		for _, wa := range cfg.WhatsApp {
+			canonical[strings.ToLower(wa.Account)] = wa.Account
+		}
+	default:
+		return dirNames
+	}
+
+	result := make([]string, len(dirNames))
+	for i, dir := range dirNames {
+		if name, ok := canonical[strings.ToLower(dir)]; ok {
+			result[i] = name
+		} else {
+			result[i] = dir
+		}
+	}
+	return result
 }
