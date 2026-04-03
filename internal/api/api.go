@@ -111,12 +111,16 @@ type sendRequest struct {
 	Thread    string `json:"thread,omitempty"`
 	Broadcast bool   `json:"broadcast,omitempty"`
 	AsUser    bool   `json:"as_user,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
 }
 
 type sendResponse struct {
-	OK        bool   `json:"ok"`
-	Timestamp string `json:"timestamp,omitempty"`
-	Error     string `json:"error,omitempty"`
+	OK          bool   `json:"ok"`
+	Timestamp   string `json:"timestamp,omitempty"`
+	Error       string `json:"error,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	SendAs      string `json:"send_as,omitempty"`
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +250,15 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		}
 		channelID = ch.ID
 		senderName = "sent by pigeon"
+	}
+
+	if req.DryRun {
+		return sendResponse{
+			OK:          true,
+			ChannelID:   channelID,
+			ChannelName: channelName,
+			SendAs:      senderName,
+		}
 	}
 
 	// Build message options.

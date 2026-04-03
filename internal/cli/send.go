@@ -27,6 +27,7 @@ to update scopes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		broadcast, _ := cmd.Flags().GetBool("broadcast")
 		asUser, _ := cmd.Flags().GetBool("as-user")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		return commands.RunSend(commands.SendParams{
 			Platform:  mustString(cmd, "platform"),
 			Account:   mustString(cmd, "account"),
@@ -35,6 +36,7 @@ to update scopes.`,
 			Thread:    mustString(cmd, "thread"),
 			Broadcast: broadcast,
 			AsUser:    asUser,
+			DryRun:    dryRun,
 		})
 	},
 }
@@ -47,6 +49,7 @@ func init() {
 	sendCmd.Flags().String("thread", "", "thread timestamp to reply to")
 	sendCmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
 	sendCmd.Flags().Bool("as-user", false, "send as yourself instead of the bot")
+	sendCmd.Flags().Bool("dry-run", false, "resolve contact and validate without sending")
 	sendCmd.MarkFlagRequired("platform")
 	sendCmd.MarkFlagRequired("account")
 	sendCmd.MarkFlagRequired("contact")
