@@ -160,9 +160,21 @@ func ReadMessages(platform, account, conversation string, opts ReadOpts) ([]stri
 	return readFileLines(files[len(files)-1])
 }
 
+// annotateThreadParent inserts a [thread:ts] marker after the timestamp in a message line.
+// Input:  [2026-03-16 09:15:02 +00:00] Alice: hello
+// Output: [2026-03-16 09:15:02 +00:00] [thread:1711568938.123456] Alice: hello
+func annotateThreadParent(line, threadTS string) string {
+	idx := strings.Index(line, "] ")
+	if idx < 0 {
+		return line
+	}
+	return line[:idx+2] + "[thread:" + threadTS + "] " + line[idx+2:]
+}
+
 // InterleaveThreads enriches channel message lines with thread content.
 // For each channel line that matches a thread parent (by comparing text content),
 // the thread replies and channel context are inserted after the parent line.
+// Parent lines are annotated with [thread:ts] so consumers can reference the thread.
 func InterleaveThreads(platform, account, conversation string, lines []string) []string {
 	threadsDir := ThreadDir(platform, account, conversation)
 	if _, err := os.Stat(threadsDir); os.IsNotExist(err) {
@@ -189,12 +201,13 @@ func InterleaveThreads(platform, account, conversation string, lines []string) [
 
 	var result []string
 	for _, line := range lines {
-		result = append(result, line)
-
 		ts, ok := parentToThread[line]
 		if !ok {
+			result = append(result, line)
 			continue
 		}
+
+		result = append(result, annotateThreadParent(line, ts))
 
 		// Read thread file and append content after parent (skip first line = parent)
 		threadLines, err := ReadThread(platform, account, conversation, ts)
@@ -274,7 +287,9 @@ func AppendActiveThreads(platform, account, conversation string, lines []string,
 
 	for _, t := range activeThreads {
 		lines = append(lines, "") // blank line separator
-		lines = append(lines, t.lines...)
+		// Annotate the parent line (first line) with thread timestamp
+		lines = append(lines, annotateThreadParent(t.lines[0], t.ts))
+		lines = append(lines, t.lines[1:]...)
 	}
 	return lines
 }

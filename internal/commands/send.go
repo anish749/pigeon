@@ -10,12 +10,25 @@ import (
 	"github.com/anish/claude-msg-utils/internal/api"
 )
 
-func RunSend(platform, account, contact, message string) error {
-	body, _ := json.Marshal(map[string]string{
-		"platform": platform,
-		"account":  account,
-		"contact":  contact,
-		"message":  message,
+type SendParams struct {
+	Platform  string
+	Account   string
+	Contact   string
+	Message   string
+	Thread    string
+	Broadcast bool
+	AsUser    bool
+}
+
+func RunSend(p SendParams) error {
+	body, _ := json.Marshal(map[string]any{
+		"platform":  p.Platform,
+		"account":   p.Account,
+		"contact":   p.Contact,
+		"message":   p.Message,
+		"thread":    p.Thread,
+		"broadcast": p.Broadcast,
+		"as_user":   p.AsUser,
 	})
 
 	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
@@ -38,6 +51,6 @@ func RunSend(platform, account, contact, message string) error {
 		return fmt.Errorf("%s", result.Error)
 	}
 
-	fmt.Printf("Sent to %s at %s\n", contact, result.Timestamp)
+	fmt.Printf("Sent to %s at %s\n", p.Contact, result.Timestamp)
 	return nil
 }

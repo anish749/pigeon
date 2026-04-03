@@ -12,18 +12,30 @@ var sendCmd = &cobra.Command{
 	GroupID: groupSending,
 	Long: `Send a message through the daemon's connected clients.
 
-Slack sending requires chat:write scope. If your Slack app was installed
-before this feature, re-run 'pigeon setup-slack' to update scopes.`,
-	Example: `  pigeon send --platform=whatsapp --account=+14155551234 --contact=Alice -m "hey, are you free?"
-  pigeon send --platform=slack --account=acme-corp --contact=#engineering -m "deploying now"`,
+By default, Slack messages are sent as the bot. Use --as-user to send as yourself.
+Use --thread to reply to a thread, and --broadcast to also post the reply to the channel.
+
+If your Slack app was installed before bot sending was added, re-run 'pigeon setup-slack'
+to update scopes.`,
+	Example: `  pigeon send -p whatsapp -a +14155551234 -c Alice -m "hey, are you free?"
+  pigeon send -p slack -a acme-corp -c #engineering -m "deploying now"
+  pigeon send -p slack -a acme-corp -c @alice -m "quick question"
+  pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 -m "fixed!"
+  pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 --broadcast -m "resolved"
+  pigeon send -p slack -a acme-corp -c @alice --as-user -m "sent as me, not the bot"`,
 	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunSend(
-			mustString(cmd, "platform"),
-			mustString(cmd, "account"),
-			mustString(cmd, "contact"),
-			mustString(cmd, "message"),
-		)
+		broadcast, _ := cmd.Flags().GetBool("broadcast")
+		asUser, _ := cmd.Flags().GetBool("as-user")
+		return commands.RunSend(commands.SendParams{
+			Platform:  mustString(cmd, "platform"),
+			Account:   mustString(cmd, "account"),
+			Contact:   mustString(cmd, "contact"),
+			Message:   mustString(cmd, "message"),
+			Thread:    mustString(cmd, "thread"),
+			Broadcast: broadcast,
+			AsUser:    asUser,
+		})
 	},
 }
 
@@ -32,6 +44,9 @@ func init() {
 	sendCmd.Flags().StringP("account", "a", "", "account name")
 	sendCmd.Flags().StringP("contact", "c", "", "contact name, phone, or channel")
 	sendCmd.Flags().StringP("message", "m", "", "message text")
+	sendCmd.Flags().String("thread", "", "thread timestamp to reply to")
+	sendCmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
+	sendCmd.Flags().Bool("as-user", false, "send as yourself instead of the bot")
 	sendCmd.MarkFlagRequired("platform")
 	sendCmd.MarkFlagRequired("account")
 	sendCmd.MarkFlagRequired("contact")

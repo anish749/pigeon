@@ -114,11 +114,19 @@ WORKFLOW — READING MESSAGES
 
 WORKFLOW — SENDING MESSAGES
 
-  pigeon send --platform=whatsapp --account=+14155551234 --contact=Alice -m "hey!"
-  pigeon send --platform=slack --account=acme-corp --contact=#engineering -m "deploying now"
+  pigeon send -p whatsapp -a +14155551234 -c Alice -m "hey!"
+  pigeon send -p slack -a acme-corp -c #engineering -m "deploying now"
+  pigeon send -p slack -a acme-corp -c @alice -m "quick question"
 
-  Note: Slack sending requires chat:write scope. If your Slack app was
-  installed before this feature, re-run 'pigeon setup-slack' to update scopes.
+  Slack messages are sent as the bot by default. Use --as-user to send as yourself.
+
+  Thread replies:
+
+    pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 -m "done"
+    pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 --broadcast -m "resolved"
+
+  If your Slack app was installed before bot sending was added,
+  re-run 'pigeon setup-slack' to update scopes.
 
 ─────────────────────────────────────────────────────────
 
