@@ -267,10 +267,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 		"workspace", workspace, "channels", synced, "messages", totalMessages)
 
 	// Sync bot DM conversations so pigeon messages appear in the unified timeline.
-	if botToken != "" {
-		if err := syncBotDMs(ctx, botToken, resolver, workspace, ms, gate, defaultOldest, activityCutoff); err != nil {
-			slog.WarnContext(ctx, "slack sync: bot DM sync failed", "workspace", workspace, "error", err)
-		}
+	if err := syncBotDMs(ctx, botToken, resolver, workspace, ms, gate, defaultOldest, activityCutoff); err != nil {
+		slog.WarnContext(ctx, "slack sync: bot DM sync failed", "workspace", workspace, "error", err)
 	}
 
 	return nil
