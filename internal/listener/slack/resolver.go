@@ -279,10 +279,9 @@ func (e *AmbiguousChannelError) Error() string {
 	return fmt.Sprintf("multiple channels match %q (%d matches)", e.Query, len(e.Matches))
 }
 
-// FindChannelID searches the channel cache for a channel matching the query.
-// Accepts channel IDs directly (e.g. "D1234567890") or matches case-insensitively
-// against channel names (with and without prefix).
-// Returns AmbiguousChannelError if multiple matches, so the caller can enrich and display.
+// FindChannelID resolves a channel for sending. Requires an exact match:
+// either a channel ID (e.g. "D1234567890") or an exact channel name
+// (e.g. "#engineering", "@Jeremiah Lu"). Case-insensitive but no substring matching.
 func (r *Resolver) FindChannelID(query string) (string, string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -292,30 +291,20 @@ func (r *Resolver) FindChannelID(query string) (string, string, error) {
 		return query, name, nil
 	}
 
+	// Exact name match (case-insensitive), with and without prefix.
 	q := strings.ToLower(query)
-	var matches []ChannelMatch
-
 	for id, name := range r.channels {
 		lower := strings.ToLower(name)
-		if strings.Contains(lower, q) {
-			matches = append(matches, ChannelMatch{id, name})
-			continue
+		if lower == q {
+			return id, name, nil
 		}
-		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') {
-			if strings.Contains(lower[1:], q) {
-				matches = append(matches, ChannelMatch{id, name})
-			}
+		// Match without prefix: "engineering" matches "#engineering"
+		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') && lower[1:] == q {
+			return id, name, nil
 		}
 	}
 
-	if len(matches) == 0 {
-		return "", "", fmt.Errorf("no channel matching %q", query)
-	}
-	if len(matches) == 1 {
-		return matches[0].ID, matches[0].Name, nil
-	}
-
-	return "", "", &AmbiguousChannelError{Query: query, Matches: matches}
+	return "", "", fmt.Errorf("no channel matching %q — use the exact channel or contact name from 'pigeon list'", query)
 }
 
 // FormatChannelName returns a human-readable channel name with prefix (# for channels, @ for DMs).

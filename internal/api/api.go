@@ -208,29 +208,11 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	// Resolve contact/channel query to channel ID.
 	channelID, channelName, err := sender.Resolver.FindChannelID(req.Contact)
 	if err != nil {
-		// If no cached channel matched an @-prefixed query, try opening a DM.
-		if strings.HasPrefix(req.Contact, "@") || !strings.HasPrefix(req.Contact, "#") {
-			if userID, userName, userErr := sender.Resolver.FindUserID(req.Contact); userErr == nil {
-				ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-					Users: []string{userID},
-				})
-				if openErr == nil {
-					channelID = ch.ID
-					channelName = "@" + userName
-					sender.Resolver.RegisterChannel(ch.ID, channelName)
-					err = nil
-				} else {
-					return sendResponse{Error: fmt.Sprintf("open DM with %s: %v", userName, openErr)}
-				}
-			}
+		var ambErr *slacklistener.AmbiguousChannelError
+		if errors.As(err, &ambErr) {
+			return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
 		}
-		if err != nil {
-			var ambErr *slacklistener.AmbiguousChannelError
-			if errors.As(err, &ambErr) {
-				return sendResponse{Error: formatAmbiguousChannels(ctx, ambErr, sender)}
-			}
-			return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
-		}
+		return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
 	}
 
 	// For bot sends to DMs/group DMs, the cached channel ID is from the user
