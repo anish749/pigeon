@@ -121,6 +121,7 @@ type sendResponse struct {
 	ChannelID   string `json:"channel_id,omitempty"`
 	ChannelName string `json:"channel_name,omitempty"`
 	SendAs      string `json:"send_as,omitempty"`
+	Email       string `json:"email,omitempty"`
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -253,12 +254,21 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	}
 
 	if req.DryRun {
-		return sendResponse{
+		resp := sendResponse{
 			OK:          true,
 			ChannelID:   channelID,
 			ChannelName: channelName,
 			SendAs:      senderName,
 		}
+		// For DMs, enrich with user email.
+		if strings.HasPrefix(channelName, "@") && !strings.HasPrefix(channelName, "@mpdm-") {
+			if userID, _, err := sender.Resolver.FindUserID(channelName); err == nil {
+				if user, err := sender.UserAPI.GetUserInfoContext(ctx, userID); err == nil && user.Profile.Email != "" {
+					resp.Email = user.Profile.Email
+				}
+			}
+		}
+		return resp
 	}
 
 	// Build message options.

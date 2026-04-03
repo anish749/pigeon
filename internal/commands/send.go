@@ -46,6 +46,7 @@ func RunSend(p SendParams) error {
 		ChannelID   string `json:"channel_id"`
 		ChannelName string `json:"channel_name"`
 		SendAs      string `json:"send_as"`
+		Email       string `json:"email"`
 	}
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -57,7 +58,11 @@ func RunSend(p SendParams) error {
 	}
 
 	if p.DryRun {
-		fmt.Printf("Dry run — would send to %s (%s) as %s\n", result.ChannelName, result.ChannelID, result.SendAs)
+		fmt.Printf("Dry run — would send to %s (%s) as %s", result.ChannelName, result.ChannelID, result.SendAs)
+		if result.Email != "" {
+			fmt.Printf(" <%s>", result.Email)
+		}
+		fmt.Println()
 		return nil
 	}
 
