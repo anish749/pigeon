@@ -211,20 +211,34 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 	}
 
 	// Resolve contact to a channel ID.
-	// Try as a user ID first (exact match in user cache), then as a channel name.
+	// Try as user ID, then email, then channel name.
 	var channelID, channelName string
+	var resolvedUserID string
 
 	if userID, userName, err := sender.Resolver.FindUserID(req.Contact); err == nil && userID == req.Contact {
-		// Exact user ID match — open a DM directly.
+		resolvedUserID = userID
+		channelName = "@" + userName
+	} else if looksLikeEmail(req.Contact) {
+		if user, err := sender.UserAPI.GetUserByEmailContext(ctx, req.Contact); err == nil {
+			resolvedUserID = user.ID
+			name := user.Profile.DisplayName
+			if name == "" {
+				name = user.RealName
+			}
+			channelName = "@" + name
+		}
+	}
+
+	if resolvedUserID != "" {
 		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{userID},
+			Users: []string{resolvedUserID},
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", userName, userID, openErr)}
+			return sendResponse{Error: fmt.Sprintf("open DM with %s: %v", channelName, openErr)}
 		}
 		channelID = ch.ID
-		channelName = "@" + userName
 	} else {
+		var err error
 		channelID, channelName, err = sender.Resolver.FindChannelID(req.Contact)
 		if err != nil {
 			return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
