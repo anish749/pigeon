@@ -96,7 +96,9 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 
 	// Skip messages from channels the user hasn't joined.
-	if !l.resolver.IsMember(msg.Channel) {
+	// Always allow DMs and group DMs through — the bot only receives these for
+	// its own conversations, and the bot owner should see all messages to the bot.
+	if msg.ChannelType != "im" && msg.ChannelType != "mim" && !l.resolver.IsMember(msg.Channel) {
 		return
 	}
 
