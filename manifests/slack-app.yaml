@@ -11,6 +11,9 @@ display_information:
   background_color: "#2d2d2d"
 
 features:
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
   bot_user:
     display_name: "${USERNAME}'s ${WORKSPACE_NAME} Pigeon"
     always_online: true
@@ -38,8 +41,10 @@ oauth_config:
       - groups:read
       - im:history
       - im:read
+      - im:write
       - mpim:history
       - mpim:read
+      - mpim:write
       - users:read
 
 settings:
