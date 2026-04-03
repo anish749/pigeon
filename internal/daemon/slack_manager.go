@@ -126,7 +126,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig) *api.SlackSe
 	}
 
 	messages := slacklistener.NewMessageStore(sl.Workspace)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.Workspace, sl.TeamID)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, sl.Workspace, sl.TeamID)
 	go listener.Run(ctx)
 
 	go func() {
