@@ -45,8 +45,10 @@ var userScopes = []string{
 	"groups:read",
 	"im:history",
 	"im:read",
+	"im:write",
 	"mpim:history",
 	"mpim:read",
+	"mpim:write",
 	"users:read",
 }
 

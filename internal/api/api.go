@@ -263,6 +263,10 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			// 1:1 DM: find the target user ID.
 			userID, _, userErr := sender.Resolver.FindUserID(channelName)
 			if userErr != nil {
+				var ambErr *slacklistener.AmbiguousUserError
+				if errors.As(userErr, &ambErr) {
+					return sendResponse{Error: formatAmbiguousUsers(ctx, ambErr, sender)}
+				}
 				return sendResponse{Error: fmt.Sprintf("resolve user %s: %v", channelName, userErr)}
 			}
 			userIDs = []string{userID}
@@ -341,6 +345,47 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 
+
+// formatAmbiguousUsers builds a disambiguation message for Slack users,
+// enriched with conversation activity from the Slack API.
+func formatAmbiguousUsers(ctx context.Context, err *slacklistener.AmbiguousUserError, sender *SlackSender) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "multiple users match %q:\n", err.Query)
+	for _, m := range err.Matches {
+		fmt.Fprintf(&b, "  %s  %s", m.ID, m.DisplayName)
+		if m.RealName != "" && m.RealName != m.DisplayName {
+			fmt.Fprintf(&b, "  (%s)", m.RealName)
+		}
+		if m.Email != "" {
+			fmt.Fprintf(&b, "  <%s>", m.Email)
+		}
+
+		// Check actual Slack conversation history for this specific user ID.
+		ch, _, _, openErr := sender.UserAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{m.ID},
+		})
+		if openErr != nil {
+			fmt.Fprintf(&b, "  [cannot open DM: %v]", openErr)
+		} else {
+			hist, histErr := sender.UserAPI.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
+				ChannelID: ch.ID,
+				Limit:     1,
+			})
+			if histErr != nil {
+				fmt.Fprintf(&b, "  [cannot read history: %v]", histErr)
+			} else if len(hist.Messages) > 0 {
+				lastTS := slacklistener.ParseTimestamp(hist.Messages[0].Timestamp)
+				fmt.Fprintf(&b, "  [last msg: %s]", lastTS.Format("2006-01-02"))
+			} else {
+				b.WriteString("  [no conversation history]")
+			}
+		}
+
+		b.WriteString("\n")
+	}
+	b.WriteString("ask the user to confirm which person to send to, then use their user ID")
+	return b.String()
+}
 
 // formatAmbiguousContacts builds a disambiguation message enriched with
 // conversation activity (last message date, total messages) from the file store.
