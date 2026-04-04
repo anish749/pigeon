@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -93,7 +94,7 @@ func printGroupedResults(results []store.SearchResult) {
 			dateStr = minDate + " to " + maxDate
 		}
 
-		dir := filepath.Join(store.DataDir(), k.platform, k.account, k.conversation)
+		dir := filepath.Join(paths.DataDir(), k.platform, k.account, k.conversation)
 		fmt.Printf("%s/%s/%s (%s, %d matches)\n", k.platform, k.account, k.conversation, dateStr, g.matches)
 		fmt.Printf("    %s\n", dir)
 		for i, section := range g.sections {

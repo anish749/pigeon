@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anish/claude-msg-utils/internal/daemon"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 // Session is the data stored in a session file.
@@ -155,7 +155,7 @@ func ListAllSessions() ([]*Session, error) {
 
 // SessionsDir returns the directory where session files are stored.
 func SessionsDir() string {
-	return filepath.Join(daemon.StateDir(), "sessions")
+	return paths.SessionsDir()
 }
 
 // SessionPath returns the full path to a session file for a platform+account.

@@ -3,19 +3,18 @@ package main
 import (
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/server"
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/anish/claude-msg-utils/internal/daemon"
+	"github.com/anish/claude-msg-utils/internal/paths"
 	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
 )
 
 func main() {
 	initLogging()
 
-	s := mcpserver.New(daemon.SocketPath())
+	s := mcpserver.New(paths.SocketPath())
 
 	slog.Info("serving stdio")
 	if err := server.ServeStdio(s); err != nil {
@@ -25,15 +24,10 @@ func main() {
 }
 
 func initLogging() {
-	stateDir := os.Getenv("PIGEON_STATE_DIR")
-	if stateDir == "" {
-		home, _ := os.UserHomeDir()
-		stateDir = filepath.Join(home, ".local", "state", "pigeon")
-	}
-	os.MkdirAll(stateDir, 0755)
+	os.MkdirAll(paths.StateDir(), 0755)
 
 	w := &lumberjack.Logger{
-		Filename:   filepath.Join(stateDir, "mcp.log"),
+		Filename:   paths.MCPLogPath(),
 		MaxSize:    5,
 		MaxBackups: 1,
 	}

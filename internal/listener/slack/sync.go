@@ -14,6 +14,7 @@ import (
 	goslack "github.com/slack-go/slack"
 	"gopkg.in/yaml.v3"
 
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -27,7 +28,7 @@ const (
 type syncCursors map[string]string
 
 func cursorsPath(workspace string) string {
-	return filepath.Join(store.DataDir(), "slack", workspace, ".sync-cursors.yaml")
+	return filepath.Join(paths.DataDir(), "slack", workspace, ".sync-cursors.yaml")
 }
 
 func loadCursors(workspace string) syncCursors {

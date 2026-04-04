@@ -13,6 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/anish/claude-msg-utils/internal/hub"
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -80,7 +81,7 @@ func (l *Listener) handleLoggedOut(ctx context.Context, evt *events.LoggedOut) {
 	}
 
 	// Delete message data.
-	dataDir := filepath.Join(store.DataDir(), "whatsapp", l.account)
+	dataDir := filepath.Join(paths.DataDir(), "whatsapp", l.account)
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.ErrorContext(ctx, "whatsapp: failed to delete message data",
 			"account", l.account, "error", err)

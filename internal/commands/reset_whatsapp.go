@@ -12,7 +12,7 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 func RunResetWhatsApp(account string) error {
@@ -74,7 +74,7 @@ func RunResetWhatsApp(account string) error {
 	}
 
 	// Delete message data.
-	dataDir := filepath.Join(store.DataDir(), "whatsapp", wa.Account)
+	dataDir := filepath.Join(paths.DataDir(), "whatsapp", wa.Account)
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.WarnContext(ctx, "failed to delete message data", "dir", dataDir, "error", err)
 	} else {

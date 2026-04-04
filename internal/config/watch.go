@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 // Watch watches the config file for changes and sends the reloaded Config
@@ -26,13 +28,13 @@ func Watch(ctx context.Context) <-chan *Config {
 
 		// Watch the directory, not the file, because editors often
 		// write to a temp file and rename — which removes a file-level watch.
-		dir := filepath.Dir(ConfigPath())
+		dir := filepath.Dir(paths.ConfigPath())
 		if err := watcher.Add(dir); err != nil {
 			slog.ErrorContext(ctx, "failed to watch config directory", "error", err)
 			return
 		}
 
-		configFile := filepath.Base(ConfigPath())
+		configFile := filepath.Base(paths.ConfigPath())
 
 		for {
 			select {
