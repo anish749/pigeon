@@ -3,16 +3,19 @@ package mcpserver
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	mcptool "github.com/anish/claude-msg-utils/internal/mcp/tool"
+	"github.com/anish/claude-msg-utils/internal/hub"
 )
 
-// New creates a configured MCP server with channel support and all tools registered.
-func New() *server.MCPServer {
+// New creates a configured MCP server with channel support. The server
+// connects to the pigeon daemon at socketPath to receive incoming messages
+// and forward them as channel notifications to Claude Code.
+func New(socketPath string) *server.MCPServer {
+	var s *server.MCPServer
+
 	hooks := &server.Hooks{}
 	hooks.AddAfterInitialize(func(ctx context.Context, id any, req *mcp.InitializeRequest, result *mcp.InitializeResult) {
 		result.Capabilities.Experimental = map[string]any{
@@ -20,39 +23,23 @@ func New() *server.MCPServer {
 		}
 		ci := req.Params.ClientInfo
 		slog.Info("mcp initialized", "client", ci.Name, "version", ci.Version)
+
+		if err := startDaemonStream(ctx, socketPath, func(incoming hub.IncomingMsg) error {
+			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{"content": incoming})
+		}); err != nil {
+			// Notify Claude so the user sees the error in the session.
+			s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
+				"content": "pigeon channel error: " + err.Error(),
+			})
+			slog.Error("failed to start daemon stream", "error", err)
+		}
 	})
 
-	s := server.NewMCPServer("pigeon", "0.1.0",
+	s = server.NewMCPServer("pigeon", "0.1.0",
 		server.WithToolCapabilities(true),
-		server.WithInstructions("Pigeon MCP probe server. Use the 'probe' tool to dump environment, process, and session info. This is an experiment to validate the MCP channel protocol."),
+		server.WithInstructions("Pigeon MCP channel server. Receives messages from WhatsApp and Slack via the pigeon daemon and delivers them as channel notifications."),
 		server.WithHooks(hooks),
 	)
 
-	mcptool.Register(s)
-
 	return s
-}
-
-// RunCoo sends a channel notification every interval. Blocks forever.
-func RunCoo(s *server.MCPServer, interval time.Duration) {
-	// Wait for the stdio session to register.
-	time.Sleep(3 * time.Second)
-
-	slog.Info("coo goroutine started", "interval", interval)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		if err := s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
-			"content": "coo",
-			"meta": map[string]any{
-				"ts": time.Now().Format(time.RFC3339),
-			},
-		}); err != nil {
-			slog.Error("coo notification failed", "error", err)
-		} else {
-			slog.Debug("coo sent")
-		}
-		<-ticker.C
-	}
 }

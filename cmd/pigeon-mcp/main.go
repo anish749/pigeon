@@ -4,20 +4,18 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/anish/claude-msg-utils/internal/daemon"
 	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
 )
 
 func main() {
 	initLogging()
 
-	s := mcpserver.New()
-
-	go mcpserver.RunCoo(s, 3*time.Second)
+	s := mcpserver.New(daemon.SocketPath())
 
 	slog.Info("serving stdio")
 	if err := server.ServeStdio(s); err != nil {
@@ -40,6 +38,6 @@ func initLogging() {
 		MaxBackups: 1,
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	})))
 }
