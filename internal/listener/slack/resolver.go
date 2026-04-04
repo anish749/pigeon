@@ -298,7 +298,7 @@ func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, str
 		ChannelID: query,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("no channel matching %q — use the exact channel or contact name from 'pigeon list'", query)
+		return "", "", fmt.Errorf("no channel matching %q: %w", query, err)
 	}
 	name := FormatChannelName(*ch)
 	if ch.IsIM {

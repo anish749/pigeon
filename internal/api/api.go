@@ -307,9 +307,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 			userIDs = []string{userID}
 		}
 
-		// Always use user token for conversations.open — bot token can't open
-		// DMs with Slack Connect users.
-		ch, _, _, openErr := sender.UserAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
 			Users: userIDs,
 		})
 		if openErr != nil {
