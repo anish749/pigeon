@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pigeon": {
-      "command": "./mcp",
-      "args": []
+      "command": "./pigeon",
+      "args": ["mcp"]
     }
   }
 }
