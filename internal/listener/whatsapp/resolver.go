@@ -15,6 +15,15 @@ func containsLower(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), substr)
 }
 
+func isDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // Resolver provides consistent name resolution for WhatsApp contacts and groups.
 // It reads from whatsmeow's ContactStore (persisted in SQLite) and maintains an
 // in-memory cache for group names. Both the real-time listener and history sync
@@ -134,6 +143,11 @@ func (r *Resolver) FindJID(ctx context.Context, query string) (types.JID, error)
 	}
 
 	if len(matches) == 0 {
+		// If query looks like a phone number, construct a JID directly.
+		phone := strings.TrimPrefix(q, "+")
+		if len(phone) >= 7 && isDigits(phone) {
+			return types.NewJID(phone, types.DefaultUserServer), nil
+		}
 		return types.JID{}, fmt.Errorf("no contact matching %q", query)
 	}
 	if len(matches) == 1 {
