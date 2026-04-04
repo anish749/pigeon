@@ -109,7 +109,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Skip messages from channels the user hasn't joined.
 	// Always allow DMs and group DMs through — the bot only receives these for
 	// its own conversations, and the bot owner should see all messages to the bot.
-	if msg.ChannelType != "im" && msg.ChannelType != "mim" && !l.resolver.IsMember(msg.Channel) {
+	if msg.ChannelType != "im" && msg.ChannelType != "mpim" && !l.resolver.IsMember(msg.Channel) {
 		return
 	}
 
@@ -117,7 +117,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	channelName := l.resolver.ChannelName(ctx, msg.Channel)
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
-	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mim") && !l.resolver.IsMember(msg.Channel)
+	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
 	if isBotDM {
 		userName = "sent to pigeon by " + userName
 	}
@@ -158,7 +158,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - Public channels — only when the bot is @mentioned
 	if l.onMessage != nil {
 		switch msg.ChannelType {
-		case "im", "mim":
+		case "im", "mpim":
 			l.onMessage("slack", l.workspace, channelName)
 		case "group":
 			l.onMessage("slack", l.workspace, channelName)
