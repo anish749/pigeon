@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/paths"
@@ -25,7 +26,7 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
-	body, _ := json.Marshal(api.SendRequest{
+	body, err := json.Marshal(api.SendRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
 		Contact:   p.Contact,
@@ -34,7 +35,11 @@ func RunSend(p SendParams) error {
 		Broadcast: p.Broadcast,
 		AsUser:    p.AsUser,
 		DryRun:    p.DryRun,
+		SessionID: os.Getenv("PIGEON_SESSION_ID"),
 	})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -50,13 +55,21 @@ func RunSend(p SendParams) error {
 	defer resp.Body.Close()
 
 	var result api.SendResponse
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("unexpected response: %s", string(data))
 	}
 
 	if !result.OK {
 		return fmt.Errorf("%s", result.Error)
+	}
+
+	if result.OutboxID != "" {
+		fmt.Printf("Submitted for review (ID: %s)\n", result.OutboxID)
+		return nil
 	}
 
 	if p.DryRun {
