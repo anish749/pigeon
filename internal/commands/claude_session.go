@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,6 +16,9 @@ import (
 	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
 )
+
+// errGoBack signals that the user wants to return to the account selector.
+var errGoBack = errors.New("go back")
 
 // ANSI color helpers.
 const (
@@ -32,23 +36,32 @@ type ClaudeSessionParams struct {
 }
 
 func RunClaudeSession(p ClaudeSessionParams) error {
-	var acct account.Account
-
-	// If platform+account not provided, let the user choose interactively.
-	if p.Platform == "" || p.Account == "" {
-		var err error
-		acct, err = selectAccount()
-		if err != nil {
-			return err
-		}
-	} else {
-		acct = account.New(p.Platform, p.Account)
-		// Validate that the provided platform+account exist in config.
+	// Non-interactive path: platform+account provided via flags.
+	if p.Platform != "" && p.Account != "" {
+		acct := account.New(p.Platform, p.Account)
 		if err := validateAccount(acct); err != nil {
 			return err
 		}
+		return runSessionForAccount(acct)
 	}
 
+	// Interactive path: loop so the user can go back to the selector.
+	for {
+		acct, err := selectAccount()
+		if err != nil {
+			return err
+		}
+
+		err = runSessionForAccount(acct)
+		if errors.Is(err, errGoBack) {
+			fmt.Println()
+			continue
+		}
+		return err
+	}
+}
+
+func runSessionForAccount(acct account.Account) error {
 	sf, err := claude.OpenSession(acct)
 	if err != nil {
 		return err
@@ -131,6 +144,9 @@ func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	}
 
 	if !confirm("Continue with this session?", true) {
+		if !confirm("Create a new session for this account?", false) {
+			return errGoBack
+		}
 		fmt.Println()
 		return handleNewSession(sf, acct, cwd)
 	}
@@ -147,8 +163,7 @@ func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) 
 	fmt.Printf("  %s   and may be exposed to others talking to pigeon over %s in %s.%s\n\n", yellow, acct.Platform, acct.Name, reset)
 
 	if !confirm("Continue?", true) {
-		fmt.Println("Aborted.")
-		return nil
+		return errGoBack
 	}
 
 	sessionID := uuid.New().String()
