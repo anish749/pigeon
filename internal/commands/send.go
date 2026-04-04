@@ -22,15 +22,15 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
-	body, _ := json.Marshal(map[string]any{
-		"platform":  p.Platform,
-		"account":   p.Account,
-		"contact":   p.Contact,
-		"message":   p.Message,
-		"thread":    p.Thread,
-		"broadcast": p.Broadcast,
-		"as_user":   p.AsUser,
-		"dry_run":   p.DryRun,
+	body, _ := json.Marshal(api.SendRequest{
+		Platform:  p.Platform,
+		Account:   p.Account,
+		Contact:   p.Contact,
+		Message:   p.Message,
+		Thread:    p.Thread,
+		Broadcast: p.Broadcast,
+		AsUser:    p.AsUser,
+		DryRun:    p.DryRun,
 	})
 
 	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
@@ -39,15 +39,7 @@ func RunSend(p SendParams) error {
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		OK          bool   `json:"ok"`
-		Timestamp   string `json:"timestamp"`
-		Error       string `json:"error"`
-		ChannelID   string `json:"channel_id"`
-		ChannelName string `json:"channel_name"`
-		SendAs      string `json:"send_as"`
-		Email       string `json:"email"`
-	}
+	var result api.SendResponse
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("unexpected response: %s", string(data))
