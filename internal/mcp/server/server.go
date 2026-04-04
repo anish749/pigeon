@@ -24,7 +24,7 @@ func New(socketPath string) *server.MCPServer {
 		ci := req.Params.ClientInfo
 		slog.Info("mcp initialized", "client", ci.Name, "version", ci.Version)
 
-		if err := startDaemonStream(ctx, socketPath, func(incoming hub.IncomingMsg) error {
+		if err := startDaemonStream(context.Background(), socketPath, func(incoming hub.IncomingMsg) error {
 			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{"content": incoming})
 		}); err != nil {
 			// Notify Claude so the user sees the error in the session.

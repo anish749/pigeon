@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,7 +28,8 @@ type daemonStream struct {
 
 // startDaemonStream connects to the daemon's SSE endpoint and forwards
 // incoming messages via notify. Reconnects automatically in a background
-// goroutine. Returns an error if initial setup fails.
+// goroutine. The provided context should be long-lived (not request-scoped).
+// Returns an error if initial setup fails.
 func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.IncomingMsg) error) error {
 	sessionID := os.Getenv("PIGEON_SESSION_ID")
 	if sessionID == "" {
@@ -50,7 +52,9 @@ func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.I
 // run connects to the daemon's SSE endpoint and forwards messages.
 // Reconnects automatically on failure. Blocks until ctx is cancelled.
 func (ds *daemonStream) run(ctx context.Context) {
+	slog.Info("daemon stream goroutine started", "session_id", ds.sessionID, "socket", ds.socketPath)
 	for {
+		slog.Info("attempting sse connection", "session_id", ds.sessionID)
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
 			return
@@ -82,12 +86,13 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+		return fmt.Errorf("connect to %s: %w", ds.socketPath, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
 	slog.Info("sse connected to daemon", "session_id", ds.sessionID, "cwd", ds.cwd)
