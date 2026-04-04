@@ -49,3 +49,9 @@ func (a Account) DataDir() string {
 func (a Account) NameSlug() string {
 	return slug.Make(a.Name)
 }
+
+// ConversationDir returns the full absolute data directory path for a
+// conversation within this account.
+func (a Account) ConversationDir(conversation string) string {
+	return filepath.Join(a.DataDir(), conversation)
+}

@@ -435,7 +435,7 @@ func formatAmbiguousContacts(err *walistener.AmbiguousContactError, acct account
 // convActivity returns the most recent message date and total line count
 // for a conversation directory.
 func convActivity(acct account.Account, conversation string) (lastDate string, totalLines int) {
-	dir := filepath.Join(acct.DataDir(), conversation)
+	dir := acct.ConversationDir(conversation)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", 0

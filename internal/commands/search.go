@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -104,7 +103,7 @@ func printGroupedResults(results []store.SearchResult) {
 		}
 
 		a := account.New(k.platform, k.account)
-		dir := filepath.Join(a.DataDir(), k.conversation)
+		dir := a.ConversationDir(k.conversation)
 		fmt.Printf("%s/%s (%s, %d matches)\n", a.Display(), k.conversation, dateStr, g.matches)
 		fmt.Printf("    %s\n", dir)
 		for i, section := range g.sections {

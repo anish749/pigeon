@@ -94,6 +94,14 @@ func TestDataDir(t *testing.T) {
 	}
 }
 
+func TestConversationDir(t *testing.T) {
+	a := New("slack", "My Workspace")
+	want := filepath.Join(paths.DataDir(), "slack", "my-workspace", "#general")
+	if got := a.ConversationDir("#general"); got != want {
+		t.Errorf("ConversationDir() = %q, want %q", got, want)
+	}
+}
+
 func TestSlugIdempotent(t *testing.T) {
 	// Slugifying an already-slugified name should be a no-op.
 	a := New("slack", "coding-with-anish")

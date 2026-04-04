@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,7 +59,7 @@ func RunRead(p ReadParams) error {
 
 	lines = enrichLines(lines, aliases)
 
-	dir := filepath.Join(acct.DataDir(), conv.DirName)
+	dir := acct.ConversationDir(conv.DirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.DisplayName)
 	fmt.Printf("    %s\n", dir)
 	fmt.Println(strings.Join(lines, "\n"))
