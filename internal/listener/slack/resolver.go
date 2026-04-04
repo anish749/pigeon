@@ -266,12 +266,13 @@ func (r *Resolver) FindUserID(query string) (string, string, error) {
 // FindChannelID resolves a channel for sending. Requires an exact match:
 // either a channel ID (e.g. "D1234567890") or an exact channel name
 // (e.g. "#engineering", "@Jeremiah Lu"). Case-insensitive but no substring matching.
-func (r *Resolver) FindChannelID(query string) (string, string, error) {
+// Falls back to the Slack API for channel IDs not yet in the cache.
+func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, string, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	// Exact channel ID match.
 	if name, ok := r.channels[query]; ok {
+		r.mu.RUnlock()
 		return query, name, nil
 	}
 
@@ -280,15 +281,31 @@ func (r *Resolver) FindChannelID(query string) (string, string, error) {
 	for id, name := range r.channels {
 		lower := strings.ToLower(name)
 		if lower == q {
+			r.mu.RUnlock()
 			return id, name, nil
 		}
 		// Match without prefix: "engineering" matches "#engineering"
 		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') && lower[1:] == q {
+			r.mu.RUnlock()
 			return id, name, nil
 		}
 	}
+	r.mu.RUnlock()
 
-	return "", "", fmt.Errorf("no channel matching %q — use the exact channel or contact name from 'pigeon list'", query)
+	// API fallback: try looking up the query as a channel ID directly.
+	// This handles channels that exist on disk but weren't in the last sync.
+	ch, err := r.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+		ChannelID: query,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("no channel matching %q — use the exact channel or contact name from 'pigeon list'", query)
+	}
+	name := FormatChannelName(*ch)
+	if ch.IsIM {
+		name = "@" + r.UserName(ctx, ch.User)
+	}
+	r.RegisterChannel(query, name)
+	return query, name, nil
 }
 
 // FormatChannelName returns a human-readable channel name with prefix (# for channels, @ for DMs).

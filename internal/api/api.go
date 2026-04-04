@@ -273,7 +273,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	} else {
 		var err error
-		channelID, channelName, err = sender.Resolver.FindChannelID(req.Contact)
+		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Contact)
 		if err != nil {
 			return SendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
 		}
