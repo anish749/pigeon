@@ -25,15 +25,44 @@ to update scopes.`,
   pigeon send -p slack -a acme-corp -c @alice --as-user -m "sent as me, not the bot"`,
 	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		broadcast, _ := cmd.Flags().GetBool("broadcast")
-		asUser, _ := cmd.Flags().GetBool("as-user")
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		platform, err := cmd.Flags().GetString("platform")
+		if err != nil {
+			return err
+		}
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
+		contact, err := cmd.Flags().GetString("contact")
+		if err != nil {
+			return err
+		}
+		message, err := cmd.Flags().GetString("message")
+		if err != nil {
+			return err
+		}
+		thread, err := cmd.Flags().GetString("thread")
+		if err != nil {
+			return err
+		}
+		broadcast, err := cmd.Flags().GetBool("broadcast")
+		if err != nil {
+			return err
+		}
+		asUser, err := cmd.Flags().GetBool("as-user")
+		if err != nil {
+			return err
+		}
+		dryRun, err := cmd.Flags().GetBool("dry-run")
+		if err != nil {
+			return err
+		}
 		return commands.RunSend(commands.SendParams{
-			Platform:  mustString(cmd, "platform"),
-			Account:   mustString(cmd, "account"),
-			Contact:   mustString(cmd, "contact"),
-			Message:   mustString(cmd, "message"),
-			Thread:    mustString(cmd, "thread"),
+			Platform:  platform,
+			Account:   account,
+			Contact:   contact,
+			Message:   message,
+			Thread:    thread,
 			Broadcast: broadcast,
 			AsUser:    asUser,
 			DryRun:    dryRun,
