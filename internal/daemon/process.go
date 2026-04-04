@@ -4,36 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
-
-// StateDir returns the directory for daemon runtime state (PID file, logs).
-// Respects PIGEON_STATE_DIR env var, defaults to ~/.local/state/pigeon/
-func StateDir() string {
-	if d := os.Getenv("PIGEON_STATE_DIR"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "pigeon")
-}
-
-// PIDPath returns the path to the daemon PID file.
-func PIDPath() string {
-	return filepath.Join(StateDir(), "daemon.pid")
-}
-
-// LogPath returns the path to the daemon log file.
-func LogPath() string {
-	return filepath.Join(StateDir(), "daemon.log")
-}
-
-// SocketPath returns the path to the daemon's unix domain socket.
-func SocketPath() string {
-	return filepath.Join(StateDir(), "daemon.sock")
-}
 
 // IsRunning checks whether the daemon process is alive.
 // Cleans up stale PID files.
@@ -44,7 +20,7 @@ func IsRunning() bool {
 	}
 	if err := syscall.Kill(pid, 0); err != nil {
 		// Process doesn't exist — clean stale PID file.
-		os.Remove(PIDPath())
+		os.Remove(paths.PIDPath())
 		return false
 	}
 	return true
@@ -57,7 +33,7 @@ func Status() (running bool, pid int) {
 		return false, 0
 	}
 	if err := syscall.Kill(p, 0); err != nil {
-		os.Remove(PIDPath())
+		os.Remove(paths.PIDPath())
 		return false, 0
 	}
 	return true, p
@@ -72,10 +48,10 @@ func Start() error {
 	}
 
 	// Clean stale files.
-	os.Remove(PIDPath())
-	os.Remove(SocketPath())
+	os.Remove(paths.PIDPath())
+	os.Remove(paths.SocketPath())
 
-	if err := os.MkdirAll(StateDir(), 0755); err != nil {
+	if err := os.MkdirAll(paths.StateDir(), 0755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
@@ -111,7 +87,7 @@ func Start() error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("daemon did not start within 3 seconds (check %s)", LogPath())
+	return fmt.Errorf("daemon did not start within 3 seconds (check %s)", paths.LogPath())
 }
 
 // Stop sends SIGTERM to the daemon and waits for it to exit.
@@ -122,14 +98,14 @@ func Stop() error {
 	}
 
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		os.Remove(PIDPath())
+		os.Remove(paths.PIDPath())
 		return fmt.Errorf("daemon is not running")
 	}
 
 	// Wait up to 5 seconds for it to die.
 	for range 50 {
 		if err := syscall.Kill(pid, 0); err != nil {
-			os.Remove(PIDPath())
+			os.Remove(paths.PIDPath())
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -140,16 +116,16 @@ func Stop() error {
 // WritePID writes the current process's PID to the PID file.
 // Called by the daemon process itself after starting.
 func WritePID() error {
-	if err := os.MkdirAll(StateDir(), 0755); err != nil {
+	if err := os.MkdirAll(paths.StateDir(), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(PIDPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+	return os.WriteFile(paths.PIDPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
 }
 
 // RemovePID removes the PID file and socket. Called on daemon shutdown.
 func RemovePID() {
-	os.Remove(PIDPath())
-	os.Remove(SocketPath())
+	os.Remove(paths.PIDPath())
+	os.Remove(paths.SocketPath())
 }
 
 // EnsureRunning starts the daemon if it is not already running.
@@ -161,7 +137,7 @@ func EnsureRunning() error {
 }
 
 func readPID() (int, error) {
-	data, err := os.ReadFile(PIDPath())
+	data, err := os.ReadFile(paths.PIDPath())
 	if err != nil {
 		return 0, err
 	}

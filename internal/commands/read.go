@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -58,7 +59,7 @@ func RunRead(p ReadParams) error {
 
 	lines = enrichLines(lines, aliases)
 
-	dir := filepath.Join(store.DataDir(), p.Platform, p.Account, conv.DirName)
+	dir := filepath.Join(paths.DataDir(), p.Platform, p.Account, conv.DirName)
 	fmt.Printf("--- %s/%s/%s ---\n", p.Platform, p.Account, conv.DisplayName)
 	fmt.Printf("    %s\n", dir)
 	fmt.Println(strings.Join(lines, "\n"))

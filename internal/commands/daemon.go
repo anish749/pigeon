@@ -14,6 +14,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 func DaemonStart() error {
@@ -35,7 +36,7 @@ func DaemonStop() error {
 func DaemonStatus() error {
 	running, pid := daemon.Status()
 	if running {
-		fmt.Printf("Running (pid=%d, log=%s)\n", pid, daemon.LogPath())
+		fmt.Printf("Running (pid=%d, log=%s)\n", pid, paths.LogPath())
 	} else {
 		fmt.Println("Not running.")
 	}
@@ -58,7 +59,7 @@ func DaemonRestart() error {
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
 func DaemonRun() error {
 	logWriter := &lumberjack.Logger{
-		Filename:   daemon.LogPath(),
+		Filename:   paths.LogPath(),
 		MaxSize:    10, // megabytes
 		MaxBackups: 2,
 	}
@@ -77,7 +78,7 @@ func DaemonRun() error {
 	}
 
 	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 {
-		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", config.ConfigPath())
+		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", paths.ConfigPath())
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -92,7 +93,7 @@ func DaemonRun() error {
 	slackMgr := daemon.NewSlackManager(apiServer)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	go apiServer.Start(ctx, daemon.SocketPath())
+	go apiServer.Start(ctx, paths.SocketPath())
 
 	slog.Info("daemon started",
 		"whatsapp_accounts", len(cfg.WhatsApp),
