@@ -15,10 +15,15 @@ the given username and workspace name, prints it to stdout, and copies
 it to the clipboard. Use this before creating or updating a Slack app.`,
 	Example: `  pigeon generate-manifest --username=Anish --workspace=acme-corp`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunGenerateManifest(
-			mustString(cmd, "username"),
-			mustString(cmd, "workspace"),
-		)
+		username, err := cmd.Flags().GetString("username")
+		if err != nil {
+			return err
+		}
+		workspace, err := cmd.Flags().GetString("workspace")
+		if err != nil {
+			return err
+		}
+		return commands.RunGenerateManifest(username, workspace)
 	},
 }
 

@@ -13,7 +13,10 @@ var setupWhatsAppCmd = &cobra.Command{
 	Example: `  pigeon setup-whatsapp
   pigeon setup-whatsapp --db=/path/to/whatsapp.db`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, _ := cmd.Flags().GetString("db")
+		db, err := cmd.Flags().GetString("db")
+		if err != nil {
+			return err
+		}
 		return commands.RunSetupWhatsApp(db)
 	},
 }

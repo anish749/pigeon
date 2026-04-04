@@ -15,14 +15,37 @@ var readCmd = &cobra.Command{
   pigeon read --platform=whatsapp --account=+14155551234 --contact=Bob --since=2h`,
 	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		last, _ := cmd.Flags().GetInt("last")
+		platform, err := cmd.Flags().GetString("platform")
+		if err != nil {
+			return err
+		}
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
+		contact, err := cmd.Flags().GetString("contact")
+		if err != nil {
+			return err
+		}
+		date, err := cmd.Flags().GetString("date")
+		if err != nil {
+			return err
+		}
+		last, err := cmd.Flags().GetInt("last")
+		if err != nil {
+			return err
+		}
+		since, err := cmd.Flags().GetString("since")
+		if err != nil {
+			return err
+		}
 		return commands.RunRead(commands.ReadParams{
-			Platform: mustString(cmd, "platform"),
-			Account:  mustString(cmd, "account"),
-			Contact:  mustString(cmd, "contact"),
-			Date:     mustString(cmd, "date"),
+			Platform: platform,
+			Account:  account,
+			Contact:  contact,
+			Date:     date,
 			Last:     last,
-			Since:    mustString(cmd, "since"),
+			Since:    since,
 		})
 	},
 }
@@ -40,7 +63,3 @@ func init() {
 	rootCmd.AddCommand(readCmd)
 }
 
-func mustString(cmd *cobra.Command, name string) string {
-	v, _ := cmd.Flags().GetString(name)
-	return v
-}

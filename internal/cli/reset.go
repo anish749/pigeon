@@ -14,10 +14,15 @@ var resetCmd = &cobra.Command{
 The next daemon start will re-sync from scratch.`,
 	Example: `  pigeon reset --platform=slack --account=acme-corp`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunReset(
-			mustString(cmd, "platform"),
-			mustString(cmd, "account"),
-		)
+		platform, err := cmd.Flags().GetString("platform")
+		if err != nil {
+			return err
+		}
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
+		return commands.RunReset(platform, account)
 	},
 }
 
@@ -26,7 +31,11 @@ var resetWhatsAppCmd = &cobra.Command{
 	Short:  "Delete WhatsApp device pairing and data",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunResetWhatsApp(mustString(cmd, "account"))
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
+		return commands.RunResetWhatsApp(account)
 	},
 }
 

@@ -15,11 +15,27 @@ var searchCmd = &cobra.Command{
   pigeon search -q "lunch" --since=7d`,
 	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		query, err := cmd.Flags().GetString("query")
+		if err != nil {
+			return err
+		}
+		platform, err := cmd.Flags().GetString("platform")
+		if err != nil {
+			return err
+		}
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
+		since, err := cmd.Flags().GetString("since")
+		if err != nil {
+			return err
+		}
 		return commands.RunSearch(commands.SearchParams{
-			Query:    mustString(cmd, "query"),
-			Platform: mustString(cmd, "platform"),
-			Account:  mustString(cmd, "account"),
-			Since:    mustString(cmd, "since"),
+			Query:    query,
+			Platform: platform,
+			Account:  account,
+			Since:    since,
 		})
 	},
 }

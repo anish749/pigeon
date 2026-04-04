@@ -15,8 +15,14 @@ var listCmd = &cobra.Command{
   pigeon list --platform=whatsapp --account=+14155551234`,
 	PreRunE: ensureDaemon,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		platform, _ := cmd.Flags().GetString("platform")
-		account, _ := cmd.Flags().GetString("account")
+		platform, err := cmd.Flags().GetString("platform")
+		if err != nil {
+			return err
+		}
+		account, err := cmd.Flags().GetString("account")
+		if err != nil {
+			return err
+		}
 		return commands.RunList(platform, account)
 	},
 }
