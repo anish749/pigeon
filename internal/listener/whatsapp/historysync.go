@@ -32,7 +32,7 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 	syncType := data.GetSyncType().String()
 
 	slog.InfoContext(ctx, "whatsapp: history sync received",
-		"account", l.account,
+		"account", l.acct,
 		"type", syncType,
 		"conversations", len(data.GetConversations()),
 		"pushnames", len(data.GetPushnames()),
@@ -51,7 +51,7 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 	}
 
 	slog.InfoContext(ctx, "whatsapp: history sync complete",
-		"account", l.account,
+		"account", l.acct,
 		"type", syncType,
 		"messages_written", totalMessages,
 	)
@@ -162,9 +162,9 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 
 		senderName := l.resolveHistorySender(ctx, chatJID, wmi, isGroup)
 
-		if err := store.WriteMessage("whatsapp", l.account, convDir, senderName, text, ts); err != nil {
+		if err := store.WriteMessage(l.acct.Platform, l.acct.NameSlug(), convDir, senderName, text, ts); err != nil {
 			slog.ErrorContext(ctx, "whatsapp: history sync: write failed",
-				"error", err, "account", l.account, "conv", convDir)
+				"error", err, "account", l.acct, "conv", convDir)
 			continue
 		}
 		written++
@@ -172,7 +172,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 
 	if written > 0 {
 		slog.InfoContext(ctx, "whatsapp: history sync: conversation done",
-			"conv", convDir, "messages", written, "account", l.account)
+			"conv", convDir, "messages", written, "account", l.acct)
 	}
 
 	return written

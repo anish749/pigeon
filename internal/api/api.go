@@ -21,9 +21,9 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/hub"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
-	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
@@ -33,26 +33,26 @@ import (
 // WhatsAppSender holds everything needed to send a WhatsApp message.
 type WhatsAppSender struct {
 	Client   *whatsmeow.Client
-	Account  string
+	Acct     account.Account
 	Resolver *walistener.Resolver
 }
 
 // SlackSender holds everything needed to send a Slack message.
 type SlackSender struct {
-	BotAPI    *goslack.Client // bot token client (default for sends)
-	UserAPI   *goslack.Client // user token client (--as-user sends)
-	Resolver  *slacklistener.Resolver
-	Messages  *slacklistener.MessageStore
-	Workspace string
-	BotName   string // the bot's display name
-	UserName  string // the authenticated user's display name
+	BotAPI   *goslack.Client // bot token client (default for sends)
+	UserAPI  *goslack.Client // user token client (--as-user sends)
+	Resolver *slacklistener.Resolver
+	Messages *slacklistener.MessageStore
+	Acct     account.Account
+	BotName  string // the bot's display name
+	UserName string // the authenticated user's display name
 }
 
 // Server is the daemon's HTTP API server.
 type Server struct {
 	mu       sync.RWMutex
-	whatsapp map[string]*WhatsAppSender // account → sender
-	slack    map[string]*SlackSender    // workspace → sender
+	whatsapp map[string]*WhatsAppSender // account slug → sender
+	slack    map[string]*SlackSender    // account slug → sender
 	hub      *hub.Hub
 }
 
@@ -68,14 +68,14 @@ func NewServer(h *hub.Hub) *Server {
 // RegisterWhatsApp registers a WhatsApp client for sending.
 func (s *Server) RegisterWhatsApp(sender *WhatsAppSender) {
 	s.mu.Lock()
-	s.whatsapp[sender.Account] = sender
+	s.whatsapp[sender.Acct.NameSlug()] = sender
 	s.mu.Unlock()
 }
 
 // RegisterSlack registers a Slack client for sending.
 func (s *Server) RegisterSlack(sender *SlackSender) {
 	s.mu.Lock()
-	s.slack[sender.Workspace] = sender
+	s.slack[sender.Acct.NameSlug()] = sender
 	s.mu.Unlock()
 }
 
@@ -152,13 +152,14 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	acct := account.New(req.Platform, req.Account)
 	var resp SendResponse
 
-	switch req.Platform {
+	switch acct.Platform {
 	case "whatsapp":
-		resp = s.sendWhatsApp(ctx, req)
+		resp = s.sendWhatsApp(ctx, acct, req)
 	case "slack":
-		resp = s.sendSlack(ctx, req)
+		resp = s.sendSlack(ctx, acct, req)
 	default:
 		resp = SendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
 	}
@@ -170,12 +171,12 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, resp)
 }
 
-func (s *Server) sendWhatsApp(ctx context.Context, req SendRequest) SendResponse {
+func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req SendRequest) SendResponse {
 	s.mu.RLock()
-	sender, ok := s.whatsapp[req.Account]
+	sender, ok := s.whatsapp[acct.NameSlug()]
 	s.mu.RUnlock()
 	if !ok {
-		return SendResponse{Error: fmt.Sprintf("no WhatsApp account %q registered", req.Account)}
+		return SendResponse{Error: fmt.Sprintf("no WhatsApp account %q registered", acct.Display())}
 	}
 
 	// Resolve contact query to JID.
@@ -183,7 +184,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, req SendRequest) SendResponse
 	if err != nil {
 		var ambErr *walistener.AmbiguousContactError
 		if errors.As(err, &ambErr) {
-			return SendResponse{Error: formatAmbiguousContacts(ambErr, sender.Account)}
+			return SendResponse{Error: formatAmbiguousContacts(ambErr, sender.Acct)}
 		}
 		return SendResponse{Error: fmt.Sprintf("resolve contact: %v", err)}
 	}
@@ -202,19 +203,19 @@ func (s *Server) sendWhatsApp(ctx context.Context, req SendRequest) SendResponse
 	if sender.Client.Store.ID != nil {
 		senderName = sender.Resolver.ContactName(ctx, types.NewJID(sender.Client.Store.ID.User, types.DefaultUserServer))
 	}
-	if err := store.WriteMessage("whatsapp", sender.Account, convDir, senderName, req.Message, resp.Timestamp); err != nil {
+	if err := store.WriteMessage(sender.Acct.Platform, sender.Acct.NameSlug(), convDir, senderName, req.Message, resp.Timestamp); err != nil {
 		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 	}
 
 	return SendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
 }
 
-func (s *Server) sendSlack(ctx context.Context, req SendRequest) SendResponse {
+func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRequest) SendResponse {
 	s.mu.RLock()
-	sender, ok := s.slack[req.Account]
+	sender, ok := s.slack[acct.NameSlug()]
 	s.mu.RUnlock()
 	if !ok {
-		return SendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", req.Account)}
+		return SendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
 	}
 
 	// Choose API client based on identity.
@@ -350,11 +351,11 @@ func (s *Server) sendSlack(ctx context.Context, req SendRequest) SendResponse {
 	// Store locally.
 	msgTS := slacklistener.ParseTimestamp(ts)
 	if req.Thread != "" {
-		if err := store.WriteThreadMessage("slack", sender.Workspace, channelName, req.Thread, senderName, req.Message, msgTS, true); err != nil {
+		if err := store.WriteThreadMessage(sender.Acct.Platform, sender.Acct.NameSlug(), channelName, req.Thread, senderName, req.Message, msgTS, true); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent thread message", "error", err)
 		}
 	} else {
-		if err := store.WriteMessage("slack", sender.Workspace, channelName, senderName, req.Message, msgTS); err != nil {
+		if err := store.WriteMessage(sender.Acct.Platform, sender.Acct.NameSlug(), channelName, senderName, req.Message, msgTS); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 		}
 	}
@@ -411,13 +412,13 @@ func formatAmbiguousUsers(ctx context.Context, err *slacklistener.AmbiguousUserE
 
 // formatAmbiguousContacts builds a disambiguation message enriched with
 // conversation activity (last message date, total messages) from the file store.
-func formatAmbiguousContacts(err *walistener.AmbiguousContactError, account string) string {
+func formatAmbiguousContacts(err *walistener.AmbiguousContactError, acct account.Account) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "multiple contacts match %q:\n", err.Query)
 
 	for _, m := range err.Matches {
 		convDir := m.Phone // conversation directories are "+phone"
-		lastDate, msgCount := convActivity("whatsapp", account, convDir)
+		lastDate, msgCount := convActivity(acct, convDir)
 
 		fmt.Fprintf(&b, "  %s  %s", m.Phone, m.Name)
 		if msgCount > 0 {
@@ -433,8 +434,8 @@ func formatAmbiguousContacts(err *walistener.AmbiguousContactError, account stri
 
 // convActivity returns the most recent message date and total line count
 // for a conversation directory.
-func convActivity(platform, account, conversation string) (lastDate string, totalLines int) {
-	dir := filepath.Join(paths.DataDir(), platform, account, conversation)
+func convActivity(acct account.Account, conversation string) (lastDate string, totalLines int) {
+	dir := acct.ConversationDir(conversation)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", 0

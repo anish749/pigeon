@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
@@ -30,25 +31,21 @@ type Session struct {
 // session file go through this struct, which holds an exclusive lock for
 // the lifetime of the SessionFile. Call Close to release the lock.
 type SessionFile struct {
-	platform string
-	account  string
-	lock     *os.File
-	data     *Session // nil if no session file exists yet
+	acct account.Account
+	lock *os.File
+	data *Session // nil if no session file exists yet
 }
 
 // OpenSession acquires an exclusive lock for the given platform+account and
 // loads the session data if a file exists. Returns a SessionFile that must
 // be closed when done. The lock is non-blocking — returns an error immediately
 // if another process holds it.
-func OpenSession(platform, account string) (*SessionFile, error) {
-	platform = strings.ToLower(platform)
-	account = strings.ToLower(account)
-
+func OpenSession(acct account.Account) (*SessionFile, error) {
 	if err := os.MkdirAll(SessionsDir(), 0755); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 
-	lp := lockPath(platform, account)
+	lp := SessionPath(acct) + ".lock"
 	f, err := os.OpenFile(lp, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open session lock %s: %w", lp, err)
@@ -56,17 +53,16 @@ func OpenSession(platform, account string) (*SessionFile, error) {
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("session %s/%s is locked by another process", platform, account)
+		return nil, fmt.Errorf("session %s is locked by another process", acct.Display())
 	}
 
 	sf := &SessionFile{
-		platform: platform,
-		account:  account,
-		lock:     f,
+		acct: acct,
+		lock: f,
 	}
 
 	// Load existing session data if the file exists.
-	data, err := os.ReadFile(sessionPath(platform, account))
+	data, err := os.ReadFile(SessionPath(acct))
 	if err == nil {
 		var s Session
 		if err := yaml.Unmarshal(data, &s); err != nil {
@@ -99,7 +95,7 @@ func (sf *SessionFile) Save(s *Session) error {
 		return fmt.Errorf("marshal session: %w", err)
 	}
 
-	path := sessionPath(sf.platform, sf.account)
+	path := SessionPath(sf.acct)
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("write session file: %w", err)
 	}
@@ -158,34 +154,16 @@ func SessionsDir() string {
 	return paths.SessionsDir()
 }
 
-// SessionPath returns the full path to a session file for a platform+account.
-func SessionPath(platform, account string) string {
-	return sessionPath(strings.ToLower(platform), strings.ToLower(account))
+// SessionPath returns the full path to a session file for the given account.
+func SessionPath(acct account.Account) string {
+	return filepath.Join(SessionsDir(), acct.String()+".yaml")
 }
 
-// SessionName returns the display name for a session (e.g. "slack/tubular").
-func SessionName(platform, account string) string {
-	return fmt.Sprintf("%s/%s", strings.ToLower(platform), strings.ToLower(account))
-}
-
-func UpdateLastDelivered(platform, account string, t time.Time) error {
-	sf, err := OpenSession(platform, account)
+func UpdateLastDelivered(acct account.Account, t time.Time) error {
+	sf, err := OpenSession(acct)
 	if err != nil {
 		return err
 	}
 	defer sf.Close()
-	return sf.updateLastDelivered(t)	
-}
-
-func sessionPath(platform, account string) string {
-	return filepath.Join(SessionsDir(), sessionFileName(platform, account))
-}
-
-func sessionFileName(platform, account string) string {
-	slug := strings.ReplaceAll(strings.ToLower(account), " ", "-")
-	return fmt.Sprintf("%s-%s.yaml", strings.ToLower(platform), slug)
-}
-
-func lockPath(platform, account string) string {
-	return sessionPath(platform, account) + ".lock"
+	return sf.updateLastDelivered(t)
 }

@@ -2,12 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -28,7 +27,16 @@ func RunSearch(p SearchParams) error {
 		sinceDur = d
 	}
 
-	results, err := store.SearchMessages(p.Query, p.Platform, p.Account, sinceDur)
+	// Build account slug for store lookups if platform+account provided.
+	platform, accountSlug := p.Platform, p.Account
+	var acct *account.Account
+	if platform != "" && accountSlug != "" {
+		a := account.New(platform, accountSlug)
+		acct = &a
+		accountSlug = a.NameSlug()
+	}
+
+	results, err := store.SearchMessages(p.Query, platform, accountSlug, sinceDur)
 	if err != nil {
 		return err
 	}
@@ -39,7 +47,7 @@ func RunSearch(p SearchParams) error {
 
 	// Enrich results: replace phone senders with contact names,
 	// and resolve conversation directory names to display names.
-	enrichSearchResults(results, p.Platform, p.Account)
+	enrichSearchResults(results, acct)
 
 	var totalMatches int
 	for _, r := range results {
@@ -94,8 +102,9 @@ func printGroupedResults(results []store.SearchResult) {
 			dateStr = minDate + " to " + maxDate
 		}
 
-		dir := filepath.Join(paths.DataDir(), k.platform, k.account, k.conversation)
-		fmt.Printf("%s/%s/%s (%s, %d matches)\n", k.platform, k.account, k.conversation, dateStr, g.matches)
+		a := account.New(k.platform, k.account)
+		dir := a.ConversationDir(k.conversation)
+		fmt.Printf("%s/%s (%s, %d matches)\n", a.Display(), k.conversation, dateStr, g.matches)
 		fmt.Printf("    %s\n", dir)
 		for i, section := range g.sections {
 			if i > 0 {

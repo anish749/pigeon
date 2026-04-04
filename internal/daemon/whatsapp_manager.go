@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/hub"
@@ -109,16 +110,16 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 		return
 	}
 
-	account := wa.Account
+	acct := account.New("whatsapp", wa.Account)
 	onLogout := func() {
-		slog.InfoContext(ctx, "removing logged-out account from config", "account", account)
+		slog.InfoContext(ctx, "removing logged-out account from config", "account", acct)
 		cfg, err := config.Load()
 		if err == nil {
-			cfg.RemoveWhatsApp(account)
+			cfg.RemoveWhatsApp(wa.Account)
 			config.Save(cfg)
 		}
 	}
-	listener := walistener.New(client, wa.Account, onLogout, m.onMessage)
+	listener := walistener.New(client, acct, onLogout, m.onMessage)
 	client.AddEventHandler(listener.EventHandler(acctCtx))
 
 	if err := client.Connect(); err != nil {
@@ -130,7 +131,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
-		Account:  wa.Account,
+		Acct:     acct,
 		Resolver: listener.Resolver(),
 	})
 

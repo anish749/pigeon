@@ -5,7 +5,9 @@ go 1.25.0
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
+	github.com/gosimple/slug v1.15.0
 	github.com/lmittmann/tint v1.1.3
+	github.com/manifoldco/promptui v0.9.0
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/mdp/qrterminal/v3 v3.2.1
@@ -25,8 +27,8 @@ require (
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/petermattis/goid v0.0.0-20260113132338-7c7de50cc741 // indirect

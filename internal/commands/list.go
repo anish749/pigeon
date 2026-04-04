@@ -2,18 +2,19 @@ package commands
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-func RunList(platform, account string) error {
+func RunList(platform, accountName string) error {
 	// Level 3: list conversations for a specific account
-	if platform != "" && account != "" {
-		aliases := loadAliases(platform, account)
-		convs, err := store.ListConversations(platform, account, aliases)
+	if platform != "" && accountName != "" {
+		acct := account.New(platform, accountName)
+		aliases := loadAliases(acct)
+		convs, err := store.ListConversations(acct.Platform, acct.NameSlug(), aliases)
 		if err != nil {
 			return err
 		}
@@ -21,7 +22,7 @@ func RunList(platform, account string) error {
 			fmt.Println("No conversations found.")
 			return nil
 		}
-		fmt.Printf("Conversations in %s/%s:\n\n", platform, account)
+		fmt.Printf("Conversations in %s:\n\n", acct.Display())
 		for _, c := range convs {
 			fmt.Printf("  %-20s  %s\n", c.Identifier, c.DisplayName)
 		}
@@ -70,26 +71,25 @@ func RunList(platform, account string) error {
 	return nil
 }
 
-// canonicalAccountNames replaces filesystem directory names with canonical names
-// from config. The filesystem is case-insensitive on macOS, so directory names
-// may not match the canonical casing from the Slack API / config file.
+// canonicalAccountNames replaces filesystem directory names (slugs) with
+// display names from config.
 func canonicalAccountNames(platform string, dirNames []string) []string {
 	cfg, err := config.Load()
 	if err != nil {
 		return dirNames
 	}
 
-	var canonical map[string]string // lowercase dir name → config name
+	canonical := make(map[string]string) // slug → display name
 	switch platform {
 	case "slack":
-		canonical = make(map[string]string, len(cfg.Slack))
 		for _, sl := range cfg.Slack {
-			canonical[strings.ToLower(sl.Workspace)] = sl.Workspace
+			acct := account.New("slack", sl.Workspace)
+			canonical[acct.NameSlug()] = sl.Workspace
 		}
 	case "whatsapp":
-		canonical = make(map[string]string, len(cfg.WhatsApp))
 		for _, wa := range cfg.WhatsApp {
-			canonical[strings.ToLower(wa.Account)] = wa.Account
+			acct := account.New("whatsapp", wa.Account)
+			canonical[acct.NameSlug()] = wa.Account
 		}
 	default:
 		return dirNames
@@ -97,7 +97,7 @@ func canonicalAccountNames(platform string, dirNames []string) []string {
 
 	result := make([]string, len(dirNames))
 	for i, dir := range dirNames {
-		if name, ok := canonical[strings.ToLower(dir)]; ok {
+		if name, ok := canonical[dir]; ok {
 			result[i] = name
 		} else {
 			result[i] = dir

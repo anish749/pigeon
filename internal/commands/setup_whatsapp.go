@@ -15,6 +15,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
@@ -62,10 +63,11 @@ func RunSetupWhatsApp(dbPath string) error {
 		case "success":
 			slog.InfoContext(ctx, "QR code scanned successfully")
 			deviceJID := client.Store.ID.String()
-			account := "+" + client.Store.ID.User
+			acctName := "+" + client.Store.ID.User
+			acct := account.New("whatsapp", acctName)
 
 			// Register listener to capture history sync events during setup.
-			listener := walistener.New(client, account, nil, nil)
+			listener := walistener.New(client, acct, nil, nil)
 			client.AddEventHandler(listener.EventHandler(ctx))
 
 			// Track sync activity so we can detect completion.
@@ -88,7 +90,7 @@ func RunSetupWhatsApp(dbPath string) error {
 			cfg.AddWhatsApp(config.WhatsAppConfig{
 				DeviceJID: deviceJID,
 				DB:        dbPath,
-				Account:   account,
+				Account:   acctName,
 			})
 			if err := config.Save(cfg); err != nil {
 				slog.ErrorContext(ctx, "failed to save config", "error", err)
@@ -98,7 +100,7 @@ func RunSetupWhatsApp(dbPath string) error {
 
 			fmt.Printf("\nDevice paired successfully!\n\n")
 			fmt.Printf("  Device JID: %s\n", deviceJID)
-			fmt.Printf("  Account:    %s\n\n", account)
+			fmt.Printf("  Account:    %s\n\n", acct.Display())
 
 			// Block until history sync completes (30s idle) or interrupted.
 			sigCh := make(chan os.Signal, 1)
