@@ -10,6 +10,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/hub"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
@@ -24,7 +25,7 @@ type Listener struct {
 	messages  *MessageStore
 	userToken string
 	botToken  string
-	workspace string
+	acct      account.Account
 	teamID    string
 	botUserID string // bot's Slack user ID, used to detect @mentions
 	onMessage hub.MessageNotifyFunc
@@ -34,14 +35,14 @@ type Listener struct {
 // botUserID is the bot's Slack user ID (used to detect @mentions).
 // onMessage is called (if non-nil) when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID, botUserID string, onMessage hub.MessageNotifyFunc) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc) *Listener {
 	return &Listener{
 		client:    client,
 		resolver:  resolver,
 		messages:  messages,
 		userToken: userToken,
 		botToken:  botToken,
-		workspace: workspace,
+		acct:      acct,
 		teamID:    teamID,
 		botUserID: botUserID,
 		onMessage: onMessage,
@@ -60,10 +61,10 @@ func (l *Listener) Run(ctx context.Context) {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeConnected:
-				slog.InfoContext(ctx, "slack: connected, triggering sync", "workspace", l.workspace)
+				slog.InfoContext(ctx, "slack: connected, triggering sync", "account", l.acct)
 				go func() {
-					if err := Sync(ctx, l.userToken, l.botToken, l.resolver, l.workspace, l.messages); err != nil {
-						slog.ErrorContext(ctx, "slack sync failed", "workspace", l.workspace, "error", err)
+					if err := Sync(ctx, l.userToken, l.botToken, l.resolver, l.acct, l.messages); err != nil {
+						slog.ErrorContext(ctx, "slack sync failed", "account", l.acct, "error", err)
 					}
 				}()
 			case socketmode.EventTypeEventsAPI:
@@ -74,9 +75,9 @@ func (l *Listener) Run(ctx context.Context) {
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
 			case socketmode.EventTypeErrorBadMessage:
-				slog.WarnContext(ctx, "slack: bad message", "workspace", l.workspace)
+				slog.WarnContext(ctx, "slack: bad message", "account", l.acct)
 			case socketmode.EventTypeIncomingError:
-				slog.ErrorContext(ctx, "slack: incoming error", "workspace", l.workspace, "error", evt.Data)
+				slog.ErrorContext(ctx, "slack: incoming error", "account", l.acct, "error", evt.Data)
 			}
 		}
 	}
@@ -93,11 +94,11 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 	case *slackevents.MemberJoinedChannelEvent:
 		l.resolver.AddMember(innerEvt.Channel)
 		slog.InfoContext(ctx, "slack: member joined channel",
-			"channel", innerEvt.Channel, "user", innerEvt.User, "workspace", l.workspace)
+			"channel", innerEvt.Channel, "user", innerEvt.User, "account", l.acct)
 	case *slackevents.MemberLeftChannelEvent:
 		l.resolver.RemoveMember(innerEvt.Channel)
 		slog.InfoContext(ctx, "slack: member left channel",
-			"channel", innerEvt.Channel, "user", innerEvt.User, "workspace", l.workspace)
+			"channel", innerEvt.Channel, "user", innerEvt.User, "account", l.acct)
 	}
 }
 
@@ -130,7 +131,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
 		if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
-			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "workspace", l.workspace)
+			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
 	}
@@ -138,32 +139,34 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write thread replies to the thread file
 	if isThreadReply {
 		// If thread file doesn't exist yet, fetch and write the parent message first
-		threadPath := store.ThreadFilePath("slack", l.workspace, channelName, msg.ThreadTimeStamp)
+		threadPath := store.ThreadFilePath(l.acct.Platform, l.acct.NameSlug(), channelName, msg.ThreadTimeStamp)
 		if _, err := os.Stat(threadPath); os.IsNotExist(err) {
 			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
 		}
 
 		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, text, ts, true); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
-				"workspace", l.workspace, "thread_ts", msg.ThreadTimeStamp)
+				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
 	}
 
 	slog.InfoContext(ctx, "slack message saved",
-		"from", userName, "channel", channelName, "workspace", l.workspace, "text_len", len(msg.Text))
+		"from", userName, "channel", channelName, "account", l.acct, "text_len", len(msg.Text))
 
 	// Notify the hub for messages the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
-	switch msg.ChannelType {
-	case "im", "mpim":
-		l.onMessage("slack", l.workspace, channelName)
-	case "group":
-		l.onMessage("slack", l.workspace, channelName)
-	case "channel":
-		if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
-			l.onMessage("slack", l.workspace, channelName)
+	if l.onMessage != nil {
+		switch msg.ChannelType {
+		case "im", "mpim":
+			l.onMessage(l.acct, channelName)
+		case "group":
+			l.onMessage(l.acct, channelName)
+		case "channel":
+			if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
+				l.onMessage(l.acct, channelName)
+			}
 		}
 	}
 }
@@ -179,7 +182,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "failed to fetch thread parent", "error", err,
-			"workspace", l.workspace, "thread_ts", threadTS)
+			"account", l.acct, "thread_ts", threadTS)
 		return
 	}
 	if len(msgs) == 0 {
@@ -194,6 +197,6 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	ts := ParseTimestamp(parent.Timestamp)
 	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, text, ts, false); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
-			"workspace", l.workspace, "thread_ts", threadTS)
+			"account", l.acct, "thread_ts", threadTS)
 	}
 }

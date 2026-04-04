@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/manifoldco/promptui"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
 )
@@ -31,26 +32,24 @@ type ClaudeSessionParams struct {
 }
 
 func RunClaudeSession(p ClaudeSessionParams) error {
-	platform := strings.ToLower(p.Platform)
-	account := p.Account
+	var acct account.Account
 
 	// If platform+account not provided, let the user choose interactively.
-	if platform == "" || account == "" {
+	if p.Platform == "" || p.Account == "" {
 		var err error
-		platform, account, err = selectAccount()
+		acct, err = selectAccount()
 		if err != nil {
 			return err
 		}
 	} else {
+		acct = account.New(p.Platform, p.Account)
 		// Validate that the provided platform+account exist in config.
-		if err := validateAccount(platform, account); err != nil {
+		if err := validateAccount(acct); err != nil {
 			return err
 		}
 	}
 
-	name := claude.SessionName(platform, account)
-
-	sf, err := claude.OpenSession(platform, account)
+	sf, err := claude.OpenSession(acct)
 	if err != nil {
 		return err
 	}
@@ -65,40 +64,37 @@ func RunClaudeSession(p ClaudeSessionParams) error {
 		return handleExistingSession(sf, cwd)
 	}
 
-	return handleNewSession(sf, platform, account, name, cwd)
+	return handleNewSession(sf, acct, cwd)
 }
 
 // accountOption represents a selectable platform+account pair.
 type accountOption struct {
-	Platform string
-	Account  string
-	Label    string // e.g. "slack / tubular"
+	Acct  account.Account
+	Label string // e.g. "slack / tubular"
 }
 
-func selectAccount() (platform, account string, err error) {
+func selectAccount() (account.Account, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return "", "", err
+		return account.Account{}, err
 	}
 
 	var options []accountOption
 	for _, s := range cfg.Slack {
 		options = append(options, accountOption{
-			Platform: "slack",
-			Account:  s.Workspace,
-			Label:    fmt.Sprintf("slack / %s", s.Workspace),
+			Acct:  account.New("slack", s.Workspace),
+			Label: fmt.Sprintf("slack / %s", s.Workspace),
 		})
 	}
 	for _, w := range cfg.WhatsApp {
 		options = append(options, accountOption{
-			Platform: "whatsapp",
-			Account:  w.Account,
-			Label:    fmt.Sprintf("whatsapp / %s", w.Account),
+			Acct:  account.New("whatsapp", w.Account),
+			Label: fmt.Sprintf("whatsapp / %s", w.Account),
 		})
 	}
 
 	if len(options) == 0 {
-		return "", "", fmt.Errorf("no accounts configured — run 'pigeon setup-slack' or 'pigeon setup-whatsapp' first")
+		return account.Account{}, fmt.Errorf("no accounts configured — run 'pigeon setup-slack' or 'pigeon setup-whatsapp' first")
 	}
 
 	var labels []string
@@ -114,16 +110,16 @@ func selectAccount() (platform, account string, err error) {
 
 	idx, _, err := prompt.Run()
 	if err != nil {
-		return "", "", fmt.Errorf("selection cancelled")
+		return account.Account{}, fmt.Errorf("selection cancelled")
 	}
 
-	selected := options[idx]
-	return selected.Platform, selected.Account, nil
+	return options[idx].Acct, nil
 }
 
 func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	s := sf.Data()
-	fmt.Printf("\n%sFound existing session for %s%s%s\n", bold, cyan, s.Name, reset)
+	acct := account.New(s.Platform, s.Account)
+	fmt.Printf("\n%sFound existing session for %s%s%s\n", bold, cyan, acct.Display(), reset)
 	fmt.Printf("  Session ID:  %s%s%s\n", dim, s.SessionID, reset)
 	fmt.Printf("  Directory:   %s%s%s\n", dim, s.CWD, reset)
 	fmt.Printf("  Created:     %s%s%s\n\n", dim, s.CreatedAt.Format("2006-01-02 15:04"), reset)
@@ -136,18 +132,19 @@ func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 
 	if !confirm("Continue with this session?", true) {
 		fmt.Println()
-		return handleNewSession(sf, s.Platform, s.Account, s.Name, cwd)
+		return handleNewSession(sf, acct, cwd)
 	}
 
 	// Resume in the stored cwd.
-	return launchClaude(s.SessionID, s.Name, s.CWD, true)
+	return launchClaude(s.SessionID, acct.Display(), s.CWD, true)
 }
 
-func handleNewSession(sf *claude.SessionFile, platform, account, name, cwd string) error {
-	fmt.Printf("\n%sCreating new Claude Code session for %s%s%s\n\n", bold, cyan, name, reset)
+func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) error {
+	display := acct.Display()
+	fmt.Printf("\n%sCreating new Claude Code session for %s%s%s\n\n", bold, cyan, display, reset)
 	fmt.Printf("  Working directory: %s%s%s\n\n", bold, cwd, reset)
 	fmt.Printf("  %s⚠  Everything in this directory will be accessible to the pigeon bot%s\n", yellow, reset)
-	fmt.Printf("  %s   and may be exposed to others talking to pigeon over %s in %s.%s\n\n", yellow, platform, account, reset)
+	fmt.Printf("  %s   and may be exposed to others talking to pigeon over %s in %s.%s\n\n", yellow, acct.Platform, acct.Name, reset)
 
 	if !confirm("Continue?", true) {
 		fmt.Println("Aborted.")
@@ -158,11 +155,11 @@ func handleNewSession(sf *claude.SessionFile, platform, account, name, cwd strin
 	now := time.Now()
 
 	s := &claude.Session{
-		Platform:      platform,
-		Account:       account,
+		Platform:      acct.Platform,
+		Account:       acct.Name,
 		SessionID:     sessionID,
 		CWD:           cwd,
-		Name:          name,
+		Name:          display,
 		CreatedAt:     now,
 		LastDelivered: now, // Only messages arriving after session creation will be delivered.
 	}
@@ -173,9 +170,9 @@ func handleNewSession(sf *claude.SessionFile, platform, account, name, cwd strin
 
 	fmt.Printf("\n  %s✓%s Session created\n", green, reset)
 	fmt.Printf("  Session ID:   %s%s%s\n", dim, sessionID, reset)
-	fmt.Printf("  Session file: %s%s%s\n\n", dim, claude.SessionPath(platform, account), reset)
+	fmt.Printf("  Session file: %s%s%s\n\n", dim, claude.SessionPath(acct), reset)
 
-	return launchClaude(sessionID, name, cwd, false)
+	return launchClaude(sessionID, display, cwd, false)
 }
 
 func launchClaude(sessionID, name, cwd string, resume bool) error {
@@ -224,29 +221,29 @@ func findClaude() (string, error) {
 	return "", fmt.Errorf("claude not found in PATH — install Claude Code first")
 }
 
-func validateAccount(platform, account string) error {
+func validateAccount(acct account.Account) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	switch platform {
+	switch acct.Platform {
 	case "slack":
 		for _, s := range cfg.Slack {
-			if strings.EqualFold(s.Workspace, account) {
+			if strings.EqualFold(s.Workspace, acct.Name) {
 				return nil
 			}
 		}
-		return fmt.Errorf("no Slack workspace %q found in config — run 'pigeon setup-slack' first", account)
+		return fmt.Errorf("no Slack workspace %q found in config — run 'pigeon setup-slack' first", acct.Name)
 	case "whatsapp":
 		for _, w := range cfg.WhatsApp {
-			if strings.EqualFold(w.Account, account) {
+			if strings.EqualFold(w.Account, acct.Name) {
 				return nil
 			}
 		}
-		return fmt.Errorf("no WhatsApp account %q found in config — run 'pigeon setup-whatsapp' first", account)
+		return fmt.Errorf("no WhatsApp account %q found in config — run 'pigeon setup-whatsapp' first", acct.Name)
 	default:
-		return fmt.Errorf("unsupported platform: %s (supported: slack, whatsapp)", platform)
+		return fmt.Errorf("unsupported platform: %s (supported: slack, whatsapp)", acct.Platform)
 	}
 }
 

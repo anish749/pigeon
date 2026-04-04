@@ -7,6 +7,7 @@ import (
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/hub"
@@ -105,6 +106,8 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
 func startSlackListener(ctx context.Context, sl config.SlackConfig, onMessage hub.MessageNotifyFunc) *api.SlackSender {
+	acct := account.New("slack", sl.Workspace)
+
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
@@ -112,14 +115,14 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, onMessage hu
 	resolver := slacklistener.NewResolver(userAPI)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to preload Slack names", "workspace", sl.Workspace, "error", err)
+		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)
 	}
 
 	var userName string
 	if authResp, err := userAPI.AuthTestContext(ctx); err == nil {
 		userName = resolver.UserName(ctx, authResp.UserID)
 	} else {
-		slog.WarnContext(ctx, "failed to get Slack auth info", "workspace", sl.Workspace, "error", err)
+		slog.WarnContext(ctx, "failed to get Slack auth info", "account", acct, "error", err)
 	}
 
 	var botName, botUserID string
@@ -127,28 +130,28 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, onMessage hu
 		botName = authResp.User
 		botUserID = authResp.UserID
 	} else {
-		slog.WarnContext(ctx, "failed to get bot auth info", "workspace", sl.Workspace, "error", err)
+		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages := slacklistener.NewMessageStore(sl.Workspace)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, sl.Workspace, sl.TeamID, botUserID, onMessage)
+	messages := slacklistener.NewMessageStore(acct)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage)
 	go listener.Run(ctx)
 
 	go func() {
 		if err := smClient.RunContext(ctx); err != nil {
-			slog.ErrorContext(ctx, "slack socket mode error", "workspace", sl.Workspace, "error", err)
+			slog.ErrorContext(ctx, "slack socket mode error", "account", acct, "error", err)
 		}
 	}()
 
-	slog.InfoContext(ctx, "slack listener started", "workspace", sl.Workspace, "users", users, "channels", channels)
+	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
 
 	return &api.SlackSender{
-		BotAPI:    botAPI,
-		UserAPI:   userAPI,
-		Resolver:  resolver,
-		Messages:  messages,
-		Workspace: sl.Workspace,
-		BotName:   botName,
-		UserName:  userName,
+		BotAPI:   botAPI,
+		UserAPI:  userAPI,
+		Resolver: resolver,
+		Messages: messages,
+		Acct:     acct,
+		BotName:  botName,
+		UserName: userName,
 	}
 }

@@ -7,16 +7,17 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/config"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-// loadAliases returns contact name aliases for a given platform/account.
+// loadAliases returns contact name aliases for a given account.
 // For WhatsApp accounts, it reads from the whatsmeow contact store.
 // Returns nil (no aliases) for other platforms or on error.
-func loadAliases(platform, account string) map[string][]string {
-	if platform != "whatsapp" {
+func loadAliases(acct account.Account) map[string][]string {
+	if acct.Platform != "whatsapp" {
 		return nil
 	}
 	cfg, err := config.Load()
@@ -24,7 +25,8 @@ func loadAliases(platform, account string) map[string][]string {
 		return nil
 	}
 	for _, wa := range cfg.WhatsApp {
-		if wa.Account == account {
+		waAcct := account.New("whatsapp", wa.Account)
+		if waAcct.NameSlug() == acct.NameSlug() {
 			jid, err := types.ParseJID(wa.DeviceJID)
 			if err != nil {
 				slog.Warn("invalid device JID in config", "jid", wa.DeviceJID, "error", err)
@@ -32,7 +34,7 @@ func loadAliases(platform, account string) map[string][]string {
 			}
 			aliases, err := walistener.LoadContactAliases(context.Background(), wa.DB, jid)
 			if err != nil {
-				slog.Warn("failed to load WhatsApp contacts", "account", account, "error", err)
+				slog.Warn("failed to load WhatsApp contacts", "account", acct, "error", err)
 				return nil
 			}
 			return aliases
@@ -43,21 +45,21 @@ func loadAliases(platform, account string) map[string][]string {
 
 // enrichSearchResults replaces phone senders with names and resolves
 // conversation directory names to display names in search results.
-func enrichSearchResults(results []store.SearchResult, platform, account string) {
+func enrichSearchResults(results []store.SearchResult, acct *account.Account) {
 	// Load aliases for each unique platform/account pair in the results.
-	type key struct{ platform, account string }
-	aliasCache := make(map[key]map[string][]string)
+	aliasCache := make(map[string]map[string][]string) // account slug → aliases
 
-	if platform != "" && account != "" {
-		aliasCache[key{platform, account}] = loadAliases(platform, account)
+	if acct != nil {
+		aliasCache[acct.String()] = loadAliases(*acct)
 	}
 
 	for i, r := range results {
-		k := key{r.Platform, r.Account}
-		aliases, ok := aliasCache[k]
+		a := account.New(r.Platform, r.Account)
+		key := a.String()
+		aliases, ok := aliasCache[key]
 		if !ok {
-			aliases = loadAliases(r.Platform, r.Account)
-			aliasCache[k] = aliases
+			aliases = loadAliases(a)
+			aliasCache[key] = aliases
 		}
 
 		// Enrich message lines in the section.

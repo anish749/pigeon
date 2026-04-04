@@ -8,23 +8,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
-// channelKey identifies a platform+account pair for map lookups.
-type channelKey struct {
-	Platform string
-	Account  string
-}
-
 // MessageNotifyFunc is called by listeners when a new message has been
-// written to disk. Parameters are platform, account, and conversation.
-type MessageNotifyFunc func(platform, account, conversation string)
+// written to disk.
+type MessageNotifyFunc func(acct account.Account, conversation string)
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -47,7 +41,7 @@ type Session struct {
 
 // channel is a per-platform+account delivery goroutine.
 type channel struct {
-	key       channelKey
+	acct      account.Account
 	sessionID string
 	signal    chan deliverySignal
 }
@@ -67,8 +61,8 @@ const (
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session    // SessionID → connected session
-	channels map[channelKey]*channel // platform+account → delivery channel
+	sessions map[string]*Session  // SessionID → connected session
+	channels map[string]*channel  // account slug → delivery channel
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
@@ -85,7 +79,7 @@ func New(ctx context.Context) (*Hub, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
 		sessions: make(map[string]*Session),
-		channels: make(map[channelKey]*channel),
+		channels: make(map[string]*channel),
 		ctx:      ctx,
 		cancel:   cancel,
 	}
@@ -115,20 +109,20 @@ func (h *Hub) watchSessionFiles(ctx context.Context) {
 // don't have one yet. Does not stop existing channels.
 func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 	h.mu.RLock()
-	existing := make(map[channelKey]bool, len(h.channels))
+	existing := make(map[string]bool, len(h.channels))
 	for k := range h.channels {
 		existing[k] = true
 	}
 	h.mu.RUnlock()
 
 	for _, s := range sessions {
-		key := channelKey{Platform: s.Platform, Account: s.Account}
-		if existing[key] {
+		acct := account.New(s.Platform, s.Account)
+		if existing[acct.String()] {
 			continue
 		}
 		h.startChannel(s)
 		slog.Info("new session file detected, delivery channel started",
-			"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
+			"account", acct, "session_id", s.SessionID)
 	}
 }
 
@@ -178,8 +172,8 @@ func (h *Hub) Register(s *Session) error {
 	slog.Info("session registered", "session_id", s.SessionID, "cwd", s.CWD)
 
 	// Signal the delivery goroutine to send hello and drain pending messages.
-	key := channelKey{Platform: strings.ToLower(found.Platform), Account: strings.ToLower(found.Account)}
-	if ch, exists := h.channels[key]; exists {
+	acct := account.New(found.Platform, found.Account)
+	if ch, exists := h.channels[acct.String()]; exists {
 		select {
 		case ch.signal <- deliverySignal{kind: signalConnected}:
 			slog.Info("signalled hello + pending drain on connect", "session_id", s.SessionID)
@@ -201,11 +195,10 @@ func (h *Hub) Unregister(sessionID string) {
 	}
 }
 
-// Route signals that a new message has arrived for the given platform, account,
-// and conversation. Non-blocking — returns immediately.
-// Platform and account are normalized to lowercase for matching.
-func (h *Hub) Route(platform, account, conversation string) {
-	key := channelKey{Platform: strings.ToLower(platform), Account: strings.ToLower(account)}
+// Route signals that a new message has arrived for the given account and
+// conversation. Non-blocking — returns immediately.
+func (h *Hub) Route(acct account.Account, conversation string) {
+	key := acct.String()
 
 	h.mu.RLock()
 	ch, exists := h.channels[key]
@@ -213,7 +206,7 @@ func (h *Hub) Route(platform, account, conversation string) {
 
 	if !exists {
 		slog.Warn("no session configured, message not routed",
-			"platform", platform, "account", account, "conversation", conversation)
+			"account", acct, "conversation", conversation)
 		return
 	}
 
@@ -221,7 +214,7 @@ func (h *Hub) Route(platform, account, conversation string) {
 	case ch.signal <- deliverySignal{kind: signalNewMessage, conversation: conversation}:
 	default:
 		slog.Error("delivery signal buffer full, message delivery may be delayed",
-			"platform", platform, "account", account, "conversation", conversation,
+			"account", acct, "conversation", conversation,
 			"buffer_size", signalBufferSize)
 	}
 }
@@ -234,22 +227,22 @@ func (h *Hub) Sessions() int {
 }
 
 func (h *Hub) startChannel(s *claude.Session) {
-	key := channelKey{Platform: s.Platform, Account: s.Account}
+	acct := account.New(s.Platform, s.Account)
 
 	ch := &channel{
-		key:       key,
+		acct:      acct,
 		sessionID: s.SessionID,
 		signal:    make(chan deliverySignal, signalBufferSize),
 	}
 
 	h.mu.Lock()
-	h.channels[key] = ch
+	h.channels[acct.String()] = ch
 	h.mu.Unlock()
 
 	go h.deliveryLoop(ch, s.LastDelivered)
 
 	slog.Info("delivery channel started",
-		"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
+		"account", acct, "session_id", s.SessionID)
 }
 
 // deliveryLoop waits for signals, reads new messages from disk, and delivers
@@ -289,10 +282,10 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 
 	hello := IncomingMsg{
-		Platform:     ch.key.Platform,
-		Account:      ch.key.Account,
+		Platform:     ch.acct.Platform,
+		Account:      ch.acct.Name,
 		Conversation: "system",
-		MsgLines:     []string{"pigeon connected to " + ch.key.Platform + "/" + ch.key.Account},
+		MsgLines:     []string{"pigeon connected to " + ch.acct.Display()},
 	}
 	if err := session.Send(h.ctx, hello); err != nil {
 		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
@@ -300,10 +293,10 @@ func (h *Hub) sendHello(ch *channel) {
 }
 
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
-	convs, err := store.ListConversations(ch.key.Platform, ch.key.Account, nil)
+	convs, err := store.ListConversations(ch.acct.Platform, ch.acct.NameSlug(), nil)
 	if err != nil {
 		slog.Error("failed to list conversations for drain",
-			"platform", ch.key.Platform, "account", ch.key.Account, "error", err)
+			"account", ch.acct, "error", err)
 		return lastDelivered
 	}
 	for _, c := range convs {
@@ -315,11 +308,10 @@ func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.T
 func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	now := time.Now()
 	since := now.Sub(lastDelivered)
-	lines, err := store.ReadMessages(ch.key.Platform, ch.key.Account, conversation, store.ReadOpts{Since: since})
+	lines, err := store.ReadMessages(ch.acct.Platform, ch.acct.NameSlug(), conversation, store.ReadOpts{Since: since})
 	if err != nil {
 		slog.Error("failed to read messages",
-			"platform", ch.key.Platform, "account", ch.key.Account,
-			"conversation", conversation, "error", err)
+			"account", ch.acct, "conversation", conversation, "error", err)
 		return lastDelivered
 	}
 
@@ -340,8 +332,8 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 
 	// Send all lines as a single message.
 	msg := IncomingMsg{
-		Platform:     ch.key.Platform,
-		Account:      ch.key.Account,
+		Platform:     ch.acct.Platform,
+		Account:      ch.acct.Name,
 		Conversation: conversation,
 		MsgLines:     lines,
 	}
@@ -352,7 +344,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	}
 
 	// Update cursor to now — everything up to this point has been delivered.
-	if err := claude.UpdateLastDelivered(ch.key.Platform, ch.key.Account, now); err != nil {
+	if err := claude.UpdateLastDelivered(ch.acct, now); err != nil {
 		slog.Error("failed to update last_delivered",
 			"session_id", ch.sessionID, "error", err)
 	}

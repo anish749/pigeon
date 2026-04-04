@@ -14,7 +14,7 @@ import (
 	goslack "github.com/slack-go/slack"
 	"gopkg.in/yaml.v3"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -27,12 +27,12 @@ const (
 // Stored as .sync-cursors.yaml in the workspace data directory.
 type syncCursors map[string]string
 
-func cursorsPath(workspace string) string {
-	return filepath.Join(paths.DataDir(), "slack", workspace, ".sync-cursors.yaml")
+func cursorsPath(acct account.Account) string {
+	return filepath.Join(acct.DataDir(), ".sync-cursors.yaml")
 }
 
-func loadCursors(workspace string) syncCursors {
-	data, err := os.ReadFile(cursorsPath(workspace))
+func loadCursors(acct account.Account) syncCursors {
+	data, err := os.ReadFile(cursorsPath(acct))
 	if err != nil {
 		return make(syncCursors)
 	}
@@ -43,8 +43,8 @@ func loadCursors(workspace string) syncCursors {
 	return c
 }
 
-func saveCursors(workspace string, c syncCursors) error {
-	path := cursorsPath(workspace)
+func saveCursors(acct account.Account, c syncCursors) error {
+	path := cursorsPath(acct)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -59,38 +59,38 @@ func saveCursors(workspace string, c syncCursors) error {
 // files and maintains per-channel cursors so that both sync and the real-time
 // listener stay consistent.
 type MessageStore struct {
-	workspace string
-	mu        gosync.Mutex
-	cursors   syncCursors
+	acct    account.Account
+	mu      gosync.Mutex
+	cursors syncCursors
 }
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(workspace string) *MessageStore {
+func NewMessageStore(acct account.Account) *MessageStore {
 	return &MessageStore{
-		workspace: workspace,
-		cursors:   loadCursors(workspace),
+		acct:    acct,
+		cursors: loadCursors(acct),
 	}
 }
 
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, text string, ts time.Time, slackTS string) error {
-	return store.WriteMessage("slack", ms.workspace, channelName, sender, text, ts)
+	return store.WriteMessage(ms.acct.Platform, ms.acct.NameSlug(), channelName, sender, text, ts)
 }
 
 // WriteThreadMessage writes a message to a thread file.
 func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, text string, ts time.Time, isReply bool) error {
-	return store.WriteThreadMessage("slack", ms.workspace, channelName, threadTS, sender, text, ts, isReply)
+	return store.WriteThreadMessage(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS, sender, text, ts, isReply)
 }
 
 // WriteThreadContext writes a channel context message to a thread file.
 func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, text string, ts time.Time) error {
-	return store.WriteThreadContext("slack", ms.workspace, channelName, threadTS, sender, text, ts)
+	return store.WriteThreadContext(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS, sender, text, ts)
 }
 
 // EnsureThreadContextSeparator writes the separator line to a thread file.
 func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS string) error {
-	return store.EnsureThreadContextSeparator("slack", ms.workspace, channelName, threadTS)
+	return store.EnsureThreadContextSeparator(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS)
 }
 
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
@@ -98,7 +98,7 @@ func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.cursors[channelID] = slackTS
-	saveCursors(ms.workspace, ms.cursors)
+	saveCursors(ms.acct, ms.cursors)
 }
 
 // Cursor returns the stored cursor for a channel.
@@ -114,9 +114,9 @@ func (ms *MessageStore) Cursor(channelID string) (string, bool) {
 // runs, picks up from where it left off using stored cursors per channel.
 // Syncs both user conversations (via user token) and bot DM conversations
 // (via bot token), interleaving them into the same contact directories.
-func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, workspace string, ms *MessageStore) error {
+func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore) error {
 	api := goslack.New(userToken)
-	gate := &rateLimitGate{workspace: workspace}
+	gate := &rateLimitGate{workspace: acct.Name}
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
 	defaultOldest := fmt.Sprintf("%d", time.Now().AddDate(0, 0, -syncDays).Unix())
 
@@ -160,7 +160,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 	})
 
 	slog.InfoContext(ctx, "slack sync: conversations",
-		"workspace", workspace,
+		"account", acct,
 		"dms", totalDMs,
 		"group_ims", totalMpIMs,
 		"private", totalPrivate,
@@ -249,7 +249,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 			totalMessages += written
 			slog.InfoContext(ctx, "slack sync: channel done",
 				"channel", channelName, "messages", written,
-				"threads", threadsSynced, "workspace", workspace)
+				"threads", threadsSynced, "account", acct)
 		}
 
 		switch channelPriority(ch) {
@@ -265,15 +265,15 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 	}
 
 	slog.InfoContext(ctx, "slack sync: complete",
-		"workspace", workspace, "channels", synced, "messages", totalMessages)
+		"account", acct, "channels", synced, "messages", totalMessages)
 
 	// Sync bot DM conversations so pigeon messages appear in the unified timeline.
-	if err := syncBotDMs(ctx, botToken, resolver, workspace, ms, gate, defaultOldest, activityCutoff); err != nil {
-		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "workspace", workspace, "error", err)
+	if err := syncBotDMs(ctx, botToken, resolver, acct, ms, gate, defaultOldest, activityCutoff); err != nil {
+		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
 	// Sort date files so user and bot messages are interleaved by timestamp.
-	store.SortDateFiles("slack", workspace)
+	store.SortDateFiles(acct.Platform, acct.NameSlug())
 
 	return nil
 }
@@ -281,7 +281,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 // syncBotDMs syncs the bot's DM conversations. Messages are written to the same
 // contact directory as the user's DMs, with "sent to pigeon by" / "sent by pigeon"
 // labels so they interleave in the unified timeline.
-func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, workspace string, ms *MessageStore, gate *rateLimitGate, defaultOldest string, activityCutoff time.Time) error {
+func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore, gate *rateLimitGate, defaultOldest string, activityCutoff time.Time) error {
 	botAPI := goslack.New(botToken)
 
 	// List bot's DM and group DM conversations only.
@@ -315,7 +315,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, worksp
 		return nil
 	}
 
-	slog.InfoContext(ctx, "slack sync: bot DMs", "workspace", workspace, "count", len(botDMs))
+	slog.InfoContext(ctx, "slack sync: bot DMs", "account", acct, "count", len(botDMs))
 
 	for _, ch := range botDMs {
 		if ctx.Err() != nil {
@@ -377,7 +377,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, worksp
 
 		if written > 0 {
 			slog.InfoContext(ctx, "slack sync: bot DM done",
-				"channel", channelName, "messages", written, "workspace", workspace)
+				"channel", channelName, "messages", written, "account", acct)
 		}
 	}
 
