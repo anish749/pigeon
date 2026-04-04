@@ -156,6 +156,8 @@ func (h *Hub) Route(platform, account, conversation string) {
 	h.mu.RUnlock()
 
 	if !exists {
+		slog.Debug("no session configured, message dropped",
+			"platform", platform, "account", account, "conversation", conversation)
 		return
 	}
 
