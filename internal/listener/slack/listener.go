@@ -9,6 +9,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
+	"github.com/anish/claude-msg-utils/internal/hub"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -24,12 +25,12 @@ type Listener struct {
 	botToken     string
 	workspace    string
 	teamID       string
-	onBotMessage func(platform, account, conversation string)
+	onBotMessage hub.MessageNotifyFunc
 }
 
 // NewListener creates a Slack listener for a single workspace.
 // onBotMessage is called (if non-nil) when a message is sent to the pigeon bot.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID string, onBotMessage func(string, string, string)) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID string, onBotMessage hub.MessageNotifyFunc) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,

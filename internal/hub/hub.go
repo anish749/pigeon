@@ -19,6 +19,16 @@ type ChannelConfig struct {
 	LastDelivered time.Time
 }
 
+// channelKey identifies a platform+account pair for map lookups.
+type channelKey struct {
+	Platform string
+	Account  string
+}
+
+// MessageNotifyFunc is called by listeners when a new message has been
+// written to disk. Parameters are platform, account, and conversation.
+type MessageNotifyFunc func(platform, account, conversation string)
+
 // ReadMessagesFunc reads message lines from the store for a conversation
 // since a given duration ago. Maps to store.ReadMessages with ReadOpts{Since}.
 type ReadMessagesFunc func(platform, account, conversation string, since time.Duration) ([]string, error)
@@ -30,6 +40,11 @@ type UpdateCursorFunc func(platform, account string, t time.Time) error
 // ParseLineTimeFunc extracts a timestamp from a message line.
 // Maps to store.ParseLineTime.
 type ParseLineTimeFunc func(line string) time.Time
+
+// signalBufferSize is the capacity of each channel's delivery signal buffer.
+// If full, new signals are dropped — the goroutine will catch up on its
+// next drain since it reads all messages since last_delivered.
+const signalBufferSize = 64
 
 // Session represents a connected MCP shim process.
 type Session struct {
@@ -44,8 +59,7 @@ type Session struct {
 
 // channel is a per-platform+account delivery goroutine.
 type channel struct {
-	platform  string
-	account   string
+	key       channelKey
 	sessionID string
 	signal    chan deliverySignal
 }
@@ -57,8 +71,8 @@ type deliverySignal struct {
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
 	mu            sync.RWMutex
-	sessions      map[string]*Session // SessionID → connected session
-	channels      map[string]*channel // "platform\x00account" → delivery channel
+	sessions      map[string]*Session     // SessionID → connected session
+	channels      map[channelKey]*channel // platform+account → delivery channel
 	readMessages  ReadMessagesFunc
 	updateCursor  UpdateCursorFunc
 	parseLineTime ParseLineTimeFunc
@@ -73,7 +87,7 @@ func New(ctx context.Context, configs []ChannelConfig, readMessages ReadMessages
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
 		sessions:      make(map[string]*Session),
-		channels:      make(map[string]*channel),
+		channels:      make(map[channelKey]*channel),
 		readMessages:  readMessages,
 		updateCursor:  updateCursor,
 		parseLineTime: parseLineTime,
@@ -127,7 +141,7 @@ func (h *Hub) Unregister(sessionID string) {
 // Route signals that a new message has arrived for the given platform, account,
 // and conversation. Non-blocking — returns immediately.
 func (h *Hub) Route(platform, account, conversation string) {
-	key := channelKey(platform, account)
+	key := channelKey{Platform: platform, Account: account}
 
 	h.mu.RLock()
 	ch, exists := h.channels[key]
@@ -140,8 +154,9 @@ func (h *Hub) Route(platform, account, conversation string) {
 	select {
 	case ch.signal <- deliverySignal{conversation: conversation}:
 	default:
-		slog.Debug("delivery signal dropped (buffer full), goroutine will catch up",
-			"platform", platform, "account", account, "conversation", conversation)
+		slog.Error("delivery signal buffer full, message delivery may be delayed",
+			"platform", platform, "account", account, "conversation", conversation,
+			"buffer_size", signalBufferSize)
 	}
 }
 
@@ -153,13 +168,12 @@ func (h *Hub) Sessions() int {
 }
 
 func (h *Hub) startChannel(cfg ChannelConfig) {
-	key := channelKey(cfg.Platform, cfg.Account)
+	key := channelKey{Platform: cfg.Platform, Account: cfg.Account}
 
 	ch := &channel{
-		platform:  cfg.Platform,
-		account:   cfg.Account,
+		key:       key,
 		sessionID: cfg.SessionID,
-		signal:    make(chan deliverySignal, 64),
+		signal:    make(chan deliverySignal, signalBufferSize),
 	}
 
 	h.mu.Lock()
@@ -189,10 +203,10 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 // Returns the updated lastDelivered timestamp.
 func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	since := time.Since(lastDelivered)
-	lines, err := h.readMessages(ch.platform, ch.account, conversation, since)
+	lines, err := h.readMessages(ch.key.Platform, ch.key.Account, conversation, since)
 	if err != nil {
 		slog.Error("failed to read messages",
-			"platform", ch.platform, "account", ch.account,
+			"platform", ch.key.Platform, "account", ch.key.Account,
 			"conversation", conversation, "error", err)
 		return lastDelivered
 	}
@@ -216,8 +230,8 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 	var newLastDelivered time.Time
 	for _, line := range lines {
 		msg := IncomingMsg{
-			Platform:     ch.platform,
-			Account:      ch.account,
+			Platform:     ch.key.Platform,
+			Account:      ch.key.Account,
 			Conversation: conversation,
 			MsgLine:      line,
 		}
@@ -233,17 +247,13 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 
 	// Update cursor if we delivered anything.
 	if !newLastDelivered.IsZero() {
-		if err := h.updateCursor(ch.platform, ch.account, newLastDelivered); err != nil {
+		if err := h.updateCursor(ch.key.Platform, ch.key.Account, newLastDelivered); err != nil {
 			slog.Error("failed to update last_delivered",
 				"session_id", ch.sessionID, "error", err)
 		}
 		return newLastDelivered
 	}
 	return lastDelivered
-}
-
-func channelKey(platform, account string) string {
-	return platform + "\x00" + account
 }
 
 // RegistrationError is returned when session registration fails.

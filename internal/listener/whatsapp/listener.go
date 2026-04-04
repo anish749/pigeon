@@ -12,6 +12,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
+	"github.com/anish/claude-msg-utils/internal/hub"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -22,13 +23,13 @@ type Listener struct {
 	resolver  *Resolver
 	syncing   atomic.Bool // true while history sync is in progress
 	onLogout  func()      // called when device is unpaired remotely
-	onMessage func(platform, account, conversation string) // called when a message is received
+	onMessage hub.MessageNotifyFunc // called when a message is received
 }
 
 // New creates a WhatsApp listener for the given client and account directory name.
 // onLogout is called when the device is unpaired from the phone (may be nil).
 // onMessage is called when a message is received and written to disk (may be nil).
-func New(client *whatsmeow.Client, account string, onLogout func(), onMessage func(string, string, string)) *Listener {
+func New(client *whatsmeow.Client, account string, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
 	return &Listener{
 		client:    client,
 		account:   account,

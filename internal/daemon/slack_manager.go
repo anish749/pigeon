@@ -9,6 +9,7 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/hub"
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
 
@@ -17,7 +18,7 @@ import (
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
 	apiServer    *api.Server
-	onBotMessage func(platform, account, conversation string)
+	onBotMessage hub.MessageNotifyFunc
 	running      map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -28,7 +29,7 @@ type runningWorkspace struct {
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onBotMessage is called when a message is sent to the
 // pigeon bot (may be nil).
-func NewSlackManager(apiServer *api.Server, onBotMessage func(string, string, string)) *SlackManager {
+func NewSlackManager(apiServer *api.Server, onBotMessage hub.MessageNotifyFunc) *SlackManager {
 	return &SlackManager{
 		apiServer:    apiServer,
 		onBotMessage: onBotMessage,
@@ -103,7 +104,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, onBotMessage func(string, string, string)) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, onBotMessage hub.MessageNotifyFunc) *api.SlackSender {
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
