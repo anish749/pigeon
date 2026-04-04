@@ -40,6 +40,9 @@ type Session struct {
 	// Send delivers a message to this session. Provided by the transport
 	// layer (SSE) when the session registers.
 	Send func(ctx context.Context, incoming IncomingMsg) error
+	// Ready is closed when the SSE event loop starts and the session can
+	// receive messages. The hub waits on this before sending the hello.
+	Ready chan struct{}
 }
 
 // channel is a per-platform+account delivery goroutine.
@@ -51,6 +54,7 @@ type channel struct {
 
 type deliverySignal struct {
 	conversation string
+	hello        bool // send a hello message before draining
 }
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -134,22 +138,12 @@ func (h *Hub) Register(s *Session) error {
 	h.sessions[s.SessionID] = s
 	slog.Info("session registered", "session_id", s.SessionID, "cwd", s.CWD)
 
-	// Send a hello message so Claude knows pigeon is connected.
-	hello := IncomingMsg{
-		Platform: found.Platform,
-		Account:  found.Account,
-		MsgLines: []string{"pigeon connected to " + found.Platform + "/" + found.Account},
-	}
-	if err := s.Send(h.ctx, hello); err != nil {
-		slog.Error("failed to send hello", "session_id", s.SessionID, "error", err)
-	}
-
-	// Signal the delivery goroutine to drain any pending messages.
+	// Signal the delivery goroutine to send hello and drain pending messages.
 	key := channelKey{Platform: strings.ToLower(found.Platform), Account: strings.ToLower(found.Account)}
 	if ch, exists := h.channels[key]; exists {
 		select {
-		case ch.signal <- deliverySignal{conversation: ""}:
-			slog.Info("signalled pending message drain on connect", "session_id", s.SessionID)
+		case ch.signal <- deliverySignal{hello: true}:
+			slog.Info("signalled hello + pending drain on connect", "session_id", s.SessionID)
 		default:
 		}
 	}
@@ -227,8 +221,38 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 		case <-h.ctx.Done():
 			return
 		case sig := <-ch.signal:
+			if sig.hello {
+				h.sendHello(ch)
+			}
 			lastDelivered = h.drainMessages(ch, sig.conversation, lastDelivered)
 		}
+	}
+}
+
+// sendHello waits for the session's SSE connection to be ready, then sends a hello.
+func (h *Hub) sendHello(ch *channel) {
+	h.mu.RLock()
+	session := h.sessions[ch.sessionID]
+	h.mu.RUnlock()
+
+	if session == nil {
+		return
+	}
+
+	// Wait for the SSE event loop to start.
+	select {
+	case <-session.Ready:
+	case <-h.ctx.Done():
+		return
+	}
+
+	hello := IncomingMsg{
+		Platform: ch.key.Platform,
+		Account:  ch.key.Account,
+		MsgLines: []string{"pigeon connected to " + ch.key.Platform + "/" + ch.key.Account},
+	}
+	if err := session.Send(h.ctx, hello); err != nil {
+		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
 	}
 }
 
