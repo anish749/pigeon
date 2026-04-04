@@ -27,6 +27,10 @@ func New(socketPath string) *server.MCPServer {
 		if err := startDaemonStream(ctx, socketPath, func(incoming hub.IncomingMsg) error {
 			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{"content": incoming})
 		}); err != nil {
+			// Notify Claude so the user sees the error in the session.
+			s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
+				"content": "pigeon channel error: " + err.Error(),
+			})
 			slog.Error("failed to start daemon stream", "error", err)
 		}
 	})
