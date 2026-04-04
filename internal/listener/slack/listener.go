@@ -17,25 +17,29 @@ import (
 // On every Socket Mode connect (including reconnects), it runs a sync to backfill
 // any messages missed while disconnected.
 type Listener struct {
-	client    *socketmode.Client
-	resolver  *Resolver
-	messages  *MessageStore
-	userToken string
-	botToken  string
-	workspace string
-	teamID    string
+	client       *socketmode.Client
+	resolver     *Resolver
+	messages     *MessageStore
+	userToken    string
+	botToken     string
+	workspace    string
+	teamID       string
+	onBotMessage func(platform, account, conversation string) // called when a bot DM arrives
 }
 
 // NewListener creates a Slack listener for a single workspace.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID string) *Listener {
+// onBotMessage is called (if non-nil) when a message is sent to the pigeon bot,
+// with the platform, account (workspace), and conversation name.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken, workspace, teamID string, onBotMessage func(string, string, string)) *Listener {
 	return &Listener{
-		client:    client,
-		resolver:  resolver,
-		messages:  messages,
-		userToken: userToken,
-		botToken:  botToken,
-		workspace: workspace,
-		teamID:    teamID,
+		client:       client,
+		resolver:     resolver,
+		messages:     messages,
+		userToken:    userToken,
+		botToken:     botToken,
+		workspace:    workspace,
+		teamID:       teamID,
+		onBotMessage: onBotMessage,
 	}
 }
 
@@ -142,6 +146,11 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	slog.InfoContext(ctx, "slack message saved",
 		"from", userName, "channel", channelName, "workspace", l.workspace, "text_len", len(msg.Text))
+
+	// Notify the hub that a bot DM arrived so it can deliver to Claude.
+	if isBotDM && l.onBotMessage != nil {
+		l.onBotMessage("slack", l.workspace, channelName)
+	}
 }
 
 // ensureThreadParent fetches the parent message of a thread and writes it to the

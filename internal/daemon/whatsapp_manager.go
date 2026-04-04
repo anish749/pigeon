@@ -21,8 +21,9 @@ import (
 // It starts initial accounts, watches for config changes, and
 // starts/stops accounts as they are added or removed.
 type WhatsAppManager struct {
-	apiServer *api.Server
-	running   map[string]*runningWAAccount // account → state
+	apiServer  *api.Server
+	onMessage  func(platform, account, conversation string)
+	running    map[string]*runningWAAccount // account → state
 }
 
 type runningWAAccount struct {
@@ -31,10 +32,11 @@ type runningWAAccount struct {
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
-// the given API server.
-func NewWhatsAppManager(apiServer *api.Server) *WhatsAppManager {
+// the given API server. onMessage is called when a message is received (may be nil).
+func NewWhatsAppManager(apiServer *api.Server, onMessage func(string, string, string)) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,
+		onMessage: onMessage,
 		running:   make(map[string]*runningWAAccount),
 	}
 }
@@ -115,7 +117,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 			config.Save(cfg)
 		}
 	}
-	listener := walistener.New(client, wa.Account, onLogout)
+	listener := walistener.New(client, wa.Account, onLogout, m.onMessage)
 	client.AddEventHandler(listener.EventHandler(acctCtx))
 
 	if err := client.Connect(); err != nil {

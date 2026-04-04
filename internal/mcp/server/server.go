@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/anish/claude-msg-utils/internal/hub"
+	mcptool "github.com/anish/claude-msg-utils/internal/mcp/tool"
 )
 
 // New creates a configured MCP server with channel support. The server
@@ -37,9 +38,11 @@ func New(socketPath string) *server.MCPServer {
 
 	s = server.NewMCPServer("pigeon", "0.1.0",
 		server.WithToolCapabilities(true),
-		server.WithInstructions("Pigeon MCP channel server. Receives messages from WhatsApp and Slack via the pigeon daemon and delivers them as channel notifications."),
+		server.WithInstructions("Pigeon MCP channel server. Receives messages from WhatsApp and Slack via the pigeon daemon and delivers them as channel notifications. Use the reply tool to send messages back."),
 		server.WithHooks(hooks),
 	)
+
+	mcptool.RegisterReply(s, socketPath)
 
 	return s
 }
