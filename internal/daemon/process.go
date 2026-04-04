@@ -87,7 +87,7 @@ func Start() error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("daemon did not start within 3 seconds (check %s)", paths.LogPath())
+	return fmt.Errorf("daemon did not start within 3 seconds (check %s)", paths.DaemonLogPath())
 }
 
 // Stop sends SIGTERM to the daemon and waits for it to exit.

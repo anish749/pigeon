@@ -44,8 +44,8 @@ func PIDPath() string {
 	return filepath.Join(StateDir(), "daemon.pid")
 }
 
-// LogPath returns the path to the daemon log file.
-func LogPath() string {
+// DaemonLogPath returns the path to the daemon log file.
+func DaemonLogPath() string {
 	return filepath.Join(StateDir(), "daemon.log")
 }
 

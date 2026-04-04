@@ -24,5 +24,5 @@ func main() {
 }
 
 func initLogging() {
-	logging.InitFile(paths.MCPLogPath(), 5, 1)
+	logging.InitFile(logging.MCP)
 }
