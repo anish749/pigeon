@@ -73,6 +73,12 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request, item *Item) {
 	h.outbox.Remove(item.ID)
 
 	if !ok {
+		slog.Error("outbox: send failed on approve", "id", item.ID, "session_id", item.SessionID, "error", errMsg)
+		// Notify the session so Claude can see the error and retry.
+		notifyMsg := fmt.Sprintf("[outbox] Send failed (ID: %s): %s", item.ID, errMsg)
+		if err := h.notify(item.SessionID, notifyMsg); err != nil {
+			slog.Error("outbox: failed to notify session of send error", "id", item.ID, "session_id", item.SessionID, "error", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": errMsg})
 		return
 	}

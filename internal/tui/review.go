@@ -94,7 +94,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionFailMsg:
 		m.status = errorStyle.Render("✗ " + msg.detail)
-		return m, clearStatusAfter(5 * time.Second)
+		return m, clearStatusAfter(30 * time.Second)
 
 	case clearStatusMsg:
 		m.status = ""
@@ -178,6 +178,9 @@ func (m model) View() string {
 	if count == 0 {
 		b.WriteString(dimStyle.Render("  No pending items. Waiting for submissions..."))
 		b.WriteString("\n\n")
+		if m.status != "" {
+			b.WriteString("  " + m.status + "\n\n")
+		}
 		b.WriteString(helpStyle.Render("  q quit"))
 		return b.String()
 	}
