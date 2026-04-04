@@ -90,7 +90,7 @@ func DaemonRun() error {
 	slackMgr := daemon.NewSlackManager(apiServer)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	go apiServer.Start(ctx)
+	go apiServer.Start(ctx, daemon.SocketPath())
 
 	slog.Info("daemon started",
 		"whatsapp_accounts", len(cfg.WhatsApp),
