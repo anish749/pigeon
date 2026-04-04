@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,6 +133,27 @@ func (h *Hub) Register(s *Session) error {
 	}
 	h.sessions[s.SessionID] = s
 	slog.Info("session registered", "session_id", s.SessionID, "cwd", s.CWD)
+
+	// Send a hello message so Claude knows pigeon is connected.
+	hello := IncomingMsg{
+		Platform: found.Platform,
+		Account:  found.Account,
+		MsgLines: []string{"pigeon connected to " + found.Platform + "/" + found.Account},
+	}
+	if err := s.Send(h.ctx, hello); err != nil {
+		slog.Error("failed to send hello", "session_id", s.SessionID, "error", err)
+	}
+
+	// Signal the delivery goroutine to drain any pending messages.
+	key := channelKey{Platform: strings.ToLower(found.Platform), Account: strings.ToLower(found.Account)}
+	if ch, exists := h.channels[key]; exists {
+		select {
+		case ch.signal <- deliverySignal{conversation: ""}:
+			slog.Info("signalled pending message drain on connect", "session_id", s.SessionID)
+		default:
+		}
+	}
+
 	return nil
 }
 
@@ -148,8 +170,9 @@ func (h *Hub) Unregister(sessionID string) {
 
 // Route signals that a new message has arrived for the given platform, account,
 // and conversation. Non-blocking — returns immediately.
+// Platform and account are normalized to lowercase for matching.
 func (h *Hub) Route(platform, account, conversation string) {
-	key := channelKey{Platform: platform, Account: account}
+	key := channelKey{Platform: strings.ToLower(platform), Account: strings.ToLower(account)}
 
 	h.mu.RLock()
 	ch, exists := h.channels[key]
@@ -210,8 +233,29 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 }
 
 // drainMessages reads messages since lastDelivered and delivers them.
+// If conversation is empty, scans all conversations for pending messages.
 // Returns the updated lastDelivered timestamp.
 func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
+	if conversation == "" {
+		return h.drainAllConversations(ch, lastDelivered)
+	}
+	return h.drainConversation(ch, conversation, lastDelivered)
+}
+
+func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
+	convs, err := store.ListConversations(ch.key.Platform, ch.key.Account, nil)
+	if err != nil {
+		slog.Error("failed to list conversations for drain",
+			"platform", ch.key.Platform, "account", ch.key.Account, "error", err)
+		return lastDelivered
+	}
+	for _, c := range convs {
+		lastDelivered = h.drainConversation(ch, c.DirName, lastDelivered)
+	}
+	return lastDelivered
+}
+
+func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	now := time.Now()
 	since := now.Sub(lastDelivered)
 	lines, err := store.ReadMessages(ch.key.Platform, ch.key.Account, conversation, store.ReadOpts{Since: since})

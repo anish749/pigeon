@@ -100,6 +100,7 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
+		slog.Info("sse received line", "line", line)
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -110,6 +111,7 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 			continue
 		}
 
+		slog.Info("delivering to claude", "platform", incoming.Platform, "account", incoming.Account)
 		if err := ds.notify(incoming); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}

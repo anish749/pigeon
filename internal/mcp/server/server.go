@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -25,7 +26,15 @@ func New(socketPath string) *server.MCPServer {
 		slog.Info("mcp initialized", "client", ci.Name, "version", ci.Version)
 
 		if err := startDaemonStream(context.Background(), socketPath, func(incoming hub.IncomingMsg) error {
-			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{"content": incoming})
+			content := strings.Join(incoming.MsgLines, "\n")
+			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
+				"content": content,
+				"meta": map[string]any{
+					"platform":     incoming.Platform,
+					"account":      incoming.Account,
+					"conversation": incoming.Conversation,
+				},
+			})
 		}); err != nil {
 			// Notify Claude so the user sees the error in the session.
 			s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
