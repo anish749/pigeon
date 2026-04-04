@@ -21,6 +21,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/anish/claude-msg-utils/internal/hub"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/store"
 
@@ -51,13 +52,15 @@ type Server struct {
 	mu       sync.RWMutex
 	whatsapp map[string]*WhatsAppSender // account → sender
 	slack    map[string]*SlackSender    // workspace → sender
+	hub      *hub.Hub
 }
 
 // NewServer creates a new API server.
-func NewServer() *Server {
+func NewServer(h *hub.Hub) *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),
+		hub:      h,
 	}
 }
 
@@ -89,6 +92,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
+	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 
 	srv := &http.Server{
 		Handler: mux,
