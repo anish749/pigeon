@@ -13,24 +13,27 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/anish/claude-msg-utils/internal/hub"
 )
 
-// daemonStream manages the SSE connection to the pigeon daemon and forwards
+type ClaudeChannelNotification struct {
+	Content string         `json:"content"`
+	Meta    map[string]any `json:"meta"`
+}
+
+// pigeonDaemonStreamingClient manages the SSE connection to the pigeon daemon and forwards
 // incoming messages as MCP channel notifications.
-type daemonStream struct {
+type pigeonDaemonStreamingClient struct {
 	socketPath string
 	sessionID  string
 	cwd        string
-	notify     func(incoming hub.IncomingMsg) error
+	notify     func(notification ClaudeChannelNotification) error
 }
 
-// startDaemonStream connects to the daemon's SSE endpoint and forwards
+// startPigeonDaemonStream connects to the daemon's SSE endpoint and forwards
 // incoming messages via notify. Reconnects automatically in a background
 // goroutine. The provided context should be long-lived (not request-scoped).
 // Returns an error if initial setup fails.
-func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.IncomingMsg) error) error {
+func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func(ClaudeChannelNotification) error) error {
 	sessionID := os.Getenv("PIGEON_SESSION_ID")
 	if sessionID == "" {
 		return fmt.Errorf("PIGEON_SESSION_ID not set — launch via 'pigeon claude' to set it")
@@ -39,7 +42,7 @@ func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.I
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
-	ds := &daemonStream{
+	ds := &pigeonDaemonStreamingClient{
 		socketPath: socketPath,
 		sessionID:  sessionID,
 		cwd:        cwd,
@@ -51,7 +54,7 @@ func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.I
 
 // run connects to the daemon's SSE endpoint and forwards messages.
 // Reconnects automatically on failure. Blocks until ctx is cancelled.
-func (ds *daemonStream) run(ctx context.Context) {
+func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 	for {
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
@@ -66,7 +69,7 @@ func (ds *daemonStream) run(ctx context.Context) {
 	}
 }
 
-func (ds *daemonStream) connect(ctx context.Context) error {
+func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 	reqURL := fmt.Sprintf("http://pigeon/api/events?session_id=%s&cwd=%s", url.QueryEscape(ds.sessionID), url.QueryEscape(ds.cwd))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
@@ -105,14 +108,13 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 			continue
 		}
 
-		var incoming hub.IncomingMsg
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &incoming); err != nil {
+		var notification ClaudeChannelNotification
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &notification); err != nil {
 			slog.Warn("sse parse error", "error", err)
 			continue
 		}
 
-		slog.Info("delivering message", "platform", incoming.Platform, "account", incoming.Account, "conversation", incoming.Conversation)
-		if err := ds.notify(incoming); err != nil {
+		if err := ds.notify(notification); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}
 	}

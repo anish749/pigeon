@@ -33,7 +33,7 @@ type Session struct {
 	CWD string
 	// Send delivers a message to this session. Provided by the transport
 	// layer (SSE) when the session registers.
-	Send func(ctx context.Context, incoming IncomingMsg) error
+	Send func(ctx context.Context, notificationMsg NotificationMsg) error
 	// Ready is closed when the SSE event loop starts and the session can
 	// receive messages. The hub waits on this before sending the hello.
 	Ready chan struct{}
@@ -61,8 +61,8 @@ const (
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session  // SessionID → connected session
-	channels map[string]*channel  // account slug → delivery channel
+	sessions map[string]*Session // SessionID → connected session
+	channels map[string]*channel // account slug → delivery channel
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
@@ -236,7 +236,7 @@ func (h *Hub) NotifySession(sessionID string, text string) error {
 	if !ok {
 		return fmt.Errorf("session %s not connected", sessionID)
 	}
-	return s.Send(h.ctx, IncomingMsg{MsgLines: []string{text}})
+	return s.Send(h.ctx, &TextNotificationMsg{Text: text})
 }
 
 func (h *Hub) startChannel(s *claude.Session) {
@@ -294,7 +294,7 @@ func (h *Hub) sendHello(ch *channel) {
 		return
 	}
 
-	hello := IncomingMsg{
+	hello := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: "system",
@@ -344,7 +344,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	}
 
 	// Send all lines as a single message.
-	msg := IncomingMsg{
+	msg := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: conversation,
