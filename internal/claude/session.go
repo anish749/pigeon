@@ -45,7 +45,7 @@ func OpenSession(acct account.Account) (*SessionFile, error) {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 
-	lp := sessionFilePath(acct) + ".lock"
+	lp := SessionPath(acct) + ".lock"
 	f, err := os.OpenFile(lp, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open session lock %s: %w", lp, err)
@@ -62,7 +62,7 @@ func OpenSession(acct account.Account) (*SessionFile, error) {
 	}
 
 	// Load existing session data if the file exists.
-	data, err := os.ReadFile(sessionFilePath(acct))
+	data, err := os.ReadFile(SessionPath(acct))
 	if err == nil {
 		var s Session
 		if err := yaml.Unmarshal(data, &s); err != nil {
@@ -95,7 +95,7 @@ func (sf *SessionFile) Save(s *Session) error {
 		return fmt.Errorf("marshal session: %w", err)
 	}
 
-	path := sessionFilePath(sf.acct)
+	path := SessionPath(sf.acct)
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("write session file: %w", err)
 	}
@@ -156,7 +156,7 @@ func SessionsDir() string {
 
 // SessionPath returns the full path to a session file for the given account.
 func SessionPath(acct account.Account) string {
-	return sessionFilePath(acct)
+	return filepath.Join(SessionsDir(), acct.String()+".yaml")
 }
 
 func UpdateLastDelivered(acct account.Account, t time.Time) error {
@@ -166,8 +166,4 @@ func UpdateLastDelivered(acct account.Account, t time.Time) error {
 	}
 	defer sf.Close()
 	return sf.updateLastDelivered(t)
-}
-
-func sessionFilePath(acct account.Account) string {
-	return filepath.Join(SessionsDir(), acct.String()+".yaml")
 }
