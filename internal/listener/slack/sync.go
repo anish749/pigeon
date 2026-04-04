@@ -271,6 +271,9 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, w
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "workspace", workspace, "error", err)
 	}
 
+	// Sort date files so user and bot messages are interleaved by timestamp.
+	store.SortDateFiles("slack", workspace)
+
 	return nil
 }
 

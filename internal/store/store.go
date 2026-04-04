@@ -307,6 +307,63 @@ func parseLineTime(line string) time.Time {
 	return ts
 }
 
+// SortDateFiles sorts all date .txt files in a workspace directory by timestamp.
+// Called after sync to ensure interleaved messages (from user and bot syncs) are
+// in chronological order. Only rewrites files that are actually out of order.
+func SortDateFiles(platform, account string) {
+	root := filepath.Join(DataDir(), platform, account)
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".txt") || strings.HasPrefix(info.Name(), ".") {
+			return nil
+		}
+		// Skip thread files
+		if strings.Contains(path, "/threads/") {
+			return nil
+		}
+		sortFileByTimestamp(path)
+		return nil
+	})
+}
+
+// sortFileByTimestamp reads a date file, sorts lines by their timestamp,
+// and rewrites only if the order changed.
+func sortFileByTimestamp(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) <= 1 {
+		return
+	}
+
+	// Check if already sorted
+	sorted := true
+	for i := 1; i < len(lines); i++ {
+		if parseLineTime(lines[i]).Before(parseLineTime(lines[i-1])) {
+			sorted = false
+			break
+		}
+	}
+	if sorted {
+		return
+	}
+
+	sort.SliceStable(lines, func(i, j int) bool {
+		ti := parseLineTime(lines[i])
+		tj := parseLineTime(lines[j])
+		if ti.IsZero() || tj.IsZero() {
+			return false // keep unparseable lines in place
+		}
+		return ti.Before(tj)
+	})
+
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
 // contextLines is the number of messages to show before and after each match.
 const contextLines = 3
 
