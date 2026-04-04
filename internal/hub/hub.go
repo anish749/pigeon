@@ -212,7 +212,8 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 // drainMessages reads messages since lastDelivered and delivers them.
 // Returns the updated lastDelivered timestamp.
 func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
-	since := time.Since(lastDelivered)
+	now := time.Now()
+	since := now.Sub(lastDelivered)
 	lines, err := store.ReadMessages(ch.key.Platform, ch.key.Account, conversation, store.ReadOpts{Since: since})
 	if err != nil {
 		slog.Error("failed to read messages",
@@ -249,24 +250,12 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 		return lastDelivered
 	}
 
-	// Find the timestamp of the last line for cursor update.
-	var newLastDelivered time.Time
-	for i := len(lines) - 1; i >= 0; i-- {
-		if ts := store.ParseLineTime(lines[i]); !ts.IsZero() {
-			newLastDelivered = ts
-			break
-		}
+	// Update cursor to now — everything up to this point has been delivered.
+	if err := claude.UpdateLastDelivered(ch.key.Platform, ch.key.Account, now); err != nil {
+		slog.Error("failed to update last_delivered",
+			"session_id", ch.sessionID, "error", err)
 	}
-
-	// Update cursor if we delivered anything.
-	if !newLastDelivered.IsZero() {
-		if err := claude.UpdateLastDelivered(ch.key.Platform, ch.key.Account, newLastDelivered); err != nil {
-			slog.Error("failed to update last_delivered",
-				"session_id", ch.sessionID, "error", err)
-		}
-		return newLastDelivered
-	}
-	return lastDelivered
+	return now
 }
 
 // RegistrationError is returned when session registration fails.

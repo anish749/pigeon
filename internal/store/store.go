@@ -260,7 +260,7 @@ func AppendActiveThreads(platform, account, conversation string, lines []string,
 		// Check if any line in the thread is within the time window
 		hasRecent := false
 		for _, tl := range threadLines {
-			if lineTS := ParseLineTime(tl); !lineTS.IsZero() && !lineTS.Before(cutoff) {
+			if lineTS := parseLineTime(tl); !lineTS.IsZero() && !lineTS.Before(cutoff) {
 				hasRecent = true
 				break
 			}
@@ -286,8 +286,8 @@ func AppendActiveThreads(platform, account, conversation string, lines []string,
 	return lines
 }
 
-// ParseLineTime parses the timestamp from a message line (handles indented lines too).
-func ParseLineTime(line string) time.Time {
+// parseLineTime parses the timestamp from a message line (handles indented lines too).
+func parseLineTime(line string) time.Time {
 	trimmed := strings.TrimLeft(line, " ")
 	if len(trimmed) < 28 || trimmed[0] != '[' {
 		return time.Time{}
@@ -335,7 +335,7 @@ func sortFileByTimestamp(path string) {
 	// Check if already sorted
 	sorted := true
 	for i := 1; i < len(lines); i++ {
-		if ParseLineTime(lines[i]).Before(ParseLineTime(lines[i-1])) {
+		if parseLineTime(lines[i]).Before(parseLineTime(lines[i-1])) {
 			sorted = false
 			break
 		}
@@ -345,8 +345,8 @@ func sortFileByTimestamp(path string) {
 	}
 
 	sort.SliceStable(lines, func(i, j int) bool {
-		ti := ParseLineTime(lines[i])
-		tj := ParseLineTime(lines[j])
+		ti := parseLineTime(lines[i])
+		tj := parseLineTime(lines[j])
 		if ti.IsZero() || tj.IsZero() {
 			return false // keep unparseable lines in place
 		}
