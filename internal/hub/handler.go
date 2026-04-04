@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 )
 
 // IncomingMsg is the JSON payload sent over SSE to MCP shim processes.
@@ -31,21 +30,15 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		}
 
 		// Parse required query params.
-		pidStr := r.URL.Query().Get("pid")
+		sessionID := r.URL.Query().Get("session_id")
 		cwd, err := url.QueryUnescape(r.URL.Query().Get("cwd"))
 		if err != nil {
 			http.Error(w, "invalid cwd encoding: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		if pidStr == "" || cwd == "" {
-			http.Error(w, "pid and cwd query params are required", http.StatusBadRequest)
-			return
-		}
-
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
-			http.Error(w, "pid must be an integer", http.StatusBadRequest)
+		if sessionID == "" || cwd == "" {
+			http.Error(w, "session_id and cwd query params are required", http.StatusBadRequest)
 			return
 		}
 
@@ -53,14 +46,14 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		msgCh := make(chan IncomingMsg, 64)
 
 		session := &Session{
-			ClaudeCodePID: pid,
-			CWD:           cwd,
+			SessionID: sessionID,
+			CWD:       cwd,
 			Send: func(ctx context.Context, incoming IncomingMsg) error {
 				select {
 				case msgCh <- incoming:
 					return nil
 				default:
-					return fmt.Errorf("session %d: send buffer full", pid)
+					return fmt.Errorf("session %s: send buffer full", sessionID)
 				}
 			},
 		}
@@ -69,9 +62,9 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		defer h.Unregister(pid)
+		defer h.Unregister(sessionID)
 
-		slog.Info("sse client connected", "claude_code_pid", pid, "cwd", cwd)
+		slog.Info("sse client connected", "session_id", sessionID, "cwd", cwd)
 
 		// Set SSE headers.
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -83,7 +76,7 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		for {
 			select {
 			case <-ctx.Done():
-				slog.Info("sse client disconnected", "claude_code_pid", pid)
+				slog.Info("sse client disconnected", "session_id", sessionID)
 				return
 			case evt := <-msgCh:
 				data, err := json.Marshal(evt)
