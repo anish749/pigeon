@@ -53,9 +53,16 @@ type channel struct {
 }
 
 type deliverySignal struct {
-	conversation string
-	hello        bool // send a hello message before draining
+	kind         signalKind
+	conversation string // only set for signalNewMessage
 }
+
+type signalKind int
+
+const (
+	signalNewMessage signalKind = iota // a specific conversation has a new message
+	signalConnected                    // session just connected — send hello and drain all
+)
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
@@ -142,7 +149,7 @@ func (h *Hub) Register(s *Session) error {
 	key := channelKey{Platform: strings.ToLower(found.Platform), Account: strings.ToLower(found.Account)}
 	if ch, exists := h.channels[key]; exists {
 		select {
-		case ch.signal <- deliverySignal{hello: true}:
+		case ch.signal <- deliverySignal{kind: signalConnected}:
 			slog.Info("signalled hello + pending drain on connect", "session_id", s.SessionID)
 		default:
 		}
@@ -179,7 +186,7 @@ func (h *Hub) Route(platform, account, conversation string) {
 	}
 
 	select {
-	case ch.signal <- deliverySignal{conversation: conversation}:
+	case ch.signal <- deliverySignal{kind: signalNewMessage, conversation: conversation}:
 	default:
 		slog.Error("delivery signal buffer full, message delivery may be delayed",
 			"platform", platform, "account", account, "conversation", conversation,
@@ -221,10 +228,13 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 		case <-h.ctx.Done():
 			return
 		case sig := <-ch.signal:
-			if sig.hello {
+			switch sig.kind {
+			case signalConnected:
 				h.sendHello(ch)
+				lastDelivered = h.drainAllConversations(ch, lastDelivered)
+			case signalNewMessage:
+				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
 			}
-			lastDelivered = h.drainMessages(ch, sig.conversation, lastDelivered)
 		}
 	}
 }
@@ -255,16 +265,6 @@ func (h *Hub) sendHello(ch *channel) {
 	if err := session.Send(h.ctx, hello); err != nil {
 		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
 	}
-}
-
-// drainMessages reads messages since lastDelivered and delivers them.
-// If conversation is empty, scans all conversations for pending messages.
-// Returns the updated lastDelivered timestamp.
-func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
-	if conversation == "" {
-		return h.drainAllConversations(ch, lastDelivered)
-	}
-	return h.drainConversation(ch, conversation, lastDelivered)
 }
 
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
