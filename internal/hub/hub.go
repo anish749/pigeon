@@ -1,49 +1,16 @@
 // Package hub routes incoming messages from platform listeners to connected
-// MCP sessions. The daemon creates a single Hub at startup. Listeners call
-// Route() when a new message arrives, and the hub delivers it to the
-// appropriate Claude Code session via SSE.
+// MCP sessions. The daemon creates a single Hub and passes it to listeners.
+// MCP shim processes register themselves as sessions when they connect.
 package hub
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 )
 
-// SessionInfo is the session data loaded from a session file.
-// Provided by the caller to avoid import cycles with the claude package.
-type SessionInfo struct {
-	Platform      string
-	Account       string
-	SessionID     string
-	CWD           string
-	LastDelivered time.Time
-}
 
-// SessionStore abstracts session file operations so the hub doesn't depend
-// on the claude package directly.
-type SessionStore interface {
-	// ListSessions returns all known sessions.
-	ListSessions() ([]SessionInfo, error)
-	// FindByID returns the session with the given ID, or nil if not found.
-	FindByID(sessionID string) (*SessionInfo, error)
-	// UpdateLastDelivered atomically updates the last_delivered timestamp.
-	UpdateLastDelivered(platform, account string, t time.Time) error
-}
-
-// MessageReader abstracts reading messages from the store.
-type MessageReader interface {
-	// ReadSince returns parsed messages in a conversation after the given time.
-	ReadSince(platform, account, conversation string, since time.Time) ([]ParsedMessage, error)
-}
-
-// ParsedMessage is a message read from the store.
-type ParsedMessage struct {
-	Timestamp time.Time
-	Sender    string
-	Text      string
-}
 
 // Session represents a connected MCP shim process.
 type Session struct {
@@ -52,83 +19,32 @@ type Session struct {
 	// CWD is the working directory of the Claude Code session.
 	CWD string
 	// Send delivers a message to this session. Provided by the transport
-	// layer (SSE) when the session registers.
+	// layer (e.g. SSE) when the session registers.
 	Send func(ctx context.Context, incoming IncomingMsg) error
-}
-
-// channel is a per-platform+account delivery goroutine.
-type channel struct {
-	platform  string
-	account   string
-	sessionID string
-	signal    chan deliverySignal
-}
-
-// deliverySignal tells the channel goroutine which conversation has new messages.
-type deliverySignal struct {
-	conversation string
 }
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session // SessionID → connected session
-	channels map[string]*channel // "platform\x00account" → delivery channel
-	store    SessionStore
-	reader   MessageReader
-	ctx      context.Context
-	cancel   context.CancelFunc
+	sessions map[string]*Session // SessionID → session
 }
 
-// New creates a Hub, loads existing session files, and starts delivery
-// goroutines. Call Stop() to shut down.
-func New(ctx context.Context, store SessionStore, reader MessageReader) *Hub {
-	ctx, cancel := context.WithCancel(ctx)
-	h := &Hub{
+// New creates an empty Hub.
+func New() *Hub {
+	return &Hub{
 		sessions: make(map[string]*Session),
-		channels: make(map[string]*channel),
-		store:    store,
-		reader:   reader,
-		ctx:      ctx,
-		cancel:   cancel,
 	}
-	h.loadSessionFiles()
-	return h
 }
 
-// Stop shuts down all delivery goroutines.
-func (h *Hub) Stop() {
-	h.cancel()
-}
-
-// Register adds a connected MCP shim session to the hub. Validates the
-// session ID against known session files and checks the CWD matches.
+// Register adds a session to the hub. Returns an error if the session ID is already taken.
+// TODO: validate session ID and CWD against session files on disk. Reject if the
+// session ID is unknown or the CWD doesn't match what's stored in the session file.
 func (h *Hub) Register(s *Session) error {
-	sessionData, err := h.store.FindByID(s.SessionID)
-	if err != nil {
-		return err
-	}
-	if sessionData == nil {
-		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "no session file found — launch via 'pigeon claude' first",
-		}
-	}
-	if sessionData.CWD != s.CWD {
-		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "working directory mismatch: session file has " + sessionData.CWD + " but shim reported " + s.CWD,
-		}
-	}
-
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if _, exists := h.sessions[s.SessionID]; exists {
-		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "session already registered",
-		}
+		return fmt.Errorf("session %s already registered", s.SessionID)
 	}
 	h.sessions[s.SessionID] = s
 	slog.Info("session registered", "session_id", s.SessionID, "cwd", s.CWD)
@@ -146,163 +62,32 @@ func (h *Hub) Unregister(sessionID string) {
 	}
 }
 
-// Route signals that a new message has arrived for the given platform, account,
-// and conversation. The appropriate delivery goroutine will read from disk and
-// deliver via SSE. Non-blocking — returns immediately.
-func (h *Hub) Route(platform, account, conversation string) {
-	key := channelKey(platform, account)
-
+// Route delivers an incoming message to the first available session.
+// If no session is connected, the message is dropped with a warning.
+func (h *Hub) Route(ctx context.Context, incoming IncomingMsg) error {
 	h.mu.RLock()
-	ch, exists := h.channels[key]
+	target := h.pickSession()
 	h.mu.RUnlock()
 
-	if !exists {
-		return
+	if target == nil {
+		// TODO: start a new Claude Code session and register it, instead of dropping.
+		slog.Warn("no session available, dropping message", "incoming", incoming)
+		return nil
 	}
-
-	select {
-	case ch.signal <- deliverySignal{conversation: conversation}:
-	default:
-		slog.Debug("delivery signal dropped (buffer full), goroutine will catch up",
-			"platform", platform, "account", account, "conversation", conversation)
-	}
+	return target.Send(ctx, incoming)
 }
 
-// Sessions returns the number of active (connected) sessions.
+// Sessions returns the number of active sessions.
 func (h *Hub) Sessions() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.sessions)
 }
 
-// loadSessionFiles scans the sessions directory and starts a delivery
-// goroutine for each session file found.
-func (h *Hub) loadSessionFiles() {
-	sessions, err := h.store.ListSessions()
-	if err != nil {
-		slog.Error("failed to load session files", "error", err)
-		return
+// pickSession returns the first session found. Caller must hold at least a read lock.
+func (h *Hub) pickSession() *Session {
+	for _, s := range h.sessions {
+		return s
 	}
-
-	for _, s := range sessions {
-		h.startChannel(s)
-	}
-
-	if len(sessions) > 0 {
-		slog.Info("loaded session files", "count", len(sessions))
-	}
-}
-
-// startChannel creates and starts a delivery goroutine for a session.
-func (h *Hub) startChannel(s SessionInfo) {
-	key := channelKey(s.Platform, s.Account)
-
-	ch := &channel{
-		platform:  s.Platform,
-		account:   s.Account,
-		sessionID: s.SessionID,
-		signal:    make(chan deliverySignal, 64),
-	}
-
-	h.mu.Lock()
-	h.channels[key] = ch
-	h.mu.Unlock()
-
-	go h.deliveryLoop(ch)
-
-	slog.Info("delivery channel started",
-		"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
-}
-
-// deliveryLoop is the per-channel goroutine. It waits for signals, reads
-// new messages from disk, and delivers them via the connected session.
-// Serialized — only one read+deliver cycle runs at a time per channel.
-func (h *Hub) deliveryLoop(ch *channel) {
-	for {
-		select {
-		case <-h.ctx.Done():
-			return
-		case sig := <-ch.signal:
-			h.drainMessages(ch, sig.conversation)
-		}
-	}
-}
-
-// drainMessages reads all messages since last_delivered for a specific
-// conversation and delivers them to the connected session.
-func (h *Hub) drainMessages(ch *channel, conversation string) {
-	// Load last_delivered from session file.
-	sessionData, err := h.store.FindByID(ch.sessionID)
-	if err != nil || sessionData == nil {
-		slog.Error("cannot read session file for delivery",
-			"session_id", ch.sessionID, "error", err)
-		return
-	}
-
-	// Read messages since last_delivered.
-	messages, err := h.reader.ReadSince(ch.platform, ch.account, conversation, sessionData.LastDelivered)
-	if err != nil {
-		slog.Error("failed to read messages for delivery",
-			"platform", ch.platform, "account", ch.account,
-			"conversation", conversation, "error", err)
-		return
-	}
-
-	if len(messages) == 0 {
-		return
-	}
-
-	// Find connected session.
-	h.mu.RLock()
-	session := h.sessions[ch.sessionID]
-	h.mu.RUnlock()
-
-	if session == nil {
-		slog.Warn("session not connected, messages pending",
-			"session_id", ch.sessionID, "platform", ch.platform,
-			"account", ch.account, "pending", len(messages))
-		return
-	}
-
-	// Deliver each message.
-	var lastDelivered time.Time
-	for _, m := range messages {
-		msg := IncomingMsg{
-			Platform:     ch.platform,
-			Account:      ch.account,
-			Conversation: conversation,
-			Sender:       m.Sender,
-			Text:         m.Text,
-		}
-
-		if err := session.Send(h.ctx, msg); err != nil {
-			slog.Error("failed to deliver message",
-				"session_id", ch.sessionID, "error", err)
-			break
-		}
-
-		lastDelivered = m.Timestamp
-	}
-
-	// Update last_delivered if we delivered anything.
-	if !lastDelivered.IsZero() {
-		if err := h.store.UpdateLastDelivered(ch.platform, ch.account, lastDelivered); err != nil {
-			slog.Error("failed to update last_delivered",
-				"session_id", ch.sessionID, "error", err)
-		}
-	}
-}
-
-func channelKey(platform, account string) string {
-	return platform + "\x00" + account
-}
-
-// RegistrationError is returned when session registration fails.
-type RegistrationError struct {
-	SessionID string
-	Reason    string
-}
-
-func (e *RegistrationError) Error() string {
-	return "session " + e.SessionID + ": " + e.Reason
+	return nil
 }
