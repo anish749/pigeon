@@ -50,22 +50,22 @@ func RunClaudeSession(p ClaudeSessionParams) error {
 
 	name := claude.SessionName(platform, account)
 
+	sf, err := claude.OpenSession(platform, account)
+	if err != nil {
+		return err
+	}
+	defer sf.Close()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// Check for existing session.
-	existing, err := claude.FindSession(platform, account)
-	if err != nil {
-		return err
+	if sf.Exists() {
+		return handleExistingSession(sf, cwd)
 	}
 
-	if existing != nil {
-		return handleExistingSession(existing, cwd)
-	}
-
-	return handleNewSession(platform, account, name, cwd)
+	return handleNewSession(sf, platform, account, name, cwd)
 }
 
 // accountOption represents a selectable platform+account pair.
@@ -121,7 +121,8 @@ func selectAccount() (platform, account string, err error) {
 	return selected.Platform, selected.Account, nil
 }
 
-func handleExistingSession(s *claude.Session, cwd string) error {
+func handleExistingSession(sf *claude.SessionFile, cwd string) error {
+	s := sf.Data()
 	fmt.Printf("\n%sFound existing session for %s%s%s\n", bold, cyan, s.Name, reset)
 	fmt.Printf("  Session ID:  %s%s%s\n", dim, s.SessionID, reset)
 	fmt.Printf("  Directory:   %s%s%s\n", dim, s.CWD, reset)
@@ -135,14 +136,14 @@ func handleExistingSession(s *claude.Session, cwd string) error {
 
 	if !confirm("Continue with this session?", true) {
 		fmt.Println()
-		return handleNewSession(s.Platform, s.Account, s.Name, cwd)
+		return handleNewSession(sf, s.Platform, s.Account, s.Name, cwd)
 	}
 
 	// Resume in the stored cwd.
 	return launchClaude(s.SessionID, s.Name, s.CWD, true)
 }
 
-func handleNewSession(platform, account, name, cwd string) error {
+func handleNewSession(sf *claude.SessionFile, platform, account, name, cwd string) error {
 	fmt.Printf("\n%sCreating new Claude Code session for %s%s%s\n\n", bold, cyan, name, reset)
 	fmt.Printf("  Working directory: %s%s%s\n\n", bold, cwd, reset)
 	fmt.Printf("  %s⚠  Everything in this directory will be accessible to the pigeon bot%s\n", yellow, reset)
@@ -163,10 +164,10 @@ func handleNewSession(platform, account, name, cwd string) error {
 		CWD:           cwd,
 		Name:          name,
 		CreatedAt:     now,
-		LastDelivered: now,
+		LastDelivered: now, // Only messages arriving after session creation will be delivered.
 	}
 
-	if err := claude.SaveSession(s); err != nil {
+	if err := sf.Save(s); err != nil {
 		return err
 	}
 
