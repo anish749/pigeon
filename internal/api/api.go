@@ -27,8 +27,6 @@ import (
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
 
-// Port is the daemon API's listen port.
-const Port = 9877
 
 // WhatsAppSender holds everything needed to send a WhatsApp message.
 type WhatsAppSender struct {
@@ -77,13 +75,22 @@ func (s *Server) RegisterSlack(sender *SlackSender) {
 	s.mu.Unlock()
 }
 
-// Start starts the HTTP server. Blocks until ctx is cancelled.
-func (s *Server) Start(ctx context.Context) error {
+// Start starts the HTTP server on a unix domain socket. Blocks until ctx is cancelled.
+func (s *Server) Start(ctx context.Context, socketPath string) error {
+	// Clean up stale socket if no one is listening.
+	if _, err := net.Dial("unix", socketPath); err != nil {
+		os.Remove(socketPath)
+	}
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", socketPath, err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
 
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", Port),
 		Handler: mux,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
@@ -93,10 +100,11 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		srv.Close()
+		ln.Close()
 	}()
 
-	slog.InfoContext(ctx, "api server started", "port", Port)
-	err := srv.ListenAndServe()
+	slog.InfoContext(ctx, "api server started", "socket", socketPath)
+	err = srv.Serve(ln)
 	if err == http.ErrServerClosed {
 		return nil
 	}

@@ -2,12 +2,15 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 
 	"github.com/anish/claude-msg-utils/internal/api"
+	"github.com/anish/claude-msg-utils/internal/daemon"
 )
 
 type SendParams struct {
@@ -33,7 +36,14 @@ func RunSend(p SendParams) error {
 		DryRun:    p.DryRun,
 	})
 
-	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/api/send", api.Port), "application/json", bytes.NewReader(body))
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", daemon.SocketPath())
+			},
+		},
+	}
+	resp, err := client.Post("http://pigeon/api/send", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("daemon not reachable (is 'pigeon daemon start' running?): %w", err)
 	}

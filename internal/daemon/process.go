@@ -30,6 +30,11 @@ func LogPath() string {
 	return filepath.Join(StateDir(), "daemon.log")
 }
 
+// SocketPath returns the path to the daemon's unix domain socket.
+func SocketPath() string {
+	return filepath.Join(StateDir(), "daemon.sock")
+}
+
 // IsRunning checks whether the daemon process is alive.
 // Cleans up stale PID files.
 func IsRunning() bool {
@@ -68,6 +73,7 @@ func Start() error {
 
 	// Clean stale files.
 	os.Remove(PIDPath())
+	os.Remove(SocketPath())
 
 	if err := os.MkdirAll(StateDir(), 0755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
@@ -140,9 +146,10 @@ func WritePID() error {
 	return os.WriteFile(PIDPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
 }
 
-// RemovePID removes the PID file. Called on daemon shutdown.
+// RemovePID removes the PID file and socket. Called on daemon shutdown.
 func RemovePID() {
 	os.Remove(PIDPath())
+	os.Remove(SocketPath())
 }
 
 // EnsureRunning starts the daemon if it is not already running.
