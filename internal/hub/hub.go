@@ -6,6 +6,7 @@ package hub
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -61,8 +62,14 @@ type Hub struct {
 }
 
 // New creates a Hub, loads session files, and starts delivery goroutines.
-// Call Stop() to shut down.
-func New(ctx context.Context) *Hub {
+// Returns an error if session files cannot be read (note: no sessions
+// configured yet is not an error). Call Stop() to shut down.
+func New(ctx context.Context) (*Hub, error) {
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		return nil, fmt.Errorf("load session files: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
 		sessions: make(map[string]*Session),
@@ -71,10 +78,6 @@ func New(ctx context.Context) *Hub {
 		cancel:   cancel,
 	}
 
-	sessions, err := claude.ListAllSessions()
-	if err != nil {
-		slog.Error("failed to load session files", "error", err)
-	}
 	for _, s := range sessions {
 		h.startChannel(s)
 	}
@@ -82,7 +85,7 @@ func New(ctx context.Context) *Hub {
 		slog.Info("hub started with session channels", "count", len(sessions))
 	}
 
-	return h
+	return h, nil
 }
 
 // Stop shuts down all delivery goroutines.

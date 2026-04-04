@@ -84,7 +84,10 @@ func DaemonRun() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	msgHub := hub.New(ctx)
+	msgHub, err := hub.New(ctx)
+	if err != nil {
+		return fmt.Errorf("start hub: %w", err)
+	}
 	defer msgHub.Stop()
 
 	apiServer := api.NewServer(msgHub)
