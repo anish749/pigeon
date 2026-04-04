@@ -1,0 +1,32 @@
+version: 2
+
+builds:
+  - id: pigeon
+    main: ./cmd/pigeon
+    binary: pigeon
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+  - id: pigeon-mcp
+    main: ./cmd/pigeon-mcp
+    binary: pigeon-mcp
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+archives:
+  - format: tar.gz
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
