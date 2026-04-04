@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
 
@@ -48,10 +49,10 @@ func RunList(platform, account string) error {
 	// Level 1: list all platforms and their accounts
 	platforms, err := store.ListPlatforms()
 	if err != nil {
-		return fmt.Errorf("cannot read data directory %s: %w", store.DataDir(), err)
+		return fmt.Errorf("cannot read data directory %s: %w", paths.DataDir(), err)
 	}
 	if len(platforms) == 0 {
-		fmt.Printf("No platforms found in %s\n", store.DataDir())
+		fmt.Printf("No platforms found in %s\n", paths.DataDir())
 		return nil
 	}
 	for _, p := range platforms {

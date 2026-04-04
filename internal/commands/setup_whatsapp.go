@@ -18,6 +18,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
@@ -92,7 +93,7 @@ func RunSetupWhatsApp(dbPath string) error {
 			if err := config.Save(cfg); err != nil {
 				slog.ErrorContext(ctx, "failed to save config", "error", err)
 			} else {
-				fmt.Printf("\nSaved to config: %s\n", config.ConfigPath())
+				fmt.Printf("\nSaved to config: %s\n", paths.ConfigPath())
 			}
 
 			fmt.Printf("\nDevice paired successfully!\n\n")

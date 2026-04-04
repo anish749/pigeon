@@ -10,7 +10,7 @@ import (
 	"net/http"
 
 	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/daemon"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 type SendParams struct {
@@ -39,7 +39,7 @@ func RunSend(p SendParams) error {
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", daemon.SocketPath())
+				return net.Dial("unix", paths.SocketPath())
 			},
 		},
 	}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/hub"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
+	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/store"
 
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
@@ -433,7 +434,7 @@ func formatAmbiguousContacts(err *walistener.AmbiguousContactError, account stri
 // convActivity returns the most recent message date and total line count
 // for a conversation directory.
 func convActivity(platform, account, conversation string) (lastDate string, totalLines int) {
-	dir := filepath.Join(store.DataDir(), platform, account, conversation)
+	dir := filepath.Join(paths.DataDir(), platform, account, conversation)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", 0

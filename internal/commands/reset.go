@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 func RunReset(platform, account string) error {
-	dir := filepath.Join(store.DataDir(), platform, account)
+	dir := filepath.Join(paths.DataDir(), platform, account)
 
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {

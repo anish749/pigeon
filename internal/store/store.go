@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 // fileLocks provides per-file mutexes so the dedup check + write in WriteMessage
@@ -16,24 +18,14 @@ import (
 // can both pass the dedup check and produce duplicate lines.
 var fileLocks sync.Map
 
-// DataDir returns the root directory for message data.
-// Respects PIGEON_DATA_DIR env var, defaults to ~/.local/share/pigeon/
-func DataDir() string {
-	if d := os.Getenv("PIGEON_DATA_DIR"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "pigeon")
-}
-
 // ListPlatforms returns platform directory names (e.g. "whatsapp", "slack").
 func ListPlatforms() ([]string, error) {
-	return listSubdirs(DataDir())
+	return listSubdirs(paths.DataDir())
 }
 
 // ListAccounts returns account directory names for a platform.
 func ListAccounts(platform string) ([]string, error) {
-	return listSubdirs(filepath.Join(DataDir(), platform))
+	return listSubdirs(filepath.Join(paths.DataDir(), platform))
 }
 
 // Conversation represents a conversation directory.
@@ -47,7 +39,7 @@ type Conversation struct {
 // aliases maps directory names to searchable name variants (first entry = display name).
 // Pass nil if no name enrichment is needed.
 func ListConversations(platform, account string, aliases map[string][]string) ([]Conversation, error) {
-	dir := filepath.Join(DataDir(), platform, account)
+	dir := filepath.Join(paths.DataDir(), platform, account)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read %s: %w", dir, err)
@@ -101,7 +93,7 @@ type ReadOpts struct {
 // ReadMessages reads messages from a conversation.
 // If no opts filter is set, reads today's messages.
 func ReadMessages(platform, account, conversation string, opts ReadOpts) ([]string, error) {
-	dir := filepath.Join(DataDir(), platform, account, conversation)
+	dir := filepath.Join(paths.DataDir(), platform, account, conversation)
 
 	files, err := listTxtFiles(dir)
 	if err != nil {
@@ -311,7 +303,7 @@ func parseLineTime(line string) time.Time {
 // Called after sync to ensure interleaved messages (from user and bot syncs) are
 // in chronological order. Only rewrites files that are actually out of order.
 func SortDateFiles(platform, account string) {
-	root := filepath.Join(DataDir(), platform, account)
+	root := filepath.Join(paths.DataDir(), platform, account)
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -379,7 +371,7 @@ type SearchResult struct {
 
 // SearchMessages searches for a query string across message files.
 func SearchMessages(query, platform, account string, since time.Duration) ([]SearchResult, error) {
-	root := DataDir()
+	root := paths.DataDir()
 	q := strings.ToLower(query)
 
 	var platforms []string
@@ -497,7 +489,7 @@ func hasLineOnOrAfter(lines []string, cutoffDate string) bool {
 // Deduplicates by skipping writes if the exact line already exists in the file.
 // Creates parent directories if needed. Safe for concurrent use (O_APPEND).
 func WriteMessage(platform, account, conversation, sender, text string, ts time.Time) error {
-	dir := filepath.Join(DataDir(), platform, account, conversation)
+	dir := filepath.Join(paths.DataDir(), platform, account, conversation)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create conversation dir %s: %w", dir, err)
 	}
@@ -508,12 +500,12 @@ func WriteMessage(platform, account, conversation, sender, text string, ts time.
 
 // ThreadDir returns the path to the threads directory for a conversation.
 func ThreadDir(platform, account, conversation string) string {
-	return filepath.Join(DataDir(), platform, account, conversation, "threads")
+	return paths.ThreadDir(platform, account, conversation)
 }
 
 // ThreadFilePath returns the path to a specific thread file.
 func ThreadFilePath(platform, account, conversation, threadTS string) string {
-	return filepath.Join(ThreadDir(platform, account, conversation), threadTS+".txt")
+	return paths.ThreadFilePath(platform, account, conversation, threadTS)
 }
 
 // WriteThreadMessage appends a message to a thread file. If isReply is true,
@@ -607,7 +599,7 @@ func appendDedup(filename, line string) error {
 
 // DefaultDBPath returns the default path for the WhatsApp SQLite database.
 func DefaultDBPath() string {
-	return filepath.Join(DataDir(), "whatsapp.db")
+	return paths.DefaultDBPath()
 }
 
 // --- helpers ---
