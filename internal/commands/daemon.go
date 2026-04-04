@@ -7,13 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/anish/claude-msg-utils/internal/api"
+	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
+	"github.com/anish/claude-msg-utils/internal/store"
 )
 
 func DaemonStart() error {
@@ -83,13 +86,44 @@ func DaemonRun() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	msgHub := hub.New()
+	// Load session files and build hub channel configs.
+	var channels []hub.ChannelConfig
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		slog.Warn("failed to load session files", "error", err)
+	}
+	for _, s := range sessions {
+		channels = append(channels, hub.ChannelConfig{
+			Platform:      s.Platform,
+			Account:       s.Account,
+			SessionID:     s.SessionID,
+			LastDelivered: s.LastDelivered,
+		})
+	}
+
+	// Wire hub callbacks to existing store and claude packages.
+	msgHub := hub.New(ctx, channels,
+		func(platform, account, conversation string, since time.Duration) ([]string, error) {
+			return store.ReadMessages(platform, account, conversation, store.ReadOpts{Since: since})
+		},
+		func(platform, account string, t time.Time) error {
+			sf, err := claude.OpenSession(platform, account)
+			if err != nil {
+				return err
+			}
+			defer sf.Close()
+			return sf.UpdateLastDelivered(t)
+		},
+		store.ParseLineTime,
+	)
+	defer msgHub.Stop()
+
 	apiServer := api.NewServer(msgHub)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer)
+	waMgr := daemon.NewWhatsAppManager(apiServer, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer)
+	slackMgr := daemon.NewSlackManager(apiServer, msgHub.Route)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	go apiServer.Start(ctx, daemon.SocketPath())

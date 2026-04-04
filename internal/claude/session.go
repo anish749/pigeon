@@ -108,9 +108,49 @@ func (sf *SessionFile) Save(s *Session) error {
 	return nil
 }
 
+// UpdateLastDelivered updates the last_delivered timestamp and saves to disk.
+// The lock is held throughout.
+func (sf *SessionFile) UpdateLastDelivered(t time.Time) error {
+	if sf.data == nil {
+		return fmt.Errorf("no session data to update")
+	}
+	sf.data.LastDelivered = t
+	return sf.Save(sf.data)
+}
+
 // Close releases the lock on the session file.
 func (sf *SessionFile) Close() error {
 	return sf.lock.Close()
+}
+
+// ListAllSessions scans the sessions directory and returns data from each
+// session file. Each file is opened with a lock, read, and closed.
+func ListAllSessions() ([]*Session, error) {
+	dir := SessionsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read sessions dir: %w", err)
+	}
+
+	var sessions []*Session
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || strings.HasSuffix(e.Name(), ".lock") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var s Session
+		if err := yaml.Unmarshal(data, &s); err != nil {
+			continue
+		}
+		sessions = append(sessions, &s)
+	}
+	return sessions, nil
 }
 
 // SessionsDir returns the directory where session files are stored.
