@@ -8,12 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gopkg.in/natefinch/lumberjack.v2"
-
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
+	"github.com/anish/claude-msg-utils/internal/logging"
 	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
@@ -36,7 +35,7 @@ func DaemonStop() error {
 func DaemonStatus() error {
 	running, pid := daemon.Status()
 	if running {
-		fmt.Printf("Running (pid=%d, log=%s)\n", pid, paths.LogPath())
+		fmt.Printf("Running (pid=%d, log=%s)\n", pid, paths.DaemonLogPath())
 	} else {
 		fmt.Println("Not running.")
 	}
@@ -58,14 +57,7 @@ func DaemonRestart() error {
 
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
 func DaemonRun() error {
-	logWriter := &lumberjack.Logger{
-		Filename:   paths.LogPath(),
-		MaxSize:    10, // megabytes
-		MaxBackups: 2,
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	logging.InitFile(logging.Daemon)
 
 	if err := daemon.WritePID(); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
