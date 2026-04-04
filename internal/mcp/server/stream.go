@@ -52,9 +52,7 @@ func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.I
 // run connects to the daemon's SSE endpoint and forwards messages.
 // Reconnects automatically on failure. Blocks until ctx is cancelled.
 func (ds *daemonStream) run(ctx context.Context) {
-	slog.Info("daemon stream goroutine started", "session_id", ds.sessionID, "socket", ds.socketPath)
 	for {
-		slog.Info("attempting sse connection", "session_id", ds.sessionID)
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
 			return
@@ -91,7 +89,10 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("unexpected status %d (and failed to read body: %w)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -100,7 +101,6 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		slog.Info("sse received line", "line", line)
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -111,7 +111,7 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 			continue
 		}
 
-		slog.Info("delivering to claude", "platform", incoming.Platform, "account", incoming.Account)
+		slog.Info("delivering message", "platform", incoming.Platform, "account", incoming.Account, "conversation", incoming.Conversation)
 		if err := ds.notify(incoming); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}
