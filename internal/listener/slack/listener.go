@@ -157,16 +157,14 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
-	if l.onMessage != nil {
-		switch msg.ChannelType {
-		case "im", "mpim":
+	switch msg.ChannelType {
+	case "im", "mpim":
+		l.onMessage(l.acct, channelName)
+	case "group":
+		l.onMessage(l.acct, channelName)
+	case "channel":
+		if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
 			l.onMessage(l.acct, channelName)
-		case "group":
-			l.onMessage(l.acct, channelName)
-		case "channel":
-			if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
-				l.onMessage(l.acct, channelName)
-			}
 		}
 	}
 }
