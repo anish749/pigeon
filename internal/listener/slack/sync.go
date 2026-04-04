@@ -318,6 +318,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 	slog.InfoContext(ctx, "slack sync: bot DMs", "account", acct, "count", len(botDMs))
 
 	for _, ch := range botDMs {
+		resolver.RegisterConversation(ctx, ch)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
