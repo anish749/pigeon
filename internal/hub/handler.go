@@ -41,8 +41,7 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 			return
 		}
 
-		// Channel for delivering messages to this SSE connection.
-		msgCh := make(chan IncomingMsg, 64)
+		msgCh := make(chan []byte, 64)
 		ready := make(chan struct{})
 
 		session := &Session{
@@ -50,8 +49,12 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 			CWD:       cwd,
 			Ready:     ready,
 			Send: func(ctx context.Context, incoming IncomingMsg) error {
+				data, err := json.Marshal(incoming)
+				if err != nil {
+					return err
+				}
 				select {
-				case msgCh <- incoming:
+				case msgCh <- data:
 					return nil
 				default:
 					return fmt.Errorf("session %s: send buffer full", sessionID)
@@ -80,12 +83,7 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 			case <-ctx.Done():
 				slog.Info("sse client disconnected", "session_id", sessionID)
 				return
-			case evt := <-msgCh:
-				data, err := json.Marshal(evt)
-				if err != nil {
-					slog.Error("sse marshal failed", "error", err)
-					continue
-				}
+			case data := <-msgCh:
 				fmt.Fprintf(w, "data: %s\n\n", data)
 				flusher.Flush()
 			}

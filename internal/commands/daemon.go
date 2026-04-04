@@ -13,6 +13,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
 	"github.com/anish/claude-msg-utils/internal/logging"
+	"github.com/anish/claude-msg-utils/internal/outbox"
 	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
@@ -82,7 +83,8 @@ func DaemonRun() error {
 	}
 	defer msgHub.Stop()
 
-	apiServer := api.NewServer(msgHub)
+	ob := outbox.New()
+	apiServer := api.NewServer(msgHub, ob)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)

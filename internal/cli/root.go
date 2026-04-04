@@ -199,6 +199,7 @@ MAINTENANCE
 
 		// Sending
 		newSendCmd(),
+		newReviewCmd(),
 
 		// Slack
 		newGenerateManifestCmd(),

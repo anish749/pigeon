@@ -24,11 +24,11 @@ import (
 	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/hub"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
+	"github.com/anish/claude-msg-utils/internal/outbox"
 	"github.com/anish/claude-msg-utils/internal/store"
 
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
-
 
 // WhatsAppSender holds everything needed to send a WhatsApp message.
 type WhatsAppSender struct {
@@ -54,14 +54,16 @@ type Server struct {
 	whatsapp map[string]*WhatsAppSender // account slug → sender
 	slack    map[string]*SlackSender    // account slug → sender
 	hub      *hub.Hub
+	outbox   *outbox.Outbox
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox) *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),
 		hub:      h,
+		outbox:   ob,
 	}
 }
 
@@ -91,9 +93,13 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 
+	obHandler := outbox.NewHandler(s.outbox, s.executeSend, s.hub.NotifySession)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
+	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
+	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
 
 	srv := &http.Server{
 		Handler: mux,
@@ -126,6 +132,10 @@ type SendRequest struct {
 	Broadcast bool   `json:"broadcast,omitempty"`
 	AsUser    bool   `json:"as_user,omitempty"`
 	DryRun    bool   `json:"dry_run,omitempty"`
+	// SessionID, when set, routes the send through the outbox for human
+	// review instead of sending immediately. Set automatically by the CLI
+	// when PIGEON_SESSION_ID is in the environment.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // SendResponse is the daemon API response for /api/send.
@@ -137,6 +147,7 @@ type SendResponse struct {
 	ChannelName string `json:"channel_name,omitempty"`
 	SendAs      string `json:"send_as,omitempty"`
 	Email       string `json:"email,omitempty"`
+	OutboxID    string `json:"outbox_id,omitempty"`
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -151,19 +162,20 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	acct := account.New(req.Platform, req.Account)
-	var resp SendResponse
-
-	switch acct.Platform {
-	case "whatsapp":
-		resp = s.sendWhatsApp(ctx, acct, req)
-	case "slack":
-		resp = s.sendSlack(ctx, acct, req)
-	default:
-		resp = SendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
+	// When a session ID is present, queue for review instead of sending.
+	if req.SessionID != "" {
+		payload, err := json.Marshal(req)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, SendResponse{Error: "marshal send request: " + err.Error()})
+			return
+		}
+		item := s.outbox.Submit(req.SessionID, payload)
+		slog.Info("outbox item submitted", "id", item.ID, "session_id", req.SessionID)
+		writeJSON(w, http.StatusOK, SendResponse{OK: true, OutboxID: item.ID})
+		return
 	}
 
+	resp := s.dispatchSend(r.Context(), req)
 	status := http.StatusOK
 	if !resp.OK {
 		status = http.StatusInternalServerError
@@ -469,4 +481,31 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 	}
 
 	return dates[len(dates)-1], totalLines
+}
+
+// dispatchSend routes a SendRequest to the appropriate platform sender.
+func (s *Server) dispatchSend(ctx context.Context, req SendRequest) SendResponse {
+	acct := account.New(req.Platform, req.Account)
+	switch acct.Platform {
+	case "whatsapp":
+		return s.sendWhatsApp(ctx, acct, req)
+	case "slack":
+		return s.sendSlack(ctx, acct, req)
+	default:
+		return SendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
+	}
+}
+
+// executeSend is the outbox.SendFunc callback. It unmarshals the stored payload
+// and dispatches through the normal send path.
+func (s *Server) executeSend(ctx context.Context, payload json.RawMessage) (bool, string) {
+	var req SendRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return false, "invalid payload: " + err.Error()
+	}
+	resp := s.dispatchSend(ctx, req)
+	if !resp.OK {
+		return false, resp.Error
+	}
+	return true, ""
 }

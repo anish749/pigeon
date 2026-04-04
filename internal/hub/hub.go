@@ -226,6 +226,19 @@ func (h *Hub) Sessions() int {
 	return len(h.sessions)
 }
 
+// NotifySession sends a text message to a specific session by ID, using the
+// same path as incoming messages. Returns an error if the session is not connected.
+func (h *Hub) NotifySession(sessionID string, text string) error {
+	h.mu.RLock()
+	s, ok := h.sessions[sessionID]
+	h.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("session %s not connected", sessionID)
+	}
+	return s.Send(h.ctx, IncomingMsg{MsgLines: []string{text}})
+}
+
 func (h *Hub) startChannel(s *claude.Session) {
 	acct := account.New(s.Platform, s.Account)
 
