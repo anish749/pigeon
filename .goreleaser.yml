@@ -11,16 +11,6 @@ builds:
     goarch:
       - amd64
 
-  - id: pigeon-mcp
-    main: ./cmd/pigeon-mcp
-    binary: pigeon-mcp
-    env:
-      - CGO_ENABLED=1
-    goos:
-      - linux
-    goarch:
-      - amd64
-
 archives:
   - format: tar.gz
 
