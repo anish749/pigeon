@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
+
+	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
 )
 
 // IncomingMsg is the JSON payload sent over SSE to MCP shim processes.
@@ -15,6 +18,20 @@ type IncomingMsg struct {
 	Account      string   `json:"account"`      // phone number or workspace
 	Conversation string   `json:"conversation"` // conversation directory name or channel name
 	MsgLines     []string `json:"msg_lines"`    // raw lines from store, e.g. "[2026-04-04 14:00:00 +02:00] Alice: hey"
+}
+
+var _ NotificationMsg = (*IncomingMsg)(nil)
+
+func (i *IncomingMsg) Content() string {
+	return strings.Join(i.MsgLines, "\n")
+}
+
+func (i *IncomingMsg) Meta() map[string]any {
+	return map[string]any{
+		"platform":     i.Platform,
+		"account":      i.Account,
+		"conversation": i.Conversation,
+	}
 }
 
 // SSEHandler returns an http.HandlerFunc that serves the SSE endpoint for
@@ -42,16 +59,20 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		}
 
 		// Channel for delivering messages to this SSE connection.
-		msgCh := make(chan IncomingMsg, 64)
+		msgCh := make(chan mcpserver.ClaudeChannelNotification, 64)
 		ready := make(chan struct{})
 
 		session := &Session{
 			SessionID: sessionID,
 			CWD:       cwd,
 			Ready:     ready,
-			Send: func(ctx context.Context, incoming IncomingMsg) error {
+			Send: func(ctx context.Context, notificationMsg NotificationMsg) error {
+				notification := mcpserver.ClaudeChannelNotification{
+					Content: notificationMsg.Content(),
+					Meta:    notificationMsg.Meta(),
+				}
 				select {
-				case msgCh <- incoming:
+				case msgCh <- notification:
 					return nil
 				default:
 					return fmt.Errorf("session %s: send buffer full", sessionID)
