@@ -187,27 +187,29 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 		return err
 	}
 
-	// --session-id requires --resume. For new sessions with a fresh UUID,
-	// claude starts a new conversation; for existing ones it resumes.
-	args := []string{
-		"claude",
-		"--session-id", sessionID,
-		"--resume", sessionID,
-		"--name", name,
-		"--dangerously-load-development-channels", "server:pigeon",
-	}
-
+	var args []string
 	if resume {
 		fmt.Printf("  %sResuming Claude Code session...%s\n\n", dim, reset)
+		args = []string{
+			"claude",
+			"--resume", sessionID,
+			"--dangerously-load-development-channels", "server:pigeon",
+		}
 	} else {
 		fmt.Printf("  %sStarting Claude Code session...%s\n\n", dim, reset)
+		args = []string{
+			"claude",
+			"--session-id", sessionID,
+			"--name", name,
+			"--dangerously-load-development-channels", "server:pigeon",
+		}
 	}
 
-	// Set env var so the MCP shim knows the session ID.
-	os.Setenv("PIGEON_SESSION_ID", sessionID)
+	// Pass session ID to claude (and its MCP shim) via environment.
+	env := append(os.Environ(), "PIGEON_SESSION_ID="+sessionID)
 
 	// Exec replaces this process with claude.
-	return syscall.Exec(claudePath, args, os.Environ())
+	return syscall.Exec(claudePath, args, env)
 }
 
 func findClaude() (string, error) {
