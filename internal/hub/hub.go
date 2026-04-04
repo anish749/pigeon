@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/anish/claude-msg-utils/internal/store"
 )
 
 // ChannelConfig describes a session loaded from a session file.
@@ -29,17 +31,9 @@ type channelKey struct {
 // written to disk. Parameters are platform, account, and conversation.
 type MessageNotifyFunc func(platform, account, conversation string)
 
-// ReadMessagesFunc reads message lines from the store for a conversation
-// since a given duration ago. Maps to store.ReadMessages with ReadOpts{Since}.
-type ReadMessagesFunc func(platform, account, conversation string, since time.Duration) ([]string, error)
-
 // UpdateCursorFunc atomically updates the last_delivered timestamp for a
-// session file. Maps to claude.SessionFile.UpdateLastDelivered.
+// session file. Needed as a callback because hub cannot import claude (cycle).
 type UpdateCursorFunc func(platform, account string, t time.Time) error
-
-// ParseLineTimeFunc extracts a timestamp from a message line.
-// Maps to store.ParseLineTime.
-type ParseLineTimeFunc func(line string) time.Time
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -70,29 +64,25 @@ type deliverySignal struct {
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
-	mu            sync.RWMutex
-	sessions      map[string]*Session     // SessionID → connected session
-	channels      map[channelKey]*channel // platform+account → delivery channel
-	readMessages  ReadMessagesFunc
-	updateCursor  UpdateCursorFunc
-	parseLineTime ParseLineTimeFunc
-	ctx           context.Context
-	cancel        context.CancelFunc
+	mu           sync.RWMutex
+	sessions     map[string]*Session    // SessionID → connected session
+	channels     map[channelKey]*channel // platform+account → delivery channel
+	updateCursor UpdateCursorFunc
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
-// New creates a Hub from the given channel configs and function callbacks.
-// The callbacks avoid import cycles — the daemon wires them to the store
-// and claude packages. Call Stop() to shut down delivery goroutines.
-func New(ctx context.Context, configs []ChannelConfig, readMessages ReadMessagesFunc, updateCursor UpdateCursorFunc, parseLineTime ParseLineTimeFunc) *Hub {
+// New creates a Hub from the given channel configs. updateCursor is a callback
+// for persisting last_delivered (needed because hub cannot import claude).
+// Call Stop() to shut down delivery goroutines.
+func New(ctx context.Context, configs []ChannelConfig, updateCursor UpdateCursorFunc) *Hub {
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
-		sessions:      make(map[string]*Session),
-		channels:      make(map[channelKey]*channel),
-		readMessages:  readMessages,
-		updateCursor:  updateCursor,
-		parseLineTime: parseLineTime,
-		ctx:           ctx,
-		cancel:        cancel,
+		sessions:     make(map[string]*Session),
+		channels:     make(map[channelKey]*channel),
+		updateCursor: updateCursor,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	for _, cfg := range configs {
@@ -203,7 +193,7 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 // Returns the updated lastDelivered timestamp.
 func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	since := time.Since(lastDelivered)
-	lines, err := h.readMessages(ch.key.Platform, ch.key.Account, conversation, since)
+	lines, err := store.ReadMessages(ch.key.Platform, ch.key.Account, conversation, store.ReadOpts{Since: since})
 	if err != nil {
 		slog.Error("failed to read messages",
 			"platform", ch.key.Platform, "account", ch.key.Account,
@@ -240,7 +230,7 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 				"session_id", ch.sessionID, "error", err)
 			break
 		}
-		if ts := h.parseLineTime(line); !ts.IsZero() {
+		if ts := store.ParseLineTime(line); !ts.IsZero() {
 			newLastDelivered = ts
 		}
 	}

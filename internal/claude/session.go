@@ -108,9 +108,9 @@ func (sf *SessionFile) Save(s *Session) error {
 	return nil
 }
 
-// UpdateLastDelivered updates the last_delivered timestamp and saves to disk.
+// updateLastDelivered updates the last_delivered timestamp and saves to disk.
 // The lock is held throughout.
-func (sf *SessionFile) UpdateLastDelivered(t time.Time) error {
+func (sf *SessionFile) updateLastDelivered(t time.Time) error {
 	if sf.data == nil {
 		return fmt.Errorf("no session data to update")
 	}
@@ -166,6 +166,15 @@ func SessionPath(platform, account string) string {
 // SessionName returns the display name for a session (e.g. "slack/tubular").
 func SessionName(platform, account string) string {
 	return fmt.Sprintf("%s/%s", strings.ToLower(platform), strings.ToLower(account))
+}
+
+func UpdateLastDelivered(platform, account string, t time.Time) error {
+	sf, err := OpenSession(platform, account)
+	if err != nil {
+		return err
+	}
+	defer sf.Close()
+	return sf.updateLastDelivered(t)	
 }
 
 func sessionPath(platform, account string) string {

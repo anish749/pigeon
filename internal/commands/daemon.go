@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
-	"github.com/anish/claude-msg-utils/internal/store"
 )
 
 func DaemonStart() error {
@@ -101,21 +99,7 @@ func DaemonRun() error {
 		})
 	}
 
-	// Wire hub callbacks to existing store and claude packages.
-	msgHub := hub.New(ctx, channels,
-		func(platform, account, conversation string, since time.Duration) ([]string, error) {
-			return store.ReadMessages(platform, account, conversation, store.ReadOpts{Since: since})
-		},
-		func(platform, account string, t time.Time) error {
-			sf, err := claude.OpenSession(platform, account)
-			if err != nil {
-				return err
-			}
-			defer sf.Close()
-			return sf.UpdateLastDelivered(t)
-		},
-		store.ParseLineTime,
-	)
+	msgHub := hub.New(ctx, channels, claude.UpdateLastDelivered)
 	defer msgHub.Stop()
 
 	apiServer := api.NewServer(msgHub)
