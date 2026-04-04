@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,7 +28,8 @@ type daemonStream struct {
 
 // startDaemonStream connects to the daemon's SSE endpoint and forwards
 // incoming messages via notify. Reconnects automatically in a background
-// goroutine. Returns an error if initial setup fails.
+// goroutine. The provided context should be long-lived (not request-scoped).
+// Returns an error if initial setup fails.
 func startDaemonStream(ctx context.Context, socketPath string, notify func(hub.IncomingMsg) error) error {
 	sessionID := os.Getenv("PIGEON_SESSION_ID")
 	if sessionID == "" {
@@ -82,12 +84,16 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+		return fmt.Errorf("connect to %s: %w", ds.socketPath, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("unexpected status %d (and failed to read body: %w)", resp.StatusCode, err)
+		}
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
 	slog.Info("sse connected to daemon", "session_id", ds.sessionID, "cwd", ds.cwd)
@@ -105,6 +111,7 @@ func (ds *daemonStream) connect(ctx context.Context) error {
 			continue
 		}
 
+		slog.Info("delivering message", "platform", incoming.Platform, "account", incoming.Account, "conversation", incoming.Conversation)
 		if err := ds.notify(incoming); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}

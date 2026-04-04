@@ -43,10 +43,12 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 
 		// Channel for delivering messages to this SSE connection.
 		msgCh := make(chan IncomingMsg, 64)
+		ready := make(chan struct{})
 
 		session := &Session{
 			SessionID: sessionID,
 			CWD:       cwd,
+			Ready:     ready,
 			Send: func(ctx context.Context, incoming IncomingMsg) error {
 				select {
 				case msgCh <- incoming:
@@ -72,6 +74,7 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		flusher.Flush()
 
 		ctx := r.Context()
+		close(ready) // Signal that the SSE event loop is ready to deliver messages.
 		for {
 			select {
 			case <-ctx.Done():
