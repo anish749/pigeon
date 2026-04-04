@@ -236,22 +236,25 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 		return lastDelivered
 	}
 
-	// Deliver each line as a separate message.
+	// Send all lines as a single message.
+	msg := IncomingMsg{
+		Platform:     ch.key.Platform,
+		Account:      ch.key.Account,
+		Conversation: conversation,
+		MsgLines:     lines,
+	}
+	if err := session.Send(h.ctx, msg); err != nil {
+		slog.Error("failed to deliver message",
+			"session_id", ch.sessionID, "error", err)
+		return lastDelivered
+	}
+
+	// Find the timestamp of the last line for cursor update.
 	var newLastDelivered time.Time
-	for _, line := range lines {
-		msg := IncomingMsg{
-			Platform:     ch.key.Platform,
-			Account:      ch.key.Account,
-			Conversation: conversation,
-			MsgLine:      line,
-		}
-		if err := session.Send(h.ctx, msg); err != nil {
-			slog.Error("failed to deliver message",
-				"session_id", ch.sessionID, "error", err)
-			break
-		}
-		if ts := store.ParseLineTime(line); !ts.IsZero() {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if ts := store.ParseLineTime(lines[i]); !ts.IsZero() {
 			newLastDelivered = ts
+			break
 		}
 	}
 
