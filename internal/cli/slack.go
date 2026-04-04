@@ -28,8 +28,7 @@ it to the clipboard. Use this before creating or updating a Slack app.`,
 		},
 	}
 	cmd.Flags().String("username", "", "display name for the bot owner")
-	cmd.Flags().String("workspace", "", "Slack workspace name")
+	cmd.Flags().String("workspace", "", "Slack workspace name (interactive picker if omitted)")
 	cmd.MarkFlagRequired("username")
-	cmd.MarkFlagRequired("workspace")
 	return cmd
 }
