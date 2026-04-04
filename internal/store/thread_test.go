@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,46 @@ func TestSearchIncludesThreads(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected result with thread: prefix in Date field")
+	}
+}
+
+func TestSearchSinceIncludesRecentlyActiveOldThread(t *testing.T) {
+	setupTestDataDir(t)
+
+	threadDir := ThreadDir("slack", "acme", "#general")
+	if err := os.MkdirAll(threadDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldParent := time.Now().Add(-48 * time.Hour)
+	recentReply := time.Now().Add(-30 * time.Minute)
+	threadFile := filepath.Join(threadDir, "123.456.txt")
+	content := fmt.Sprintf("[%s] Alice: old parent\n  [%s] Bob: recent reply with deploy keyword\n",
+		oldParent.Format("2006-01-02 15:04:05 -07:00"),
+		recentReply.Format("2006-01-02 15:04:05 -07:00"),
+	)
+	if err := os.WriteFile(threadFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := SearchMessages("deploy keyword", "slack", "acme", 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected search --since to find recently active thread")
+	}
+
+	found := false
+	for _, r := range results {
+		if strings.HasPrefix(r.Date, "thread:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected a thread search result for recently active old thread")
 	}
 }
 

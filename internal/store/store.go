@@ -450,11 +450,8 @@ func SearchMessages(query, platform, account string, since time.Duration) ([]Sea
 						if err != nil {
 							continue
 						}
-						// Check cutoff by parsing the first line's timestamp
-						if cutoffDate != "" && len(lines) > 0 {
-							if firstTS := parseLineDate(lines[0]); firstTS != "" && firstTS < cutoffDate {
-								continue
-							}
+						if cutoffDate != "" && !hasLineOnOrAfter(lines, cutoffDate) {
+							continue
 						}
 						for _, sec := range buildSections(lines, q) {
 							results = append(results, SearchResult{
@@ -485,6 +482,15 @@ func parseLineDate(line string) string {
 		return trimmed[1:11]
 	}
 	return ""
+}
+
+func hasLineOnOrAfter(lines []string, cutoffDate string) bool {
+	for _, line := range lines {
+		if lineDate := parseLineDate(line); lineDate != "" && lineDate >= cutoffDate {
+			return true
+		}
+	}
+	return false
 }
 
 // WriteMessage appends a formatted message line to the appropriate date file.
