@@ -101,13 +101,13 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 			case <-ctx.Done():
 				slog.Info("sse client disconnected", "session_id", sessionID)
 				return
-			case data := <-msgCh:
-				jsonData, err := json.Marshal(data)
+			case evt := <-msgCh:
+				data, err := json.Marshal(evt)
 				if err != nil {
 					slog.Error("sse marshal failed", "error", err)
 					continue
 				}
-				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				fmt.Fprintf(w, "data: %s\n\n", data)
 				flusher.Flush()
 			}
 		}
