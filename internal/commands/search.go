@@ -123,41 +123,62 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 		ts     time.Time
 		sender string
 	}
-	var msgs []msgInfo
+	type groupKey struct {
+		platform, account string
+	}
+
+	// Group messages by platform/account, preserving insertion order.
+	groupMsgs := make(map[groupKey][]msgInfo)
+	var groupOrder []groupKey
 	for _, r := range results {
+		k := groupKey{r.Platform, r.Account}
+		if _, ok := groupMsgs[k]; !ok {
+			groupOrder = append(groupOrder, k)
+		}
 		for _, line := range r.Lines {
 			ts, sender := parseResultLine(line)
 			if !ts.IsZero() {
-				msgs = append(msgs, msgInfo{ts: ts, sender: sender})
+				groupMsgs[k] = append(groupMsgs[k], msgInfo{ts: ts, sender: sender})
 			}
 		}
-	}
-	if len(msgs) == 0 {
-		return
 	}
 
 	buckets := chooseBuckets(sinceDur)
 
-	for _, b := range buckets {
-		if b.dur > sinceDur {
+	for _, k := range groupOrder {
+		msgs := groupMsgs[k]
+		if len(msgs) == 0 {
 			continue
 		}
-		cutoff := now.Add(-b.dur)
-		var count int
-		senders := make(map[string]struct{})
-		for _, m := range msgs {
-			if !m.ts.Before(cutoff) {
-				count++
-				if m.sender != "" {
-					senders[m.sender] = struct{}{}
+		var lines []string
+		for _, b := range buckets {
+			if b.dur > sinceDur {
+				continue
+			}
+			cutoff := now.Add(-b.dur)
+			var count int
+			senders := make(map[string]struct{})
+			for _, m := range msgs {
+				if !m.ts.Before(cutoff) {
+					count++
+					if m.sender != "" {
+						senders[m.sender] = struct{}{}
+					}
 				}
 			}
+			if count > 0 {
+				lines = append(lines, fmt.Sprintf("    Last %-4s %3d msgs — %s", b.label+":", count, formatSenders(senders, 50)))
+			}
 		}
-		if count > 0 {
-			fmt.Printf("  Last %-4s %3d msgs — %s\n", b.label+":", count, formatSenders(senders, 50))
+		if len(lines) == 0 {
+			continue
 		}
+		fmt.Printf("  %s/%s:\n", k.platform, k.account)
+		for _, line := range lines {
+			fmt.Println(line)
+		}
+		fmt.Println()
 	}
-	fmt.Println()
 }
 
 func parseResultLine(line string) (time.Time, string) {
