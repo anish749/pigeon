@@ -1,6 +1,7 @@
 // Package hub routes incoming messages from platform listeners to connected
-// MCP sessions. The daemon creates a single Hub and passes it to listeners.
-// MCP shim processes register themselves as sessions when they connect.
+// MCP sessions. The daemon creates a single Hub at startup. Listeners call
+// Route() when a new message arrives, and the hub delivers it to the
+// appropriate Claude Code session via SSE.
 package hub
 
 import (
@@ -8,9 +9,26 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
+
+	"github.com/anish/claude-msg-utils/internal/claude"
+	"github.com/anish/claude-msg-utils/internal/store"
 )
 
+// channelKey identifies a platform+account pair for map lookups.
+type channelKey struct {
+	Platform string
+	Account  string
+}
 
+// MessageNotifyFunc is called by listeners when a new message has been
+// written to disk. Parameters are platform, account, and conversation.
+type MessageNotifyFunc func(platform, account, conversation string)
+
+// signalBufferSize is the capacity of each channel's delivery signal buffer.
+// If full, new signals are dropped — the goroutine will catch up on its
+// next drain since it reads all messages since last_delivered.
+const signalBufferSize = 64
 
 // Session represents a connected MCP shim process.
 type Session struct {
@@ -19,32 +37,98 @@ type Session struct {
 	// CWD is the working directory of the Claude Code session.
 	CWD string
 	// Send delivers a message to this session. Provided by the transport
-	// layer (e.g. SSE) when the session registers.
+	// layer (SSE) when the session registers.
 	Send func(ctx context.Context, incoming IncomingMsg) error
+}
+
+// channel is a per-platform+account delivery goroutine.
+type channel struct {
+	key       channelKey
+	sessionID string
+	signal    chan deliverySignal
+}
+
+type deliverySignal struct {
+	conversation string
 }
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session // SessionID → session
+	sessions map[string]*Session    // SessionID → connected session
+	channels map[channelKey]*channel // platform+account → delivery channel
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
-// New creates an empty Hub.
-func New() *Hub {
-	return &Hub{
-		sessions: make(map[string]*Session),
+// New creates a Hub, loads session files, and starts delivery goroutines.
+// Returns an error if session files cannot be read (note: no sessions
+// configured yet is not an error). Call Stop() to shut down.
+func New(ctx context.Context) (*Hub, error) {
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		return nil, fmt.Errorf("load session files: %w", err)
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[channelKey]*channel),
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	for _, s := range sessions {
+		h.startChannel(s)
+	}
+	if len(sessions) > 0 {
+		slog.Info("hub started with session channels", "count", len(sessions))
+	}
+
+	return h, nil
 }
 
-// Register adds a session to the hub. Returns an error if the session ID is already taken.
-// TODO: validate session ID and CWD against session files on disk. Reject if the
-// session ID is unknown or the CWD doesn't match what's stored in the session file.
+// Stop shuts down all delivery goroutines.
+func (h *Hub) Stop() {
+	h.cancel()
+}
+
+// Register adds a connected MCP shim session to the hub. Validates the
+// session ID exists in a session file and the CWD matches.
 func (h *Hub) Register(s *Session) error {
+	// Validate against session files on disk.
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		return fmt.Errorf("validate session: %w", err)
+	}
+	var found *claude.Session
+	for _, cs := range sessions {
+		if cs.SessionID == s.SessionID {
+			found = cs
+			break
+		}
+	}
+	if found == nil {
+		return &RegistrationError{
+			SessionID: s.SessionID,
+			Reason:    "no session file found — launch via 'pigeon claude' first",
+		}
+	}
+	if found.CWD != s.CWD {
+		return &RegistrationError{
+			SessionID: s.SessionID,
+			Reason:    "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+		}
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if _, exists := h.sessions[s.SessionID]; exists {
-		return fmt.Errorf("session %s already registered", s.SessionID)
+		return &RegistrationError{
+			SessionID: s.SessionID,
+			Reason:    "session already registered",
+		}
 	}
 	h.sessions[s.SessionID] = s
 	slog.Info("session registered", "session_id", s.SessionID, "cwd", s.CWD)
@@ -62,32 +146,124 @@ func (h *Hub) Unregister(sessionID string) {
 	}
 }
 
-// Route delivers an incoming message to the first available session.
-// If no session is connected, the message is dropped with a warning.
-func (h *Hub) Route(ctx context.Context, incoming IncomingMsg) error {
+// Route signals that a new message has arrived for the given platform, account,
+// and conversation. Non-blocking — returns immediately.
+func (h *Hub) Route(platform, account, conversation string) {
+	key := channelKey{Platform: platform, Account: account}
+
 	h.mu.RLock()
-	target := h.pickSession()
+	ch, exists := h.channels[key]
 	h.mu.RUnlock()
 
-	if target == nil {
-		// TODO: start a new Claude Code session and register it, instead of dropping.
-		slog.Warn("no session available, dropping message", "incoming", incoming)
-		return nil
+	if !exists {
+		slog.Debug("no session configured, message dropped",
+			"platform", platform, "account", account, "conversation", conversation)
+		return
 	}
-	return target.Send(ctx, incoming)
+
+	select {
+	case ch.signal <- deliverySignal{conversation: conversation}:
+	default:
+		slog.Error("delivery signal buffer full, message delivery may be delayed",
+			"platform", platform, "account", account, "conversation", conversation,
+			"buffer_size", signalBufferSize)
+	}
 }
 
-// Sessions returns the number of active sessions.
+// Sessions returns the number of active (connected) sessions.
 func (h *Hub) Sessions() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.sessions)
 }
 
-// pickSession returns the first session found. Caller must hold at least a read lock.
-func (h *Hub) pickSession() *Session {
-	for _, s := range h.sessions {
-		return s
+func (h *Hub) startChannel(s *claude.Session) {
+	key := channelKey{Platform: s.Platform, Account: s.Account}
+
+	ch := &channel{
+		key:       key,
+		sessionID: s.SessionID,
+		signal:    make(chan deliverySignal, signalBufferSize),
 	}
-	return nil
+
+	h.mu.Lock()
+	h.channels[key] = ch
+	h.mu.Unlock()
+
+	go h.deliveryLoop(ch, s.LastDelivered)
+
+	slog.Info("delivery channel started",
+		"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
+}
+
+// deliveryLoop waits for signals, reads new messages from disk, and delivers
+// them via the connected session. Serialized per channel.
+func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case sig := <-ch.signal:
+			lastDelivered = h.drainMessages(ch, sig.conversation, lastDelivered)
+		}
+	}
+}
+
+// drainMessages reads messages since lastDelivered and delivers them.
+// Returns the updated lastDelivered timestamp.
+func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time.Time) time.Time {
+	now := time.Now()
+	since := now.Sub(lastDelivered)
+	lines, err := store.ReadMessages(ch.key.Platform, ch.key.Account, conversation, store.ReadOpts{Since: since})
+	if err != nil {
+		slog.Error("failed to read messages",
+			"platform", ch.key.Platform, "account", ch.key.Account,
+			"conversation", conversation, "error", err)
+		return lastDelivered
+	}
+
+	if len(lines) == 0 {
+		return lastDelivered
+	}
+
+	// Find connected session.
+	h.mu.RLock()
+	session := h.sessions[ch.sessionID]
+	h.mu.RUnlock()
+
+	if session == nil {
+		slog.Warn("session not connected, messages pending",
+			"session_id", ch.sessionID, "pending", len(lines))
+		return lastDelivered
+	}
+
+	// Send all lines as a single message.
+	msg := IncomingMsg{
+		Platform:     ch.key.Platform,
+		Account:      ch.key.Account,
+		Conversation: conversation,
+		MsgLines:     lines,
+	}
+	if err := session.Send(h.ctx, msg); err != nil {
+		slog.Error("failed to deliver message",
+			"session_id", ch.sessionID, "error", err)
+		return lastDelivered
+	}
+
+	// Update cursor to now — everything up to this point has been delivered.
+	if err := claude.UpdateLastDelivered(ch.key.Platform, ch.key.Account, now); err != nil {
+		slog.Error("failed to update last_delivered",
+			"session_id", ch.sessionID, "error", err)
+	}
+	return now
+}
+
+// RegistrationError is returned when session registration fails.
+type RegistrationError struct {
+	SessionID string
+	Reason    string
+}
+
+func (e *RegistrationError) Error() string {
+	return "session " + e.SessionID + ": " + e.Reason
 }

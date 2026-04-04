@@ -84,13 +84,18 @@ func DaemonRun() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	msgHub := hub.New()
+	msgHub, err := hub.New(ctx)
+	if err != nil {
+		return fmt.Errorf("start hub: %w", err)
+	}
+	defer msgHub.Stop()
+
 	apiServer := api.NewServer(msgHub)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer)
+	waMgr := daemon.NewWhatsAppManager(apiServer, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer)
+	slackMgr := daemon.NewSlackManager(apiServer, msgHub.Route)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	go apiServer.Start(ctx, paths.SocketPath())

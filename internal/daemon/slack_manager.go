@@ -9,6 +9,7 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/hub"
 	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
 )
 
@@ -16,8 +17,9 @@ import (
 // It starts initial workspaces, watches for config changes, and
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
-	apiServer *api.Server
-	running   map[string]*runningWorkspace // teamID → workspace
+	apiServer    *api.Server
+	onBotMessage hub.MessageNotifyFunc
+	running      map[string]*runningWorkspace // teamID → workspace
 }
 
 type runningWorkspace struct {
@@ -25,11 +27,13 @@ type runningWorkspace struct {
 }
 
 // NewSlackManager creates a manager that registers Slack senders with the
-// given API server.
-func NewSlackManager(apiServer *api.Server) *SlackManager {
+// given API server. onBotMessage is called when a message is sent to the
+// pigeon bot (may be nil).
+func NewSlackManager(apiServer *api.Server, onBotMessage hub.MessageNotifyFunc) *SlackManager {
 	return &SlackManager{
-		apiServer: apiServer,
-		running:   make(map[string]*runningWorkspace),
+		apiServer:    apiServer,
+		onBotMessage: onBotMessage,
+		running:      make(map[string]*runningWorkspace),
 	}
 }
 
@@ -88,7 +92,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	sender := startSlackListener(wsCtx, sl)
+	sender := startSlackListener(wsCtx, sl, m.onBotMessage)
 	if sender == nil {
 		cancel()
 		return
@@ -100,7 +104,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, onBotMessage hub.MessageNotifyFunc) *api.SlackSender {
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
@@ -126,7 +130,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig) *api.SlackSe
 	}
 
 	messages := slacklistener.NewMessageStore(sl.Workspace)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, sl.Workspace, sl.TeamID)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, sl.Workspace, sl.TeamID, onBotMessage)
 	go listener.Run(ctx)
 
 	go func() {

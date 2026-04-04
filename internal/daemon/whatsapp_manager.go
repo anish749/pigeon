@@ -13,6 +13,7 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/api"
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/hub"
 	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
 	"github.com/anish/claude-msg-utils/internal/walog"
 )
@@ -22,6 +23,7 @@ import (
 // starts/stops accounts as they are added or removed.
 type WhatsAppManager struct {
 	apiServer *api.Server
+	onMessage hub.MessageNotifyFunc
 	running   map[string]*runningWAAccount // account → state
 }
 
@@ -31,10 +33,11 @@ type runningWAAccount struct {
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
-// the given API server.
-func NewWhatsAppManager(apiServer *api.Server) *WhatsAppManager {
+// the given API server. onMessage is called when a message is received (may be nil).
+func NewWhatsAppManager(apiServer *api.Server, onMessage hub.MessageNotifyFunc) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,
+		onMessage: onMessage,
 		running:   make(map[string]*runningWAAccount),
 	}
 }
@@ -115,7 +118,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 			config.Save(cfg)
 		}
 	}
-	listener := walistener.New(client, wa.Account, onLogout)
+	listener := walistener.New(client, wa.Account, onLogout, m.onMessage)
 	client.AddEventHandler(listener.EventHandler(acctCtx))
 
 	if err := client.Connect(); err != nil {

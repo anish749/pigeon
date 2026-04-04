@@ -11,11 +11,10 @@ import (
 
 // IncomingMsg is the JSON payload sent over SSE to MCP shim processes.
 type IncomingMsg struct {
-	Platform     string `json:"platform"`     // "whatsapp" or "slack"
-	Account      string `json:"account"`      // phone number or workspace
-	Conversation string `json:"conversation"` // conversation directory name or channel name
-	Sender       string `json:"sender"`       // display name of the person who sent the message
-	Text         string `json:"text"`         // message text
+	Platform     string   `json:"platform"`     // "whatsapp" or "slack"
+	Account      string   `json:"account"`      // phone number or workspace
+	Conversation string   `json:"conversation"` // conversation directory name or channel name
+	MsgLines     []string `json:"msg_lines"`    // raw lines from store, e.g. "[2026-04-04 14:00:00 +02:00] Alice: hey"
 }
 
 // SSEHandler returns an http.HandlerFunc that serves the SSE endpoint for
