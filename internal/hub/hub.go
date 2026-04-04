@@ -93,9 +93,34 @@ func (h *Hub) Stop() {
 	h.cancel()
 }
 
-// Register adds a connected MCP shim session to the hub.
-// TODO: validate session ID and CWD against session files on disk.
+// Register adds a connected MCP shim session to the hub. Validates the
+// session ID exists in a session file and the CWD matches.
 func (h *Hub) Register(s *Session) error {
+	// Validate against session files on disk.
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		return fmt.Errorf("validate session: %w", err)
+	}
+	var found *claude.Session
+	for _, cs := range sessions {
+		if cs.SessionID == s.SessionID {
+			found = cs
+			break
+		}
+	}
+	if found == nil {
+		return &RegistrationError{
+			SessionID: s.SessionID,
+			Reason:    "no session file found — launch via 'pigeon claude' first",
+		}
+	}
+	if found.CWD != s.CWD {
+		return &RegistrationError{
+			SessionID: s.SessionID,
+			Reason:    "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+		}
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
