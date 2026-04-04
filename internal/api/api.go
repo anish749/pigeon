@@ -103,7 +103,8 @@ func (s *Server) Start(ctx context.Context) error {
 	return err
 }
 
-type sendRequest struct {
+// SendRequest is the daemon API payload for /api/send.
+type SendRequest struct {
 	Platform  string `json:"platform"`
 	Account   string `json:"account"`
 	Contact   string `json:"contact"`
@@ -114,7 +115,8 @@ type sendRequest struct {
 	DryRun    bool   `json:"dry_run,omitempty"`
 }
 
-type sendResponse struct {
+// SendResponse is the daemon API response for /api/send.
+type SendResponse struct {
 	OK          bool   `json:"ok"`
 	Timestamp   string `json:"timestamp,omitempty"`
 	Error       string `json:"error,omitempty"`
@@ -125,19 +127,19 @@ type sendResponse struct {
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
-	var req sendRequest
+	var req SendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, sendResponse{Error: "invalid JSON: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: "invalid JSON: " + err.Error()})
 		return
 	}
 
 	if req.Platform == "" || req.Account == "" || req.Contact == "" || req.Message == "" {
-		writeJSON(w, http.StatusBadRequest, sendResponse{Error: "platform, account, contact, and message are required"})
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: "platform, account, contact, and message are required"})
 		return
 	}
 
 	ctx := r.Context()
-	var resp sendResponse
+	var resp SendResponse
 
 	switch req.Platform {
 	case "whatsapp":
@@ -145,7 +147,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	case "slack":
 		resp = s.sendSlack(ctx, req)
 	default:
-		resp = sendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
+		resp = SendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
 	}
 
 	status := http.StatusOK
@@ -155,12 +157,12 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, resp)
 }
 
-func (s *Server) sendWhatsApp(ctx context.Context, req sendRequest) sendResponse {
+func (s *Server) sendWhatsApp(ctx context.Context, req SendRequest) SendResponse {
 	s.mu.RLock()
 	sender, ok := s.whatsapp[req.Account]
 	s.mu.RUnlock()
 	if !ok {
-		return sendResponse{Error: fmt.Sprintf("no WhatsApp account %q registered", req.Account)}
+		return SendResponse{Error: fmt.Sprintf("no WhatsApp account %q registered", req.Account)}
 	}
 
 	// Resolve contact query to JID.
@@ -168,9 +170,9 @@ func (s *Server) sendWhatsApp(ctx context.Context, req sendRequest) sendResponse
 	if err != nil {
 		var ambErr *walistener.AmbiguousContactError
 		if errors.As(err, &ambErr) {
-			return sendResponse{Error: formatAmbiguousContacts(ambErr, sender.Account)}
+			return SendResponse{Error: formatAmbiguousContacts(ambErr, sender.Account)}
 		}
-		return sendResponse{Error: fmt.Sprintf("resolve contact: %v", err)}
+		return SendResponse{Error: fmt.Sprintf("resolve contact: %v", err)}
 	}
 
 	// Send the message.
@@ -178,7 +180,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, req sendRequest) sendResponse
 		Conversation: proto.String(req.Message),
 	})
 	if err != nil {
-		return sendResponse{Error: fmt.Sprintf("send: %v", err)}
+		return SendResponse{Error: fmt.Sprintf("send: %v", err)}
 	}
 
 	// Store locally.
@@ -191,15 +193,15 @@ func (s *Server) sendWhatsApp(ctx context.Context, req sendRequest) sendResponse
 		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 	}
 
-	return sendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
+	return SendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
 }
 
-func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
+func (s *Server) sendSlack(ctx context.Context, req SendRequest) SendResponse {
 	s.mu.RLock()
 	sender, ok := s.slack[req.Account]
 	s.mu.RUnlock()
 	if !ok {
-		return sendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", req.Account)}
+		return SendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", req.Account)}
 	}
 
 	// Choose API client based on identity.
@@ -235,7 +237,7 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			Users: []string{resolvedUserID},
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf(
+			return SendResponse{Error: fmt.Sprintf(
 				"open DM with %s (%s) failed: %v — for Slack Connect users, the bot must be a member of at least one shared channel with the recipient",
 				channelName, resolvedUserID, openErr)}
 		}
@@ -247,7 +249,7 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		var err error
 		channelID, channelName, err = sender.Resolver.FindChannelID(req.Contact)
 		if err != nil {
-			return sendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+			return SendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
 		}
 	}
 
@@ -263,7 +265,7 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 				ChannelID: channelID,
 			})
 			if err != nil {
-				return sendResponse{Error: fmt.Sprintf("get members of %s: %v", channelName, err)}
+				return SendResponse{Error: fmt.Sprintf("get members of %s: %v", channelName, err)}
 			}
 			userIDs = members
 		} else {
@@ -272,9 +274,9 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			if userErr != nil {
 				var ambErr *slacklistener.AmbiguousUserError
 				if errors.As(userErr, &ambErr) {
-					return sendResponse{Error: formatAmbiguousUsers(ctx, ambErr, sender)}
+					return SendResponse{Error: formatAmbiguousUsers(ctx, ambErr, sender)}
 				}
-				return sendResponse{Error: fmt.Sprintf("resolve user %s: %v", channelName, userErr)}
+				return SendResponse{Error: fmt.Sprintf("resolve user %s: %v", channelName, userErr)}
 			}
 			userIDs = []string{userID}
 		}
@@ -285,14 +287,14 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			Users: userIDs,
 		})
 		if openErr != nil {
-			return sendResponse{Error: fmt.Sprintf("open conversation with %s: %v", channelName, openErr)}
+			return SendResponse{Error: fmt.Sprintf("open conversation with %s: %v", channelName, openErr)}
 		}
 		channelID = ch.ID
 		senderName = "sent by pigeon"
 	}
 
 	if req.DryRun {
-		resp := sendResponse{
+		resp := SendResponse{
 			OK:          true,
 			ChannelID:   channelID,
 			ChannelName: channelName,
@@ -325,11 +327,11 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 			"channel_id", channelID, "channel_name", channelName,
 			"as_user", req.AsUser, "error", err)
 		if err.Error() == "channel_not_found" && !req.AsUser {
-			return sendResponse{Error: fmt.Sprintf(
+			return SendResponse{Error: fmt.Sprintf(
 				"send to %s failed: %v — bot cannot access this channel. For Slack Connect users, ensure the bot is a member of at least one shared channel with the recipient. For private channels, ask the user to invite the bot to %s.",
 				channelName, err, channelName)}
 		}
-		return sendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
+		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
 
 	// Store locally.
@@ -344,7 +346,7 @@ func (s *Server) sendSlack(ctx context.Context, req sendRequest) sendResponse {
 		}
 	}
 
-	return sendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
+	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -352,8 +354,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
-
-
 
 // formatAmbiguousUsers builds a disambiguation message for Slack users,
 // enriched with conversation activity from the Slack API.
