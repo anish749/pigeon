@@ -11,10 +11,26 @@ import (
 	"github.com/anish/claude-msg-utils/internal/daemon"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "pigeon",
-	Short: "Messaging data CLI for AI agents",
-	Long: `pigeon — messaging data CLI for AI agents
+// Command group IDs for categorized help output.
+const (
+	groupSetup       = "setup"
+	groupDaemon      = "daemon"
+	groupReading     = "reading"
+	groupSending     = "sending"
+	groupSlack       = "slack"
+	groupMaintenance = "maintenance"
+)
+
+// ensureDaemon is a PreRunE hook for commands that benefit from the daemon running.
+func ensureDaemon(cmd *cobra.Command, args []string) error {
+	return daemon.EnsureRunning()
+}
+
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "pigeon",
+		Short: "Messaging data CLI for AI agents",
+		Long: `pigeon — messaging data CLI for AI agents
 
 Reads locally-stored messaging data (WhatsApp, Slack, etc.) and provides
 listeners that receive real-time messages and save them as text files.
@@ -150,26 +166,15 @@ MAINTENANCE
 
   Deletes all synced message data and sync cursors for a workspace/account.
   The next daemon start will re-sync from scratch.`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
-			Level:      slog.LevelInfo,
-			TimeFormat: time.Kitchen,
-		})))
-	},
-}
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
+				Level:      slog.LevelInfo,
+				TimeFormat: time.Kitchen,
+			})))
+		},
+	}
 
-// Command group IDs for categorized help output.
-const (
-	groupSetup       = "setup"
-	groupDaemon      = "daemon"
-	groupReading     = "reading"
-	groupSending     = "sending"
-	groupSlack       = "slack"
-	groupMaintenance = "maintenance"
-)
-
-func init() {
-	rootCmd.AddGroup(
+	root.AddGroup(
 		&cobra.Group{ID: groupSetup, Title: "Setup:"},
 		&cobra.Group{ID: groupDaemon, Title: "Daemon:"},
 		&cobra.Group{ID: groupReading, Title: "Reading:"},
@@ -177,14 +182,36 @@ func init() {
 		&cobra.Group{ID: groupSlack, Title: "Slack:"},
 		&cobra.Group{ID: groupMaintenance, Title: "Maintenance:"},
 	)
-}
 
-// ensureDaemon is a PreRunE hook for commands that benefit from the daemon running.
-func ensureDaemon(cmd *cobra.Command, args []string) error {
-	return daemon.EnsureRunning()
+	root.AddCommand(
+		// Setup
+		newSetupWhatsAppCmd(),
+		newSetupSlackCmd(),
+
+		// Daemon
+		newDaemonCmd(),
+		newClaudeSessionCmd(),
+
+		// Reading
+		newListCmd(),
+		newReadCmd(),
+		newSearchCmd(),
+
+		// Sending
+		newSendCmd(),
+
+		// Slack
+		newGenerateManifestCmd(),
+
+		// Maintenance
+		newResetCmd(),
+		newResetWhatsAppCmd(),
+	)
+
+	return root
 }
 
 // Execute runs the root command.
 func Execute() error {
-	return rootCmd.Execute()
+	return newRootCmd().Execute()
 }
