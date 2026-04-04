@@ -10,16 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/store"
 )
-
-// ChannelConfig describes a session loaded from a session file.
-type ChannelConfig struct {
-	Platform      string
-	Account       string
-	SessionID     string
-	LastDelivered time.Time
-}
 
 // channelKey identifies a platform+account pair for map lookups.
 type channelKey struct {
@@ -30,10 +23,6 @@ type channelKey struct {
 // MessageNotifyFunc is called by listeners when a new message has been
 // written to disk. Parameters are platform, account, and conversation.
 type MessageNotifyFunc func(platform, account, conversation string)
-
-// UpdateCursorFunc atomically updates the last_delivered timestamp for a
-// session file. Needed as a callback because hub cannot import claude (cycle).
-type UpdateCursorFunc func(platform, account string, t time.Time) error
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -64,32 +53,33 @@ type deliverySignal struct {
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
-	mu           sync.RWMutex
-	sessions     map[string]*Session    // SessionID → connected session
-	channels     map[channelKey]*channel // platform+account → delivery channel
-	updateCursor UpdateCursorFunc
-	ctx          context.Context
-	cancel       context.CancelFunc
+	mu       sync.RWMutex
+	sessions map[string]*Session    // SessionID → connected session
+	channels map[channelKey]*channel // platform+account → delivery channel
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
-// New creates a Hub from the given channel configs. updateCursor is a callback
-// for persisting last_delivered (needed because hub cannot import claude).
-// Call Stop() to shut down delivery goroutines.
-func New(ctx context.Context, configs []ChannelConfig, updateCursor UpdateCursorFunc) *Hub {
+// New creates a Hub, loads session files, and starts delivery goroutines.
+// Call Stop() to shut down.
+func New(ctx context.Context) *Hub {
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
-		sessions:     make(map[string]*Session),
-		channels:     make(map[channelKey]*channel),
-		updateCursor: updateCursor,
-		ctx:          ctx,
-		cancel:       cancel,
+		sessions: make(map[string]*Session),
+		channels: make(map[channelKey]*channel),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
-	for _, cfg := range configs {
-		h.startChannel(cfg)
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		slog.Error("failed to load session files", "error", err)
 	}
-	if len(configs) > 0 {
-		slog.Info("hub started with session channels", "count", len(configs))
+	for _, s := range sessions {
+		h.startChannel(s)
+	}
+	if len(sessions) > 0 {
+		slog.Info("hub started with session channels", "count", len(sessions))
 	}
 
 	return h
@@ -157,12 +147,12 @@ func (h *Hub) Sessions() int {
 	return len(h.sessions)
 }
 
-func (h *Hub) startChannel(cfg ChannelConfig) {
-	key := channelKey{Platform: cfg.Platform, Account: cfg.Account}
+func (h *Hub) startChannel(s *claude.Session) {
+	key := channelKey{Platform: s.Platform, Account: s.Account}
 
 	ch := &channel{
 		key:       key,
-		sessionID: cfg.SessionID,
+		sessionID: s.SessionID,
 		signal:    make(chan deliverySignal, signalBufferSize),
 	}
 
@@ -170,10 +160,10 @@ func (h *Hub) startChannel(cfg ChannelConfig) {
 	h.channels[key] = ch
 	h.mu.Unlock()
 
-	go h.deliveryLoop(ch, cfg.LastDelivered)
+	go h.deliveryLoop(ch, s.LastDelivered)
 
 	slog.Info("delivery channel started",
-		"platform", cfg.Platform, "account", cfg.Account, "session_id", cfg.SessionID)
+		"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
 }
 
 // deliveryLoop waits for signals, reads new messages from disk, and delivers
@@ -237,7 +227,7 @@ func (h *Hub) drainMessages(ch *channel, conversation string, lastDelivered time
 
 	// Update cursor if we delivered anything.
 	if !newLastDelivered.IsZero() {
-		if err := h.updateCursor(ch.key.Platform, ch.key.Account, newLastDelivered); err != nil {
+		if err := claude.UpdateLastDelivered(ch.key.Platform, ch.key.Account, newLastDelivered); err != nil {
 			slog.Error("failed to update last_delivered",
 				"session_id", ch.sessionID, "error", err)
 		}

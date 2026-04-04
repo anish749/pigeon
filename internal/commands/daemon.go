@@ -11,7 +11,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
 	"github.com/anish/claude-msg-utils/internal/daemon"
 	"github.com/anish/claude-msg-utils/internal/hub"
@@ -85,22 +84,7 @@ func DaemonRun() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Load session files and build hub channel configs.
-	var channels []hub.ChannelConfig
-	sessions, err := claude.ListAllSessions()
-	if err != nil {
-		slog.Warn("failed to load session files", "error", err)
-	}
-	for _, s := range sessions {
-		channels = append(channels, hub.ChannelConfig{
-			Platform:      s.Platform,
-			Account:       s.Account,
-			SessionID:     s.SessionID,
-			LastDelivered: s.LastDelivered,
-		})
-	}
-
-	msgHub := hub.New(ctx, channels, claude.UpdateLastDelivered)
+	msgHub := hub.New(ctx)
 	defer msgHub.Stop()
 
 	apiServer := api.NewServer(msgHub)
