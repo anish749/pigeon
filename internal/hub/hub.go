@@ -73,9 +73,9 @@ type Hub struct {
 	cancel   context.CancelFunc
 }
 
-// New creates a Hub, loads session files, and starts delivery goroutines.
-// Returns an error if session files cannot be read (note: no sessions
-// configured yet is not an error). Call Stop() to shut down.
+// New creates a Hub, loads session files, starts delivery goroutines, and
+// watches for new session files. Returns an error if session files cannot
+// be read (no sessions configured yet is not an error). Call Stop() to shut down.
 func New(ctx context.Context) (*Hub, error) {
 	sessions, err := claude.ListAllSessions()
 	if err != nil {
@@ -97,7 +97,39 @@ func New(ctx context.Context) (*Hub, error) {
 		slog.Info("hub started with session channels", "count", len(sessions))
 	}
 
+	// Watch for new/updated session files and start channels as needed.
+	go h.watchSessionFiles(ctx)
+
 	return h, nil
+}
+
+// watchSessionFiles watches for changes in the sessions directory and
+// starts delivery channels for any new session files.
+func (h *Hub) watchSessionFiles(ctx context.Context) {
+	for sessions := range claude.WatchSessions(ctx) {
+		h.reconcileChannels(sessions)
+	}
+}
+
+// reconcileChannels starts delivery channels for session files that
+// don't have one yet. Does not stop existing channels.
+func (h *Hub) reconcileChannels(sessions []*claude.Session) {
+	h.mu.RLock()
+	existing := make(map[channelKey]bool, len(h.channels))
+	for k := range h.channels {
+		existing[k] = true
+	}
+	h.mu.RUnlock()
+
+	for _, s := range sessions {
+		key := channelKey{Platform: s.Platform, Account: s.Account}
+		if existing[key] {
+			continue
+		}
+		h.startChannel(s)
+		slog.Info("new session file detected, delivery channel started",
+			"platform", s.Platform, "account", s.Account, "session_id", s.SessionID)
+	}
 }
 
 // Stop shuts down all delivery goroutines.
@@ -180,7 +212,7 @@ func (h *Hub) Route(platform, account, conversation string) {
 	h.mu.RUnlock()
 
 	if !exists {
-		slog.Debug("no session configured, message dropped",
+		slog.Warn("no session configured, message not routed",
 			"platform", platform, "account", account, "conversation", conversation)
 		return
 	}
