@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
@@ -26,7 +27,7 @@ type WhatsAppManager struct {
 
 type runningWAAccount struct {
 	cancel context.CancelFunc
-	lock   *DeviceLock
+	lock   *os.File
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
