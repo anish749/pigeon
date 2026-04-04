@@ -247,9 +247,10 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 
 	hello := IncomingMsg{
-		Platform: ch.key.Platform,
-		Account:  ch.key.Account,
-		MsgLines: []string{"pigeon connected to " + ch.key.Platform + "/" + ch.key.Account},
+		Platform:     ch.key.Platform,
+		Account:      ch.key.Account,
+		Conversation: "system",
+		MsgLines:     []string{"pigeon connected to " + ch.key.Platform + "/" + ch.key.Account},
 	}
 	if err := session.Send(h.ctx, hello); err != nil {
 		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
