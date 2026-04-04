@@ -6,26 +6,31 @@ import (
 	"github.com/anish/claude-msg-utils/internal/commands"
 )
 
-var setupWhatsAppCmd = &cobra.Command{
-	Use:     "setup-whatsapp",
-	Short:   "Pair a WhatsApp device via QR code, save to config",
-	GroupID: groupSetup,
-	Example: `  pigeon setup-whatsapp
+func newSetupWhatsAppCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "setup-whatsapp",
+		Short:   "Pair a WhatsApp device via QR code, save to config",
+		GroupID: groupSetup,
+		Example: `  pigeon setup-whatsapp
   pigeon setup-whatsapp --db=/path/to/whatsapp.db`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := cmd.Flags().GetString("db")
-		if err != nil {
-			return err
-		}
-		return commands.RunSetupWhatsApp(db)
-	},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			return commands.RunSetupWhatsApp(db)
+		},
+	}
+	cmd.Flags().String("db", "", "SQLite database path (default: <data-dir>/whatsapp.db)")
+	return cmd
 }
 
-var setupSlackCmd = &cobra.Command{
-	Use:     "setup-slack",
-	Short:   "Install a Slack app in a workspace via OAuth",
-	GroupID: groupSetup,
-	Long: `Installs the Slack app in a workspace via OAuth. Opens your browser
+func newSetupSlackCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup-slack",
+		Short:   "Install a Slack app in a workspace via OAuth",
+		GroupID: groupSetup,
+		Long: `Installs the Slack app in a workspace via OAuth. Opens your browser
 to Slack's authorization page — pick a workspace and approve.
 
 To create a Slack app:
@@ -37,12 +42,8 @@ To create a Slack app:
   6. pigeon setup-slack
   7. Your browser opens — pick a workspace and approve
   8. Done! Add more workspaces by running: pigeon setup-slack`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return commands.RunSetupSlack(args)
-	},
-}
-
-func init() {
-	setupWhatsAppCmd.Flags().String("db", "", "SQLite database path (default: <data-dir>/whatsapp.db)")
-	rootCmd.AddCommand(setupWhatsAppCmd, setupSlackCmd)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return commands.RunSetupSlack(args)
+		},
+	}
 }
