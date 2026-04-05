@@ -19,7 +19,7 @@ const repo = "anish749/pigeon"
 const checkInterval = 24 * time.Hour
 
 // Update checks for the latest release and replaces the binary if a newer version exists.
-func Update(currentVersion string) error {
+func Update(currentVersion string) (bool, error) {
 	return doUpdate(currentVersion, true)
 }
 
@@ -43,16 +43,46 @@ func AutoCheck(currentVersion string) {
 	}
 
 	go func() {
-		if err := doUpdate(currentVersion, false); err != nil {
+		if _, err := doUpdate(currentVersion, false); err != nil {
 			slog.Error("auto-update check failed", "error", err)
 		}
 	}()
 }
 
-func doUpdate(currentVersion string, verbose bool) error {
+// DaemonAutoUpdate runs a periodic update check for the daemon. When an update
+// is applied, it calls onUpdate (typically to trigger a re-exec). The check
+// runs immediately on start, then every checkInterval.
+func DaemonAutoUpdate(ctx context.Context, currentVersion string, onUpdate func()) {
+	if currentVersion == "dev" {
+		return
+	}
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	// Check immediately on start, then on each tick.
+	for {
+		updated, err := doUpdate(currentVersion, false)
+		if err != nil {
+			slog.Error("daemon auto-update check failed", "error", err)
+		}
+		if updated {
+			onUpdate()
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func doUpdate(currentVersion string, verbose bool) (bool, error) {
 	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
-		return fmt.Errorf("create update source: %w", err)
+		return false, fmt.Errorf("create update source: %w", err)
 	}
 
 	updater, err := selfupdate.NewUpdater(selfupdate.Config{
@@ -60,40 +90,40 @@ func doUpdate(currentVersion string, verbose bool) error {
 		Validator: &selfupdate.ChecksumValidator{UniqueFilename: "checksums.txt"},
 	})
 	if err != nil {
-		return fmt.Errorf("create updater: %w", err)
+		return false, fmt.Errorf("create updater: %w", err)
 	}
 
 	latest, found, err := updater.DetectLatest(context.Background(), selfupdate.ParseSlug(repo))
 	if err != nil {
-		return fmt.Errorf("check for updates: %w", err)
+		return false, fmt.Errorf("check for updates: %w", err)
 	}
 	if !found {
 		if verbose {
-			return fmt.Errorf("no releases found for %s", repo)
+			return false, fmt.Errorf("no releases found for %s", repo)
 		}
-		return nil
+		return false, nil
 	}
 
 	if latest.LessOrEqual(currentVersion) {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Already up to date (v%s)\n", currentVersion)
 		}
-		return nil
+		return false, nil
 	}
 
 	fmt.Fprintf(os.Stderr, "Updating pigeon v%s → v%s...\n", currentVersion, latest.Version())
 
 	exePath, err := selfupdate.ExecutablePath()
 	if err != nil {
-		return fmt.Errorf("locate executable: %w", err)
+		return false, fmt.Errorf("locate executable: %w", err)
 	}
 
 	if err := updater.UpdateTo(context.Background(), latest, exePath); err != nil {
-		return fmt.Errorf("update failed: %w", err)
+		return false, fmt.Errorf("update failed: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "✓ Updated to v%s\n", latest.Version())
-	return nil
+	return true, nil
 }
 
 func readLastCheck() (time.Time, error) {

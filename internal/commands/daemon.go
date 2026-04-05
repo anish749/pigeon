@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store/storev1"
 )
 
@@ -58,7 +59,7 @@ func DaemonRestart() error {
 }
 
 // DaemonRun is the actual daemon process, invoked via "daemon _run".
-func DaemonRun() error {
+func DaemonRun(version string) error {
 	logging.InitFile(logging.Daemon)
 
 	if err := daemon.WritePID(); err != nil {
@@ -97,11 +98,34 @@ func DaemonRun() error {
 
 	go apiServer.Start(ctx, paths.SocketPath())
 
+	// Periodic update check — re-execs the daemon when a new version is installed.
+	reexec := make(chan struct{}, 1)
+	go selfupdate.DaemonAutoUpdate(ctx, version, func() {
+		select {
+		case reexec <- struct{}{}:
+		default:
+		}
+	})
+
 	slog.Info("daemon started",
+		"version", version,
 		"whatsapp_accounts", len(cfg.WhatsApp),
 		"slack_workspaces", len(cfg.Slack))
 
-	<-ctx.Done()
-	slog.Info("shutting down")
-	return nil
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting down")
+		return nil
+	case <-reexec:
+		slog.Info("update applied, re-execing daemon")
+		cancel()
+
+		exePath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("locate executable for re-exec: %w", err)
+		}
+		// Remove socket so the new process can bind it.
+		os.Remove(paths.SocketPath())
+		return syscall.Exec(exePath, os.Args, os.Environ())
+	}
 }
