@@ -20,14 +20,13 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/storev1"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
 func RunSetupWhatsApp(dbPath string) error {
 	if dbPath == "" {
-		dbPath = store.DefaultDBPath()
+		dbPath = paths.DefaultDBPath()
 	}
 
 	// Acquire device lock to prevent daemon from using this device during pairing.
