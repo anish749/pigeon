@@ -144,6 +144,8 @@ func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	}
 
 	if !confirm("Continue with this session?", true) {
+		fmt.Printf("\n  %s⚠  Creating a new session will disconnect pigeon from the previous one.%s\n", yellow, reset)
+		fmt.Printf("  %s   Messages will only be delivered to the new session.%s\n\n", dim, reset)
 		if !confirm("Create a new session for this account?", false) {
 			return errGoBack
 		}
