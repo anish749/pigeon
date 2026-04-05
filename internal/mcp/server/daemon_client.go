@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,16 @@ import (
 	"strings"
 	"time"
 )
+
+// rejectedError is returned when the daemon permanently rejects this session.
+// The MCP client should not retry.
+type rejectedError struct {
+	reason string
+}
+
+func (e *rejectedError) Error() string {
+	return e.reason
+}
 
 type ClaudeChannelNotification struct {
 	Content string         `json:"content"`
@@ -53,13 +64,23 @@ func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func
 }
 
 // run connects to the daemon's SSE endpoint and forwards messages.
-// Reconnects automatically on failure. Blocks until ctx is cancelled.
+// Reconnects automatically on transient failures. Stops on permanent rejection.
 func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 	for {
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
 			return
 		}
+
+		var rejected *rejectedError
+		if errors.As(err, &rejected) {
+			slog.Error("session rejected by daemon, stopping", "session_id", ds.sessionID, "reason", rejected.reason)
+			ds.notify(ClaudeChannelNotification{
+				Content: "pigeon disconnected — " + rejected.reason,
+			})
+			return
+		}
+
 		slog.Warn("sse connection lost, reconnecting", "error", err)
 		select {
 		case <-time.After(2 * time.Second):
@@ -92,11 +113,12 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("unexpected status %d (and failed to read body: %w)", resp.StatusCode, err)
+		body, _ := io.ReadAll(resp.Body)
+		msg := strings.TrimSpace(string(body))
+		if resp.StatusCode == http.StatusConflict {
+			return &rejectedError{reason: msg}
 		}
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, msg)
 	}
 
 	slog.Info("sse connected to daemon", "session_id", ds.sessionID, "cwd", ds.cwd)
@@ -114,6 +136,7 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 			continue
 		}
 
+		slog.Info("forwarding notification", "content_len", len(notification.Content), "meta", notification.Meta)
 		if err := ds.notify(notification); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}
