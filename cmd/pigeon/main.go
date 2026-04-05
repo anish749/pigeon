@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/anish/claude-msg-utils/internal/cli"
+	"github.com/anish749/pigeon/internal/cli"
 )
 
 var version = "dev"

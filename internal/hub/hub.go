@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/claude"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/claude"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // MessageNotifyFunc is called by listeners when a new message has been

@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/tui"
+	"github.com/anish749/pigeon/internal/tui"
 )
 
 func newReviewCmd() *cobra.Command {

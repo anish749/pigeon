@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // LogFile identifies which log file to write to.

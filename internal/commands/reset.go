@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func RunReset(platform, account string) error {

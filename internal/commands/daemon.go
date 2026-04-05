@@ -8,13 +8,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/daemon"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	"github.com/anish/claude-msg-utils/internal/logging"
-	"github.com/anish/claude-msg-utils/internal/outbox"
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/api"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
+	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/logging"
+	"github.com/anish749/pigeon/internal/outbox"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func DaemonStart() error {

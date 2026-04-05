@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // fileLocks provides per-file mutexes so the dedup check + write in WriteMessage

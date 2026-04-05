@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 type Config struct {

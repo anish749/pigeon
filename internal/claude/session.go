@@ -12,8 +12,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // Session is the data stored in a session file.

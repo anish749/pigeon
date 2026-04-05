@@ -1,4 +1,4 @@
-module github.com/anish/claude-msg-utils
+module github.com/anish749/pigeon
 
 go 1.25.0
 

@@ -10,9 +10,9 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.

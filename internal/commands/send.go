@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/anish/claude-msg-utils/internal/api"
-	daemonclient "github.com/anish/claude-msg-utils/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/api"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 )
 
 type SendParams struct {

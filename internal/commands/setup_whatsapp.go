@@ -9,19 +9,19 @@ import (
 	"syscall"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
+	_ "modernc.org/sqlite"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/daemon"
-	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
-	"github.com/anish/claude-msg-utils/internal/paths"
-	"github.com/anish/claude-msg-utils/internal/store"
-	"github.com/anish/claude-msg-utils/internal/walog"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
+	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/walog"
 )
 
 func RunSetupWhatsApp(dbPath string) error {

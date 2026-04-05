@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/logging"
+	"github.com/anish749/pigeon/internal/logging"
 )
 
 func newLogCmd() *cobra.Command {

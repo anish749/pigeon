@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/commands"
+	"github.com/anish749/pigeon/internal/commands"
 )
 
 func newSetupWhatsAppCmd() *cobra.Command {

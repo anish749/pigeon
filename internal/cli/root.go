@@ -8,8 +8,8 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/daemon"
-	"github.com/anish/claude-msg-utils/internal/selfupdate"
+	"github.com/anish749/pigeon/internal/daemon"
+	"github.com/anish749/pigeon/internal/selfupdate"
 )
 
 // Command group IDs for categorized help output.

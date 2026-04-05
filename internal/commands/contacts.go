@@ -7,10 +7,10 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/config"
-	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/config"
+	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // loadAliases returns contact name aliases for a given account.

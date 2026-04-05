@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 type SearchParams struct {

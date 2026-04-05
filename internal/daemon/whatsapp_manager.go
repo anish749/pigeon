@@ -6,17 +6,17 @@ import (
 	"log/slog"
 	"os"
 
-	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
+	_ "modernc.org/sqlite"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
-	"github.com/anish/claude-msg-utils/internal/walog"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/hub"
+	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	"github.com/anish749/pigeon/internal/walog"
 )
 
 // WhatsAppManager owns the lifecycle of all WhatsApp account listeners.

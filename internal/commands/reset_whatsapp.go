@@ -7,12 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow/types"
+	_ "modernc.org/sqlite"
 
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/daemon"
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func RunResetWhatsApp(account string) error {

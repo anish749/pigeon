@@ -3,10 +3,10 @@ package commands
 import (
 	"fmt"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/paths"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 func RunList(platform, accountName string) error {
