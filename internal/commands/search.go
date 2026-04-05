@@ -32,7 +32,11 @@ func RunSearch(p SearchParams) error {
 
 	var sinceDur time.Duration
 	if p.Since != "" {
-		sinceDur, _ = parseDuration(p.Since)
+		d, err := parseDuration(p.Since)
+		if err != nil {
+			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
+		}
+		sinceDur = d
 	}
 
 	output, err := captureGrep(p.Query, searchDir, includes, p.Context)
@@ -117,7 +121,7 @@ func captureGrep(query, dir string, includes []string, context int) ([]byte, err
 }
 
 func captureRg(rgPath, query, dir string, includes []string, context int) ([]byte, error) {
-	args := []string{"--no-color"}
+	args := []string{"--color=never"}
 	for _, inc := range includes {
 		args = append(args, "--glob", inc)
 	}

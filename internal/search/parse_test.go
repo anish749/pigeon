@@ -217,42 +217,42 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 // --- ParseFilePath ---
 
 func TestParseFilePath_FullDepth(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_PlatformScope(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack")
+	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack")
 	if plat != "" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_AccountScope(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_ThreadFile(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
+	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 1711568940.789012)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_ThreadFile_AccountScope(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 1711568940.789012)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_WhatsApp(t *testing.T) {
-	plat, acct, conv, date := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _ := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:", "/data")
 	if plat != "whatsapp" || acct != "15551234567" || conv != "+14155551234" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q)", plat, acct, conv, date)
 	}

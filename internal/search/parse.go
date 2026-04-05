@@ -35,14 +35,19 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			continue
 		}
 
-		// rg/grep output: /path/to/file.txt:{"type":"msg",...}
-		// Split on ":{"  — the colon is grep's delimiter, { starts the JSON.
+		// rg/grep output format:
+		//   match lines:   /path/to/file.txt:{"type":"msg",...}
+		//   context lines: /path/to/file.txt-{"type":"msg",...}
+		// Split on ":{" or "-{" — the delimiter is grep's : (match) or - (context).
 		idx := bytes.Index(line, []byte(":{"))
+		if idx < 0 {
+			idx = bytes.Index(line, []byte("-{"))
+		}
 		if idx < 0 {
 			continue
 		}
 		filePart := string(line[:idx])
-		jsonPart := line[idx+1:] // skip the ":", keep the "{"
+		jsonPart := line[idx+1:] // skip the delimiter, keep the "{"
 
 		var envelope struct {
 			Type modelv1.LineType `json:"type"`
@@ -61,7 +66,11 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			continue
 		}
 
-		platform, account, conversation, date := ParseFilePath(filePart, searchDir)
+		platform, account, conversation, date, pathErr := ParseFilePath(filePart, searchDir)
+		if pathErr != nil {
+			errs = append(errs, pathErr)
+			continue
+		}
 		matches = append(matches, Match{
 			Platform:     platform,
 			Account:      account,
@@ -82,12 +91,12 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 //
 // When searchDir already includes platform or account, those leading
 // components are absent from the relative path.
-func ParseFilePath(filePart, searchDir string) (platform, account, conversation, date string) {
+func ParseFilePath(filePart, searchDir string) (platform, account, conversation, date string, err error) {
 	filePart = strings.TrimSuffix(strings.TrimSpace(filePart), ":")
 
 	rel, err := filepath.Rel(searchDir, filePart)
 	if err != nil {
-		return
+		return "", "", "", "", fmt.Errorf("parse file path: %w", err)
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 
@@ -111,7 +120,9 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 		account, conversation = parts[0], parts[1]
 	case 2:
 		conversation = parts[0]
+	default:
+		return "", "", "", "", fmt.Errorf("parse file path: unexpected depth %d in %q", len(parts), rel)
 	}
-	return
+	return platform, account, conversation, date, nil
 }
 
