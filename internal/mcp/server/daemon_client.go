@@ -139,6 +139,12 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		var notification ClaudeChannelNotification
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &notification); err != nil {
 			slog.Warn("sse parse error", "error", err)
+			if err := ds.notify(ClaudeChannelNotification{
+				Content: "pigeon: failed to parse daemon event: " + err.Error(),
+				Meta:    map[string]any{},
+			}); err != nil {
+				slog.Error("failed to notify client of parse error", "error", err)
+			}
 			continue
 		}
 
