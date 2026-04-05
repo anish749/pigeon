@@ -28,7 +28,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location, full bool) []string {
 
 	tsStr := m.Ts.In(loc).Format(layout)
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s[%s] %s: %s", prefix, tsStr, m.Sender, m.Text))
+	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, m.Sender, m.SenderID, m.Text))
 
 	if len(m.Reactions) > 0 {
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))

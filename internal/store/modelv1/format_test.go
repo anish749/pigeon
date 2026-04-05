@@ -17,7 +17,7 @@ func TestFormatMsg_Full(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1", len(lines))
 	}
-	if lines[0] != "[2026-03-16 09:15:02] Alice: hello world" {
+	if lines[0] != "[2026-03-16 09:15:02] [M1] Alice (U1): hello world" {
 		t.Errorf("got %q", lines[0])
 	}
 }
@@ -30,7 +30,7 @@ func TestFormatMsg_Short(t *testing.T) {
 		},
 	}
 	lines := FormatMsg(m, time.UTC, false)
-	if lines[0] != "[09:15:02] Alice: hello" {
+	if lines[0] != "[09:15:02] [M1] Alice (U1): hello" {
 		t.Errorf("got %q", lines[0])
 	}
 }
