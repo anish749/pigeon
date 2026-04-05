@@ -27,10 +27,24 @@ func (e *rejectedError) Error() string {
 }
 
 type ClaudeChannelNotification struct {
-	Content string         `json:"content"`
+	Content string `json:"content"`
 	// Meta must be non-nil (at minimum an empty map). Claude Code ignores
 	// channel notifications where meta serializes as null instead of {}.
 	Meta map[string]any `json:"meta"`
+}
+
+func (n *ClaudeChannelNotification) AsMap() map[string]any {
+	return map[string]any{
+		"content": n.Content,
+		"meta":    n.Meta,
+	}
+}
+
+func NewClaudeChannelErrorNotification(err error) *ClaudeChannelNotification {
+	return &ClaudeChannelNotification{
+		Content: "pigeon channel error: " + err.Error(),
+		Meta:    map[string]any{},
+	}
 }
 
 // pigeonDaemonStreamingClient manages the SSE connection to the pigeon daemon and forwards
@@ -39,14 +53,14 @@ type pigeonDaemonStreamingClient struct {
 	socketPath string
 	sessionID  string
 	cwd        string
-	notify     func(notification ClaudeChannelNotification) error
+	notify     func(notification *ClaudeChannelNotification)
 }
 
 // startPigeonDaemonStream connects to the daemon's SSE endpoint and forwards
 // incoming messages via notify. Reconnects automatically in a background
 // goroutine. The provided context should be long-lived (not request-scoped).
 // Returns an error if initial setup fails.
-func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func(ClaudeChannelNotification) error) error {
+func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func(*ClaudeChannelNotification)) error {
 	sessionID := os.Getenv("PIGEON_SESSION_ID")
 	if sessionID == "" {
 		return fmt.Errorf("PIGEON_SESSION_ID not set — launch via 'pigeon claude' to set it")
@@ -77,12 +91,7 @@ func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 		var rejected *rejectedError
 		if errors.As(err, &rejected) {
 			slog.Error("session rejected by daemon, stopping", "reason", rejected.reason)
-			if err := ds.notify(ClaudeChannelNotification{
-				Content: "pigeon disconnected — " + rejected.reason,
-				Meta:    map[string]any{},
-			}); err != nil {
-				slog.Error("failed to notify client of rejection", "error", err)
-			}
+			ds.notify(NewClaudeChannelErrorNotification(fmt.Errorf("session rejected by daemon: %w", err)))
 			return
 		}
 
@@ -141,19 +150,12 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		var notification ClaudeChannelNotification
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &notification); err != nil {
 			slog.Warn("sse parse error", "error", err)
-			if err := ds.notify(ClaudeChannelNotification{
-				Content: "pigeon: failed to parse daemon event: " + err.Error(),
-				Meta:    map[string]any{},
-			}); err != nil {
-				slog.Error("failed to notify client of parse error", "error", err)
-			}
+			ds.notify(NewClaudeChannelErrorNotification(fmt.Errorf("failed to parse daemon event: %w", err)))
 			continue
 		}
 
 		slog.Info("forwarding notification", "content_len", len(notification.Content), "meta", notification.Meta)
-		if err := ds.notify(notification); err != nil {
-			slog.Error("channel notification failed", "error", err)
-		}
+		ds.notify(&notification)
 	}
 
 	if err := scanner.Err(); err != nil {

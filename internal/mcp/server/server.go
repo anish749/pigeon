@@ -32,18 +32,21 @@ func New(socketPath string) *server.MCPServer {
 	// Start the daemon stream after Claude Code sends notifications/initialized,
 	// ensuring the client is ready to receive channel notifications.
 	s.AddNotificationHandler("notifications/initialized", func(ctx context.Context, notification mcp.JSONRPCNotification) {
-		slog.Info("client initialized, starting daemon stream",
-			"method", notification.Method,
-			"params", notification.Params)
-		if err := startPigeonDaemonStream(context.Background(), socketPath, func(n ClaudeChannelNotification) error {
-			return s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
-				"content": n.Content,
-				"meta":    n.Meta,
-			})
+		slog.Info("client initialized, starting daemon stream", "method", notification.Method, "params", notification.Params)
+		if err := startPigeonDaemonStream(context.Background(), socketPath, func(n *ClaudeChannelNotification) {
+			err := s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", n.AsMap())
+			if err != nil {
+				slog.Error("failed to send notification to client", "error", err)
+				err = s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", NewClaudeChannelErrorNotification(err).AsMap())
+				if err != nil {
+					slog.Error("failed to send error notification to client", "error", err)
+				}
+			}
 		}); err != nil {
-			s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", map[string]any{
-				"content": "pigeon channel error: " + err.Error(),
-			})
+			err = s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", NewClaudeChannelErrorNotification(err).AsMap())
+			if err != nil {
+				slog.Error("failed to send error notification to client", "error", err)
+			}
 			slog.Error("failed to start daemon stream", "error", err)
 		}
 	})
