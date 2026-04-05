@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: read
 
 jobs:
   release:
@@ -16,14 +17,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: docker/login-action@v3
         with:
-          go-version-file: go.mod
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser-cross
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e CGO_ENABLED=1 \
+            -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
+            ghcr.io/goreleaser/goreleaser-cross:v1.25.0 \
+            release --clean
