@@ -189,45 +189,6 @@ func TestListPlatformsAndAccounts(t *testing.T) {
 	}
 }
 
-// --- Search ---
-
-func TestSearch(t *testing.T) {
-	s, acct := setup(t)
-
-	s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"))
-	s.Append(acct, "#general", msgLine("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "nice work"))
-	s.Append(acct, "#random", msgLine("M3", ts(2026, 3, 16, 9, 2, 0), "Alice", "U1", "deploy the new version"))
-
-	results, err := s.Search("deploy", SearchOpts{})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(results) != 2 {
-		t.Errorf("results = %d, want 2 (one per conversation)", len(results))
-	}
-
-	total := 0
-	for _, r := range results {
-		total += r.MatchCount
-	}
-	if total != 2 {
-		t.Errorf("total matches = %d, want 2", total)
-	}
-}
-
-func TestSearch_NoResults(t *testing.T) {
-	s, acct := setup(t)
-	s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"))
-
-	results, err := s.Search("nonexistent", SearchOpts{})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("results = %d, want 0", len(results))
-	}
-}
-
 // --- Maintain ---
 
 func TestMaintain(t *testing.T) {

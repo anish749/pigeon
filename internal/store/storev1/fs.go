@@ -169,50 +169,6 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 	return modelv1.ResolveThread(compacted), nil
 }
 
-// Search finds messages matching a query across conversations.
-func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) {
-	q := strings.ToLower(query)
-	var results []SearchResult
-	var errs []error
-
-	platforms, err := s.ListPlatforms()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, plat := range platforms {
-		if opts.Platform != "" && plat != opts.Platform {
-			continue
-		}
-		accounts, err := s.ListAccounts(plat)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("list accounts %s: %w", plat, err))
-			continue
-		}
-		for _, acctSlug := range accounts {
-			if opts.Account != "" && acctSlug != opts.Account {
-				continue
-			}
-			acct := account.NewFromSlug(plat, acctSlug)
-			convs, err := s.ListConversations(acct)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("list conversations %s: %w", acct.Display(), err))
-				continue
-			}
-			for _, conv := range convs {
-				convResults, err := s.searchConversation(acct, conv, q, opts)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("search %s/%s: %w", acct.Display(), conv, err))
-					continue
-				}
-				results = append(results, convResults...)
-			}
-		}
-	}
-
-	return results, errors.Join(errs...)
-}
-
 // ListPlatforms returns all platform directories.
 func (s *FSStore) ListPlatforms() ([]string, error) {
 	return listSubdirs(s.base)
@@ -359,63 +315,6 @@ func (s *FSStore) maintainFile(path string) error {
 		return nil
 	}
 	return os.WriteFile(path, newData, 0644)
-}
-
-func (s *FSStore) searchConversation(acct account.Account, conversation, query string, opts SearchOpts) ([]SearchResult, error) {
-	dir := s.convDir(acct, conversation)
-	files, err := listDateFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	var results []SearchResult
-	var errs []error
-	for _, f := range files {
-		if opts.Since > 0 {
-			d, dateErr := dateFromFilename(f)
-			if dateErr != nil {
-				continue
-			}
-			cutoff := time.Now().Add(-opts.Since)
-			if d.Before(cutoff.Truncate(24 * time.Hour)) {
-				continue
-			}
-		}
-
-		data, err := os.ReadFile(f)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("read %s: %w", f, err))
-			continue
-		}
-		df, parseErr := modelv1.ParseDateFile(data)
-		if parseErr != nil {
-			slog.Warn("search: some lines skipped", "file", f, "error", parseErr)
-		}
-
-		// Compact and resolve so reactions are grouped onto messages.
-		compacted := compact.Compact(df)
-		resolved := modelv1.Resolve(compacted)
-
-		var matching []modelv1.ResolvedMsg
-		for _, m := range resolved.Messages {
-			if strings.Contains(strings.ToLower(m.Text), query) ||
-				strings.Contains(strings.ToLower(m.Sender), query) {
-				matching = append(matching, m)
-			}
-		}
-
-		if len(matching) > 0 {
-			results = append(results, SearchResult{
-				Platform:     acct.Platform,
-				Account:      acct.NameSlug(),
-				Conversation: conversation,
-				Date:         strings.TrimSuffix(filepath.Base(f), ".txt"),
-				Messages:     matching,
-				MatchCount:   len(matching),
-			})
-		}
-	}
-	return results, errors.Join(errs...)
 }
 
 var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.txt$`)
