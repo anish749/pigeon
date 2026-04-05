@@ -39,6 +39,16 @@ func (s *FSStore) convDir(acct account.Account, conversation string) string {
 	return filepath.Join(s.acctDir(acct), conversation)
 }
 
+// threadsDir returns the threads subdirectory for a conversation.
+func (s *FSStore) threadsDir(acct account.Account, conversation string) string {
+	return filepath.Join(s.convDir(acct, conversation), "threads")
+}
+
+// threadFile returns the path to a thread file (THREAD_TS.txt).
+func (s *FSStore) threadFile(acct account.Account, conversation, threadTS string) string {
+	return filepath.Join(s.threadsDir(acct, conversation), threadTS+".txt")
+}
+
 // fileMu returns the per-file mutex for the given path.
 func (s *FSStore) fileMu(path string) *sync.Mutex {
 	val, _ := s.locks.LoadOrStore(path, &sync.Mutex{})
@@ -63,13 +73,10 @@ func (s *FSStore) Append(acct account.Account, conversation string, line modelv1
 
 // AppendThread writes a single event line to a thread file.
 func (s *FSStore) AppendThread(acct account.Account, conversation, threadTS string, line modelv1.Line) error {
-	dir := filepath.Join(s.convDir(acct, conversation), "threads")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(s.threadsDir(acct, conversation), 0755); err != nil {
 		return fmt.Errorf("create threads dir: %w", err)
 	}
-
-	filename := filepath.Join(dir, threadTS+".txt")
-	return s.appendLine(filename, line)
+	return s.appendLine(s.threadFile(acct, conversation, threadTS), line)
 }
 
 // ReadConversation loads messages from a conversation, applying compaction
@@ -165,7 +172,7 @@ func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS stri
 
 // ReadThread loads a thread file, applying compaction and resolution.
 func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
-	filename := filepath.Join(s.convDir(acct, conversation), "threads", threadTS+".txt")
+	filename := s.threadFile(acct, conversation, threadTS)
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
