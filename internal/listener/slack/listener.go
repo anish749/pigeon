@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -90,6 +91,10 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 	switch innerEvt := evt.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
 		l.handleMessage(ctx, innerEvt)
+	case *slackevents.ReactionAddedEvent:
+		l.handleReaction(ctx, innerEvt.User, innerEvt.Reaction, innerEvt.Item, false)
+	case *slackevents.ReactionRemovedEvent:
+		l.handleReaction(ctx, innerEvt.User, innerEvt.Reaction, innerEvt.Item, true)
 	case *slackevents.MemberJoinedChannelEvent:
 		l.resolver.AddMember(innerEvt.Channel)
 		slog.InfoContext(ctx, "slack: member joined channel",
@@ -102,6 +107,16 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 }
 
 func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEvent) {
+	// Handle edits and deletes before the general filter.
+	switch msg.SubType {
+	case "message_changed":
+		l.handleEdit(ctx, msg)
+		return
+	case "message_deleted":
+		l.handleDelete(ctx, msg)
+		return
+	}
+
 	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
 		return
 	}
@@ -209,4 +224,109 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}
+}
+
+// handleReaction stores an incoming reaction (or unreaction) event.
+func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, item slackevents.Item, remove bool) {
+	if item.Type != "message" {
+		return
+	}
+
+	channelName := l.resolver.ChannelName(ctx, item.Channel)
+	userName := l.resolver.UserName(ctx, userID)
+	msgTS := ParseTimestamp(item.Timestamp)
+
+	lineType := modelv1.LineReaction
+	if remove {
+		lineType = modelv1.LineUnreaction
+	}
+
+	line := modelv1.Line{
+		Type: lineType,
+		React: &modelv1.ReactLine{
+			Ts:       msgTS,
+			MsgID:    item.Timestamp,
+			Sender:   userName,
+			SenderID: userID,
+			Emoji:    emoji,
+			Remove:   remove,
+		},
+	}
+
+	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
+	}
+
+	slog.InfoContext(ctx, "slack reaction saved",
+		"emoji", emoji, "from", userName, "channel", channelName, "remove", remove, "account", l.acct)
+}
+
+// handleEdit stores a message edit event.
+func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent) {
+	if msg.Message == nil {
+		return
+	}
+
+	channelName := l.resolver.ChannelName(ctx, msg.Channel)
+	userName := l.resolver.UserName(ctx, msg.Message.User)
+	text := l.resolver.ResolveText(ctx, msg.Message.Text)
+	ts := time.Now().UTC()
+
+	line := modelv1.Line{
+		Type: modelv1.LineEdit,
+		Edit: &modelv1.EditLine{
+			Ts:       ts,
+			MsgID:    msg.Message.Timestamp,
+			Sender:   userName,
+			SenderID: msg.Message.User,
+			Text:     text,
+		},
+	}
+
+	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
+	}
+
+	slog.InfoContext(ctx, "slack edit saved",
+		"msg_id", msg.Message.Timestamp, "channel", channelName, "account", l.acct)
+}
+
+// handleDelete stores a message delete event.
+func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEvent) {
+	channelName := l.resolver.ChannelName(ctx, msg.Channel)
+	ts := time.Now().UTC()
+
+	// For message_deleted, the deleted message's timestamp is in msg.PreviousMessage
+	// or msg.DeletedTimeStamp.
+	deletedTS := msg.DeletedTimeStamp
+	if deletedTS == "" && msg.PreviousMessage != nil {
+		deletedTS = msg.PreviousMessage.Timestamp
+	}
+	if deletedTS == "" {
+		slog.WarnContext(ctx, "slack delete: no deleted timestamp", "channel", channelName, "account", l.acct)
+		return
+	}
+
+	var senderName, senderID string
+	if msg.PreviousMessage != nil {
+		senderName = l.resolver.UserName(ctx, msg.PreviousMessage.User)
+		senderID = msg.PreviousMessage.User
+	}
+
+	line := modelv1.Line{
+		Type: modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{
+			Ts:       ts,
+			MsgID:    deletedTS,
+			Sender:   senderName,
+			SenderID: senderID,
+		},
+	}
+
+	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
+	}
+
+	slog.InfoContext(ctx, "slack delete saved",
+		"msg_id", deletedTS, "channel", channelName, "account", l.acct)
 }
