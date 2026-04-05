@@ -173,6 +173,7 @@ The set of recognized tag keys and how they determine line type:
 | `from` | (sender identity) | all line types |
 | `via` | (message pathway) | any line type, optional |
 | `attach` | (attachment ref) | messages only, optional, repeatable |
+| `reply` | (quote-reply ref) | messages only, optional |
 
 ### Parsing Algorithm
 
@@ -284,6 +285,26 @@ A message may have multiple `[attach:...]` tags:
 ```
 [TIMESTAMP] [id:MSG_ID] [from:SENDER_ID] [attach:F1 type=image/jpeg] [attach:F2 type=image/png] Alice: two photos
 ```
+
+### Quote-Reply (WhatsApp)
+
+```
+[TIMESTAMP] [id:MSG_ID] [from:SENDER_ID] [reply:QUOTED_MSG_ID] Sender Name: reply text
+```
+
+- **`[reply:QUOTED_MSG_ID]`**: references the message being replied to by
+  its ID. This is a single-level, flat reference. It does not create a
+  thread or a chain. If someone quote-replies to a quote-reply, each reply
+  independently points back to its quoted message.
+- The quoted message ID matches an `[id:...]` value in the same
+  conversation (possibly in an older date file). If the quoted message
+  predates pigeon's sync, the ID may not resolve. Readers handle this
+  gracefully by showing the reply without quote context.
+- The `QuotedMessage` content from the WhatsApp protobuf is not stored.
+  The original message is already in storage, reachable by ID.
+- This is distinct from Slack threads. Slack uses separate thread files
+  with parent/reply structure. WhatsApp quote-replies stay inline in the
+  date file as regular messages with a `[reply:...]` tag.
 
 ### Empty Text (Media-Only Message)
 
@@ -433,11 +454,17 @@ Reactions on thread messages are appended to the thread file.
 
 When a message with an attachment arrives, the writer:
 
-1. Downloads the file content from the platform.
-2. Stores it at `attachments/{ATTACH_ID}.{ext}` in the conversation directory.
-3. Writes the message line with the `[attach:...]` tag referencing the stored file.
+1. Writes the message line with the `[attach:...]` tag. The tag is always
+   present if the original message had an attachment, regardless of whether
+   the file was successfully downloaded.
+2. Downloads the file content from the platform (best-effort).
+3. Stores it at `attachments/{ATTACH_ID}.{ext}` in the conversation directory.
 
-Attachment files are immutable once written. They are never updated or deleted.
+The message line is the source of truth for whether a message had an
+attachment. The file on disk is best-effort — it may be missing due to
+download failures, expired URLs, or network issues. Readers must not
+assume the referenced file exists. Attachment files are immutable once
+written. They are never updated or deleted.
 
 ## Maintenance Protocol
 
@@ -543,6 +570,7 @@ type MsgLine struct {
     Sender      string       // display name (best-effort at write time)
     SenderID    string       // platform user ID (stable identity)
     Via         string       // "" (organic), "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
+    ReplyTo     string       // quoted message ID (WhatsApp quote-reply), empty if not a reply
     Text        string       // message body (may contain newlines)
     Reply       bool         // thread reply (2-space indent)
     Attachments []Attachment // zero or more attachments
