@@ -217,42 +217,103 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 // --- ParseFilePath ---
 
 func TestParseFilePath_FullDepth(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_PlatformScope(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack")
 	if plat != "" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_AccountScope(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_ThreadFile(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
+	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 1711568940.789012)", plat, acct, conv, date)
+	}
+	if !thread {
+		t.Error("thread = false, want true")
 	}
 }
 
 func TestParseFilePath_ThreadFile_AccountScope(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 1711568940.789012)", plat, acct, conv, date)
+	}
+	if !thread {
+		t.Error("thread = false, want true")
+	}
+}
+
+func TestParseFilePath_DateFile_NotThread(t *testing.T) {
+	_, _, _, _, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
+	if thread {
+		t.Error("thread = true, want false for date file")
+	}
+}
+
+// --- FilterThreadsBySince ---
+
+func TestFilterThreadsBySince_KeepsAliveThreads(t *testing.T) {
+	now := time.Now()
+	matches := []Match{
+		// Date file match — always kept
+		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
+			Msg: modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}},
+		// Thread with a recent message — whole thread kept
+		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "1711568940", Thread: true,
+			Msg: modelv1.MsgLine{ID: "T1", Ts: now.Add(-30 * time.Minute)}},
+		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "1711568940", Thread: true,
+			Msg: modelv1.MsgLine{ID: "T2", Ts: now.Add(-48 * time.Hour)}}, // old but same thread
+		// Dead thread — all messages old
+		{Platform: "slack", Account: "acme", Conversation: "#random", Date: "9999999999", Thread: true,
+			Msg: modelv1.MsgLine{ID: "D1", Ts: now.Add(-72 * time.Hour)}},
+	}
+
+	filtered := FilterThreadsBySince(matches, 24*time.Hour)
+
+	if len(filtered) != 3 {
+		t.Fatalf("filtered = %d, want 3 (1 date + 2 alive thread)", len(filtered))
+	}
+	ids := map[string]bool{}
+	for _, m := range filtered {
+		ids[m.Msg.ID] = true
+	}
+	if !ids["M1"] || !ids["T1"] || !ids["T2"] {
+		t.Errorf("expected M1, T1, T2; got %v", ids)
+	}
+	if ids["D1"] {
+		t.Error("dead thread match D1 should have been filtered out")
+	}
+}
+
+func TestFilterThreadsBySince_KeepsAllNonThread(t *testing.T) {
+	now := time.Now()
+	matches := []Match{
+		{Date: "2026-03-16", Msg: modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}},
+		{Date: "2026-03-15", Msg: modelv1.MsgLine{ID: "M2", Ts: now.Add(-48 * time.Hour)}},
+	}
+	filtered := FilterThreadsBySince(matches, 24*time.Hour)
+	// Both are date file matches (Thread=false), always kept
+	if len(filtered) != 2 {
+		t.Errorf("filtered = %d, want 2", len(filtered))
 	}
 }
 
 func TestParseFilePath_WhatsApp(t *testing.T) {
-	plat, acct, conv, date, _ := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:", "/data")
 	if plat != "whatsapp" || acct != "15551234567" || conv != "+14155551234" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q)", plat, acct, conv, date)
 	}
