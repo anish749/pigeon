@@ -756,6 +756,29 @@ System messages (channel joins/leaves, topic changes, etc.) are not part
 of Protocol V1. They are not stored. This may be revisited in a future
 protocol version.
 
+## Storage Format Change: Bracket-Tag → JSONL
+
+The original V1 protocol used a custom bracket-tag line format:
+
+```
+[2026-03-16 09:15:02 +00:00] [id:MSG_ID] [from:SENDER_ID] Sender Name: message text
+```
+
+This has been replaced with JSONL (one JSON object per line):
+
+```json
+{"type":"msg","ts":"2026-03-16T09:15:02Z","id":"MSG_ID","from":"SENDER_ID","sender":"Sender Name","text":"message text"}
+```
+
+**Why:** The bracket-tag format required a hand-rolled parser with edge cases
+that were difficult to eliminate: brackets in sender names broke the tag
+parser, colons in sender names were lossy (stripped at write time), newlines
+and backslashes in non-text fields could corrupt the file, and `]` in tag
+values truncated them. JSONL delegates all serialization to `encoding/json`,
+which handles escaping, quoting, and special characters correctly. The
+one-line-per-event property is preserved, as are `grep`, `wc -l`, and `sort`
+compatibility.
+
 ## Known Limitations
 
 ### Do Not
@@ -775,7 +798,7 @@ protocol version.
   always handle unsorted, duplicated input. Correctness must not depend
   on maintenance having run.
 - **Do not use the sender name as an identifier.** Sender names are
-  best-effort display names that can change. Use `[from:...]` for
+  best-effort display names that can change. Use the `from` field for
   identity.
 - **Do not add or remove `+` from phone numbers.** Store identifiers
   as-is from the platform. Slug transformations are only for directory

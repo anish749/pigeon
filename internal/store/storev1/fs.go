@@ -293,11 +293,12 @@ func (s *FSStore) appendLine(filename string, line modelv1.Line) error {
 		}
 	}()
 
-	serialized, merr := modelv1.Marshal(line)
+	data, merr := modelv1.Marshal(line)
 	if merr != nil {
 		return fmt.Errorf("marshal line: %w", merr)
 	}
-	_, err = f.WriteString(serialized + "\n")
+	data = append(data, '\n')
+	_, err = f.Write(data)
 	return err
 }
 
