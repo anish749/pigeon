@@ -2,6 +2,7 @@ package storev1
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,8 +91,11 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	case opts.Since > 0:
 		cutoff := time.Now().Add(-opts.Since)
 		for _, f := range files {
-			d := dateFromFilename(f)
-			if !d.IsZero() && !d.Before(cutoff.Truncate(24*time.Hour)) {
+			d, err := dateFromFilename(f)
+			if err != nil {
+				continue // non-date files in the directory
+			}
+			if !d.Before(cutoff.Truncate(24 * time.Hour)) {
 				selected = append(selected, f)
 			}
 		}
@@ -153,6 +157,7 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) {
 	q := strings.ToLower(query)
 	var results []SearchResult
+	var errs []error
 
 	platforms, err := s.ListPlatforms()
 	if err != nil {
@@ -165,6 +170,7 @@ func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) 
 		}
 		accounts, err := s.ListAccounts(plat)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("list accounts %s: %w", plat, err))
 			continue
 		}
 		for _, acctSlug := range accounts {
@@ -174,11 +180,13 @@ func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) 
 			acct := account.New(plat, acctSlug)
 			convs, err := s.ListConversations(acct)
 			if err != nil {
+				errs = append(errs, fmt.Errorf("list conversations %s: %w", acct.Display(), err))
 				continue
 			}
 			for _, conv := range convs {
 				convResults, err := s.searchConversation(acct, conv, q, opts)
 				if err != nil {
+					errs = append(errs, fmt.Errorf("search %s/%s: %w", acct.Display(), conv, err))
 					continue
 				}
 				results = append(results, convResults...)
@@ -186,7 +194,7 @@ func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) 
 		}
 	}
 
-	return results, nil
+	return results, errors.Join(errs...)
 }
 
 // ListPlatforms returns all platform directories.
@@ -222,14 +230,21 @@ func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 func (s *FSStore) Maintain(acct account.Account) error {
 	dir := s.acctDir(acct)
 	stateFile := filepath.Join(dir, ".maintenance.json")
-	state := loadMaintenanceState(stateFile)
+	state, err := loadMaintenanceState(stateFile)
+	if err != nil {
+		return err
+	}
 
 	var errs []error
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".txt") {
 			return nil
 		}
-		rel, _ := filepath.Rel(dir, path)
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			errs = append(errs, fmt.Errorf("rel path %s: %w", path, relErr))
+			return nil
+		}
 		mtime := info.ModTime().UTC().Format(time.RFC3339)
 		if state[rel] == mtime {
 			return nil // unchanged since last maintenance
@@ -240,10 +255,12 @@ func (s *FSStore) Maintain(acct account.Account) error {
 			return nil
 		}
 
-		// Re-stat after rewrite to get new mtime
-		if newInfo, err := os.Stat(path); err == nil {
-			state[rel] = newInfo.ModTime().UTC().Format(time.RFC3339)
+		newInfo, statErr := os.Stat(path)
+		if statErr != nil {
+			errs = append(errs, fmt.Errorf("stat after maintain %s: %w", rel, statErr))
+			return nil
 		}
+		state[rel] = newInfo.ModTime().UTC().Format(time.RFC3339)
 		return nil
 	})
 	if err != nil {
@@ -254,10 +271,7 @@ func (s *FSStore) Maintain(acct account.Account) error {
 		errs = append(errs, err)
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("maintenance errors: %v", errs)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // --- internal helpers ---
@@ -324,21 +338,27 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 	}
 
 	var results []SearchResult
+	var errs []error
 	for _, f := range files {
 		if opts.Since > 0 {
-			d := dateFromFilename(f)
+			d, dateErr := dateFromFilename(f)
+			if dateErr != nil {
+				continue
+			}
 			cutoff := time.Now().Add(-opts.Since)
-			if !d.IsZero() && d.Before(cutoff.Truncate(24*time.Hour)) {
+			if d.Before(cutoff.Truncate(24 * time.Hour)) {
 				continue
 			}
 		}
 
 		data, err := os.ReadFile(f)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", f, err))
 			continue
 		}
 		df, err := modelv1.ParseDateFile(data)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("parse %s: %w", f, err))
 			continue
 		}
 
@@ -355,13 +375,13 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 				Platform:     acct.Platform,
 				Account:      acct.NameSlug(),
 				Conversation: conversation,
-				Date:         dateFromFilename(f).Format("2006-01-02"),
+				Date:         strings.TrimSuffix(filepath.Base(f), ".txt"),
 				Lines:        matching,
 				MatchCount:   len(matching),
 			})
 		}
 	}
-	return results, nil
+	return results, errors.Join(errs...)
 }
 
 func lineTimestamp(l modelv1.Line) time.Time {
@@ -414,10 +434,13 @@ func listSubdirs(dir string) ([]string, error) {
 	return dirs, nil
 }
 
-func dateFromFilename(path string) time.Time {
+func dateFromFilename(path string) (time.Time, error) {
 	name := strings.TrimSuffix(filepath.Base(path), ".txt")
-	t, _ := time.Parse("2006-01-02", name)
-	return t
+	t, err := time.Parse("2006-01-02", name)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse date from filename %s: %w", path, err)
+	}
+	return t, nil
 }
 
 func fileExists(path string) bool {
@@ -425,16 +448,19 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func loadMaintenanceState(path string) map[string]string {
+func loadMaintenanceState(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return make(map[string]string)
+		if os.IsNotExist(err) {
+			return make(map[string]string), nil
+		}
+		return nil, fmt.Errorf("read maintenance state: %w", err)
 	}
 	var state map[string]string
 	if err := json.Unmarshal(data, &state); err != nil {
-		return make(map[string]string)
+		return nil, fmt.Errorf("parse maintenance state: %w", err)
 	}
-	return state
+	return state, nil
 }
 
 func saveMaintenanceState(path string, state map[string]string) error {

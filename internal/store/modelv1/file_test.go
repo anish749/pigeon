@@ -61,8 +61,18 @@ func TestParseDateFile_SkipsUnparseableLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDateFile: %v", err)
 	}
-	if len(f.Messages) != 2 {
-		t.Errorf("messages = %d, want 2 (garbage line skipped)", len(f.Messages))
+	if len(f.Messages) != 3 {
+		t.Errorf("messages = %d, want 3 (2 parsed + 1 parse error)", len(f.Messages))
+	}
+	// The garbage line becomes a parse error message
+	hasError := false
+	for _, m := range f.Messages {
+		if m.Sender == "[parse error]" {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Error("expected a [parse error] message for the garbage line")
 	}
 }
 

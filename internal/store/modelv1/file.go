@@ -1,19 +1,25 @@
 package modelv1
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 )
 
 // ParseDateFile parses raw file bytes into a DateFile. Lines that fail to
-// parse are skipped. The returned DateFile is raw (not compacted).
+// parse are added as message lines with the error as text, so the caller
+// can see that something went wrong. The returned DateFile is raw (not compacted).
 func ParseDateFile(data []byte) (*DateFile, error) {
 	f := &DateFile{}
 	for _, raw := range splitLines(data) {
 		line, err := Parse(raw)
 		if err != nil {
-			continue // skip unparseable lines
+			f.Messages = append(f.Messages, MsgLine{
+				Sender: "[parse error]",
+				Text:   fmt.Sprintf("unparseable line: %s (error: %v)", raw, err),
+			})
+			continue
 		}
 		classifyIntoDateFile(f, line)
 	}
@@ -47,6 +53,10 @@ func ParseThreadFile(data []byte) (*ThreadFile, error) {
 	for _, raw := range splitLines(data) {
 		line, err := Parse(raw)
 		if err != nil {
+			f.Context = append(f.Context, MsgLine{
+				Sender: "[parse error]",
+				Text:   fmt.Sprintf("unparseable line: %s (error: %v)", raw, err),
+			})
 			continue
 		}
 
