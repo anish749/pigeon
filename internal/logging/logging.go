@@ -30,9 +30,9 @@ func (f LogFile) path() string {
 	}
 }
 
-// Tail follows all existing log files, showing the last n lines from each.
-// Blocks until interrupted.
-func Tail(n int) error {
+// Tail runs tail -f on all existing log files, forwarding extraArgs
+// to the tail command. Blocks until interrupted.
+func Tail(extraArgs []string) error {
 	var files []string
 	for _, p := range []string{paths.DaemonLogPath(), paths.MCPLogPath()} {
 		if _, err := os.Stat(p); err == nil {
@@ -43,7 +43,8 @@ func Tail(n int) error {
 		return fmt.Errorf("no log files found in %s", paths.StateDir())
 	}
 
-	args := append([]string{"-f", "-n", fmt.Sprintf("%d", n)}, files...)
+	args := append([]string{"-f"}, extraArgs...)
+	args = append(args, files...)
 	tail := exec.Command("tail", args...)
 	tail.Stdout = os.Stdout
 	tail.Stderr = os.Stderr
