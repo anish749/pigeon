@@ -127,6 +127,11 @@ func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 		// Session file was rewritten with a new session ID — repoint the channel.
 		h.mu.Lock()
 		if ch.sessionID != s.SessionID {
+			if old, ok := h.sessions[ch.sessionID]; ok {
+				old.Send(h.ctx, &TextNotificationMsg{
+					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
+				})
+			}
 			slog.Info("session file changed, delivery channel repointed",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
 			ch.sessionID = s.SessionID
