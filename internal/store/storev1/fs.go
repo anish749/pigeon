@@ -102,6 +102,10 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 				selected = append(selected, f)
 			}
 		}
+	case opts.Last > 0:
+		// For --last N, read files in reverse until we have enough messages.
+		// Start from the most recent file and work backwards.
+		selected = files
 	default:
 		today := filepath.Join(dir, time.Now().UTC().Format("2006-01-02")+".txt")
 		if fileExists(today) {
@@ -129,6 +133,10 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 
 	compacted := compact.Compact(merged)
 	resolved := modelv1.Resolve(compacted)
+
+	// Interleave thread replies: for each message that is a thread parent,
+	// read its thread file and insert replies after the parent.
+	resolved = s.interleaveThreads(acct, conversation, resolved)
 
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
@@ -359,6 +367,48 @@ func (s *FSStore) maintainFile(path string) error {
 		return nil
 	}
 	return os.WriteFile(path, newData, 0644)
+}
+
+// interleaveThreads reads thread files for the conversation and splices
+// replies into the resolved output after their parent message, matched by ID.
+func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) *modelv1.ResolvedDateFile {
+	threadsDir := filepath.Join(s.convDir(acct, conversation), "threads")
+	entries, err := os.ReadDir(threadsDir)
+	if err != nil {
+		return resolved // no threads directory
+	}
+
+	// Build a map of threadTS → resolved thread file.
+	threads := make(map[string]*modelv1.ResolvedThreadFile)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		threadTS := strings.TrimSuffix(e.Name(), ".txt")
+		tf, err := s.ReadThread(acct, conversation, threadTS)
+		if err != nil || tf == nil {
+			continue
+		}
+		threads[tf.Parent.ID] = tf
+	}
+
+	if len(threads) == 0 {
+		return resolved
+	}
+
+	// Walk messages and splice thread replies after each parent.
+	var result []modelv1.ResolvedMsg
+	for _, m := range resolved.Messages {
+		result = append(result, m)
+		if tf, ok := threads[m.ID]; ok {
+			for _, r := range tf.Replies {
+				r.Reply = true
+				result = append(result, r)
+			}
+		}
+	}
+
+	return &modelv1.ResolvedDateFile{Messages: result}
 }
 
 func (s *FSStore) searchConversation(acct account.Account, conversation, query string, opts SearchOpts) ([]SearchResult, error) {

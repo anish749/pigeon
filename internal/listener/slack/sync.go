@@ -408,6 +408,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			var via modelv1.Via
 			if msg.BotID != "" {
 				senderName = "sent by pigeon"
+				senderID = msg.BotID
 				via = modelv1.ViaPigeonAsBot
 			} else {
 				senderName = "sent to pigeon by " + resolver.UserName(ctx, msg.User)
