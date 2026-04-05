@@ -36,8 +36,15 @@ To install from source:
 git clone https://github.com/anish749/pigeon.git
 cd pigeon
 ./pigeon help          # wrapper script auto-builds
-./install-skill.sh     # register Claude Code skill
 ```
+
+To register pigeon as a Claude Code skill:
+
+```bash
+npx skills add anish749/pigeon
+```
+
+Or manually: copy `.claude/skills/pigeon/SKILL.md` from this repo into `~/.claude/skills/pigeon/SKILL.md`.
 
 ## Getting Started
 
