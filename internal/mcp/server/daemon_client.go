@@ -113,7 +113,10 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("unexpected status %d (and failed to read body: %w)", resp.StatusCode, err)
+		}
 		msg := strings.TrimSpace(string(body))
 		if resp.StatusCode == http.StatusConflict {
 			return &rejectedError{reason: msg}
