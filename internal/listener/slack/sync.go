@@ -76,6 +76,9 @@ func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
 	}
 }
 
+// Store returns the underlying store for direct access (e.g. reactions, edits, deletes).
+func (ms *MessageStore) Store() storev1.Store { return ms.store }
+
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
