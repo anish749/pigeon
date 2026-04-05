@@ -139,8 +139,10 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	// Write thread replies to the thread file
 	if isThreadReply {
-		// Ensure the thread parent exists by fetching it if needed.
-		l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
+		// Only fetch the parent from Slack API if the thread file doesn't exist yet.
+		if !l.messages.ThreadExists(channelName, msg.ThreadTimeStamp) {
+			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
+		}
 
 		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, msg.User, text, ts, msg.TimeStamp, true, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,

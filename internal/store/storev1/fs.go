@@ -39,6 +39,16 @@ func (s *FSStore) convDir(acct account.Account, conversation string) string {
 	return filepath.Join(s.acctDir(acct), conversation)
 }
 
+// threadsDir returns the threads subdirectory for a conversation.
+func (s *FSStore) threadsDir(acct account.Account, conversation string) string {
+	return filepath.Join(s.convDir(acct, conversation), "threads")
+}
+
+// threadFile returns the path to a thread file (THREAD_TS.txt).
+func (s *FSStore) threadFile(acct account.Account, conversation, threadTS string) string {
+	return filepath.Join(s.threadsDir(acct, conversation), threadTS+".txt")
+}
+
 // fileMu returns the per-file mutex for the given path.
 func (s *FSStore) fileMu(path string) *sync.Mutex {
 	val, _ := s.locks.LoadOrStore(path, &sync.Mutex{})
@@ -63,13 +73,10 @@ func (s *FSStore) Append(acct account.Account, conversation string, line modelv1
 
 // AppendThread writes a single event line to a thread file.
 func (s *FSStore) AppendThread(acct account.Account, conversation, threadTS string, line modelv1.Line) error {
-	dir := filepath.Join(s.convDir(acct, conversation), "threads")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(s.threadsDir(acct, conversation), 0755); err != nil {
 		return fmt.Errorf("create threads dir: %w", err)
 	}
-
-	filename := filepath.Join(dir, threadTS+".txt")
-	return s.appendLine(filename, line)
+	return s.appendLine(s.threadFile(acct, conversation, threadTS), line)
 }
 
 // ReadConversation loads messages from a conversation, applying compaction
@@ -102,6 +109,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 				selected = append(selected, f)
 			}
 		}
+	case opts.Last > 0:
+		// For --last N, read all files so we can slice after compaction.
+		selected = files
 	default:
 		today := filepath.Join(dir, time.Now().UTC().Format("2006-01-02")+".txt")
 		if fileExists(today) {
@@ -130,6 +140,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	compacted := compact.Compact(merged)
 	resolved := modelv1.Resolve(compacted)
 
+	// Interleave thread replies after their parent message.
+	resolved = s.interleaveThreads(acct, conversation, resolved)
+
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
 		cutoff := time.Now().Add(-opts.Since)
@@ -149,10 +162,14 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	return resolved, nil
 }
 
+// ThreadExists checks if a thread file exists for the given thread timestamp.
+func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS string) bool {
+	return fileExists(s.threadFile(acct, conversation, threadTS))
+}
+
 // ReadThread loads a thread file, applying compaction and resolution.
 func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
-	filename := filepath.Join(s.convDir(acct, conversation), "threads", threadTS+".txt")
-	data, err := os.ReadFile(filename)
+	data, err := os.ReadFile(s.threadFile(acct, conversation, threadTS))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -167,6 +184,45 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 
 	compacted := compact.CompactThread(tf)
 	return modelv1.ResolveThread(compacted), nil
+}
+
+// interleaveThreads reads thread files for the conversation and splices
+// replies into the resolved output after their parent message, matched by ID.
+func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) *modelv1.ResolvedDateFile {
+	entries, err := os.ReadDir(s.threadsDir(acct, conversation))
+	if err != nil {
+		return resolved
+	}
+
+	threads := make(map[string]*modelv1.ResolvedThreadFile)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		threadTS := strings.TrimSuffix(e.Name(), ".txt")
+		tf, err := s.ReadThread(acct, conversation, threadTS)
+		if err != nil || tf == nil {
+			continue
+		}
+		threads[tf.Parent.ID] = tf
+	}
+
+	if len(threads) == 0 {
+		return resolved
+	}
+
+	var result []modelv1.ResolvedMsg
+	for _, m := range resolved.Messages {
+		result = append(result, m)
+		if tf, ok := threads[m.ID]; ok {
+			for _, r := range tf.Replies {
+				r.Reply = true
+				result = append(result, r)
+			}
+		}
+	}
+
+	return &modelv1.ResolvedDateFile{Messages: result}
 }
 
 // ListPlatforms returns all platform directories.
