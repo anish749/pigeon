@@ -249,12 +249,20 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 		return err
 	}
 
+	pigeonPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve pigeon binary path: %w", err)
+	}
+
+	mcpConfig := fmt.Sprintf(`{"mcpServers":{"pigeon":{"command":%q,"args":["mcp"]}}}`, pigeonPath)
+
 	var args []string
 	if resume {
 		fmt.Printf("  %sResuming Claude Code session...%s\n\n", dim, reset)
 		args = []string{
 			"claude",
 			"--resume", sessionID,
+			"--mcp-config", mcpConfig,
 			"--dangerously-load-development-channels", "server:pigeon",
 		}
 	} else {
@@ -263,6 +271,7 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 			"claude",
 			"--session-id", sessionID,
 			"--name", name,
+			"--mcp-config", mcpConfig,
 			"--dangerously-load-development-channels", "server:pigeon",
 		}
 	}
