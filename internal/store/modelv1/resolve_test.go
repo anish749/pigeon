@@ -86,8 +86,12 @@ func TestResolveThread(t *testing.T) {
 	if len(resolved.Replies) != 1 || len(resolved.Replies[0].Reactions) != 1 {
 		t.Errorf("reply reactions = %d, want 1", len(resolved.Replies[0].Reactions))
 	}
-	if len(resolved.Context) != 1 || resolved.Context[0].Reactions != nil {
-		t.Errorf("context should have no reactions")
+	// C1 (ts 9:02) is after parent (ts 9:00), so goes in After
+	if len(resolved.After) != 1 || resolved.After[0].Reactions != nil {
+		t.Errorf("after context should have 1 msg with no reactions")
+	}
+	if len(resolved.Before) != 0 {
+		t.Errorf("before context should be empty, got %d", len(resolved.Before))
 	}
 }
 

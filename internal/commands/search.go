@@ -67,7 +67,7 @@ func printGroupedResultsV1(results []storev1.SearchResult) {
 	type group struct {
 		key      groupKey
 		dates    []string
-		sections [][]modelv1.Line
+		sections [][]modelv1.ResolvedMsg
 		matches  int
 	}
 
@@ -81,7 +81,7 @@ func printGroupedResultsV1(results []storev1.SearchResult) {
 			groups[k] = g
 			order = append(order, k)
 		}
-		g.sections = append(g.sections, r.Lines)
+		g.sections = append(g.sections, r.Messages)
 		g.matches += r.MatchCount
 		g.dates = append(g.dates, r.Date)
 	}
@@ -110,12 +110,9 @@ func printGroupedResultsV1(results []storev1.SearchResult) {
 			if i > 0 {
 				fmt.Println("  ...")
 			}
-			for _, line := range section {
-				if line.Msg != nil {
-					rm := modelv1.ResolvedMsg{MsgLine: *line.Msg}
-					for _, s := range modelv1.FormatMsg(rm, time.Local, true) {
-						fmt.Printf("  %s\n", s)
-					}
+			for _, m := range section {
+				for _, s := range modelv1.FormatMsg(m, time.Local, true) {
+					fmt.Printf("  %s\n", s)
 				}
 			}
 		}
@@ -144,10 +141,8 @@ func printSearchSummaryV1(results []storev1.SearchResult, sinceDur time.Duration
 		if _, ok := groupMsgs[k]; !ok {
 			groupOrder = append(groupOrder, k)
 		}
-		for _, line := range r.Lines {
-			if line.Msg != nil {
-				groupMsgs[k] = append(groupMsgs[k], msgInfo{ts: line.Msg.Ts, sender: line.Msg.Sender})
-			}
+		for _, m := range r.Messages {
+			groupMsgs[k] = append(groupMsgs[k], msgInfo{ts: m.Ts, sender: m.Sender})
 		}
 	}
 

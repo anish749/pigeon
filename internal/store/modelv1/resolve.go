@@ -16,7 +16,8 @@ type ResolvedDateFile struct {
 type ResolvedThreadFile struct {
 	Parent  ResolvedMsg
 	Replies []ResolvedMsg
-	Context []ResolvedMsg
+	Before  []ResolvedMsg // channel messages before the parent
+	After   []ResolvedMsg // channel messages after the parent
 }
 
 // Resolve transforms a compacted DateFile into a ResolvedDateFile by
@@ -58,13 +59,24 @@ func ResolveThread(f *ThreadFile) *ResolvedThreadFile {
 		return out
 	}
 
+	// Split context into before/after based on parent timestamp.
+	var before, after []MsgLine
+	for _, c := range f.Context {
+		if c.Ts.Before(f.Parent.Ts) {
+			before = append(before, c)
+		} else {
+			after = append(after, c)
+		}
+	}
+
 	return &ResolvedThreadFile{
 		Parent: ResolvedMsg{
 			MsgLine:   f.Parent,
 			Reactions: reactionsByMsg[f.Parent.ID],
 		},
 		Replies: resolveSlice(f.Replies),
-		Context: resolveSlice(f.Context),
+		Before:  resolveSlice(before),
+		After:   resolveSlice(after),
 	}
 }
 

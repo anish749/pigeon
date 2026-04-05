@@ -26,13 +26,13 @@ type SearchOpts struct {
 	Since    time.Duration // search within this duration from now
 }
 
-// SearchResult is a set of matching lines from one conversation/date.
+// SearchResult is a set of matching messages from one conversation/date.
 type SearchResult struct {
 	Platform     string
 	Account      string
 	Conversation string
 	Date         string
-	Lines        []modelv1.Line
+	Messages     []modelv1.ResolvedMsg
 	MatchCount   int
 }
 

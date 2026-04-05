@@ -150,20 +150,33 @@ func TestFormatThreadFile(t *testing.T) {
 		Replies: []ResolvedMsg{
 			{MsgLine: MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true}},
 		},
-		Context: []ResolvedMsg{
-			{MsgLine: MsgLine{ID: "C1", Ts: ts(2026, 3, 16, 9, 2, 0), Sender: "Charlie", SenderID: "U3", Text: "context"}},
+		Before: []ResolvedMsg{
+			{MsgLine: MsgLine{ID: "C1", Ts: ts(2026, 3, 16, 8, 58, 0), Sender: "Charlie", SenderID: "U3", Text: "before"}},
+		},
+		After: []ResolvedMsg{
+			{MsgLine: MsgLine{ID: "C2", Ts: ts(2026, 3, 16, 9, 2, 0), Sender: "Charlie", SenderID: "U3", Text: "after"}},
 		},
 	}
 	lines := FormatThreadFile(f, time.UTC, true)
-	// Parent + reply + separator + context = 4 lines
+	// Before + parent + reply + after = 4 lines
 	if len(lines) != 4 {
 		t.Fatalf("lines = %d, want 4", len(lines))
 	}
-	if !strings.HasPrefix(lines[1], "  ") {
+	// First line is before context
+	if !strings.Contains(lines[0], "before") {
+		t.Errorf("line 0 should be before context, got %q", lines[0])
+	}
+	// Second line is parent
+	if !strings.Contains(lines[1], "thread start") {
+		t.Errorf("line 1 should be parent, got %q", lines[1])
+	}
+	// Third line is reply (indented)
+	if !strings.HasPrefix(lines[2], "  ") {
 		t.Error("reply should be indented")
 	}
-	if lines[2] != SeparatorLine {
-		t.Errorf("line 2 = %q, want separator", lines[2])
+	// Fourth line is after context
+	if !strings.Contains(lines[3], "after") {
+		t.Errorf("line 3 should be after context, got %q", lines[3])
 	}
 }
 

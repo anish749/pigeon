@@ -392,11 +392,15 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 			slog.Warn("search: some lines skipped", "file", f, "error", parseErr)
 		}
 
-		var matching []modelv1.Line
-		for _, m := range df.Messages {
+		// Compact and resolve so reactions are grouped onto messages.
+		compacted := compact.Compact(df)
+		resolved := modelv1.Resolve(compacted)
+
+		var matching []modelv1.ResolvedMsg
+		for _, m := range resolved.Messages {
 			if strings.Contains(strings.ToLower(m.Text), query) ||
 				strings.Contains(strings.ToLower(m.Sender), query) {
-				matching = append(matching, modelv1.Line{Type: modelv1.LineMessage, Msg: &m})
+				matching = append(matching, m)
 			}
 		}
 
@@ -406,7 +410,7 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 				Account:      acct.NameSlug(),
 				Conversation: conversation,
 				Date:         strings.TrimSuffix(filepath.Base(f), ".txt"),
-				Lines:        matching,
+				Messages:     matching,
 				MatchCount:   len(matching),
 			})
 		}

@@ -56,6 +56,11 @@ func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, full bool) []st
 	}
 	var lines []string
 
+	// Before context
+	for _, c := range f.Before {
+		lines = append(lines, FormatMsg(c, loc, full)...)
+	}
+
 	// Parent
 	lines = append(lines, FormatMsg(f.Parent, loc, full)...)
 
@@ -64,12 +69,9 @@ func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, full bool) []st
 		lines = append(lines, FormatMsg(r, loc, full)...)
 	}
 
-	// Context (with separator)
-	if len(f.Context) > 0 {
-		lines = append(lines, SeparatorLine)
-		for _, c := range f.Context {
-			lines = append(lines, FormatMsg(c, loc, full)...)
-		}
+	// After context
+	for _, c := range f.After {
+		lines = append(lines, FormatMsg(c, loc, full)...)
 	}
 
 	return lines
