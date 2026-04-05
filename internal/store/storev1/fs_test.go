@@ -230,7 +230,7 @@ func TestMaintain(t *testing.T) {
 	}
 
 	// Verify maintenance state file exists
-	stateFile := s.acctDir(acct).MaintenancePath()
+	stateFile := s.root.AccountFor(acct).MaintenancePath()
 	if !fileExists(stateFile) {
 		t.Error("maintenance state file not created")
 	}

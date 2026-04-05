@@ -9,6 +9,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	_ "modernc.org/sqlite"
 
+	acctpkg "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/paths"
@@ -75,7 +76,7 @@ func RunUnlinkWhatsApp(account string) error {
 	}
 
 	// Delete message data.
-	dataDir := paths.DefaultDataRoot().Account("whatsapp", wa.Account).Path()
+	dataDir := paths.DefaultDataRoot().AccountFor(acctpkg.New("whatsapp", wa.Account)).Path()
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.WarnContext(ctx, "failed to delete message data", "dir", dataDir, "error", err)
 	} else {

@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gosimple/slug"
-
 	"github.com/anish749/pigeon/internal/account"
 )
 
@@ -14,7 +12,7 @@ import (
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
 //
 // Each level carries accumulated path segments and exposes Path() string.
-// Slugification of account names happens once, inside PlatformDir.Account().
+// Slugification lives in the account package; paths only accepts slugs or Account objects.
 // The base directory is injected via NewDataRoot, so FSStore can use a test
 // directory while commands use DefaultDataRoot().
 
@@ -35,14 +33,9 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
 }
 
-// Account is a shortcut for r.Platform(platform).Account(name).
-func (r DataRoot) Account(platform, name string) AccountDir {
-	return r.Platform(platform).Account(name)
-}
-
 // AccountFor returns an AccountDir from an account.Account.
 func (r DataRoot) AccountFor(acct account.Account) AccountDir {
-	return r.Platform(acct.Platform).Account(acct.Name)
+	return r.Platform(acct.Platform).AccountFromSlug(acct.NameSlug())
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/
@@ -54,11 +47,6 @@ type PlatformDir struct {
 // Path returns the platform directory path.
 func (p PlatformDir) Path() string {
 	return filepath.Join(p.root.base, p.platform)
-}
-
-// Account returns an AccountDir, slugifying the display name.
-func (p PlatformDir) Account(name string) AccountDir {
-	return AccountDir{platform: p, slug: slug.Make(name)}
 }
 
 // AccountFromSlug returns an AccountDir from an already-slugified name

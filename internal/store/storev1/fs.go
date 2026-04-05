@@ -30,12 +30,8 @@ func NewFSStore(root paths.DataRoot) *FSStore {
 	return &FSStore{root: root}
 }
 
-func (s *FSStore) acctDir(acct account.Account) paths.AccountDir {
-	return s.root.AccountFor(acct)
-}
-
 func (s *FSStore) convDir(acct account.Account, conversation string) paths.ConversationDir {
-	return s.acctDir(acct).Conversation(conversation)
+	return s.root.AccountFor(acct).Conversation(conversation)
 }
 
 // fileMu returns the per-file mutex for the given path.
@@ -226,7 +222,7 @@ func (s *FSStore) ListAccounts(platform string) ([]string, error) {
 
 // ListConversations returns all conversation directories for an account.
 func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
-	dir := s.acctDir(acct).Path()
+	dir := s.root.AccountFor(acct).Path()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -245,7 +241,7 @@ func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 
 // Maintain runs the maintenance pass for an account.
 func (s *FSStore) Maintain(acct account.Account) error {
-	ad := s.acctDir(acct)
+	ad := s.root.AccountFor(acct)
 	dir := ad.Path()
 	stateFile := ad.MaintenancePath()
 	state, err := loadMaintenanceState(stateFile)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/search"
 )
@@ -74,7 +75,7 @@ func searchPath(platform, acctName string) string {
 	root := paths.DefaultDataRoot()
 	switch {
 	case platform != "" && acctName != "":
-		return root.Account(platform, acctName).Path()
+		return root.AccountFor(account.New(platform, acctName)).Path()
 	case platform != "":
 		return root.Platform(platform).Path()
 	default:
