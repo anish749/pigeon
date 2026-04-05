@@ -27,6 +27,16 @@ func New(platform, name string) Account {
 	}
 }
 
+// NewFromSlug creates an Account from a platform and an already-slugified
+// account name (e.g. from a directory listing). The slug is used as-is for
+// both Name and NameSlug since the original display name is not recoverable.
+func NewFromSlug(platform, nameSlug string) Account {
+	return Account{
+		Platform: strings.ToLower(platform),
+		Name:     nameSlug,
+	}
+}
+
 // String returns the canonical slug form: "slack-coding-with-anish".
 // Suitable for map keys, session filenames, and log identifiers.
 func (a Account) String() string {
