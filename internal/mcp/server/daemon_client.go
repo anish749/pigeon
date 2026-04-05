@@ -28,7 +28,9 @@ func (e *rejectedError) Error() string {
 
 type ClaudeChannelNotification struct {
 	Content string         `json:"content"`
-	Meta    map[string]any `json:"meta"`
+	// Meta must be non-nil (at minimum an empty map). Claude Code ignores
+	// channel notifications where meta serializes as null instead of {}.
+	Meta map[string]any `json:"meta"`
 }
 
 // pigeonDaemonStreamingClient manages the SSE connection to the pigeon daemon and forwards
