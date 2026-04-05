@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -138,34 +137,73 @@ func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	fmt.Printf("  Created:     %s%s%s\n\n", dim, s.CreatedAt.Format("2006-01-02 15:04"), reset)
 
 	if cwd != s.CWD {
-		fmt.Printf("%s⚠  Your current directory is %s%s\n", yellow, cwd, reset)
-		fmt.Printf("%s   The existing session is in %s%s\n", yellow, s.CWD, reset)
-		fmt.Printf("%s   To continue, your working directory will be changed to %s%s\n\n", yellow, s.CWD, reset)
+		fmt.Printf("  %s⚠  Your current directory is %s%s\n", yellow, cwd, reset)
+		fmt.Printf("  %s   Resuming will change your working directory to %s%s\n\n", yellow, s.CWD, reset)
 	}
 
-	if !confirm("Continue with this session?", true) {
-		if !confirm("Create a new session for this account?", false) {
-			return errGoBack
-		}
-		fmt.Println()
-		return handleNewSession(sf, acct, cwd)
+	fmt.Printf("  %s⚠  A new session will disconnect pigeon from the current one.%s\n", yellow, reset)
+	fmt.Printf("  %s   Everything in the working directory is accessible to pigeon.%s\n\n", dim, reset)
+
+	prompt := promptui.Select{
+		Label: "What would you like to do",
+		Items: []string{
+			"Resume existing session",
+			fmt.Sprintf("Create new session in %s", cwd),
+			"← Back",
+			"Exit",
+		},
+		Size: 4,
 	}
 
-	// Resume in the stored cwd.
-	return launchClaude(s.SessionID, acct.Display(), s.CWD, true)
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return nil // ctrl-c / escape
+	}
+
+	switch idx {
+	case 0: // Resume
+		return launchClaude(s.SessionID, acct.Display(), s.CWD, true)
+	case 1: // Create new
+		return createAndLaunchSession(sf, acct, cwd)
+	case 2: // Back
+		return errGoBack
+	default: // Exit
+		return nil
+	}
 }
 
 func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) error {
-	display := acct.Display()
-	fmt.Printf("\n%sCreating new Claude Code session for %s%s%s\n\n", bold, cyan, display, reset)
+	fmt.Printf("\n%sNew session for %s%s%s\n", bold, cyan, acct.Display(), reset)
 	fmt.Printf("  Working directory: %s%s%s\n\n", bold, cwd, reset)
-	fmt.Printf("  %s⚠  Everything in this directory will be accessible to the pigeon bot%s\n", yellow, reset)
-	fmt.Printf("  %s   and may be exposed to others talking to pigeon over %s in %s.%s\n\n", yellow, acct.Platform, acct.Name, reset)
+	fmt.Printf("  %s⚠  Everything in this directory will be accessible to pigeon%s\n", yellow, reset)
+	fmt.Printf("  %s   and may be exposed to others talking to pigeon over %s.%s\n\n", yellow, acct.Platform, reset)
 
-	if !confirm("Continue?", true) {
-		return errGoBack
+	prompt := promptui.Select{
+		Label: "What would you like to do",
+		Items: []string{
+			"Start session",
+			"← Back",
+			"Exit",
+		},
+		Size: 3,
 	}
 
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return nil
+	}
+
+	switch idx {
+	case 0: // Start
+		return createAndLaunchSession(sf, acct, cwd)
+	case 1: // Back
+		return errGoBack
+	default: // Exit
+		return nil
+	}
+}
+
+func createAndLaunchSession(sf *claude.SessionFile, acct account.Account, cwd string) error {
 	sessionID := uuid.New().String()
 	now := time.Now()
 
@@ -174,7 +212,7 @@ func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) 
 		Account:       acct.Name,
 		SessionID:     sessionID,
 		CWD:           cwd,
-		Name:          display,
+		Name:          acct.Display(),
 		CreatedAt:     now,
 		LastDelivered: now, // Only messages arriving after session creation will be delivered.
 	}
@@ -183,11 +221,9 @@ func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) 
 		return err
 	}
 
-	fmt.Printf("\n  %s✓%s Session created\n", green, reset)
-	fmt.Printf("  Session ID:   %s%s%s\n", dim, sessionID, reset)
-	fmt.Printf("  Session file: %s%s%s\n\n", dim, claude.SessionPath(acct), reset)
+	fmt.Printf("\n  %s✓%s Session created\n\n", green, reset)
 
-	return launchClaude(sessionID, display, cwd, false)
+	return launchClaude(sessionID, acct.Display(), cwd, false)
 }
 
 func launchClaude(sessionID, name, cwd string, resume bool) error {
@@ -260,24 +296,4 @@ func validateAccount(acct account.Account) error {
 	default:
 		return fmt.Errorf("unsupported platform: %s (supported: slack, whatsapp)", acct.Platform)
 	}
-}
-
-func confirm(prompt string, defaultYes bool) bool {
-	hint := "Y/n"
-	if !defaultYes {
-		hint = "y/N"
-	}
-
-	fmt.Printf("%s%s [%s]:%s ", bold, prompt, hint, reset)
-
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return defaultYes
-	}
-
-	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	if answer == "" {
-		return defaultYes
-	}
-	return answer == "y" || answer == "yes"
 }
