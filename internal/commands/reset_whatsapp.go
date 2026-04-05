@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"go.mau.fi/whatsmeow/types"
 	_ "modernc.org/sqlite"
@@ -76,7 +75,7 @@ func RunUnlinkWhatsApp(account string) error {
 	}
 
 	// Delete message data.
-	dataDir := filepath.Join(paths.DataDir(), "whatsapp", wa.Account)
+	dataDir := paths.DefaultDataRoot().Account("whatsapp", wa.Account).Path()
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.WarnContext(ctx, "failed to delete message data", "dir", dataDir, "error", err)
 	} else {

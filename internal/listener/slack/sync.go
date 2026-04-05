@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
@@ -29,7 +30,7 @@ const (
 type syncCursors map[string]string
 
 func cursorsPath(acct account.Account) string {
-	return filepath.Join(acct.DataDir(), ".sync-cursors.yaml")
+	return paths.DefaultDataRoot().Account(acct.Platform, acct.Name).SyncCursorsPath()
 }
 
 func loadCursors(acct account.Account) syncCursors {

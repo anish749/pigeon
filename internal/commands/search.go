@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/search"
 )
@@ -72,14 +71,14 @@ func RunSearch(p SearchParams) error {
 
 // searchPath returns the directory to search based on platform/account filters.
 func searchPath(platform, acctName string) string {
+	root := paths.DefaultDataRoot()
 	switch {
 	case platform != "" && acctName != "":
-		acct := account.New(platform, acctName)
-		return paths.AccountDir(platform, acct.NameSlug())
+		return root.Account(platform, acctName).Path()
 	case platform != "":
-		return paths.PlatformDir(platform)
+		return root.Platform(platform).Path()
 	default:
-		return paths.DataDir()
+		return root.Path()
 	}
 }
 

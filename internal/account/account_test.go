@@ -1,10 +1,7 @@
 package account
 
 import (
-	"path/filepath"
 	"testing"
-
-	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestNew(t *testing.T) {
@@ -83,22 +80,6 @@ func TestNameSlug(t *testing.T) {
 		if got := a.NameSlug(); got != tt.want {
 			t.Errorf("New(\"slack\", %q).NameSlug() = %q, want %q", tt.name, got, tt.want)
 		}
-	}
-}
-
-func TestDataDir(t *testing.T) {
-	a := New("slack", "My Workspace")
-	want := filepath.Join(paths.DataDir(), "slack", "my-workspace")
-	if got := a.DataDir(); got != want {
-		t.Errorf("DataDir() = %q, want %q", got, want)
-	}
-}
-
-func TestConversationDir(t *testing.T) {
-	a := New("slack", "My Workspace")
-	want := filepath.Join(paths.DataDir(), "slack", "my-workspace", "#general")
-	if got := a.ConversationDir("#general"); got != want {
-		t.Errorf("ConversationDir() = %q, want %q", got, want)
 	}
 }
 

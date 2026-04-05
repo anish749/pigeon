@@ -14,39 +14,28 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/compact"
 )
 
 // FSStore implements Store backed by the local filesystem.
 type FSStore struct {
-	base  string // root data directory
+	root  paths.DataRoot
 	locks sync.Map
 }
 
-// NewFSStore creates a Store rooted at the given base directory.
-func NewFSStore(base string) *FSStore {
-	return &FSStore{base: base}
+// NewFSStore creates a Store rooted at the given data root.
+func NewFSStore(root paths.DataRoot) *FSStore {
+	return &FSStore{root: root}
 }
 
-// acctDir returns the directory for an account: base/platform/account-slug
-func (s *FSStore) acctDir(acct account.Account) string {
-	return filepath.Join(s.base, acct.Platform, acct.NameSlug())
+func (s *FSStore) acctDir(acct account.Account) paths.AccountDir {
+	return s.root.Account(acct.Platform, acct.Name)
 }
 
-// convDir returns the directory for a conversation.
-func (s *FSStore) convDir(acct account.Account, conversation string) string {
-	return filepath.Join(s.acctDir(acct), conversation)
-}
-
-// threadsDir returns the threads subdirectory for a conversation.
-func (s *FSStore) threadsDir(acct account.Account, conversation string) string {
-	return filepath.Join(s.convDir(acct, conversation), "threads")
-}
-
-// threadFile returns the path to a thread file (THREAD_TS.txt).
-func (s *FSStore) threadFile(acct account.Account, conversation, threadTS string) string {
-	return filepath.Join(s.threadsDir(acct, conversation), threadTS+".txt")
+func (s *FSStore) convDir(acct account.Account, conversation string) paths.ConversationDir {
+	return s.acctDir(acct).Conversation(conversation)
 }
 
 // fileMu returns the per-file mutex for the given path.
@@ -62,28 +51,28 @@ func (s *FSStore) Append(acct account.Account, conversation string, line modelv1
 		return fmt.Errorf("append: line has zero timestamp")
 	}
 
-	dir := s.convDir(acct, conversation)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	conv := s.convDir(acct, conversation)
+	if err := os.MkdirAll(conv.Path(), 0755); err != nil {
 		return fmt.Errorf("create conversation dir: %w", err)
 	}
 
-	filename := filepath.Join(dir, ts.UTC().Format("2006-01-02")+".txt")
-	return s.appendLine(filename, line)
+	return s.appendLine(conv.DateFile(ts.UTC().Format("2006-01-02")), line)
 }
 
 // AppendThread writes a single event line to a thread file.
 func (s *FSStore) AppendThread(acct account.Account, conversation, threadTS string, line modelv1.Line) error {
-	if err := os.MkdirAll(s.threadsDir(acct, conversation), 0755); err != nil {
+	conv := s.convDir(acct, conversation)
+	if err := os.MkdirAll(conv.ThreadsDir(), 0755); err != nil {
 		return fmt.Errorf("create threads dir: %w", err)
 	}
-	return s.appendLine(s.threadFile(acct, conversation, threadTS), line)
+	return s.appendLine(conv.ThreadFile(threadTS), line)
 }
 
 // ReadConversation loads messages from a conversation, applying compaction
 // and resolution. Reactions are grouped onto their parent messages.
 func (s *FSStore) ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.ResolvedDateFile, error) {
-	dir := s.convDir(acct, conversation)
-	files, err := listDateFiles(dir)
+	conv := s.convDir(acct, conversation)
+	files, err := listDateFiles(conv.Path())
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +83,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	var selected []string
 	switch {
 	case opts.Date != "":
-		target := filepath.Join(dir, opts.Date+".txt")
+		target := conv.DateFile(opts.Date)
 		if fileExists(target) {
 			selected = []string{target}
 		}
@@ -113,7 +102,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		// For --last N, read all files so we can slice after compaction.
 		selected = files
 	default:
-		today := filepath.Join(dir, time.Now().UTC().Format("2006-01-02")+".txt")
+		today := conv.DateFile(time.Now().UTC().Format("2006-01-02"))
 		if fileExists(today) {
 			selected = []string{today}
 		} else {
@@ -164,12 +153,12 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS string) bool {
-	return fileExists(s.threadFile(acct, conversation, threadTS))
+	return fileExists(s.convDir(acct, conversation).ThreadFile(threadTS))
 }
 
 // ReadThread loads a thread file, applying compaction and resolution.
 func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
-	data, err := os.ReadFile(s.threadFile(acct, conversation, threadTS))
+	data, err := os.ReadFile(s.convDir(acct, conversation).ThreadFile(threadTS))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -189,7 +178,7 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 // interleaveThreads reads thread files for the conversation and splices
 // replies into the resolved output after their parent message, matched by ID.
 func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) *modelv1.ResolvedDateFile {
-	entries, err := os.ReadDir(s.threadsDir(acct, conversation))
+	entries, err := os.ReadDir(s.convDir(acct, conversation).ThreadsDir())
 	if err != nil {
 		return resolved
 	}
@@ -227,17 +216,17 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 
 // ListPlatforms returns all platform directories.
 func (s *FSStore) ListPlatforms() ([]string, error) {
-	return listSubdirs(s.base)
+	return listSubdirs(s.root.Path())
 }
 
 // ListAccounts returns all account directories for a platform.
 func (s *FSStore) ListAccounts(platform string) ([]string, error) {
-	return listSubdirs(filepath.Join(s.base, platform))
+	return listSubdirs(s.root.Platform(platform).Path())
 }
 
 // ListConversations returns all conversation directories for an account.
 func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
-	dir := s.acctDir(acct)
+	dir := s.acctDir(acct).Path()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -256,8 +245,9 @@ func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 
 // Maintain runs the maintenance pass for an account.
 func (s *FSStore) Maintain(acct account.Account) error {
-	dir := s.acctDir(acct)
-	stateFile := filepath.Join(dir, ".maintenance.json")
+	ad := s.acctDir(acct)
+	dir := ad.Path()
+	stateFile := ad.MaintenancePath()
 	state, err := loadMaintenanceState(stateFile)
 	if err != nil {
 		return err

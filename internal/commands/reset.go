@@ -3,13 +3,12 @@ package commands
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/anish749/pigeon/internal/paths"
 )
 
 func RunReset(platform, account string) error {
-	dir := filepath.Join(paths.DataDir(), platform, account)
+	dir := paths.DefaultDataRoot().Account(platform, account).Path()
 
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
