@@ -183,6 +183,12 @@ func (h *Hub) Register(s *Session) error {
 	acct := account.New(found.Platform, found.Account)
 	if ch, exists := h.channels[acct.String()]; exists {
 		if ch.sessionID != s.SessionID {
+			// Notify the old session that it's being replaced.
+			if old, ok := h.sessions[ch.sessionID]; ok {
+				old.Send(h.ctx, &TextNotificationMsg{
+					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
+				})
+			}
 			slog.Info("delivery channel repointed to new session",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
 			ch.sessionID = s.SessionID
@@ -297,6 +303,7 @@ func (h *Hub) sendHello(ch *channel) {
 	h.mu.RUnlock()
 
 	if session == nil {
+		slog.Warn("sendHello: session not found", "session_id", ch.sessionID)
 		return
 	}
 
@@ -315,6 +322,8 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 	if err := session.Send(h.ctx, hello); err != nil {
 		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
+	} else {
+		slog.Info("hello sent", "session_id", ch.sessionID, "account", ch.acct)
 	}
 }
 
