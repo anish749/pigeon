@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -39,7 +39,7 @@ func RunSetupWhatsApp(dbPath string) error {
 	ctx := context.Background()
 	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
 
-	container, err := sqlstore.New(ctx, "sqlite3", dsn, walog.New(ctx, "whatsapp-db"))
+	container, err := sqlstore.New(ctx, "sqlite", dsn, walog.New(ctx, "whatsapp-db"))
 	if err != nil {
 		return fmt.Errorf("create device store: %w", err)
 	}

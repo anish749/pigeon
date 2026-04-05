@@ -22,7 +22,6 @@ jobs:
 
       - uses: goreleaser/goreleaser-action@v6
         with:
-          distribution: goreleaser-cross
           version: latest
           args: release --clean
         env:
