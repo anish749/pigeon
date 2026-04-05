@@ -105,24 +105,32 @@ func (h *Hub) watchSessionFiles(ctx context.Context) {
 	}
 }
 
-// reconcileChannels starts delivery channels for session files that
-// don't have one yet. Does not stop existing channels.
+// reconcileChannels ensures each session file has a delivery channel with
+// the correct session ID. Starts new channels and repoints existing ones.
 func (h *Hub) reconcileChannels(sessions []*claude.Session) {
-	h.mu.RLock()
-	existing := make(map[string]bool, len(h.channels))
-	for k := range h.channels {
-		existing[k] = true
-	}
-	h.mu.RUnlock()
-
 	for _, s := range sessions {
 		acct := account.New(s.Platform, s.Account)
-		if existing[acct.String()] {
+		key := acct.String()
+
+		h.mu.RLock()
+		ch, exists := h.channels[key]
+		h.mu.RUnlock()
+
+		if !exists {
+			h.startChannel(s)
+			slog.Info("new session file detected, delivery channel started",
+				"account", acct, "session_id", s.SessionID)
 			continue
 		}
-		h.startChannel(s)
-		slog.Info("new session file detected, delivery channel started",
-			"account", acct, "session_id", s.SessionID)
+
+		// Session file was rewritten with a new session ID — repoint the channel.
+		h.mu.Lock()
+		if ch.sessionID != s.SessionID {
+			slog.Info("session file changed, delivery channel repointed",
+				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
+			ch.sessionID = s.SessionID
+		}
+		h.mu.Unlock()
 	}
 }
 
@@ -174,6 +182,11 @@ func (h *Hub) Register(s *Session) error {
 	// Signal the delivery goroutine to send hello and drain pending messages.
 	acct := account.New(found.Platform, found.Account)
 	if ch, exists := h.channels[acct.String()]; exists {
+		if ch.sessionID != s.SessionID {
+			slog.Info("delivery channel repointed to new session",
+				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
+			ch.sessionID = s.SessionID
+		}
 		select {
 		case ch.signal <- deliverySignal{kind: signalConnected}:
 			slog.Info("signalled hello + pending drain on connect", "session_id", s.SessionID)
