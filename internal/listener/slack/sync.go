@@ -130,6 +130,11 @@ func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS strin
 	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
 }
 
+// ThreadExists checks if a thread file exists for the given thread timestamp.
+func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
+	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
+}
+
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
 func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
 	ms.mu.Lock()

@@ -52,6 +52,9 @@ type Store interface {
 	// ReadThread loads a thread file, applying compaction and resolution.
 	ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error)
 
+	// ThreadExists checks if a thread file exists for the given thread timestamp.
+	ThreadExists(acct account.Account, conversation, threadTS string) bool
+
 	// Search finds messages matching a query across conversations.
 	Search(query string, opts SearchOpts) ([]SearchResult, error)
 
