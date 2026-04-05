@@ -204,6 +204,7 @@ MAINTENANCE
 
 		// Sending
 		newSendCmd(),
+		newReactCmd(),
 		newReviewCmd(),
 
 		// Slack

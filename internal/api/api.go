@@ -100,6 +100,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
+	mux.HandleFunc("POST /api/react", s.handleReact)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
@@ -554,4 +555,189 @@ func (s *Server) executeSend(ctx context.Context, payload json.RawMessage) (bool
 		return false, resp.Error
 	}
 	return true, ""
+}
+
+// ReactRequest is the daemon API payload for /api/react.
+type ReactRequest struct {
+	Platform  string `json:"platform"`
+	Account   string `json:"account"`
+	Contact   string `json:"contact"`
+	MessageID string `json:"message_id"`
+	Emoji     string `json:"emoji"`
+	Remove    bool   `json:"remove,omitempty"`
+}
+
+// ReactResponse is the daemon API response for /api/react.
+type ReactResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
+	var req ReactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: "invalid JSON: " + err.Error()})
+		return
+	}
+
+	if req.Platform == "" || req.Account == "" || req.Contact == "" || req.MessageID == "" || req.Emoji == "" {
+		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: "platform, account, contact, message_id, and emoji are required"})
+		return
+	}
+
+	resp := s.dispatchReact(r.Context(), req)
+	status := http.StatusOK
+	if !resp.OK {
+		status = http.StatusInternalServerError
+	}
+	writeJSON(w, status, resp)
+}
+
+// dispatchReact routes a ReactRequest to the appropriate platform.
+func (s *Server) dispatchReact(ctx context.Context, req ReactRequest) ReactResponse {
+	acct := account.New(req.Platform, req.Account)
+	switch acct.Platform {
+	case "slack":
+		return s.reactSlack(ctx, acct, req)
+	case "whatsapp":
+		return s.reactWhatsApp(ctx, acct, req)
+	default:
+		return ReactResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
+	}
+}
+
+func (s *Server) reactSlack(ctx context.Context, acct account.Account, req ReactRequest) ReactResponse {
+	s.mu.RLock()
+	sender, ok := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return ReactResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
+	}
+
+	// Resolve contact to a channel ID.
+	channelID, channelName, err := sender.Resolver.FindChannelID(ctx, req.Contact)
+	if err != nil {
+		return ReactResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+	}
+
+	// Reactions are always sent via the bot token.
+	ref := goslack.NewRefToMessage(channelID, req.MessageID)
+	if req.Remove {
+		err = sender.BotAPI.RemoveReactionContext(ctx, req.Emoji, ref)
+	} else {
+		err = sender.BotAPI.AddReactionContext(ctx, req.Emoji, ref)
+	}
+	if err != nil {
+		return ReactResponse{Error: fmt.Sprintf("react on %s: %v", channelName, err)}
+	}
+
+	// Store locally. Derive date file from the message timestamp.
+	msgTS := slacklistener.ParseTimestamp(req.MessageID)
+	lineType := modelv1.LineReaction
+	if req.Remove {
+		lineType = modelv1.LineUnreaction
+	}
+
+	// Get bot identity for the from field.
+	senderName := sender.BotName
+	var senderID string
+	if authResp, authErr := sender.BotAPI.AuthTestContext(ctx); authErr == nil {
+		senderID = authResp.UserID
+	}
+
+	// Use the message timestamp for file placement: the protocol requires
+	// reactions to land in the same date file as the target message.
+	// store.Append derives the date file from line.Ts(), so we use msgTS.
+	line := modelv1.Line{
+		Type: lineType,
+		React: &modelv1.ReactLine{
+			Ts:       msgTS,
+			MsgID:    req.MessageID,
+			Sender:   senderName,
+			SenderID: senderID,
+			Via:      modelv1.ViaPigeonAsBot,
+			Emoji:    req.Emoji,
+			Remove:   req.Remove,
+		},
+	}
+	if err := s.store.Append(sender.Acct, channelName, line); err != nil {
+		slog.ErrorContext(ctx, "failed to store reaction", "error", err)
+	}
+
+	// Also append to thread file if one exists for this message.
+	if s.store.ThreadExists(sender.Acct, channelName, req.MessageID) {
+		if err := s.store.AppendThread(sender.Acct, channelName, req.MessageID, line); err != nil {
+			slog.ErrorContext(ctx, "failed to store reaction in thread", "error", err)
+		}
+	}
+
+	return ReactResponse{OK: true}
+}
+
+func (s *Server) reactWhatsApp(ctx context.Context, acct account.Account, req ReactRequest) ReactResponse {
+	s.mu.RLock()
+	sender, ok := s.whatsapp[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return ReactResponse{Error: fmt.Sprintf("no WhatsApp account %q registered", acct.Display())}
+	}
+
+	// Resolve contact query to JID.
+	recipientJID, err := sender.Resolver.FindJID(ctx, req.Contact)
+	if err != nil {
+		var ambErr *walistener.AmbiguousContactError
+		if errors.As(err, &ambErr) {
+			return ReactResponse{Error: formatAmbiguousContacts(ambErr, sender.Acct)}
+		}
+		return ReactResponse{Error: fmt.Sprintf("resolve contact: %v", err)}
+	}
+
+	// Build and send the reaction message.
+	// For unreact, WhatsApp uses an empty string as the reaction text.
+	emoji := req.Emoji
+	if req.Remove {
+		emoji = ""
+	}
+
+	var senderJID types.JID
+	if sender.Client.Store.ID != nil {
+		senderJID = types.NewJID(sender.Client.Store.ID.User, types.DefaultUserServer)
+	}
+
+	reactionMsg := sender.Client.BuildReaction(recipientJID, senderJID, req.MessageID, emoji)
+	_, err = sender.Client.SendMessage(ctx, recipientJID, reactionMsg)
+	if err != nil {
+		return ReactResponse{Error: fmt.Sprintf("send reaction: %v", err)}
+	}
+
+	// Store locally.
+	convDir := sender.Resolver.ConvDir(ctx, recipientJID)
+	senderName := "me"
+	var senderID string
+	if !senderJID.IsEmpty() {
+		senderName = sender.Resolver.ContactName(ctx, senderJID)
+		senderID = senderJID.String()
+	}
+
+	lineType := modelv1.LineReaction
+	if req.Remove {
+		lineType = modelv1.LineUnreaction
+	}
+	line := modelv1.Line{
+		Type: lineType,
+		React: &modelv1.ReactLine{
+			Ts:       time.Now().UTC(),
+			MsgID:    req.MessageID,
+			Sender:   senderName,
+			SenderID: senderID,
+			Via:      modelv1.ViaPigeonAsBot,
+			Emoji:    req.Emoji,
+			Remove:   req.Remove,
+		},
+	}
+	if err := s.store.Append(sender.Acct, convDir, line); err != nil {
+		slog.ErrorContext(ctx, "failed to store reaction", "error", err)
+	}
+
+	return ReactResponse{OK: true}
 }
