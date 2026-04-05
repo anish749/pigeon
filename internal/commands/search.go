@@ -44,7 +44,10 @@ func RunSearch(p SearchParams) error {
 		return nil
 	}
 
-	matches := search.ParseGrepOutput(output, searchDir)
+	matches, parseErr := search.ParseGrepOutput(output, searchDir)
+	if parseErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
+	}
 
 	fmt.Printf("%d match(es) found:\n\n", len(matches))
 	search.PrintSummary(matches, sinceDur)

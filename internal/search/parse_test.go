@@ -52,7 +52,7 @@ func TestParseGrepOutput_BasicMessages(t *testing.T) {
 	}
 	output := []byte(strings.Join(lines, "\n"))
 
-	matches := ParseGrepOutput(output, "/data")
+	matches, _ := ParseGrepOutput(output, "/data")
 	if len(matches) != 2 {
 		t.Fatalf("matches = %d, want 2", len(matches))
 	}
@@ -84,7 +84,7 @@ func TestParseGrepOutput_SkipsNonMessageEvents(t *testing.T) {
 		"/data/slack/acme/ch/2026-03-16.txt:" + `{"type":"delete","ts":"2026-03-16T09:03:00Z","msg":"M1","sender":"Alice","from":"U1"}`,
 	}
 	output := []byte(strings.Join(lines, "\n"))
-	matches := ParseGrepOutput(output, "/data")
+	matches, _ := ParseGrepOutput(output, "/data")
 	if len(matches) != 1 {
 		t.Errorf("matches = %d, want 1 (only msg events)", len(matches))
 	}
@@ -97,7 +97,7 @@ func TestParseGrepOutput_SkipsContextSeparators(t *testing.T) {
 		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
-	matches := ParseGrepOutput(output, "/data")
+	matches, _ := ParseGrepOutput(output, "/data")
 	if len(matches) != 2 {
 		t.Errorf("matches = %d, want 2", len(matches))
 	}
@@ -110,14 +110,43 @@ func TestParseGrepOutput_SkipsGarbageLines(t *testing.T) {
 		"another garbage line",
 	}
 	output := []byte(strings.Join(lines, "\n"))
-	matches := ParseGrepOutput(output, "/data")
+	matches, _ := ParseGrepOutput(output, "/data")
 	if len(matches) != 1 {
 		t.Errorf("matches = %d, want 1", len(matches))
 	}
 }
 
+func TestParseGrepOutput_TextWithBraces(t *testing.T) {
+	msg := fmt.Sprintf(`{"type":"msg","id":"M1","ts":"2026-03-16T09:00:00Z","sender":"Alice","from":"U1","text":"meeting at {office} tomorrow"}`)
+	line := "/data/slack/acme/ch/2026-03-16.txt:" + msg
+	matches, _ := ParseGrepOutput([]byte(line), "/data")
+	if len(matches) != 1 {
+		t.Fatalf("matches = %d, want 1", len(matches))
+	}
+	if matches[0].Msg.Text != "meeting at {office} tomorrow" {
+		t.Errorf("text = %q, want 'meeting at {office} tomorrow'", matches[0].Msg.Text)
+	}
+}
+
+func TestParseGrepOutput_ReturnsErrorForBadJSON(t *testing.T) {
+	lines := []string{
+		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "good"),
+		"/data/slack/acme/ch/2026-03-16.txt:{bad json here}",
+		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "also good"),
+	}
+	output := []byte(strings.Join(lines, "\n"))
+	matches, err := ParseGrepOutput(output, "/data")
+	if err == nil {
+		t.Error("expected error for bad JSON line, got nil")
+	}
+	// Good lines should still be parsed
+	if len(matches) != 2 {
+		t.Errorf("matches = %d, want 2 (bad line skipped but error returned)", len(matches))
+	}
+}
+
 func TestParseGrepOutput_EmptyOutput(t *testing.T) {
-	matches := ParseGrepOutput(nil, "/data")
+	matches, _ := ParseGrepOutput(nil, "/data")
 	if len(matches) != 0 {
 		t.Errorf("matches = %d, want 0", len(matches))
 	}
@@ -130,7 +159,7 @@ func TestParseGrepOutput_MultipleConversations(t *testing.T) {
 		"/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:" + msgJSON("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "C1", "deploy three"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
-	matches := ParseGrepOutput(output, "/data")
+	matches, _ := ParseGrepOutput(output, "/data")
 	if len(matches) != 3 {
 		t.Fatalf("matches = %d, want 3", len(matches))
 	}
@@ -163,7 +192,7 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 		[]modelv1.Attachment{{ID: "F1", Type: "image/jpeg"}},
 	}
 	line := fmt.Sprintf("/data/slack/acme/ch/2026-03-16.txt:%s", jsonLine(msg))
-	matches := ParseGrepOutput([]byte(line), "/data")
+	matches, _ := ParseGrepOutput([]byte(line), "/data")
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
@@ -205,6 +234,20 @@ func TestParseFilePath_AccountScope(t *testing.T) {
 	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 2026-03-16)", plat, acct, conv, date)
+	}
+}
+
+func TestParseFilePath_ThreadFile(t *testing.T) {
+	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
+	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "1711568940.789012" {
+		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 1711568940.789012)", plat, acct, conv, date)
+	}
+}
+
+func TestParseFilePath_ThreadFile_AccountScope(t *testing.T) {
+	plat, acct, conv, date := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
+	if plat != "" || acct != "" || conv != "#general" || date != "1711568940.789012" {
+		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 1711568940.789012)", plat, acct, conv, date)
 	}
 }
 
