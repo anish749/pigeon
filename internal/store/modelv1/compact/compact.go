@@ -1,6 +1,10 @@
-package modelv1
+package compact
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/anish749/pigeon/internal/store/modelv1"
+)
 
 // reactKey identifies a unique reaction tuple for dedup and reconciliation.
 type reactKey struct {
@@ -12,9 +16,9 @@ type reactKey struct {
 // Compact takes a raw DateFile and returns a compacted one. It deduplicates
 // messages and reactions, reconciles react/unreact pairs, applies edits and
 // deletes, and sorts messages by timestamp. The input is not mutated.
-func Compact(f *DateFile) *DateFile {
+func Compact(f *modelv1.DateFile) *modelv1.DateFile {
 	if f == nil {
-		return &DateFile{}
+		return &modelv1.DateFile{}
 	}
 
 	msgs := dedupMessages(f.Messages)
@@ -27,7 +31,7 @@ func Compact(f *DateFile) *DateFile {
 		return msgs[i].Ts.Before(msgs[j].Ts)
 	})
 
-	return &DateFile{
+	return &modelv1.DateFile{
 		Messages:  msgs,
 		Reactions: reactions,
 	}
@@ -36,15 +40,13 @@ func Compact(f *DateFile) *DateFile {
 // CompactThread applies the same compaction logic as Compact but for thread
 // files. Edits and deletes can target the parent, any reply, or any context
 // message. If the parent is deleted, nil is returned.
-func CompactThread(f *ThreadFile) *ThreadFile {
+func CompactThread(f *modelv1.ThreadFile) *modelv1.ThreadFile {
 	if f == nil {
 		return nil
 	}
 
-	// Combine all messages into a single slice for uniform processing.
-	// Tag each message so we can separate them back out.
 	type tagged struct {
-		msg    MsgLine
+		msg    modelv1.MsgLine
 		source string // "parent", "reply", "context"
 	}
 
@@ -57,7 +59,6 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 		all = append(all, tagged{msg: c, source: "context"})
 	}
 
-	// Deduplicate messages by ID, keeping first occurrence.
 	seen := make(map[string]bool)
 	var deduped []tagged
 	for _, t := range all {
@@ -71,7 +72,6 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 	reactions := dedupReactions(f.Reactions)
 	reactions = reconcileReactions(reactions)
 
-	// Apply edits to all messages.
 	latestEdits := latestEditByMsg(f.Edits)
 	for i, t := range deduped {
 		if e, ok := latestEdits[t.msg.ID]; ok {
@@ -80,13 +80,11 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 		}
 	}
 
-	// Apply deletes: remove messages and associated reactions.
 	deleted := make(map[string]bool)
 	for _, d := range f.Deletes {
 		deleted[d.MsgID] = true
 	}
 
-	// If parent is deleted, return nil.
 	if len(deduped) > 0 && deduped[0].source == "parent" && deleted[deduped[0].msg.ID] {
 		return nil
 	}
@@ -98,17 +96,15 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 		}
 	}
 
-	// Remove reactions referencing deleted messages.
-	var survivingReactions []ReactLine
+	var survivingReactions []modelv1.ReactLine
 	for _, r := range reactions {
 		if !deleted[r.MsgID] {
 			survivingReactions = append(survivingReactions, r)
 		}
 	}
 
-	// Separate back into parent, replies, context.
-	var parent MsgLine
-	var replies, context []MsgLine
+	var parent modelv1.MsgLine
+	var replies, context []modelv1.MsgLine
 	for _, t := range surviving {
 		switch t.source {
 		case "parent":
@@ -120,7 +116,6 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 		}
 	}
 
-	// Sort replies and context by timestamp.
 	sort.SliceStable(replies, func(i, j int) bool {
 		return replies[i].Ts.Before(replies[j].Ts)
 	})
@@ -128,7 +123,7 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 		return context[i].Ts.Before(context[j].Ts)
 	})
 
-	return &ThreadFile{
+	return &modelv1.ThreadFile{
 		Parent:    parent,
 		Replies:   replies,
 		Context:   context,
@@ -139,20 +134,21 @@ func CompactThread(f *ThreadFile) *ThreadFile {
 // AggregateReactions groups reactions by message ID, reconciles react/unreact
 // pairs per (message ID, emoji, sender ID), and returns the final reaction
 // state per message. Only surviving reacts (Remove=false) are included.
-func AggregateReactions(reactions []ReactLine) map[string][]ReactLine {
+func AggregateReactions(reactions []modelv1.ReactLine) map[string][]modelv1.ReactLine {
 	reconciled := reconcileReactions(dedupReactions(reactions))
 
-	result := make(map[string][]ReactLine)
+	result := make(map[string][]modelv1.ReactLine)
 	for _, r := range reconciled {
 		result[r.MsgID] = append(result[r.MsgID], r)
 	}
 	return result
 }
 
-// dedupMessages removes duplicate messages by ID, keeping the first occurrence.
-func dedupMessages(msgs []MsgLine) []MsgLine {
+// --- internal helpers ---
+
+func dedupMessages(msgs []modelv1.MsgLine) []modelv1.MsgLine {
 	seen := make(map[string]bool)
-	var out []MsgLine
+	var out []modelv1.MsgLine
 	for _, m := range msgs {
 		if seen[m.ID] {
 			continue
@@ -163,21 +159,16 @@ func dedupMessages(msgs []MsgLine) []MsgLine {
 	return out
 }
 
-// dedupReactions removes exact duplicate reaction lines. Two reaction lines
-// are duplicates if they share the same (MsgID, Emoji, SenderID, Remove, Ts)
-// tuple — i.e. the same event was appended twice. Different timestamps or
-// different Remove values represent distinct events and are preserved for
-// reconciliation.
-func dedupReactions(reactions []ReactLine) []ReactLine {
+func dedupReactions(reactions []modelv1.ReactLine) []modelv1.ReactLine {
 	type dedupKey struct {
 		MsgID    string
 		Emoji    string
 		SenderID string
 		Remove   bool
-		Ts       int64 // UnixNano for comparison
+		Ts       int64
 	}
 	seen := make(map[dedupKey]bool)
-	var out []ReactLine
+	var out []modelv1.ReactLine
 	for _, r := range reactions {
 		k := dedupKey{r.MsgID, r.Emoji, r.SenderID, r.Remove, r.Ts.UnixNano()}
 		if seen[k] {
@@ -189,25 +180,20 @@ func dedupReactions(reactions []ReactLine) []ReactLine {
 	return out
 }
 
-// reconcileReactions replays react/unreact events per (MsgID, Emoji, SenderID)
-// tuple in timestamp order and returns only the surviving reacts.
-func reconcileReactions(reactions []ReactLine) []ReactLine {
-	// Group by key.
-	groups := make(map[reactKey][]ReactLine)
+func reconcileReactions(reactions []modelv1.ReactLine) []modelv1.ReactLine {
+	groups := make(map[reactKey][]modelv1.ReactLine)
 	for _, r := range reactions {
 		k := reactKey{r.MsgID, r.Emoji, r.SenderID}
 		groups[k] = append(groups[k], r)
 	}
 
-	var out []ReactLine
+	var out []modelv1.ReactLine
 	for _, events := range groups {
-		// Sort by timestamp to replay in order.
 		sort.SliceStable(events, func(i, j int) bool {
 			return events[i].Ts.Before(events[j].Ts)
 		})
 
-		// Replay: track the final state.
-		var last *ReactLine
+		var last *modelv1.ReactLine
 		for i := range events {
 			if events[i].Remove {
 				last = nil
@@ -220,7 +206,6 @@ func reconcileReactions(reactions []ReactLine) []ReactLine {
 		}
 	}
 
-	// Sort output by timestamp for deterministic ordering.
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Ts.Before(out[j].Ts)
 	})
@@ -228,9 +213,8 @@ func reconcileReactions(reactions []ReactLine) []ReactLine {
 	return out
 }
 
-// latestEditByMsg returns the most recent edit for each message ID.
-func latestEditByMsg(edits []EditLine) map[string]EditLine {
-	latest := make(map[string]EditLine)
+func latestEditByMsg(edits []modelv1.EditLine) map[string]modelv1.EditLine {
+	latest := make(map[string]modelv1.EditLine)
 	for _, e := range edits {
 		if prev, ok := latest[e.MsgID]; !ok || e.Ts.After(prev.Ts) {
 			latest[e.MsgID] = e
@@ -239,15 +223,13 @@ func latestEditByMsg(edits []EditLine) map[string]EditLine {
 	return latest
 }
 
-// applyEdits replaces message text and attachments with the most recent edit.
-// Edit lines are consumed and not included in the output.
-func applyEdits(msgs []MsgLine, edits []EditLine) []MsgLine {
+func applyEdits(msgs []modelv1.MsgLine, edits []modelv1.EditLine) []modelv1.MsgLine {
 	latest := latestEditByMsg(edits)
 	if len(latest) == 0 {
 		return msgs
 	}
 
-	out := make([]MsgLine, len(msgs))
+	out := make([]modelv1.MsgLine, len(msgs))
 	copy(out, msgs)
 	for i, m := range out {
 		if e, ok := latest[m.ID]; ok {
@@ -258,9 +240,7 @@ func applyEdits(msgs []MsgLine, edits []EditLine) []MsgLine {
 	return out
 }
 
-// applyDeletes removes deleted messages and any reactions, edits, or unreactions
-// that reference the deleted message. Returns the surviving messages and reactions.
-func applyDeletes(msgs []MsgLine, reactions []ReactLine, edits []EditLine, deletes []DeleteLine) ([]MsgLine, []ReactLine) {
+func applyDeletes(msgs []modelv1.MsgLine, reactions []modelv1.ReactLine, edits []modelv1.EditLine, deletes []modelv1.DeleteLine) ([]modelv1.MsgLine, []modelv1.ReactLine) {
 	deleted := make(map[string]bool)
 	for _, d := range deletes {
 		deleted[d.MsgID] = true
@@ -269,14 +249,14 @@ func applyDeletes(msgs []MsgLine, reactions []ReactLine, edits []EditLine, delet
 		return msgs, reactions
 	}
 
-	var outMsgs []MsgLine
+	var outMsgs []modelv1.MsgLine
 	for _, m := range msgs {
 		if !deleted[m.ID] {
 			outMsgs = append(outMsgs, m)
 		}
 	}
 
-	var outReactions []ReactLine
+	var outReactions []modelv1.ReactLine
 	for _, r := range reactions {
 		if !deleted[r.MsgID] {
 			outReactions = append(outReactions, r)
@@ -286,12 +266,11 @@ func applyDeletes(msgs []MsgLine, reactions []ReactLine, edits []EditLine, delet
 	return outMsgs, outReactions
 }
 
-// cloneAttachments returns a copy of the attachment slice.
-func cloneAttachments(a []Attachment) []Attachment {
+func cloneAttachments(a []modelv1.Attachment) []modelv1.Attachment {
 	if a == nil {
 		return nil
 	}
-	out := make([]Attachment, len(a))
+	out := make([]modelv1.Attachment, len(a))
 	copy(out, a)
 	return out
 }
