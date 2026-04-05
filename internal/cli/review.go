@@ -3,7 +3,6 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
 	"github.com/anish/claude-msg-utils/internal/tui"
 )
 
@@ -20,7 +19,7 @@ the outbox for review instead of being sent immediately. Use this command to
 approve, reject, or provide feedback on pending messages.`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return tui.RunReview(paths.SocketPath())
+			return tui.RunReview()
 		},
 	}
 }

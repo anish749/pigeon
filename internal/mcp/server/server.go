@@ -11,7 +11,7 @@ import (
 // New creates a configured MCP server with channel support. The server
 // connects to the pigeon daemon at socketPath to receive incoming messages
 // and forward them as channel notifications to Claude Code.
-func New(socketPath string) *server.MCPServer {
+func New() *server.MCPServer {
 	var s *server.MCPServer
 
 	hooks := &server.Hooks{}
@@ -33,7 +33,7 @@ func New(socketPath string) *server.MCPServer {
 	// ensuring the client is ready to receive channel notifications.
 	s.AddNotificationHandler("notifications/initialized", func(ctx context.Context, notification mcp.JSONRPCNotification) {
 		slog.Info("client initialized, starting daemon stream", "method", notification.Method, "params", notification.Params)
-		if err := startPigeonDaemonStream(context.Background(), socketPath, func(n *ClaudeChannelNotification) {
+		if err := startPigeonDaemonStream(context.Background(), func(n *ClaudeChannelNotification) {
 			err := s.SendNotificationToSpecificClient("stdio", "notifications/claude/channel", n.AsMap())
 			if err != nil {
 				slog.Error("failed to send notification to client", "error", err)

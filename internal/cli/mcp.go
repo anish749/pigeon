@@ -10,7 +10,6 @@ import (
 
 	"github.com/anish/claude-msg-utils/internal/logging"
 	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
-	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 func newMCPCmd() *cobra.Command {
@@ -27,7 +26,7 @@ func newMCPCmd() *cobra.Command {
 				slog.String("session_id", os.Getenv("PIGEON_SESSION_ID")),
 				slog.String("cwd", cwd),
 			)
-			s := mcpserver.New(paths.SocketPath())
+			s := mcpserver.New()
 			slog.Info("serving stdio")
 			return server.ServeStdio(s)
 		},
