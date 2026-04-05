@@ -167,6 +167,9 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
 			result = l.onMessage(l.acct, channelName)
 		}
+	default:
+		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
+			"channel_type", msg.ChannelType, "channel", channelName, "account", l.acct)
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
