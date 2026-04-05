@@ -64,6 +64,11 @@ func SessionsDir() string {
 	return filepath.Join(StateDir(), "sessions")
 }
 
+// LastUpdateCheckPath returns the path to the file that stores the last auto-update check timestamp.
+func LastUpdateCheckPath() string {
+	return filepath.Join(StateDir(), "last_update_check")
+}
+
 // --- Config dir paths ---
 
 // ConfigPath returns the full path to config.yaml.

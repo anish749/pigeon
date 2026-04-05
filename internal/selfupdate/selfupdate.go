@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,15 +30,22 @@ func AutoCheck(currentVersion string) {
 		return
 	}
 
-	lastCheck, _ := readLastCheck()
+	lastCheck, err := readLastCheck()
+	if err != nil && !os.IsNotExist(err) {
+		slog.Error("read last update check", "error", err)
+	}
 	if time.Since(lastCheck) < checkInterval {
 		return
 	}
 
-	writeLastCheck()
+	if err := writeLastCheck(); err != nil {
+		slog.Error("write last update check", "error", err)
+	}
 
 	go func() {
-		doUpdate(currentVersion, false)
+		if err := doUpdate(currentVersion, false); err != nil {
+			slog.Error("auto-update check failed", "error", err)
+		}
 	}()
 }
 
@@ -88,12 +96,8 @@ func doUpdate(currentVersion string, verbose bool) error {
 	return nil
 }
 
-func lastCheckPath() string {
-	return filepath.Join(paths.StateDir(), "last_update_check")
-}
-
 func readLastCheck() (time.Time, error) {
-	data, err := os.ReadFile(lastCheckPath())
+	data, err := os.ReadFile(paths.LastUpdateCheckPath())
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -104,8 +108,10 @@ func readLastCheck() (time.Time, error) {
 	return time.Unix(ts, 0), nil
 }
 
-func writeLastCheck() {
-	path := lastCheckPath()
-	os.MkdirAll(filepath.Dir(path), 0700)
-	os.WriteFile(path, []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0600)
+func writeLastCheck() error {
+	path := paths.LastUpdateCheckPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	return os.WriteFile(path, []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0600)
 }
