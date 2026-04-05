@@ -22,7 +22,7 @@ func newUpdateCmd(version string) *cobra.Command {
 				return err
 			}
 			if updated && daemon.IsRunning() {
-				fmt.Fprintln(os.Stderr, "A daemon is running. It will automatically restart with the new version.")
+				fmt.Fprintln(os.Stderr, "The daemon is still running the old version. It will automatically detect this update and restart itself.")
 			}
 			return nil
 		},

@@ -49,32 +49,72 @@ func AutoCheck(currentVersion string) {
 	}()
 }
 
-// DaemonAutoUpdate runs a periodic update check for the daemon. When an update
-// is applied, it calls onUpdate (typically to trigger a re-exec). The check
-// runs immediately on start, then every checkInterval.
-func DaemonAutoUpdate(ctx context.Context, currentVersion string, onUpdate func()) {
+// CheckOnce checks for an update and applies it if available. Returns true
+// if the binary was replaced. Intended for use at daemon startup before
+// listeners are started — avoids wasting work that a re-exec would redo.
+func CheckOnce(currentVersion string) (bool, error) {
+	if currentVersion == "dev" {
+		return false, nil
+	}
+	return doUpdate(currentVersion, false)
+}
+
+const (
+	// pollInterval is how often we check the wall clock for sleep/wake gaps.
+	pollInterval = 1 * time.Minute
+	// wakeThreshold is the minimum gap between ticks that indicates a sleep/wake cycle.
+	// If a 1-minute ticker fires and more than 2 minutes have elapsed, we slept.
+	wakeThreshold = 2 * time.Minute
+)
+
+// DaemonAutoUpdate monitors for two events that should trigger a re-exec:
+//  1. Sleep/wake detected (wall clock jumped) — re-exec so the new process
+//     runs CheckOnce before listeners reconnect.
+//  2. Periodic update check (every checkInterval) — re-exec if a new version
+//     was downloaded.
+//
+// onReexec is called when the daemon should re-exec itself.
+func DaemonAutoUpdate(ctx context.Context, currentVersion string, onReexec func()) {
 	if currentVersion == "dev" {
 		return
 	}
 
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	// Check immediately on start, then on each tick.
-	for {
-		updated, err := doUpdate(currentVersion, false)
-		if err != nil {
-			slog.Error("daemon auto-update check failed", "error", err)
-		}
-		if updated {
-			onUpdate()
-			return
-		}
+	lastTick := time.Now()
+	lastUpdateCheck := time.Now() // startup CheckOnce already ran
 
+	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case now := <-ticker.C:
+			elapsed := now.Sub(lastTick)
+			lastTick = now
+
+			// Detect sleep/wake: if significantly more time passed than expected,
+			// re-exec so the new process runs CheckOnce before listeners reconnect.
+			if elapsed > wakeThreshold {
+				slog.Info("sleep/wake detected, re-execing to run update check",
+					"gap", elapsed.Round(time.Second))
+				onReexec()
+				return
+			}
+
+			// Periodic update check.
+			if time.Since(lastUpdateCheck) >= checkInterval {
+				lastUpdateCheck = now
+				updated, err := doUpdate(currentVersion, false)
+				if err != nil {
+					slog.Error("daemon auto-update check failed", "error", err)
+					continue
+				}
+				if updated {
+					onReexec()
+					return
+				}
+			}
 		}
 	}
 }
