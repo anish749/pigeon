@@ -165,7 +165,7 @@ func (h *Hub) Register(s *Session) error {
 	if found.CWD != s.CWD {
 		return &RegistrationError{
 			SessionID:  s.SessionID,
-			Reason:     "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+			Reason:     "working directory mismatch: session was created in " + found.CWD + " but current directory is " + s.CWD,
 			StatusCode: http.StatusBadRequest,
 		}
 	}
