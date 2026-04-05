@@ -192,7 +192,7 @@ MAINTENANCE
 		newSetupSlackCmd(),
 
 		// Daemon
-		newDaemonCmd(),
+		newDaemonCmd(version),
 		newClaudeSessionCmd(),
 		newMCPCmd(),
 		newLogCmd(),

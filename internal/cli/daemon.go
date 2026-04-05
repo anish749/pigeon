@@ -6,7 +6,7 @@ import (
 	"github.com/anish749/pigeon/internal/commands"
 )
 
-func newDaemonCmd() *cobra.Command {
+func newDaemonCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "daemon",
 		Short:   "Manage the background daemon",
@@ -45,7 +45,7 @@ func newDaemonCmd() *cobra.Command {
 			Use:    "_run",
 			Hidden: true,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return commands.DaemonRun()
+				return commands.DaemonRun(version)
 			},
 		},
 	)
