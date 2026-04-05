@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/search"
 )
 
 type SearchParams struct {
@@ -29,25 +30,43 @@ func RunSearch(p SearchParams) error {
 		return err
 	}
 
-	return runGrep(p.Query, searchDir, includes, p.Context)
+	var sinceDur time.Duration
+	if p.Since != "" {
+		sinceDur, _ = parseDuration(p.Since)
+	}
+
+	output, err := captureGrep(p.Query, searchDir, includes, p.Context)
+	if err != nil {
+		return err
+	}
+	if len(output) == 0 {
+		fmt.Println("No matches found.")
+		return nil
+	}
+
+	matches := search.ParseGrepOutput(output, searchDir)
+
+	fmt.Printf("%d match(es) found:\n\n", len(matches))
+	search.PrintSummary(matches, sinceDur)
+	search.PrintGroupedResults(matches)
+
+	return nil
 }
 
 // searchPath returns the directory to search based on platform/account filters.
-// No filters: search the entire data dir. Platform only: search that platform.
-// Both: search that specific account.
 func searchPath(platform, account string) string {
-	base := paths.DataDir()
-	if platform == "" {
-		return base
+	switch {
+	case platform != "" && account != "":
+		return paths.AccountDir(platform, account)
+	case platform != "":
+		return paths.PlatformDir(platform)
+	default:
+		return paths.DataDir()
 	}
-	if account == "" {
-		return filepath.Join(base, platform)
-	}
-	return filepath.Join(base, platform, account)
 }
 
 // dateFileIncludes returns --include glob patterns to restrict search to date
-// files within the --since window. If since is empty, returns nil (search all .txt files).
+// files within the --since window. If since is empty, returns all .txt files.
 func dateFileIncludes(searchDir, since string) ([]string, error) {
 	if since == "" {
 		return []string{"*.txt"}, nil
@@ -61,7 +80,6 @@ func dateFileIncludes(searchDir, since string) ([]string, error) {
 	cutoff := time.Now().Add(-dur).Truncate(24 * time.Hour)
 	var includes []string
 
-	// Walk to find date files, filter by filename date.
 	filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -87,16 +105,16 @@ func dateFileIncludes(searchDir, since string) ([]string, error) {
 	return includes, nil
 }
 
-// runGrep executes rg (or falls back to grep) with the given query and options.
-func runGrep(query, dir string, includes []string, context int) error {
+// captureGrep runs rg (or grep) and returns the raw output.
+func captureGrep(query, dir string, includes []string, context int) ([]byte, error) {
 	if rgPath, err := exec.LookPath("rg"); err == nil {
-		return runRg(rgPath, query, dir, includes, context)
+		return captureRg(rgPath, query, dir, includes, context)
 	}
-	return runGrepFallback(query, dir, includes, context)
+	return captureGrepFallback(query, dir, includes, context)
 }
 
-func runRg(rgPath, query, dir string, includes []string, context int) error {
-	args := []string{"--color=auto"}
+func captureRg(rgPath, query, dir string, includes []string, context int) ([]byte, error) {
+	args := []string{"--no-color"}
 	for _, inc := range includes {
 		args = append(args, "--glob", inc)
 	}
@@ -105,19 +123,15 @@ func runRg(rgPath, query, dir string, includes []string, context int) error {
 	}
 	args = append(args, query, dir)
 
-	cmd := exec.Command(rgPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
+	out, err := exec.Command(rgPath, args...).Output()
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-		fmt.Println("No matches found.")
-		return nil
+		return nil, nil
 	}
-	return err
+	return out, err
 }
 
-func runGrepFallback(query, dir string, includes []string, context int) error {
-	args := []string{"-r", "--color=auto"}
+func captureGrepFallback(query, dir string, includes []string, context int) ([]byte, error) {
+	args := []string{"-r", "--no-color"}
 	for _, inc := range includes {
 		args = append(args, "--include", inc)
 	}
@@ -126,13 +140,9 @@ func runGrepFallback(query, dir string, includes []string, context int) error {
 	}
 	args = append(args, query, dir)
 
-	cmd := exec.Command("grep", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
+	out, err := exec.Command("grep", args...).Output()
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-		fmt.Println("No matches found.")
-		return nil
+		return nil, nil
 	}
-	return err
+	return out, err
 }

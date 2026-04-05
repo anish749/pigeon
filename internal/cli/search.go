@@ -25,8 +25,11 @@ Platform and account flags narrow the search to a subdirectory.
 The --since flag restricts to date files within the time window.
 Flags -C and -q are passed through to %s.
 
-Output is raw JSONL — one JSON object per line. Pipe through jq
-for structured queries.
+By default, output includes a search summary (match counts, time
+buckets, senders) followed by formatted results grouped by
+conversation. Piping through jq gives raw JSONL for structured
+queries, but skips the summary — choose based on whether you need
+the overview or structured data.
 
 JSON fields:
   type      event type: "msg", "react", "unreact", "edit", "delete"
