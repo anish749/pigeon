@@ -113,12 +113,12 @@ Directory names that require slugification use `gosimple/slug` v1.x rules
 | Account directory | Slug of account name | `acme-corp`, `15551234567` |
 | WhatsApp conversation dir (DM) | E.164 from JID `"+" + jid.User` | `+14155551234` |
 | WhatsApp conversation dir (group) | Slugified group name | `book-club-nyc` |
-| `[from:...]` Slack | Raw user ID | `U04ABCDEF` |
-| `[from:...]` WhatsApp JID | Raw JID as-is | `14155551234@s.whatsapp.net` |
-| `[from:...]` WhatsApp LID | Raw LID as-is | `abc123@lid` |
+| `from` Slack | Raw user ID | `U04ABCDEF` |
+| `from` WhatsApp JID | Raw JID as-is | `14155551234@s.whatsapp.net` |
+| `from` WhatsApp LID | Raw LID as-is | `abc123@lid` |
 | Sender name fallback (WhatsApp) | E.164 `"+" + jid.User` | `+14155551234` |
 
-The `[from:...]` field always contains the raw platform identifier. The
+The `from` field always contains the raw platform identifier. The
 conversation directory and sender name display may use E.164 format with
 a `+` prefix for human readability, but this is a display convention
 derived from the JID, not a transformation of the stored ID.
@@ -193,7 +193,7 @@ To parse a line:
 **Sender name colon stripping**: if a platform display name contains `:`
 characters (e.g. "Dr. Smith: Cardiologist"), the `:` characters are
 stripped from the sender name at write time. This is an accepted lossy
-transformation. The `[from:...]` tag carries the stable identity; the
+transformation. The `from` tag carries the stable identity; the
 sender name is best-effort for display.
 
 ### Line Type Classification
@@ -255,7 +255,7 @@ Every line is one of: **message**, **reaction**, **unreaction**, **edit**,
   For WhatsApp, resolved in priority order: FullName (address book) >
   PushName (user's self-chosen name) > BusinessName > phone number.
   For Slack, resolved from the workspace user directory.
-  The name may change over time; the `[from:...]` JID/user ID is the
+  The name may change over time; the `from` JID/user ID is the
   stable identity. Colons in display names are stripped at write time
   (see Parsing Algorithm).
 - **Message Text**: everything after `:`, with escaping applied (see Escaping).
@@ -576,7 +576,7 @@ Messages are shown with their aggregated reactions beneath:
 [09:15:30] Bob: check this out [📎 image/jpeg]
 ```
 
-The `[id:...]`, `[from:...]`, `[via:...]`, and `[attach:...]` tags are
+The `[id:...]`, `from`, `[via:...]`, and `[attach:...]` tags are
 stripped for display. They are internal metadata. Attachments may be shown
 as a summary indicator.
 
@@ -671,32 +671,112 @@ type ThreadFile struct {
 
 ## Greppability
 
-The format is designed for standard text tools:
+Each event is one JSON object per line (JSONL). Standard text tools work
+directly on the files. `pigeon rg` (or `pigeon grep` if ripgrep is not
+installed) wraps these tools with platform/account scoping and date
+filtering.
 
-- `grep "Alice:" file.txt` finds messages from Alice.
-- `grep "\[react:" file.txt` finds all reactions.
-- `grep "\[react:1711568938" file.txt` finds reactions to a specific message.
-- `grep "\[attach:" file.txt` finds messages with attachments.
-- `grep "\[edit:" file.txt` finds message edits.
-- `grep "\[delete:" file.txt` finds message deletions.
-- `grep "\[via:" file.txt` finds all pigeon-involved messages.
-- `grep "\[via:pigeon-as" file.txt` finds messages sent by pigeon.
-- `grep "\[via:to-pigeon\]" file.txt` finds messages sent to pigeon's bot.
-- `grep "deploy" file.txt` finds messages mentioning deploy.
-- `wc -l file.txt` counts total events.
-- `grep "\[id:" file.txt | wc -l` counts messages only.
-- `sort` on the timestamp prefix gives chronological order.
+### rg / grep
+
+Plain-text search works because field values appear as literal strings
+in the JSON:
+
+```bash
+rg "Alice" file.txt                   # messages involving Alice
+rg "deploy" file.txt                  # full-text search
+rg "thumbsup" file.txt               # reactions with this emoji
+rg "image/jpeg" file.txt             # messages with JPEG attachments
+rg "pigeon-as" file.txt              # messages sent by pigeon
+rg "to-pigeon" file.txt              # messages sent to pigeon's bot
+rg -c "" file.txt                    # count total events
+wc -l file.txt                       # count total events (same)
+rg -C 3 "deploy" file.txt            # match with 3 lines of context
+```
+
+### jq
+
+For structured queries, pipe through `jq`. Each line is valid JSON:
+
+```bash
+# Select by event type
+jq -c 'select(.type == "msg")' file.txt
+jq -c 'select(.type == "react")' file.txt
+jq -c 'select(.type == "edit")' file.txt
+
+# Select by sender
+jq -c 'select(.sender == "Alice")' file.txt
+
+# Select by via (message pathway)
+jq -c 'select(.via == "to-pigeon")' file.txt
+jq -c 'select(.via != null and (.via | startswith("pigeon-as")))' file.txt
+
+# Full-text search within message text
+jq -c 'select(.text != null and (.text | contains("deploy")))' file.txt
+
+# Messages with attachments
+jq -c 'select(.attach != null)' file.txt
+
+# Compound queries
+jq -c 'select(.sender == "Bob" and .attach != null)' file.txt
+jq -c 'select(.type == "msg" and .ts > "2026-03-16T09:00:00Z")' file.txt
+
+# Extract specific fields
+jq -r 'select(.type == "msg") | .id' file.txt
+jq -r 'select(.type == "edit") | .msg' file.txt
+
+# Format as readable output
+jq -r 'select(.type == "msg") | "[" + .ts[11:19] + "] " + .sender + ": " + (.text // "")' file.txt
+
+# Sort by timestamp
+jq -s 'sort_by(.ts)[]' file.txt
+
+# Count messages only
+jq -c 'select(.type == "msg")' file.txt | wc -l
+
+# Group reactions by emoji
+jq -s '[.[] | select(.type == "react")] | group_by(.emoji) | map({emoji: .[0].emoji, count: length})' file.txt
+```
+
+### Combining rg and jq
+
+Use `rg` for fast filtering, then `jq` for structured extraction:
+
+```bash
+# Find messages mentioning "deploy", format as readable lines
+rg "deploy" file.txt | jq -r 'select(.type == "msg") | "[" + .ts[11:19] + "] " + .sender + ": " + .text'
+
+# Search across all conversations, extract sender and text
+rg "bug" ~/.local/share/pigeon/ | jq -r 'select(.type == "msg") | .sender + ": " + .text'
+```
+
+### Scoping by directory
+
+The directory layout provides natural scoping:
+
+```bash
+# All platforms, all accounts
+rg "deploy" ~/.local/share/pigeon/
+
+# Slack only
+rg "deploy" ~/.local/share/pigeon/slack/
+
+# Specific account
+rg "deploy" ~/.local/share/pigeon/slack/acme-corp/
+
+# Specific conversation
+rg "deploy" ~/.local/share/pigeon/slack/acme-corp/#general/
+```
 
 ## Notes
 
 ### Outgoing Messages
 
 Outgoing messages (sent via `pigeon send` or the MCP send tool) use the
-same line format as incoming messages. The `[from:...]` field contains the
+same line format as incoming messages. The `from` field contains the
 account's own platform user ID (WhatsApp: own JID, Slack: bot user ID or
 authenticated user ID). The sender name is resolved the same way as for
 any other user. There is no special line type for outgoing messages.
-Whether a message is "yours" is determined by comparing `[from:...]` to
+Whether a message is "yours" is determined by comparing `from` to
 the account's own ID.
 
 ### Bot Conversations (Slack)
@@ -723,7 +803,7 @@ timeline in `@Alice/2026-03-16.txt`:
 [ts] [id:...] [from:U04USER] [via:pigeon-as-user] User: Alice, 3pm works for me
 ```
 
-| Scenario | `[from:...]` | `[via:...]` |
+| Scenario | `from` | `[via:...]` |
 |----------|-------------|-------------|
 | User sends directly in Slack | User's ID | (absent) |
 | Third party messages the user | Third party's ID | (absent) |

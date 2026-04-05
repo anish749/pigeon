@@ -19,23 +19,6 @@ type ReadOpts struct {
 	Last  int           // last N messages
 }
 
-// SearchOpts controls the scope of a search.
-type SearchOpts struct {
-	Platform string        // filter to platform, empty for all
-	Account  string        // filter to account slug, empty for all
-	Since    time.Duration // search within this duration from now
-}
-
-// SearchResult is a set of matching messages from one conversation/date.
-type SearchResult struct {
-	Platform     string
-	Account      string
-	Conversation string
-	Date         string
-	Messages     []modelv1.ResolvedMsg
-	MatchCount   int
-}
-
 // Store provides structured read/write access to pigeon's message storage.
 type Store interface {
 	// Append writes a single event line to the appropriate date file for
@@ -51,9 +34,6 @@ type Store interface {
 
 	// ReadThread loads a thread file, applying compaction and resolution.
 	ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error)
-
-	// Search finds messages matching a query across conversations.
-	Search(query string, opts SearchOpts) ([]SearchResult, error)
 
 	// ListPlatforms returns all platform directories (e.g. "slack", "whatsapp").
 	ListPlatforms() ([]string, error)
