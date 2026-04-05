@@ -157,14 +157,25 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
+	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
-		l.onMessage(l.acct, channelName)
+		result = l.onMessage(l.acct, channelName)
 	case "group":
-		l.onMessage(l.acct, channelName)
+		result = l.onMessage(l.acct, channelName)
 	case "channel":
 		if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
-			l.onMessage(l.acct, channelName)
+			result = l.onMessage(l.acct, channelName)
+		}
+	}
+
+	// Auto-reply when someone DMs the bot but no pigeon session is configured.
+	if isBotDM && result.State == hub.RouteNoSession {
+		botAPI := goslack.New(l.botToken)
+		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
+			goslack.MsgOptionText("No pigeon session is configured for this workspace. Messages will not be delivered until a session is set up.", false))
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to send auto-reply", "error", err, "account", l.acct)
 		}
 	}
 }
