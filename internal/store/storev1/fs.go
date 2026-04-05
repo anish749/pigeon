@@ -166,8 +166,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS string) bool {
-	filename := filepath.Join(s.convDir(acct, conversation), "threads", threadTS+".txt")
-	return fileExists(filename)
+	return fileExists(s.threadFile(acct, conversation, threadTS))
 }
 
 // ReadThread loads a thread file, applying compaction and resolution.
