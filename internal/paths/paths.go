@@ -83,6 +83,11 @@ func DefaultDBPath() string {
 	return filepath.Join(DataDir(), "whatsapp.db")
 }
 
+// DBLockPath returns the path to the WhatsApp database lock file.
+func DBLockPath() string {
+	return DefaultDBPath() + ".lock"
+}
+
 // ThreadDir returns the path to the threads directory for a conversation.
 func ThreadDir(platform, account, conversation string) string {
 	return filepath.Join(DataDir(), platform, account, conversation, "threads")

@@ -48,7 +48,7 @@ func RunResetWhatsApp(account string) error {
 	ctx := context.Background()
 
 	// Acquire device lock to ensure daemon isn't connected.
-	lock, err := daemon.LockDevice(wa.DB)
+	lock, err := daemon.LockDevice()
 	if err != nil {
 		return fmt.Errorf("cannot reset while daemon is connected to this device — run 'pigeon daemon stop' first")
 	}
