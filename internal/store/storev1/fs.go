@@ -31,7 +31,7 @@ func NewFSStore(root paths.DataRoot) *FSStore {
 }
 
 func (s *FSStore) acctDir(acct account.Account) paths.AccountDir {
-	return s.root.Account(acct.Platform, acct.Name)
+	return s.root.AccountFor(acct)
 }
 
 func (s *FSStore) convDir(acct account.Account, conversation string) paths.ConversationDir {

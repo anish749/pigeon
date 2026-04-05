@@ -84,7 +84,7 @@ func (l *Listener) handleLoggedOut(ctx context.Context, evt *events.LoggedOut) {
 	}
 
 	// Delete message data.
-	dataDir := paths.DefaultDataRoot().Account(l.acct.Platform, l.acct.Name).Path()
+	dataDir := paths.DefaultDataRoot().AccountFor(l.acct).Path()
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.ErrorContext(ctx, "whatsapp: failed to delete message data",
 			"account", l.acct, "error", err)

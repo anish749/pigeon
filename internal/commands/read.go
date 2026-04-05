@@ -54,7 +54,7 @@ func RunRead(p ReadParams) error {
 
 	lines := modelv1.FormatDateFile(df, time.Local, true)
 
-	convDir := paths.DefaultDataRoot().Account(acct.Platform, acct.Name).Conversation(conv.dirName)
+	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)
 	fmt.Printf("    %s\n", convDir.Path())
 	fmt.Println(strings.Join(lines, "\n"))

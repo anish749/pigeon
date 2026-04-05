@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/gosimple/slug"
+
+	"github.com/anish749/pigeon/internal/account"
 )
 
 // Data directory type hierarchy:
@@ -36,6 +38,11 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 // Account is a shortcut for r.Platform(platform).Account(name).
 func (r DataRoot) Account(platform, name string) AccountDir {
 	return r.Platform(platform).Account(name)
+}
+
+// AccountFor returns an AccountDir from an account.Account.
+func (r DataRoot) AccountFor(acct account.Account) AccountDir {
+	return r.Platform(acct.Platform).Account(acct.Name)
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/

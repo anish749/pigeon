@@ -30,7 +30,7 @@ const (
 type syncCursors map[string]string
 
 func cursorsPath(acct account.Account) string {
-	return paths.DefaultDataRoot().Account(acct.Platform, acct.Name).SyncCursorsPath()
+	return paths.DefaultDataRoot().AccountFor(acct).SyncCursorsPath()
 }
 
 func loadCursors(acct account.Account) syncCursors {
