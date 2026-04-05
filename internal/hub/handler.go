@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -81,7 +82,12 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 		}
 
 		if err := h.Register(session); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			var regErr *RegistrationError
+			if errors.As(err, &regErr) {
+				http.Error(w, regErr.Error(), regErr.StatusCode)
+			} else {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
 			return
 		}
 		defer h.Unregister(sessionID)

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -156,14 +157,16 @@ func (h *Hub) Register(s *Session) error {
 	}
 	if found == nil {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "no session file found — launch via 'pigeon claude' first",
+			SessionID:  s.SessionID,
+			Reason:     "no session file found — launch via 'pigeon claude' first",
+			StatusCode: http.StatusNotFound,
 		}
 	}
 	if found.CWD != s.CWD {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+			SessionID:  s.SessionID,
+			Reason:     "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+			StatusCode: http.StatusBadRequest,
 		}
 	}
 
@@ -172,8 +175,9 @@ func (h *Hub) Register(s *Session) error {
 
 	if _, exists := h.sessions[s.SessionID]; exists {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "session already registered",
+			SessionID:  s.SessionID,
+			Reason:     "this session is already connected in another window",
+			StatusCode: http.StatusConflict,
 		}
 	}
 	h.sessions[s.SessionID] = s
@@ -388,8 +392,9 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 
 // RegistrationError is returned when session registration fails.
 type RegistrationError struct {
-	SessionID string
-	Reason    string
+	SessionID  string
+	Reason     string
+	StatusCode int // HTTP status code to return to the client.
 }
 
 func (e *RegistrationError) Error() string {
