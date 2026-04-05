@@ -58,21 +58,11 @@ func TestParseDateFile_SkipsUnparseableLines(t *testing.T) {
 			"[2026-03-16 09:15:30 +00:00] [id:M2] [from:U2] Bob: world\n",
 	)
 	f, err := ParseDateFile(input)
-	if err != nil {
-		t.Fatalf("ParseDateFile: %v", err)
+	if err == nil {
+		t.Error("expected error for garbage line, got nil")
 	}
-	if len(f.Messages) != 3 {
-		t.Errorf("messages = %d, want 3 (2 parsed + 1 parse error)", len(f.Messages))
-	}
-	// The garbage line becomes a parse error message
-	hasError := false
-	for _, m := range f.Messages {
-		if m.Sender == "[parse error]" {
-			hasError = true
-		}
-	}
-	if !hasError {
-		t.Error("expected a [parse error] message for the garbage line")
+	if len(f.Messages) != 2 {
+		t.Errorf("messages = %d, want 2 (garbage line skipped)", len(f.Messages))
 	}
 }
 
@@ -112,7 +102,8 @@ func TestDateFile_RoundTrip(t *testing.T) {
 		},
 	}
 
-	data := MarshalDateFile(f)
+	data, merr := MarshalDateFile(f)
+	if merr != nil { t.Fatalf("MarshalDateFile: %v", merr) }
 	parsed, err := ParseDateFile(data)
 	if err != nil {
 		t.Fatalf("ParseDateFile: %v", err)
@@ -150,7 +141,8 @@ func TestMarshalDateFile_ChronologicalOrder(t *testing.T) {
 			{Ts: ts(2026, 3, 16, 9, 15, 30), MsgID: "M1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup"},
 		},
 	}
-	data := MarshalDateFile(f)
+	data, merr := MarshalDateFile(f)
+	if merr != nil { t.Fatalf("MarshalDateFile: %v", merr) }
 	parsed, err := ParseDateFile(data)
 	if err != nil {
 		t.Fatalf("ParseDateFile: %v", err)
@@ -247,7 +239,8 @@ func TestThreadFile_RoundTrip(t *testing.T) {
 		},
 	}
 
-	data := MarshalThreadFile(f)
+	data, merr := MarshalThreadFile(f)
+	if merr != nil { t.Fatalf("MarshalThreadFile: %v", merr) }
 	parsed, err := ParseThreadFile(data)
 	if err != nil {
 		t.Fatalf("ParseThreadFile: %v", err)
@@ -282,7 +275,9 @@ func TestMarshalThreadFile_SectionOrder(t *testing.T) {
 		Reactions: []ReactLine{{Ts: ts(2026, 3, 16, 9, 20, 0), MsgID: "P1", Sender: "Alice", SenderID: "U2", Emoji: "tada"}},
 	}
 
-	data := string(MarshalThreadFile(f))
+	rawData, merr := MarshalThreadFile(f)
+	if merr != nil { t.Fatalf("MarshalThreadFile: %v", merr) }
+	data := string(rawData)
 	lines := splitLines([]byte(data))
 
 	// Line 0: parent (not indented)
@@ -313,7 +308,9 @@ func TestMarshalThreadFile_NoContext_NoSeparator(t *testing.T) {
 		Replies: []MsgLine{{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "reply", Reply: true}},
 	}
 
-	data := string(MarshalThreadFile(f))
+	rawData, merr := MarshalThreadFile(f)
+	if merr != nil { t.Fatalf("MarshalThreadFile: %v", merr) }
+	data := string(rawData)
 	if contains(data, SeparatorLine) {
 		t.Error("should not have separator when no context")
 	}

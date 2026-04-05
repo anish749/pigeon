@@ -18,22 +18,38 @@ const (
 )
 
 // Marshal serialises a Line to its protocol representation.
-func Marshal(l Line) string {
+// Returns an error if the line type is unrecognized or the required pointer is nil.
+func Marshal(l Line) (string, error) {
 	switch l.Type {
 	case LineMessage:
-		return marshalMsg(*l.Msg)
+		if l.Msg == nil {
+			return "", fmt.Errorf("marshal: LineMessage with nil Msg")
+		}
+		return marshalMsg(*l.Msg), nil
 	case LineReaction:
-		return marshalReaction(*l.React, "react")
+		if l.React == nil {
+			return "", fmt.Errorf("marshal: LineReaction with nil React")
+		}
+		return marshalReaction(*l.React, "react"), nil
 	case LineUnreaction:
-		return marshalReaction(*l.React, "unreact")
+		if l.React == nil {
+			return "", fmt.Errorf("marshal: LineUnreaction with nil React")
+		}
+		return marshalReaction(*l.React, "unreact"), nil
 	case LineEdit:
-		return marshalEdit(*l.Edit)
+		if l.Edit == nil {
+			return "", fmt.Errorf("marshal: LineEdit with nil Edit")
+		}
+		return marshalEdit(*l.Edit), nil
 	case LineDelete:
-		return marshalDelete(*l.Delete)
+		if l.Delete == nil {
+			return "", fmt.Errorf("marshal: LineDelete with nil Delete")
+		}
+		return marshalDelete(*l.Delete), nil
 	case LineSeparator:
-		return SeparatorLine
+		return SeparatorLine, nil
 	default:
-		return ""
+		return "", fmt.Errorf("marshal: unknown line type %d", l.Type)
 	}
 }
 

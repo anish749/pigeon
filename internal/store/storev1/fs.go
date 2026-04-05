@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -45,7 +47,7 @@ func (s *FSStore) fileMu(path string) *sync.Mutex {
 
 // Append writes a single event line to the appropriate date file.
 func (s *FSStore) Append(acct account.Account, conversation string, line modelv1.Line) error {
-	ts := lineTimestamp(line)
+	ts := line.Ts()
 	if ts.IsZero() {
 		return fmt.Errorf("append: line has zero timestamp")
 	}
@@ -115,9 +117,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
-		df, err := modelv1.ParseDateFile(data)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", f, err)
+		df, parseErr := modelv1.ParseDateFile(data)
+		if parseErr != nil {
+			slog.Warn("parse date file: some lines skipped", "file", f, "error", parseErr)
 		}
 		merged.Messages = append(merged.Messages, df.Messages...)
 		merged.Reactions = append(merged.Reactions, df.Reactions...)
@@ -145,9 +147,9 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 		return nil, fmt.Errorf("read thread %s: %w", threadTS, err)
 	}
 
-	tf, err := modelv1.ParseThreadFile(data)
-	if err != nil {
-		return nil, fmt.Errorf("parse thread %s: %w", threadTS, err)
+	tf, parseErr := modelv1.ParseThreadFile(data)
+	if parseErr != nil {
+		slog.Warn("parse thread file: some lines skipped", "thread", threadTS, "error", parseErr)
 	}
 
 	return compact.CompactThread(tf), nil
@@ -177,7 +179,7 @@ func (s *FSStore) Search(query string, opts SearchOpts) ([]SearchResult, error) 
 			if opts.Account != "" && acctSlug != opts.Account {
 				continue
 			}
-			acct := account.New(plat, acctSlug)
+			acct := account.NewFromSlug(plat, acctSlug)
 			convs, err := s.ListConversations(acct)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("list conversations %s: %w", acct.Display(), err))
@@ -285,9 +287,17 @@ func (s *FSStore) appendLine(filename string, line modelv1.Line) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", filename, err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			slog.Warn("close after write", "file", filename, "error", cerr)
+		}
+	}()
 
-	_, err = f.WriteString(modelv1.Marshal(line) + "\n")
+	serialized, merr := modelv1.Marshal(line)
+	if merr != nil {
+		return fmt.Errorf("marshal line: %w", merr)
+	}
+	_, err = f.WriteString(serialized + "\n")
 	return err
 }
 
@@ -303,27 +313,33 @@ func (s *FSStore) maintainFile(path string) error {
 
 	// Determine if this is a thread file (lives in a threads/ directory).
 	if strings.Contains(path, "/threads/") {
-		tf, err := modelv1.ParseThreadFile(data)
-		if err != nil {
-			return err
+		tf, parseErr := modelv1.ParseThreadFile(data)
+		if parseErr != nil {
+			slog.Warn("parse thread file: some lines skipped", "file", path, "error", parseErr)
 		}
 		compacted := compact.CompactThread(tf)
 		if compacted == nil {
 			return os.Remove(path) // parent was deleted
 		}
-		newData := modelv1.MarshalThreadFile(compacted)
+		newData, err := modelv1.MarshalThreadFile(compacted)
+		if err != nil {
+			return fmt.Errorf("marshal thread: %w", err)
+		}
 		if string(newData) == string(data) {
 			return nil
 		}
 		return os.WriteFile(path, newData, 0644)
 	}
 
-	df, err := modelv1.ParseDateFile(data)
-	if err != nil {
-		return err
+	df, parseErr := modelv1.ParseDateFile(data)
+	if parseErr != nil {
+		slog.Warn("parse date file: some lines skipped", "file", path, "error", parseErr)
 	}
 	compacted := compact.Compact(df)
-	newData := modelv1.MarshalDateFile(compacted)
+	newData, err := modelv1.MarshalDateFile(compacted)
+	if err != nil {
+		return fmt.Errorf("marshal date file: %w", err)
+	}
 	if string(newData) == string(data) {
 		return nil
 	}
@@ -356,10 +372,9 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 			errs = append(errs, fmt.Errorf("read %s: %w", f, err))
 			continue
 		}
-		df, err := modelv1.ParseDateFile(data)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("parse %s: %w", f, err))
-			continue
+		df, parseErr := modelv1.ParseDateFile(data)
+		if parseErr != nil {
+			slog.Warn("search: some lines skipped", "file", f, "error", parseErr)
 		}
 
 		var matching []modelv1.Line
@@ -384,20 +399,7 @@ func (s *FSStore) searchConversation(acct account.Account, conversation, query s
 	return results, errors.Join(errs...)
 }
 
-func lineTimestamp(l modelv1.Line) time.Time {
-	switch l.Type {
-	case modelv1.LineMessage:
-		return l.Msg.Ts
-	case modelv1.LineReaction, modelv1.LineUnreaction:
-		return l.React.Ts
-	case modelv1.LineEdit:
-		return l.Edit.Ts
-	case modelv1.LineDelete:
-		return l.Delete.Ts
-	default:
-		return time.Time{}
-	}
-}
+var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.txt$`)
 
 func listDateFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
@@ -409,7 +411,7 @@ func listDateFiles(dir string) ([]string, error) {
 	}
 	var files []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".txt") {
+		if !e.IsDir() && dateFilePattern.MatchString(e.Name()) {
 			files = append(files, filepath.Join(dir, e.Name()))
 		}
 	}

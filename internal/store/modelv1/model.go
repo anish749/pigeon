@@ -84,6 +84,29 @@ type Line struct {
 	Delete *DeleteLine
 }
 
+// Ts returns the timestamp of the line's inner type.
+func (l Line) Ts() time.Time {
+	switch l.Type {
+	case LineMessage:
+		if l.Msg != nil {
+			return l.Msg.Ts
+		}
+	case LineReaction, LineUnreaction:
+		if l.React != nil {
+			return l.React.Ts
+		}
+	case LineEdit:
+		if l.Edit != nil {
+			return l.Edit.Ts
+		}
+	case LineDelete:
+		if l.Delete != nil {
+			return l.Delete.Ts
+		}
+	}
+	return time.Time{}
+}
+
 // DateFile holds all parsed events from a single date file.
 type DateFile struct {
 	Messages  []MsgLine

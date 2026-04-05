@@ -1,45 +1,47 @@
 package modelv1
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
-// ParseDateFile parses raw file bytes into a DateFile. Lines that fail to
-// parse are added as message lines with the error as text, so the caller
-// can see that something went wrong. The returned DateFile is raw (not compacted).
+// ParseDateFile parses raw file bytes into a DateFile. Unparseable lines are
+// skipped. If any lines fail to parse, the returned error collects them but
+// the successfully parsed lines are still returned.
 func ParseDateFile(data []byte) (*DateFile, error) {
 	f := &DateFile{}
+	var errs []error
 	for _, raw := range splitLines(data) {
 		line, err := Parse(raw)
 		if err != nil {
-			f.Messages = append(f.Messages, MsgLine{
-				Sender: "[parse error]",
-				Text:   fmt.Sprintf("unparseable line: %s (error: %v)", raw, err),
-			})
+			errs = append(errs, fmt.Errorf("skip line: %w", err))
 			continue
 		}
 		classifyIntoDateFile(f, line)
 	}
-	return f, nil
+	return f, errors.Join(errs...)
 }
 
 // MarshalDateFile serialises a DateFile to bytes. All events are interleaved
 // in chronological order by timestamp.
-func MarshalDateFile(f *DateFile) []byte {
+func MarshalDateFile(f *DateFile) ([]byte, error) {
 	lines := collectDateFileLines(f)
 	sort.SliceStable(lines, func(i, j int) bool {
-		return lineTs(lines[i]).Before(lineTs(lines[j]))
+		return lines[i].Ts().Before(lines[j].Ts())
 	})
 
 	var b strings.Builder
 	for _, l := range lines {
-		b.WriteString(Marshal(l))
+		s, err := Marshal(l)
+		if err != nil {
+			return nil, fmt.Errorf("marshal date file: %w", err)
+		}
+		b.WriteString(s)
 		b.WriteByte('\n')
 	}
-	return []byte(b.String())
+	return []byte(b.String()), nil
 }
 
 // ParseThreadFile parses raw file bytes into a ThreadFile. The thread file
@@ -50,13 +52,11 @@ func ParseThreadFile(data []byte) (*ThreadFile, error) {
 	parentSet := false
 	afterSeparator := false
 
+	var errs []error
 	for _, raw := range splitLines(data) {
 		line, err := Parse(raw)
 		if err != nil {
-			f.Context = append(f.Context, MsgLine{
-				Sender: "[parse error]",
-				Text:   fmt.Sprintf("unparseable line: %s (error: %v)", raw, err),
-			})
+			errs = append(errs, fmt.Errorf("skip line: %w", err))
 			continue
 		}
 
@@ -88,33 +88,47 @@ func ParseThreadFile(data []byte) (*ThreadFile, error) {
 			f.Deletes = append(f.Deletes, *line.Delete)
 		}
 	}
-	return f, nil
+	return f, errors.Join(errs...)
 }
 
 // MarshalThreadFile serialises a ThreadFile to bytes in the correct section
 // order: parent, replies, separator, context, then reactions/edits/deletes.
-func MarshalThreadFile(f *ThreadFile) []byte {
+func MarshalThreadFile(f *ThreadFile) ([]byte, error) {
 	var b strings.Builder
 
+	write := func(l Line) error {
+		s, err := Marshal(l)
+		if err != nil {
+			return err
+		}
+		b.WriteString(s)
+		b.WriteByte('\n')
+		return nil
+	}
+
 	// Parent
-	b.WriteString(Marshal(Line{Type: LineMessage, Msg: &f.Parent}))
-	b.WriteByte('\n')
+	if err := write(Line{Type: LineMessage, Msg: &f.Parent}); err != nil {
+		return nil, fmt.Errorf("marshal thread file: %w", err)
+	}
 
 	// Replies
 	for i := range f.Replies {
 		r := f.Replies[i]
 		r.Reply = true // ensure indent
-		b.WriteString(Marshal(Line{Type: LineMessage, Msg: &r}))
-		b.WriteByte('\n')
+		if err := write(Line{Type: LineMessage, Msg: &r}); err != nil {
+			return nil, fmt.Errorf("marshal thread file: %w", err)
+		}
 	}
 
 	// Separator + context (only if there's context)
 	if len(f.Context) > 0 {
-		b.WriteString(Marshal(Line{Type: LineSeparator}))
-		b.WriteByte('\n')
+		if err := write(Line{Type: LineSeparator}); err != nil {
+			return nil, fmt.Errorf("marshal thread file: %w", err)
+		}
 		for i := range f.Context {
-			b.WriteString(Marshal(Line{Type: LineMessage, Msg: &f.Context[i]}))
-			b.WriteByte('\n')
+			if err := write(Line{Type: LineMessage, Msg: &f.Context[i]}); err != nil {
+				return nil, fmt.Errorf("marshal thread file: %w", err)
+			}
 		}
 	}
 
@@ -135,14 +149,15 @@ func MarshalThreadFile(f *ThreadFile) []byte {
 		tail = append(tail, Line{Type: LineDelete, Delete: &f.Deletes[i]})
 	}
 	sort.SliceStable(tail, func(i, j int) bool {
-		return lineTs(tail[i]).Before(lineTs(tail[j]))
+		return tail[i].Ts().Before(tail[j].Ts())
 	})
 	for _, l := range tail {
-		b.WriteString(Marshal(l))
-		b.WriteByte('\n')
+		if err := write(l); err != nil {
+			return nil, fmt.Errorf("marshal thread file: %w", err)
+		}
 	}
 
-	return []byte(b.String())
+	return []byte(b.String()), nil
 }
 
 // --- helpers ---
@@ -197,17 +212,3 @@ func collectDateFileLines(f *DateFile) []Line {
 	return lines
 }
 
-func lineTs(l Line) time.Time {
-	switch l.Type {
-	case LineMessage:
-		return l.Msg.Ts
-	case LineReaction, LineUnreaction:
-		return l.React.Ts
-	case LineEdit:
-		return l.Edit.Ts
-	case LineDelete:
-		return l.Delete.Ts
-	default:
-		return time.Time{}
-	}
-}
