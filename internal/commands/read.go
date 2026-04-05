@@ -52,7 +52,7 @@ func RunRead(p ReadParams) error {
 		return nil
 	}
 
-	lines := modelv1.FormatDateFile(df, time.Local, true)
+	lines := modelv1.FormatDateFile(df, time.Local)
 
 	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)

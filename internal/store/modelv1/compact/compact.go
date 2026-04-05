@@ -13,9 +13,20 @@ type reactKey struct {
 	SenderID string
 }
 
-// Compact takes a raw DateFile and returns a compacted one. It deduplicates
-// messages and reactions, reconciles react/unreact pairs, applies edits and
-// deletes, and sorts messages by timestamp. The input is not mutated.
+// Compact takes a raw DateFile and returns a cleaned, display-ready version.
+// The input is not mutated.
+//
+// Steps applied in order:
+//  1. Dedup messages by ID (keeps first occurrence).
+//  2. Dedup reactions by (msgID, emoji, senderID, remove, ts).
+//  3. Reconcile react/unreact pairs: for each (msgID, emoji, senderID) tuple,
+//     replay events chronologically — an unreact cancels the preceding react.
+//     Only surviving reacts are kept.
+//  4. Apply edits: each message is updated to the text/attachments of its
+//     latest EditLine (by timestamp).
+//  5. Apply deletes: messages targeted by a DeleteLine are removed, along with
+//     their reactions.
+//  6. Sort surviving messages by timestamp (stable).
 func Compact(f *modelv1.DateFile) *modelv1.DateFile {
 	if f == nil {
 		return &modelv1.DateFile{}

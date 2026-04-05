@@ -13,24 +13,11 @@ func TestFormatMsg_Full(t *testing.T) {
 			Sender: "Alice", SenderID: "U1", Text: "hello world",
 		},
 	}
-	lines := FormatMsg(m, time.UTC, true)
+	lines := FormatMsg(m, time.UTC)
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1", len(lines))
 	}
-	if lines[0] != "[2026-03-16 09:15:02] Alice: hello world" {
-		t.Errorf("got %q", lines[0])
-	}
-}
-
-func TestFormatMsg_Short(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-		},
-	}
-	lines := FormatMsg(m, time.UTC, false)
-	if lines[0] != "[09:15:02] Alice: hello" {
+	if lines[0] != "[2026-03-16 09:15:02] [M1] Alice (U1): hello world" {
 		t.Errorf("got %q", lines[0])
 	}
 }
@@ -47,7 +34,7 @@ func TestFormatMsg_WithReactions(t *testing.T) {
 			{MsgID: "M1", Sender: "Dave", Emoji: "🎉"},
 		},
 	}
-	lines := FormatMsg(m, time.UTC, false)
+	lines := FormatMsg(m, time.UTC)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -66,7 +53,7 @@ func TestFormatMsg_Reply(t *testing.T) {
 			Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true,
 		},
 	}
-	lines := FormatMsg(m, time.UTC, false)
+	lines := FormatMsg(m, time.UTC)
 	if !strings.HasPrefix(lines[0], "  ") {
 		t.Errorf("reply should be indented, got %q", lines[0])
 	}
@@ -82,7 +69,7 @@ func TestFormatMsg_ReplyWithReactions(t *testing.T) {
 			{MsgID: "R1", Sender: "Alice", Emoji: "👍"},
 		},
 	}
-	lines := FormatMsg(m, time.UTC, false)
+	lines := FormatMsg(m, time.UTC)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -100,7 +87,7 @@ func TestFormatMsg_Timezone(t *testing.T) {
 			Sender: "Alice", SenderID: "U1", Text: "hello",
 		},
 	}
-	lines := FormatMsg(m, loc, false)
+	lines := FormatMsg(m, loc)
 	// 9:00 UTC = 14:30 IST
 	if !strings.Contains(lines[0], "14:30:00") {
 		t.Errorf("expected IST time, got %q", lines[0])
@@ -121,7 +108,7 @@ func TestFormatDateFile(t *testing.T) {
 			},
 		},
 	}
-	lines := FormatDateFile(f, time.UTC, true)
+	lines := FormatDateFile(f, time.UTC)
 	// M1 message + M1 reactions + M2 message = 3 lines
 	if len(lines) != 3 {
 		t.Errorf("lines = %d, want 3", len(lines))
@@ -129,14 +116,14 @@ func TestFormatDateFile(t *testing.T) {
 }
 
 func TestFormatDateFile_Empty(t *testing.T) {
-	lines := FormatDateFile(&ResolvedDateFile{}, time.UTC, true)
+	lines := FormatDateFile(&ResolvedDateFile{}, time.UTC)
 	if len(lines) != 0 {
 		t.Errorf("lines = %d, want 0", len(lines))
 	}
 }
 
 func TestFormatDateFile_Nil(t *testing.T) {
-	lines := FormatDateFile(nil, time.UTC, true)
+	lines := FormatDateFile(nil, time.UTC)
 	if lines != nil {
 		t.Errorf("expected nil, got %v", lines)
 	}
@@ -157,7 +144,7 @@ func TestFormatThreadFile(t *testing.T) {
 			{MsgLine: MsgLine{ID: "C2", Ts: ts(2026, 3, 16, 9, 2, 0), Sender: "Charlie", SenderID: "U3", Text: "after"}},
 		},
 	}
-	lines := FormatThreadFile(f, time.UTC, true)
+	lines := FormatThreadFile(f, time.UTC)
 	// Before + parent + reply + after = 4 lines
 	if len(lines) != 4 {
 		t.Fatalf("lines = %d, want 4", len(lines))
@@ -181,7 +168,7 @@ func TestFormatThreadFile(t *testing.T) {
 }
 
 func TestFormatThreadFile_Nil(t *testing.T) {
-	lines := FormatThreadFile(nil, time.UTC, true)
+	lines := FormatThreadFile(nil, time.UTC)
 	if lines != nil {
 		t.Errorf("expected nil, got %v", lines)
 	}
