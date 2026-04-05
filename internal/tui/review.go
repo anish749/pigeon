@@ -3,12 +3,9 @@ package tui
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -16,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anish/claude-msg-utils/internal/api"
+	"github.com/anish/claude-msg-utils/internal/daemon/client"
 	"github.com/anish/claude-msg-utils/internal/outbox"
 )
 
@@ -30,8 +28,8 @@ var (
 )
 
 // RunReview starts the outbox review TUI. Blocks until quit.
-func RunReview(socketPath string) error {
-	p := tea.NewProgram(newModel(socketPath), tea.WithAltScreen())
+func RunReview() error {
+	p := tea.NewProgram(model{}, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
@@ -44,7 +42,6 @@ const (
 )
 
 type model struct {
-	socketPath string
 	items      []*outbox.Item
 	cursor     int
 	mode       mode
@@ -63,10 +60,6 @@ type (
 	clearStatusMsg struct{}
 	tickMsg        struct{}
 )
-
-func newModel(socketPath string) model {
-	return model{socketPath: socketPath}
-}
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(m.fetchItems(), tickEvery(time.Second))
@@ -248,7 +241,7 @@ func (m model) renderDetail(item *outbox.Item) string {
 
 func (m model) fetchItems() tea.Cmd {
 	return func() tea.Msg {
-		items, err := doGet(m.socketPath)
+		items, err := doGet()
 		if err != nil {
 			return itemsMsg(nil)
 		}
@@ -262,7 +255,7 @@ func (m model) approveItem(id string) tea.Cmd {
 		if err != nil {
 			return actionFailMsg{"marshal request: " + err.Error()}
 		}
-		result, err := doPost(m.socketPath, "http://pigeon/api/outbox/action", body)
+		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
 			return actionFailMsg{err.Error()}
 		}
@@ -280,7 +273,7 @@ func (m model) sendFeedback(id, note string) tea.Cmd {
 		if err != nil {
 			return actionFailMsg{"marshal request: " + err.Error()}
 		}
-		result, err := doPost(m.socketPath, "http://pigeon/api/outbox/action", body)
+		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
 			return actionFailMsg{err.Error()}
 		}
@@ -302,18 +295,8 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 
 // --- HTTP helpers ---
 
-func daemonHTTP(socketPath string) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", socketPath)
-			},
-		},
-	}
-}
-
-func doGet(socketPath string) ([]*outbox.Item, error) {
-	resp, err := daemonHTTP(socketPath).Get("http://pigeon/api/outbox")
+func doGet() ([]*outbox.Item, error) {
+	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/outbox")
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +306,8 @@ func doGet(socketPath string) ([]*outbox.Item, error) {
 	return items, nil
 }
 
-func doPost(socketPath, url string, body []byte) (map[string]any, error) {
-	resp, err := daemonHTTP(socketPath).Post(url, "application/json", bytes.NewReader(body))
+func doPost(url string, body []byte) (map[string]any, error) {
+	resp, err := daemonclient.DefaultPgnHTTPClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

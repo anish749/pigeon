@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	daemonclient "github.com/anish/claude-msg-utils/internal/daemon/client"
 )
 
 // rejectedError is returned when the daemon permanently rejects this session.
@@ -50,17 +51,17 @@ func NewClaudeChannelErrorNotification(err error) *ClaudeChannelNotification {
 // pigeonDaemonStreamingClient manages the SSE connection to the pigeon daemon and forwards
 // incoming messages as MCP channel notifications.
 type pigeonDaemonStreamingClient struct {
-	socketPath string
-	sessionID  string
-	cwd        string
-	notify     func(notification *ClaudeChannelNotification)
+	client    *daemonclient.PgnHTTPClient
+	sessionID string
+	cwd       string
+	notify    func(notification *ClaudeChannelNotification)
 }
 
 // startPigeonDaemonStream connects to the daemon's SSE endpoint and forwards
 // incoming messages via notify. Reconnects automatically in a background
 // goroutine. The provided context should be long-lived (not request-scoped).
 // Returns an error if initial setup fails.
-func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func(*ClaudeChannelNotification)) error {
+func startPigeonDaemonStream(ctx context.Context, notify func(*ClaudeChannelNotification)) error {
 	sessionID := os.Getenv("PIGEON_SESSION_ID")
 	if sessionID == "" {
 		return fmt.Errorf("PIGEON_SESSION_ID not set — launch via 'pigeon claude' to set it")
@@ -70,10 +71,10 @@ func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func
 		return fmt.Errorf("get working directory: %w", err)
 	}
 	ds := &pigeonDaemonStreamingClient{
-		socketPath: socketPath,
-		sessionID:  sessionID,
-		cwd:        cwd,
-		notify:     notify,
+		client:    daemonclient.DefaultPgnHTTPClient,
+		sessionID: sessionID,
+		cwd:       cwd,
+		notify:    notify,
 	}
 	go ds.run(ctx)
 	return nil
@@ -112,17 +113,9 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		return fmt.Errorf("build request: %w", err)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", ds.socketPath)
-			},
-		},
-	}
-
-	resp, err := client.Do(req)
+	resp, err := ds.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", ds.socketPath, err)
+		return fmt.Errorf("connect to daemon: %w", err)
 	}
 	defer resp.Body.Close()
 

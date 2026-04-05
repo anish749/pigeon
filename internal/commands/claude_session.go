@@ -1,12 +1,9 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"strings"
 	"syscall"
@@ -18,7 +15,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/paths"
+	daemonclient "github.com/anish/claude-msg-utils/internal/daemon/client"
 )
 
 // errGoBack signals that the user wants to return to the account selector.
@@ -317,13 +314,7 @@ func validateAccount(acct account.Account) error {
 // isSessionConnected asks the daemon whether the given session ID has an active
 // SSE connection. Returns false if the daemon is unreachable.
 func isSessionConnected(sessionID string) bool {
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", paths.SocketPath())
-			},
-		},
-	}
+	client := daemonclient.DefaultPgnHTTPClient
 	resp, err := client.Get("http://pigeon/api/session/connected?session_id=" + sessionID)
 	if err != nil {
 		return false
