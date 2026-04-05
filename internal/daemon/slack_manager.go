@@ -12,6 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
+	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
 
 // SlackManager owns the lifecycle of all Slack workspace listeners.
@@ -20,6 +21,7 @@ import (
 type SlackManager struct {
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
+	store     storev1.Store
 	running   map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -30,10 +32,11 @@ type runningWorkspace struct {
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onMessage is called when a routable message arrives
 // (DMs, MPDMs, private channels, bot mentions). May be nil.
-func NewSlackManager(apiServer *api.Server, onMessage hub.MessageNotifyFunc) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s storev1.Store, onMessage hub.MessageNotifyFunc) *SlackManager {
 	return &SlackManager{
 		apiServer: apiServer,
 		onMessage: onMessage,
+		store:     s,
 		running:   make(map[string]*runningWorkspace),
 	}
 }
@@ -93,7 +96,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	sender := startSlackListener(wsCtx, sl, m.onMessage)
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage)
 	if sender == nil {
 		cancel()
 		return
@@ -105,7 +108,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, onMessage hub.MessageNotifyFunc) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s storev1.Store, onMessage hub.MessageNotifyFunc) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
@@ -133,7 +136,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, onMessage hu
 		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages := slacklistener.NewMessageStore(acct)
+	messages := slacklistener.NewMessageStore(acct, s)
 	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage)
 	go listener.Run(ctx)
 

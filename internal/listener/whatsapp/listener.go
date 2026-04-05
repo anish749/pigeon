@@ -13,7 +13,8 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
 
 // Listener receives WhatsApp events and writes messages to local text files.
@@ -21,6 +22,7 @@ type Listener struct {
 	client    *whatsmeow.Client
 	acct      account.Account
 	resolver  *Resolver
+	store     storev1.Store
 	syncing   atomic.Bool           // true while history sync is in progress
 	onLogout  func()                // called when device is unpaired remotely
 	onMessage hub.MessageNotifyFunc // called when a message is received
@@ -29,11 +31,12 @@ type Listener struct {
 // New creates a WhatsApp listener for the given client and account.
 // onLogout is called when the device is unpaired from the phone (may be nil).
 // onMessage is called when a message is received and written to disk (may be nil).
-func New(client *whatsmeow.Client, acct account.Account, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
+func New(client *whatsmeow.Client, acct account.Account, s storev1.Store, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
 	return &Listener{
 		client:    client,
 		acct:      acct,
 		resolver:  NewResolver(client),
+		store:     s,
 		onLogout:  onLogout,
 		onMessage: onMessage,
 	}
@@ -123,7 +126,17 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
 	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
 
-	if err := store.WriteMessage(l.acct.Platform, l.acct.NameSlug(), convDir, senderName, text, evt.Info.Timestamp); err != nil {
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:       evt.Info.ID,
+			Ts:       evt.Info.Timestamp,
+			Sender:   senderName,
+			SenderID: evt.Info.Sender.String(),
+			Text:     text,
+		},
+	}
+	if err := l.store.Append(l.acct, convDir, line); err != nil {
 		slog.ErrorContext(ctx, "failed to write message", "error", err, "account", l.acct)
 		return
 	}

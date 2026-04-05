@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/store/storev1"
 )
 
 type SearchParams struct {
@@ -18,6 +20,8 @@ type SearchParams struct {
 }
 
 func RunSearch(p SearchParams) error {
+	s := storev1.NewFSStore(paths.DataDir())
+
 	var sinceDur time.Duration
 	if p.Since != "" {
 		d, err := parseDuration(p.Since)
@@ -27,16 +31,17 @@ func RunSearch(p SearchParams) error {
 		sinceDur = d
 	}
 
-	// Build account slug for store lookups if platform+account provided.
-	platform, accountSlug := p.Platform, p.Account
-	var acct *account.Account
-	if platform != "" && accountSlug != "" {
-		a := account.New(platform, accountSlug)
-		acct = &a
-		accountSlug = a.NameSlug()
+	opts := storev1.SearchOpts{
+		Platform: p.Platform,
+		Account:  p.Account,
+		Since:    sinceDur,
+	}
+	if p.Platform != "" && p.Account != "" {
+		a := account.New(p.Platform, p.Account)
+		opts.Account = a.NameSlug()
 	}
 
-	results, err := store.SearchMessages(p.Query, platform, accountSlug, sinceDur)
+	results, err := s.Search(p.Query, opts)
 	if err != nil {
 		return err
 	}
@@ -45,28 +50,24 @@ func RunSearch(p SearchParams) error {
 		return nil
 	}
 
-	// Enrich results: replace phone senders with contact names,
-	// and resolve conversation directory names to display names.
-	enrichSearchResults(results, acct)
-
 	var totalMatches int
 	for _, r := range results {
 		totalMatches += r.MatchCount
 	}
 	fmt.Printf("%d match(es) found:\n\n", totalMatches)
-	printSearchSummary(results, sinceDur)
-	printGroupedResults(results)
+	printSearchSummaryV1(results, sinceDur)
+	printGroupedResultsV1(results)
 	return nil
 }
 
-func printGroupedResults(results []store.SearchResult) {
+func printGroupedResultsV1(results []storev1.SearchResult) {
 	type groupKey struct {
 		platform, account, conversation string
 	}
 	type group struct {
 		key      groupKey
 		dates    []string
-		sections [][]string // each section is a slice of lines
+		sections [][]modelv1.Line
 		matches  int
 	}
 
@@ -87,7 +88,6 @@ func printGroupedResults(results []store.SearchResult) {
 
 	for _, k := range order {
 		g := groups[k]
-		// Determine date range
 		minDate, maxDate := g.dates[0], g.dates[0]
 		for _, d := range g.dates[1:] {
 			if d < minDate {
@@ -111,19 +111,18 @@ func printGroupedResults(results []store.SearchResult) {
 				fmt.Println("  ...")
 			}
 			for _, line := range section {
-				fmt.Printf("  %s\n", line)
+				if line.Msg != nil {
+					fmt.Printf("  [%s] %s: %s\n",
+						line.Msg.Ts.Format("2006-01-02 15:04:05 -07:00"),
+						line.Msg.Sender, line.Msg.Text)
+				}
 			}
 		}
 		fmt.Println()
 	}
 }
 
-type timeBucket struct {
-	dur   time.Duration
-	label string
-}
-
-func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
+func printSearchSummaryV1(results []storev1.SearchResult, sinceDur time.Duration) {
 	if sinceDur == 0 || len(results) == 0 {
 		return
 	}
@@ -137,7 +136,6 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 		platform, account string
 	}
 
-	// Group messages by platform/account, preserving insertion order.
 	groupMsgs := make(map[groupKey][]msgInfo)
 	var groupOrder []groupKey
 	for _, r := range results {
@@ -146,9 +144,8 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 			groupOrder = append(groupOrder, k)
 		}
 		for _, line := range r.Lines {
-			ts, sender := parseResultLine(line)
-			if !ts.IsZero() {
-				groupMsgs[k] = append(groupMsgs[k], msgInfo{ts: ts, sender: sender})
+			if line.Msg != nil {
+				groupMsgs[k] = append(groupMsgs[k], msgInfo{ts: line.Msg.Ts, sender: line.Msg.Sender})
 			}
 		}
 	}
@@ -191,20 +188,9 @@ func printSearchSummary(results []store.SearchResult, sinceDur time.Duration) {
 	}
 }
 
-func parseResultLine(line string) (time.Time, string) {
-	if len(line) < 29 || line[0] != '[' {
-		return time.Time{}, ""
-	}
-	ts, err := time.Parse("2006-01-02 15:04:05 -07:00", line[1:27])
-	if err != nil {
-		return time.Time{}, ""
-	}
-	rest := line[29:]
-	idx := strings.Index(rest, ": ")
-	if idx < 0 {
-		return ts, ""
-	}
-	return ts, rest[:idx]
+type timeBucket struct {
+	dur   time.Duration
+	label string
 }
 
 func chooseBuckets(since time.Duration) []timeBucket {

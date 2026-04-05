@@ -10,7 +10,6 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
-	"github.com/anish749/pigeon/internal/store"
 )
 
 // loadAliases returns contact name aliases for a given account.
@@ -43,37 +42,8 @@ func loadAliases(acct account.Account) map[string][]string {
 	return nil
 }
 
-// enrichSearchResults replaces phone senders with names and resolves
-// conversation directory names to display names in search results.
-func enrichSearchResults(results []store.SearchResult, acct *account.Account) {
-	// Load aliases for each unique platform/account pair in the results.
-	aliasCache := make(map[string]map[string][]string) // account slug → aliases
-
-	if acct != nil {
-		aliasCache[acct.String()] = loadAliases(*acct)
-	}
-
-	for i, r := range results {
-		a := account.New(r.Platform, r.Account)
-		key := a.String()
-		aliases, ok := aliasCache[key]
-		if !ok {
-			aliases = loadAliases(a)
-			aliasCache[key] = aliases
-		}
-
-		// Enrich message lines in the section.
-		results[i].Lines = enrichLines(r.Lines, aliases)
-
-		// Resolve conversation dir to display name.
-		if names, ok := aliases[r.Conversation]; ok && len(names) > 0 {
-			results[i].Conversation = names[0]
-		}
-	}
-}
-
 // enrichLines replaces phone number senders in message lines with contact names.
-// Message format: [2026-03-18 21:14:48] +19175305966: text
+// Message format: [2026-03-18 21:14:48 +00:00] +19175305966: text
 func enrichLines(lines []string, aliases map[string][]string) []string {
 	if len(aliases) == 0 {
 		return lines
