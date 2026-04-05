@@ -44,9 +44,9 @@ func Tail(n int, follow bool) error {
 	}
 
 	for _, f := range files {
-		fmt.Fprintf(os.Stderr, "  %s\n", f)
+		fmt.Printf("  %s\n", f)
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Println()
 
 	args := []string{"-n", fmt.Sprintf("%d", n)}
 	if follow {
