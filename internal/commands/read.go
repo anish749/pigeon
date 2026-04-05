@@ -53,7 +53,6 @@ func RunRead(p ReadParams) error {
 	}
 
 	lines := formatMessages(df.Messages)
-	lines = enrichLines(lines, aliases)
 
 	dir := acct.ConversationDir(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)

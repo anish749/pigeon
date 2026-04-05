@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	"go.mau.fi/whatsmeow/types"
 
@@ -42,25 +41,3 @@ func loadAliases(acct account.Account) map[string][]string {
 	return nil
 }
 
-// enrichLines replaces phone number senders in message lines with contact names.
-// Message format: [2026-03-18 21:14:48 +00:00] +19175305966: text
-func enrichLines(lines []string, aliases map[string][]string) []string {
-	if len(aliases) == 0 {
-		return lines
-	}
-	for i, line := range lines {
-		if len(line) < 23 || line[0] != '[' {
-			continue
-		}
-		rest := line[22:]
-		colonIdx := strings.Index(rest, ": ")
-		if colonIdx < 0 {
-			continue
-		}
-		sender := rest[:colonIdx]
-		if names, ok := aliases[sender]; ok && len(names) > 0 {
-			lines[i] = line[:22] + names[0] + line[22+colonIdx:]
-		}
-	}
-	return lines
-}
