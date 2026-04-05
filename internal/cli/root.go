@@ -192,6 +192,7 @@ MAINTENANCE
 		newDaemonCmd(),
 		newClaudeSessionCmd(),
 		newMCPCmd(),
+		newLogCmd(),
 
 		// Reading
 		newListCmd(),
