@@ -309,7 +309,15 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
-	// Run maintenance (dedup, sort, compaction) so user and bot messages are interleaved.
+	// Run maintenance after sync. Sync writes user messages and bot DM messages
+	// to the same date files, potentially out of order and with duplicates.
+	// Maintenance deduplicates, sorts, and compacts these files on disk.
+	//
+	// This is best-effort: if it fails, correctness is not affected because
+	// readers always dedup and sort in-memory. The periodic maintenance pass
+	// will also pick up any files missed here. We run it eagerly after sync
+	// because we know the files are dirty and it improves on-disk readability
+	// for grep/cat.
 	if err := ms.store.Maintain(acct); err != nil {
 		slog.WarnContext(ctx, "slack sync: maintenance failed", "account", acct, "error", err)
 	}
