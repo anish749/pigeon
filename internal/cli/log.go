@@ -7,15 +7,19 @@ import (
 )
 
 func newLogCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "log [-- tail-flags...]",
-		Short:   "Tail pigeon log files (extra args forwarded to tail)",
+	cmd := &cobra.Command{
+		Use:     "log",
+		Short:   "Tail pigeon log files",
 		GroupID: groupDaemon,
-		Long:    `Tails the daemon and MCP log files with tail -f. Extra arguments after -- are forwarded directly to tail (e.g. -n 100).`,
-		Example: "  pigeon log\n  pigeon log -- -n 100",
-		Args:    cobra.ArbitraryArgs,
+		Long:    `Tails the daemon and MCP log files, interleaving output in real time.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return logging.Tail(args)
+			n, err := cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
+			return logging.Tail(n)
 		},
 	}
+	cmd.Flags().IntP("lines", "n", 50, "last N lines to show from each file before following")
+	return cmd
 }
