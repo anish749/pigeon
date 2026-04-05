@@ -5,15 +5,24 @@ import (
 	"testing"
 )
 
+func mustLine(t *testing.T, l Line) string {
+	t.Helper()
+	data, err := Marshal(l)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	return string(data)
+}
+
 // --- ParseDateFile ---
 
 func TestParseDateFile_Mixed(t *testing.T) {
-	msg1, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
-	msg2, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
-	react, _ := Marshal(Line{Type: LineReaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 16, 0), MsgID: "M1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup"}})
-	edit, _ := Marshal(Line{Type: LineEdit, Edit: &EditLine{Ts: ts(2026, 3, 16, 9, 17, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1", Text: "hello updated"}})
-	del, _ := Marshal(Line{Type: LineDelete, Delete: &DeleteLine{Ts: ts(2026, 3, 16, 9, 18, 0), MsgID: "M2", Sender: "Bob", SenderID: "U2"}})
-	unreact, _ := Marshal(Line{Type: LineUnreaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 19, 0), MsgID: "M1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup", Remove: true}})
+	msg1 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
+	msg2 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
+	react := mustLine(t, Line{Type: LineReaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 16, 0), MsgID: "M1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup"}})
+	edit := mustLine(t, Line{Type: LineEdit, Edit: &EditLine{Ts: ts(2026, 3, 16, 9, 17, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1", Text: "hello updated"}})
+	del := mustLine(t, Line{Type: LineDelete, Delete: &DeleteLine{Ts: ts(2026, 3, 16, 9, 18, 0), MsgID: "M2", Sender: "Bob", SenderID: "U2"}})
+	unreact := mustLine(t, Line{Type: LineUnreaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 19, 0), MsgID: "M1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup", Remove: true}})
 
 	input := []byte(strings.Join([]string{msg1, msg2, react, edit, del, unreact}, "\n") + "\n")
 
@@ -54,8 +63,8 @@ func TestParseDateFile_Empty(t *testing.T) {
 }
 
 func TestParseDateFile_SkipsUnparseableLines(t *testing.T) {
-	msg1, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
-	msg2, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
+	msg1 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
+	msg2 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
 
 	input := []byte(msg1 + "\nthis is garbage\n" + msg2 + "\n")
 
@@ -69,8 +78,8 @@ func TestParseDateFile_SkipsUnparseableLines(t *testing.T) {
 }
 
 func TestParseDateFile_MessagesOnly(t *testing.T) {
-	msg1, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
-	msg2, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
+	msg1 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}})
+	msg2 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U2", Text: "world"}})
 
 	input := []byte(msg1 + "\n" + msg2 + "\n")
 
@@ -163,12 +172,12 @@ func TestMarshalDateFile_ChronologicalOrder(t *testing.T) {
 // --- ParseThreadFile ---
 
 func TestParseThreadFile_FullStructure(t *testing.T) {
-	parent, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U1", Text: "starting a thread"}})
-	reply1, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "replying here", Reply: true}})
-	reply2, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "R2", Ts: ts(2026, 3, 16, 9, 17, 0), Sender: "Bob", SenderID: "U1", Text: "thanks", Reply: true}})
-	ctx1, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "C1", Ts: ts(2026, 3, 16, 9, 13, 0), Sender: "Charlie", SenderID: "U3", Text: "context before"}})
-	ctx2, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "C2", Ts: ts(2026, 3, 16, 9, 18, 0), Sender: "Charlie", SenderID: "U3", Text: "context after"}})
-	react, _ := Marshal(Line{Type: LineReaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 20, 0), MsgID: "P1", Sender: "Alice", SenderID: "U2", Emoji: "tada"}})
+	parent := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U1", Text: "starting a thread"}})
+	reply1 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "replying here", Reply: true}})
+	reply2 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "R2", Ts: ts(2026, 3, 16, 9, 17, 0), Sender: "Bob", SenderID: "U1", Text: "thanks", Reply: true}})
+	ctx1 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "C1", Ts: ts(2026, 3, 16, 9, 13, 0), Sender: "Charlie", SenderID: "U3", Text: "context before"}})
+	ctx2 := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "C2", Ts: ts(2026, 3, 16, 9, 18, 0), Sender: "Charlie", SenderID: "U3", Text: "context after"}})
+	react := mustLine(t, Line{Type: LineReaction, React: &ReactLine{Ts: ts(2026, 3, 16, 9, 20, 0), MsgID: "P1", Sender: "Alice", SenderID: "U2", Emoji: "tada"}})
 
 	input := []byte(strings.Join([]string{parent, reply1, reply2, SeparatorLine, ctx1, ctx2, react}, "\n") + "\n")
 
@@ -208,8 +217,8 @@ func TestParseThreadFile_Empty(t *testing.T) {
 }
 
 func TestParseThreadFile_NoContext(t *testing.T) {
-	parent, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U1", Text: "thread"}})
-	reply, _ := Marshal(Line{Type: LineMessage, Msg: &MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "reply", Reply: true}})
+	parent := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 30), Sender: "Bob", SenderID: "U1", Text: "thread"}})
+	reply := mustLine(t, Line{Type: LineMessage, Msg: &MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "reply", Reply: true}})
 
 	input := []byte(parent + "\n" + reply + "\n")
 

@@ -32,16 +32,16 @@ func MarshalDateFile(f *DateFile) ([]byte, error) {
 		return lines[i].Ts().Before(lines[j].Ts())
 	})
 
-	var b strings.Builder
+	var b []byte
 	for _, l := range lines {
-		s, err := Marshal(l)
+		data, err := Marshal(l)
 		if err != nil {
 			return nil, fmt.Errorf("marshal date file: %w", err)
 		}
-		b.WriteString(s)
-		b.WriteByte('\n')
+		b = append(b, data...)
+		b = append(b, '\n')
 	}
-	return []byte(b.String()), nil
+	return b, nil
 }
 
 // ParseThreadFile parses raw file bytes into a ThreadFile. The thread file
@@ -94,15 +94,15 @@ func ParseThreadFile(data []byte) (*ThreadFile, error) {
 // MarshalThreadFile serialises a ThreadFile to bytes in the correct section
 // order: parent, replies, separator, context, then reactions/edits/deletes.
 func MarshalThreadFile(f *ThreadFile) ([]byte, error) {
-	var b strings.Builder
+	var b []byte
 
 	write := func(l Line) error {
-		s, err := Marshal(l)
+		data, err := Marshal(l)
 		if err != nil {
 			return err
 		}
-		b.WriteString(s)
-		b.WriteByte('\n')
+		b = append(b, data...)
+		b = append(b, '\n')
 		return nil
 	}
 
@@ -157,7 +157,7 @@ func MarshalThreadFile(f *ThreadFile) ([]byte, error) {
 		}
 	}
 
-	return []byte(b.String()), nil
+	return b, nil
 }
 
 // --- helpers ---

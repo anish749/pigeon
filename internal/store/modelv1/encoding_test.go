@@ -253,11 +253,11 @@ func TestAllViaValues(t *testing.T) {
 
 func mustMarshal(t *testing.T, l Line) string {
 	t.Helper()
-	s, err := Marshal(l)
+	data, err := Marshal(l)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	return s
+	return string(data)
 }
 
 func mustParseMsg(t *testing.T, line string) MsgLine {

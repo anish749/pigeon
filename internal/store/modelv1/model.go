@@ -30,52 +30,52 @@ const (
 
 // MsgLine represents a message event.
 type MsgLine struct {
-	ID          string       `json:"id"`
-	Ts          time.Time    `json:"ts"`
-	Sender      string       `json:"sender"`
-	SenderID    string       `json:"from"`
-	Via         Via          `json:"via,omitempty"`
-	ReplyTo     string       `json:"replyTo,omitempty"`
-	Text        string       `json:"text,omitempty"`
-	Reply       bool         `json:"reply,omitempty"`
-	Attachments []Attachment `json:"attach,omitempty"`
+	ID          string       // platform message ID
+	Ts          time.Time    // message timestamp
+	Sender      string       // display name (best-effort at write time)
+	SenderID    string       // platform user ID (stable identity)
+	Via         Via          // message pathway
+	ReplyTo     string       // quoted message ID (WhatsApp quote-reply), empty if not a reply
+	Text        string       // message body (may contain newlines)
+	Reply       bool         // thread reply
+	Attachments []Attachment // zero or more attachments
 }
 
 // Attachment references a file stored in the conversation's attachments/ directory.
 type Attachment struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
+	ID   string `json:"id"`   // platform attachment ID (filename in attachments/)
+	Type string `json:"type"` // MIME type (e.g. "image/jpeg")
 }
 
 // ReactLine represents a reaction or unreaction event.
 type ReactLine struct {
-	Ts       time.Time `json:"ts"`
-	MsgID    string    `json:"msg"`
-	Sender   string    `json:"sender"`
-	SenderID string    `json:"from"`
-	Via      Via       `json:"via,omitempty"`
-	Emoji    string    `json:"emoji"`
-	Remove   bool      `json:"-"` // derived from LineType, not serialized
+	Ts       time.Time // when the reaction happened
+	MsgID    string    // target message ID
+	Sender   string    // who reacted (display name)
+	SenderID string    // who reacted (platform ID)
+	Via      Via       // message pathway
+	Emoji    string    // emoji name or Unicode character
+	Remove   bool      // true = unreact (derived from LineType, not serialized)
 }
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts          time.Time    `json:"ts"`
-	MsgID       string       `json:"msg"`
-	Sender      string       `json:"sender"`
-	SenderID    string       `json:"from"`
-	Via         Via          `json:"via,omitempty"`
-	Text        string       `json:"text,omitempty"`
-	Attachments []Attachment `json:"attach,omitempty"`
+	Ts          time.Time    // when the edit happened
+	MsgID       string       // target message ID
+	Sender      string       // who edited (display name)
+	SenderID    string       // who edited (platform ID)
+	Via         Via          // message pathway
+	Text        string       // new message text
+	Attachments []Attachment // complete attachment set after edit
 }
 
 // DeleteLine represents a message delete event.
 type DeleteLine struct {
-	Ts       time.Time `json:"ts"`
-	MsgID    string    `json:"msg"`
-	Sender   string    `json:"sender"`
-	SenderID string    `json:"from"`
-	Via      Via       `json:"via,omitempty"`
+	Ts       time.Time // when the delete happened
+	MsgID    string    // target message ID
+	Sender   string    // who deleted (display name)
+	SenderID string    // who deleted (platform ID)
+	Via      Via       // message pathway
 }
 
 // Line is a parsed protocol line. Exactly one of Msg, React, Edit, or
@@ -111,88 +111,178 @@ func (l Line) Ts() time.Time {
 	return time.Time{}
 }
 
-// MarshalJSON serialises a Line as a flat JSON object with a "type" field.
-func (l Line) MarshalJSON() ([]byte, error) {
+// SeparatorLine is the JSON representation of a separator event.
+const SeparatorLine = `{"type":"separator"}`
+
+// Marshal serialises a Line to JSONL (one JSON object, no trailing newline).
+func Marshal(l Line) ([]byte, error) {
+	data, err := json.Marshal(toEvent(l))
+	if err != nil {
+		return nil, fmt.Errorf("marshal line: %w", err)
+	}
+	return data, nil
+}
+
+// Parse parses a single JSONL line into a Line.
+func Parse(line string) (Line, error) {
+	var e event
+	if err := json.Unmarshal([]byte(line), &e); err != nil {
+		return Line{}, fmt.Errorf("parse line: %w", err)
+	}
+	switch e.Type {
+	case LineMessage, LineReaction, LineUnreaction, LineEdit, LineDelete, LineSeparator:
+	case "":
+		return Line{}, fmt.Errorf("parse line: missing type field")
+	default:
+		return Line{}, fmt.Errorf("parse line: unknown type %q", e.Type)
+	}
+	return fromEvent(e), nil
+}
+
+// event is the flat JSON envelope used for serialization. All line types
+// share the same struct; unused fields are omitted via omitempty.
+// This avoids custom MarshalJSON/UnmarshalJSON — encoding/json handles
+// everything natively.
+type event struct {
+	Type     LineType     `json:"type"`
+	ID       string       `json:"id,omitempty"`       // message ID (msg)
+	Ts       *time.Time   `json:"ts,omitempty"`        // event timestamp (all except separator)
+	Sender   string       `json:"sender,omitempty"`    // display name
+	SenderID string       `json:"from,omitempty"`      // platform user ID
+	Via      Via          `json:"via,omitempty"`        // message pathway
+	Text     string       `json:"text,omitempty"`       // message/edit text
+	ReplyTo  string       `json:"replyTo,omitempty"`   // quoted message ID
+	Reply    bool         `json:"reply,omitempty"`      // thread reply flag
+	Attach   []Attachment `json:"attach,omitempty"`     // attachments
+	MsgID    string       `json:"msg,omitempty"`        // target message ID (react/edit/delete)
+	Emoji    string       `json:"emoji,omitempty"`      // reaction emoji
+}
+
+// toEvent converts a Line to the flat serialization envelope.
+func toEvent(l Line) event {
+	e := event{Type: l.Type}
 	switch l.Type {
 	case LineMessage:
 		if l.Msg == nil {
-			return nil, fmt.Errorf("marshal line: nil Msg for type %s", l.Type)
+			return e
 		}
-		return marshalWithType(l.Type, l.Msg)
+		m := l.Msg
+		e.ID = m.ID
+		e.Ts = &m.Ts
+		e.Sender = m.Sender
+		e.SenderID = m.SenderID
+		e.Via = m.Via
+		e.Text = m.Text
+		e.ReplyTo = m.ReplyTo
+		e.Reply = m.Reply
+		e.Attach = m.Attachments
 	case LineReaction, LineUnreaction:
 		if l.React == nil {
-			return nil, fmt.Errorf("marshal line: nil React for type %s", l.Type)
+			return e
 		}
-		return marshalWithType(l.Type, l.React)
+		r := l.React
+		e.Ts = &r.Ts
+		e.MsgID = r.MsgID
+		e.Sender = r.Sender
+		e.SenderID = r.SenderID
+		e.Via = r.Via
+		e.Emoji = r.Emoji
 	case LineEdit:
 		if l.Edit == nil {
-			return nil, fmt.Errorf("marshal line: nil Edit for type %s", l.Type)
+			return e
 		}
-		return marshalWithType(l.Type, l.Edit)
+		ed := l.Edit
+		e.Ts = &ed.Ts
+		e.MsgID = ed.MsgID
+		e.Sender = ed.Sender
+		e.SenderID = ed.SenderID
+		e.Via = ed.Via
+		e.Text = ed.Text
+		e.Attach = ed.Attachments
 	case LineDelete:
 		if l.Delete == nil {
-			return nil, fmt.Errorf("marshal line: nil Delete for type %s", l.Type)
+			return e
 		}
-		return marshalWithType(l.Type, l.Delete)
-	case LineSeparator:
-		return []byte(`{"type":"separator"}`), nil
-	default:
-		return nil, fmt.Errorf("marshal line: unknown type %q", l.Type)
+		d := l.Delete
+		e.Ts = &d.Ts
+		e.MsgID = d.MsgID
+		e.Sender = d.Sender
+		e.SenderID = d.SenderID
+		e.Via = d.Via
 	}
+	return e
 }
 
-// UnmarshalJSON parses a flat JSON object with a "type" field into a Line.
-func (l *Line) UnmarshalJSON(data []byte) error {
-	var envelope struct {
-		Type LineType `json:"type"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return fmt.Errorf("unmarshal line type: %w", err)
-	}
-
-	l.Type = envelope.Type
-	switch envelope.Type {
+// fromEvent converts the flat serialization envelope back to a Line.
+func fromEvent(e event) Line {
+	l := Line{Type: e.Type}
+	switch e.Type {
 	case LineMessage:
-		l.Msg = &MsgLine{}
-		return json.Unmarshal(data, l.Msg)
+		m := &MsgLine{
+			ID:       e.ID,
+			Sender:   e.Sender,
+			SenderID: e.SenderID,
+			Via:      e.Via,
+			Text:     e.Text,
+			ReplyTo:  e.ReplyTo,
+			Reply:    e.Reply,
+		}
+		if e.Ts != nil {
+			m.Ts = *e.Ts
+		}
+		m.Attachments = e.Attach
+		l.Msg = m
 	case LineReaction:
-		l.React = &ReactLine{}
-		if err := json.Unmarshal(data, l.React); err != nil {
-			return err
+		r := &ReactLine{
+			MsgID:    e.MsgID,
+			Sender:   e.Sender,
+			SenderID: e.SenderID,
+			Via:      e.Via,
+			Emoji:    e.Emoji,
 		}
-		return nil
+		if e.Ts != nil {
+			r.Ts = *e.Ts
+		}
+		l.React = r
 	case LineUnreaction:
-		l.React = &ReactLine{Remove: true}
-		if err := json.Unmarshal(data, l.React); err != nil {
-			return err
+		r := &ReactLine{
+			MsgID:    e.MsgID,
+			Sender:   e.Sender,
+			SenderID: e.SenderID,
+			Via:      e.Via,
+			Emoji:    e.Emoji,
+			Remove:   true,
 		}
-		return nil
+		if e.Ts != nil {
+			r.Ts = *e.Ts
+		}
+		l.React = r
 	case LineEdit:
-		l.Edit = &EditLine{}
-		return json.Unmarshal(data, l.Edit)
+		ed := &EditLine{
+			MsgID:    e.MsgID,
+			Sender:   e.Sender,
+			SenderID: e.SenderID,
+			Via:      e.Via,
+			Text:     e.Text,
+		}
+		if e.Ts != nil {
+			ed.Ts = *e.Ts
+		}
+		ed.Attachments = e.Attach
+		l.Edit = ed
 	case LineDelete:
-		l.Delete = &DeleteLine{}
-		return json.Unmarshal(data, l.Delete)
-	case LineSeparator:
-		return nil
-	default:
-		return fmt.Errorf("unmarshal line: unknown type %q", envelope.Type)
+		d := &DeleteLine{
+			MsgID:    e.MsgID,
+			Sender:   e.Sender,
+			SenderID: e.SenderID,
+			Via:      e.Via,
+		}
+		if e.Ts != nil {
+			d.Ts = *e.Ts
+		}
+		l.Delete = d
 	}
-}
-
-// marshalWithType marshals a struct as JSON and injects a "type" field.
-func marshalWithType(typ LineType, v any) ([]byte, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	// Insert "type":"..." right after the opening {
-	prefix := fmt.Appendf(nil, `{"type":%q,`, typ)
-	// data is `{...}`, we want `{"type":"...", ...}`
-	result := make([]byte, 0, len(prefix)+len(data)-1)
-	result = append(result, prefix...)
-	result = append(result, data[1:]...) // skip the opening {
-	return result, nil
+	return l
 }
 
 // DateFile holds all parsed events from a single date file.
