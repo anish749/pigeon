@@ -75,9 +75,11 @@ func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 		var rejected *rejectedError
 		if errors.As(err, &rejected) {
 			slog.Error("session rejected by daemon, stopping", "reason", rejected.reason)
-			ds.notify(ClaudeChannelNotification{
+			if err := ds.notify(ClaudeChannelNotification{
 				Content: "pigeon disconnected — " + rejected.reason,
-			})
+			}); err != nil {
+				slog.Error("failed to notify client of rejection", "error", err)
+			}
 			return
 		}
 
