@@ -1,4 +1,4 @@
-package storev1
+package store
 
 import (
 	"os/exec"

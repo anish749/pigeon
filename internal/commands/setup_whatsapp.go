@@ -20,7 +20,7 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
@@ -71,7 +71,7 @@ func RunSetupWhatsApp(dbPath string) error {
 			// process, not inside the daemon. The device lock (acquired above)
 			// guarantees the daemon is not running, so there is no concurrent
 			// access to the data directory.
-			setupStore := storev1.NewFSStore(paths.DefaultDataRoot())
+			setupStore := store.NewFSStore(paths.DefaultDataRoot())
 			listener := walistener.New(client, acct, setupStore, nil, nil)
 			client.AddEventHandler(listener.EventHandler(ctx))
 

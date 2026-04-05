@@ -16,7 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/selfupdate"
-	"github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 func DaemonStart() error {
@@ -87,7 +87,7 @@ func DaemonRun(version string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	store := storev1.NewFSStore(paths.DefaultDataRoot())
+	store := store.NewFSStore(paths.DefaultDataRoot())
 
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {
