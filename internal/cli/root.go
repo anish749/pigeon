@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish/claude-msg-utils/internal/daemon"
+	"github.com/anish/claude-msg-utils/internal/selfupdate"
 )
 
 // Command group IDs for categorized help output.
@@ -26,7 +27,7 @@ func ensureDaemon(cmd *cobra.Command, args []string) error {
 	return daemon.EnsureRunning()
 }
 
-func newRootCmd() *cobra.Command {
+func newRootCmd(version string) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "pigeon",
 		Short: "Messaging data CLI for AI agents",
@@ -166,11 +167,13 @@ MAINTENANCE
 
   Deletes all synced message data and sync cursors for a workspace/account.
   The next daemon start will re-sync from scratch.`,
+		Version: version,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
 				Level:      slog.LevelInfo,
 				TimeFormat: time.Kitchen,
 			})))
+			selfupdate.AutoCheck(version)
 		},
 	}
 
@@ -209,12 +212,13 @@ MAINTENANCE
 		// Maintenance
 		newResetCmd(),
 		newResetWhatsAppCmd(),
+		newUpdateCmd(version),
 	)
 
 	return root
 }
 
 // Execute runs the root command.
-func Execute() error {
-	return newRootCmd().Execute()
+func Execute(version string) error {
+	return newRootCmd(version).Execute()
 }

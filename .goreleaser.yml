@@ -6,6 +6,7 @@ builds:
     binary: pigeon
     ldflags:
       - -s -w
+      - -X main.version={{.Version}}
     goos:
       - linux
       - darwin
@@ -15,6 +16,9 @@ builds:
 
 archives:
   - format: tar.gz
+
+checksum:
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc
