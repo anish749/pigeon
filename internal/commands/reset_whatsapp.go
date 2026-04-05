@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/anish/claude-msg-utils/internal/config"

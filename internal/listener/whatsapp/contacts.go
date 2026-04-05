@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -15,7 +15,7 @@ import (
 // Used by search/list/read commands for name resolution without a running daemon.
 func LoadContactAliases(ctx context.Context, dbPath string, deviceJID types.JID) (map[string][]string, error) {
 	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
-	container, err := sqlstore.New(ctx, "sqlite3", dsn, nil)
+	container, err := sqlstore.New(ctx, "sqlite", dsn, nil)
 	if err != nil {
 		return nil, fmt.Errorf("open whatsmeow store: %w", err)
 	}

@@ -4,27 +4,14 @@ builds:
   - id: pigeon
     main: ./cmd/pigeon
     binary: pigeon
-    env:
-      - CGO_ENABLED=1
+    ldflags:
+      - -s -w
     goos:
       - linux
       - darwin
     goarch:
       - amd64
       - arm64
-    overrides:
-      - goos: linux
-        goarch: arm64
-        env:
-          - CC=aarch64-linux-gnu-gcc
-      - goos: darwin
-        goarch: amd64
-        env:
-          - CC=o64-clang
-      - goos: darwin
-        goarch: arm64
-        env:
-          - CC=oa64-clang
 
 archives:
   - format: tar.gz
