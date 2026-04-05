@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -17,7 +18,8 @@ type Match struct {
 	Platform     string
 	Account      string
 	Conversation string
-	Date         string
+	Date         string // date filename (YYYY-MM-DD) or thread timestamp
+	Thread       bool   // true if match came from a thread file
 	Msg          modelv1.MsgLine
 }
 
@@ -66,7 +68,7 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			continue
 		}
 
-		platform, account, conversation, date, pathErr := ParseFilePath(filePart, searchDir)
+		platform, account, conversation, date, thread, pathErr := ParseFilePath(filePart, searchDir)
 		if pathErr != nil {
 			errs = append(errs, pathErr)
 			continue
@@ -76,10 +78,49 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			Account:      account,
 			Conversation: conversation,
 			Date:         date,
+			Thread:       thread,
 			Msg:          msg,
 		})
 	}
 	return matches, errors.Join(errs...)
+}
+
+// FilterThreadsBySince drops matches from thread files where no message
+// in that thread falls within the since window. If any message in a thread
+// is recent, all matches from that thread are kept (preserving context).
+// Non-thread matches are always kept (date files are already filtered by
+// filename at the rg/grep level).
+func FilterThreadsBySince(matches []Match, since time.Duration) []Match {
+	cutoff := time.Now().Add(-since)
+
+	// First pass: find which thread files have at least one recent message.
+	type threadKey struct {
+		platform, account, conversation, date string
+	}
+	alive := make(map[threadKey]bool)
+	for _, m := range matches {
+		if !m.Thread {
+			continue
+		}
+		if !m.Msg.Ts.Before(cutoff) {
+			k := threadKey{m.Platform, m.Account, m.Conversation, m.Date}
+			alive[k] = true
+		}
+	}
+
+	// Second pass: keep non-thread matches and alive thread matches.
+	var out []Match
+	for _, m := range matches {
+		if !m.Thread {
+			out = append(out, m)
+			continue
+		}
+		k := threadKey{m.Platform, m.Account, m.Conversation, m.Date}
+		if alive[k] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // ParseFilePath extracts platform/account/conversation/date from a grep
@@ -91,20 +132,20 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 //
 // When searchDir already includes platform or account, those leading
 // components are absent from the relative path.
-func ParseFilePath(filePart, searchDir string) (platform, account, conversation, date string, err error) {
+func ParseFilePath(filePart, searchDir string) (platform, account, conversation, date string, thread bool, err error) {
 	filePart = strings.TrimSuffix(strings.TrimSpace(filePart), ":")
 
 	rel, err := filepath.Rel(searchDir, filePart)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("parse file path: %w", err)
+		return "", "", "", "", false, fmt.Errorf("parse file path: %w", err)
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 
 	// Strip "threads" directory if present — thread files are
 	// conversation/threads/TS.txt; we want the conversation, not "threads".
-	// Remove the "threads" element so the rest of the logic works uniformly.
 	for i, p := range parts {
 		if p == "threads" {
+			thread = true
 			parts = append(parts[:i], parts[i+1:]...)
 			break
 		}
@@ -121,8 +162,8 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	case 2:
 		conversation = parts[0]
 	default:
-		return "", "", "", "", fmt.Errorf("parse file path: unexpected depth %d in %q", len(parts), rel)
+		return "", "", "", "", false, fmt.Errorf("parse file path: unexpected depth %d in %q", len(parts), rel)
 	}
-	return platform, account, conversation, date, nil
+	return platform, account, conversation, date, thread, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/search"
 )
@@ -25,7 +26,7 @@ func RunSearch(p SearchParams) error {
 		return fmt.Errorf("no data at %s", searchDir)
 	}
 
-	includes, err := dateFileIncludes(searchDir, p.Since)
+	includes, err := fileIncludes(searchDir, p.Since)
 	if err != nil {
 		return err
 	}
@@ -53,6 +54,15 @@ func RunSearch(p SearchParams) error {
 		fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
 	}
 
+	if sinceDur > 0 {
+		matches = search.FilterThreadsBySince(matches, sinceDur)
+	}
+
+	if len(matches) == 0 {
+		fmt.Println("No matches found.")
+		return nil
+	}
+
 	fmt.Printf("%d match(es) found:\n\n", len(matches))
 	search.PrintSummary(matches, sinceDur)
 	search.PrintGroupedResults(matches)
@@ -61,10 +71,11 @@ func RunSearch(p SearchParams) error {
 }
 
 // searchPath returns the directory to search based on platform/account filters.
-func searchPath(platform, account string) string {
+func searchPath(platform, acctName string) string {
 	switch {
-	case platform != "" && account != "":
-		return paths.AccountDir(platform, account)
+	case platform != "" && acctName != "":
+		acct := account.New(platform, acctName)
+		return paths.AccountDir(platform, acct.NameSlug())
 	case platform != "":
 		return paths.PlatformDir(platform)
 	default:
@@ -72,9 +83,11 @@ func searchPath(platform, account string) string {
 	}
 }
 
-// dateFileIncludes returns --include glob patterns to restrict search to date
-// files within the --since window. If since is empty, returns all .txt files.
-func dateFileIncludes(searchDir, since string) ([]string, error) {
+// fileIncludes returns --glob patterns to restrict search to date files
+// within the --since window plus all thread files. Thread files are always
+// included because their filenames are timestamps, not dates — we can't
+// filter them by name. If since is empty, returns *.txt (all files).
+func fileIncludes(searchDir, since string) ([]string, error) {
 	if since == "" {
 		return []string{"*.txt"}, nil
 	}
@@ -85,7 +98,7 @@ func dateFileIncludes(searchDir, since string) ([]string, error) {
 	}
 
 	cutoff := time.Now().Add(-dur).Truncate(24 * time.Hour)
-	var includes []string
+	seen := make(map[string]bool)
 
 	filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -101,12 +114,20 @@ func dateFileIncludes(searchDir, since string) ([]string, error) {
 			return nil
 		}
 		if !t.Before(cutoff) {
-			includes = append(includes, name)
+			seen[name] = true
 		}
 		return nil
 	})
 
-	if len(includes) == 0 {
+	var includes []string
+	for name := range seen {
+		includes = append(includes, name)
+	}
+	// Always include thread files — can't date-filter by filename.
+	includes = append(includes, "threads/*.txt")
+
+	if len(includes) == 1 {
+		// Only the threads glob, no date files matched.
 		return nil, fmt.Errorf("no date files within --%s window", since)
 	}
 	return includes, nil
