@@ -17,9 +17,14 @@ func newLogCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return logging.Tail(n)
+			follow, err := cmd.Flags().GetBool("follow")
+			if err != nil {
+				return err
+			}
+			return logging.Tail(n, follow)
 		},
 	}
-	cmd.Flags().IntP("lines", "n", 50, "last N lines to show from each file before following")
+	cmd.Flags().IntP("lines", "n", 50, "last N lines to show from each file")
+	cmd.Flags().BoolP("follow", "f", false, "follow log output in real time")
 	return cmd
 }

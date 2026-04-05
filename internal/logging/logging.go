@@ -30,9 +30,9 @@ func (f LogFile) path() string {
 	}
 }
 
-// Tail prints log file paths, then runs tail -f showing the last n lines
-// from each file. Blocks until interrupted.
-func Tail(n int) error {
+// Tail prints log file paths, then runs tail showing the last n lines
+// from each file. If follow is true, keeps tailing until interrupted.
+func Tail(n int, follow bool) error {
 	var files []string
 	for _, p := range []string{paths.DaemonLogPath(), paths.MCPLogPath()} {
 		if _, err := os.Stat(p); err == nil {
@@ -48,7 +48,11 @@ func Tail(n int) error {
 	}
 	fmt.Fprintln(os.Stderr)
 
-	args := append([]string{"-f", "-n", fmt.Sprintf("%d", n)}, files...)
+	args := []string{"-n", fmt.Sprintf("%d", n)}
+	if follow {
+		args = append(args, "-f")
+	}
+	args = append(args, files...)
 	tail := exec.Command("tail", args...)
 	tail.Stdout = os.Stdout
 	tail.Stderr = os.Stderr
