@@ -128,9 +128,12 @@ func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 		h.mu.Lock()
 		if ch.sessionID != s.SessionID {
 			if old, ok := h.sessions[ch.sessionID]; ok {
-				old.Send(h.ctx, &TextNotificationMsg{
+				if err := old.Send(h.ctx, &TextNotificationMsg{
 					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
-				})
+				}); err != nil {
+					slog.Error("failed to send disconnect notification",
+						"session_id", ch.sessionID, "error", err)
+				}
 			}
 			slog.Info("session file changed, delivery channel repointed",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
@@ -194,9 +197,12 @@ func (h *Hub) Register(s *Session) error {
 		if ch.sessionID != s.SessionID {
 			// Notify the old session that it's being replaced.
 			if old, ok := h.sessions[ch.sessionID]; ok {
-				old.Send(h.ctx, &TextNotificationMsg{
+				if err := old.Send(h.ctx, &TextNotificationMsg{
 					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
-				})
+				}); err != nil {
+					slog.Error("failed to send disconnect notification",
+						"session_id", ch.sessionID, "error", err)
+				}
 			}
 			slog.Info("delivery channel repointed to new session",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
