@@ -6,9 +6,7 @@ argument-hint: <command> [options]
 
 # pigeon — Messaging Data Reader
 
-The pigeon binary is at: __PIGEON_PATH__
-
-Before doing anything else, run `__PIGEON_PATH__ help` to discover available commands and their options.
+Before doing anything else, run `pigeon help` to discover available commands and their options.
 
 ## Task
 

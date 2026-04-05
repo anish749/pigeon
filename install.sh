@@ -52,12 +52,11 @@ if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
 fi
 
 # Install Claude Code skill
-SKILL_SRC="$(dirname "$0")/.claude/skills/pigeon/SKILL.md.template"
-if [ -f "$SKILL_SRC" ]; then
-  CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  SKILL_DST="${CLAUDE_DIR}/skills/pigeon"
-  mkdir -p "$SKILL_DST"
-  sed "s|__PIGEON_PATH__|${INSTALL_DIR}/pigeon|g" "$SKILL_SRC" > "$SKILL_DST/SKILL.md"
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SKILL_DST="${CLAUDE_DIR}/skills/pigeon"
+SKILL_URL="https://raw.githubusercontent.com/${REPO}/${LATEST}/.claude/skills/pigeon/SKILL.md"
+mkdir -p "$SKILL_DST"
+if curl -fsSL -o "$SKILL_DST/SKILL.md" "$SKILL_URL"; then
   echo "Installed Claude Code skill to ${SKILL_DST}/SKILL.md"
 fi
 

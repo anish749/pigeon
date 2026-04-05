@@ -65,7 +65,7 @@ Pigeon supports multiple Slack workspaces and WhatsApp numbers simultaneously. E
 
 ```
 ┌─────────────┐     ┌─────────────┐
-│    Slack     │     │  WhatsApp   │
+│    Slack    │     │  WhatsApp   │
 └──────┬──────┘     └──────┬──────┘
        │                   │
        ▼                   ▼
