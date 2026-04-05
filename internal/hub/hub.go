@@ -17,9 +17,22 @@ import (
 	"github.com/anish749/pigeon/internal/store"
 )
 
+// RouteState describes the outcome of routing a message through the hub.
+type RouteState int
+
+const (
+	RouteOK        RouteState = iota // message signaled to delivery loop
+	RouteNoSession                   // no session file exists for this account
+)
+
+// RouteResult is returned by Route to tell the caller what happened.
+type RouteResult struct {
+	State RouteState
+}
+
 // MessageNotifyFunc is called by listeners when a new message has been
 // written to disk.
-type MessageNotifyFunc func(acct account.Account, conversation string)
+type MessageNotifyFunc func(acct account.Account, conversation string) RouteResult
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -231,7 +244,7 @@ func (h *Hub) Unregister(sessionID string) {
 
 // Route signals that a new message has arrived for the given account and
 // conversation. Non-blocking — returns immediately.
-func (h *Hub) Route(acct account.Account, conversation string) {
+func (h *Hub) Route(acct account.Account, conversation string) RouteResult {
 	key := acct.String()
 
 	h.mu.RLock()
@@ -241,7 +254,7 @@ func (h *Hub) Route(acct account.Account, conversation string) {
 	if !exists {
 		slog.Warn("no session configured, message not routed",
 			"account", acct, "conversation", conversation)
-		return
+		return RouteResult{State: RouteNoSession}
 	}
 
 	select {
@@ -251,6 +264,7 @@ func (h *Hub) Route(acct account.Account, conversation string) {
 			"account", acct, "conversation", conversation,
 			"buffer_size", signalBufferSize)
 	}
+	return RouteResult{State: RouteOK}
 }
 
 // Sessions returns the number of active (connected) sessions.
