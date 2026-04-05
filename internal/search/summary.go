@@ -111,7 +111,7 @@ func PrintGroupedResults(matches []Match) {
 		fmt.Printf("%s (%s, %d matches)\n", label, dateStr, g.matches)
 		for _, m := range g.msgs {
 			resolved := modelv1.ResolvedMsg{MsgLine: m.Msg}
-			for _, s := range modelv1.FormatMsg(resolved, time.Local, true) {
+			for _, s := range modelv1.FormatMsg(resolved, time.Local) {
 				fmt.Printf("  %s\n", s)
 			}
 		}

@@ -394,7 +394,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		return lastDelivered
 	}
 
-	lines := modelv1.FormatDateFile(df, time.Local, false)
+	lines := modelv1.FormatDateFile(df, time.Local)
 
 	// Find connected session.
 	h.mu.RLock()

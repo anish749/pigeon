@@ -7,26 +7,17 @@ import (
 	"time"
 )
 
-const (
-	fullTsLayout  = "2006-01-02 15:04:05"
-	shortTsLayout = "15:04:05"
-)
+const tsLayout = "2006-01-02 15:04:05"
 
 // FormatMsg renders a resolved message with its reactions as display lines.
-// full=true shows date+time, full=false shows time only.
 // loc controls the timezone for display (pass time.Local for user's timezone).
-func FormatMsg(m ResolvedMsg, loc *time.Location, full bool) []string {
-	layout := shortTsLayout
-	if full {
-		layout = fullTsLayout
-	}
-
+func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	prefix := ""
 	if m.Reply {
 		prefix = "  "
 	}
 
-	tsStr := m.Ts.In(loc).Format(layout)
+	tsStr := m.Ts.In(loc).Format(tsLayout)
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, m.Sender, m.SenderID, m.Text))
 
@@ -38,40 +29,36 @@ func FormatMsg(m ResolvedMsg, loc *time.Location, full bool) []string {
 }
 
 // FormatDateFile renders a resolved conversation day as display lines.
-func FormatDateFile(f *ResolvedDateFile, loc *time.Location, full bool) []string {
+func FormatDateFile(f *ResolvedDateFile, loc *time.Location) []string {
 	if f == nil {
 		return nil
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, FormatMsg(m, loc, full)...)
+		lines = append(lines, FormatMsg(m, loc)...)
 	}
 	return lines
 }
 
 // FormatThreadFile renders a resolved thread as display lines.
-func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, full bool) []string {
+func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location) []string {
 	if f == nil {
 		return nil
 	}
 	var lines []string
 
-	// Before context
 	for _, c := range f.Before {
-		lines = append(lines, FormatMsg(c, loc, full)...)
+		lines = append(lines, FormatMsg(c, loc)...)
 	}
 
-	// Parent
-	lines = append(lines, FormatMsg(f.Parent, loc, full)...)
+	lines = append(lines, FormatMsg(f.Parent, loc)...)
 
-	// Replies
 	for _, r := range f.Replies {
-		lines = append(lines, FormatMsg(r, loc, full)...)
+		lines = append(lines, FormatMsg(r, loc)...)
 	}
 
-	// After context
 	for _, c := range f.After {
-		lines = append(lines, FormatMsg(c, loc, full)...)
+		lines = append(lines, FormatMsg(c, loc)...)
 	}
 
 	return lines
@@ -80,7 +67,6 @@ func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, full bool) []st
 // formatReactions renders a list of reactions as a single display line.
 // e.g. "👍 Bob, Charlie · 🎉 Dave"
 func formatReactions(reactions []ReactLine) string {
-	// Group by emoji, preserving order of first appearance.
 	type emojiGroup struct {
 		emoji string
 		users []string
