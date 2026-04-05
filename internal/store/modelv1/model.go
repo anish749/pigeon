@@ -83,3 +83,21 @@ type Line struct {
 	Edit   *EditLine
 	Delete *DeleteLine
 }
+
+// DateFile holds all parsed events from a single date file.
+type DateFile struct {
+	Messages  []MsgLine
+	Reactions []ReactLine
+	Edits     []EditLine
+	Deletes   []DeleteLine
+}
+
+// ThreadFile holds all parsed events from a single thread file.
+type ThreadFile struct {
+	Parent    MsgLine
+	Replies   []MsgLine
+	Context   []MsgLine // channel context messages (before + after parent)
+	Reactions []ReactLine
+	Edits     []EditLine
+	Deletes   []DeleteLine
+}
