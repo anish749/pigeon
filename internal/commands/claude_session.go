@@ -12,10 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/manifoldco/promptui"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/claude"
-	"github.com/anish/claude-msg-utils/internal/config"
-	daemonclient "github.com/anish/claude-msg-utils/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/claude"
+	"github.com/anish749/pigeon/internal/config"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 )
 
 // errGoBack signals that the user wants to return to the account selector.

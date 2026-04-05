@@ -7,11 +7,11 @@ import (
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/config"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api"
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/hub"
+	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
 
 // SlackManager owns the lifecycle of all Slack workspace listeners.

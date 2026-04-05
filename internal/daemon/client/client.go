@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // PgnHTTPClient is an HTTP client preconfigured to talk to the pigeon daemon

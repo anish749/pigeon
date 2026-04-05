@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
+	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
 
 func RunSetupSlack(args []string) error {

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	daemonclient "github.com/anish/claude-msg-utils/internal/daemon/client"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 )
 
 // rejectedError is returned when the daemon permanently rejects this session.

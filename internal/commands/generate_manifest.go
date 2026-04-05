@@ -9,7 +9,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 
-	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish749/pigeon/internal/config"
 )
 
 func RunGenerateManifest(username, workspace string) error {

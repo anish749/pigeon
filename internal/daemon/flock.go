@@ -6,7 +6,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // ErrDeviceLocked is returned when a WhatsApp device is already in use by another process.

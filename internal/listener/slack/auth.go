@@ -12,7 +12,7 @@ import (
 
 	goslack "github.com/slack-go/slack"
 
-	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish749/pigeon/internal/config"
 )
 
 const defaultPort = 9876

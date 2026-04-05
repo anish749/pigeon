@@ -12,7 +12,7 @@ import (
 
 	selfupdate "github.com/creativeprojects/go-selfupdate"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 const repo = "anish749/pigeon"

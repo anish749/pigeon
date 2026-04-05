@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
+	mcpserver "github.com/anish749/pigeon/internal/mcp/server"
 )
 
 // IncomingMsg is the JSON payload sent over SSE to MCP shim processes.

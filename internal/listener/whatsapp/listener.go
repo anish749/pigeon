@@ -11,9 +11,9 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // Listener receives WhatsApp events and writes messages to local text files.
@@ -21,8 +21,8 @@ type Listener struct {
 	client    *whatsmeow.Client
 	acct      account.Account
 	resolver  *Resolver
-	syncing   atomic.Bool // true while history sync is in progress
-	onLogout  func()      // called when device is unpaired remotely
+	syncing   atomic.Bool           // true while history sync is in progress
+	onLogout  func()                // called when device is unpaired remotely
 	onMessage hub.MessageNotifyFunc // called when a message is received
 }
 

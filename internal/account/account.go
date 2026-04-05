@@ -9,7 +9,7 @@ import (
 
 	"github.com/gosimple/slug"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // Account identifies a messaging account with a platform and display name.

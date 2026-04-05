@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anish/claude-msg-utils/internal/paths"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // IsRunning checks whether the daemon process is alive.

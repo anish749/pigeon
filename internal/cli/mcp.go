@@ -8,8 +8,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
-	"github.com/anish/claude-msg-utils/internal/logging"
-	mcpserver "github.com/anish/claude-msg-utils/internal/mcp/server"
+	"github.com/anish749/pigeon/internal/logging"
+	mcpserver "github.com/anish749/pigeon/internal/mcp/server"
 )
 
 func newMCPCmd() *cobra.Command {

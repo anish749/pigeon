@@ -21,13 +21,13 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/anish/claude-msg-utils/internal/account"
-	"github.com/anish/claude-msg-utils/internal/hub"
-	walistener "github.com/anish/claude-msg-utils/internal/listener/whatsapp"
-	"github.com/anish/claude-msg-utils/internal/outbox"
-	"github.com/anish/claude-msg-utils/internal/store"
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/hub"
+	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	"github.com/anish749/pigeon/internal/outbox"
+	"github.com/anish749/pigeon/internal/store"
 
-	slacklistener "github.com/anish/claude-msg-utils/internal/listener/slack"
+	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
 
 // WhatsAppSender holds everything needed to send a WhatsApp message.

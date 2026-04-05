@@ -12,9 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/anish/claude-msg-utils/internal/api"
-	"github.com/anish/claude-msg-utils/internal/daemon/client"
-	"github.com/anish/claude-msg-utils/internal/outbox"
+	"github.com/anish749/pigeon/internal/api"
+	"github.com/anish749/pigeon/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/outbox"
 )
 
 var (
@@ -42,14 +42,14 @@ const (
 )
 
 type model struct {
-	items      []*outbox.Item
-	cursor     int
-	mode       mode
-	feedback   string
-	status     string
-	err        error
-	width      int
-	height     int
+	items    []*outbox.Item
+	cursor   int
+	mode     mode
+	feedback string
+	status   string
+	err      error
+	width    int
+	height   int
 }
 
 // Bubble Tea messages
