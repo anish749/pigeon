@@ -62,8 +62,9 @@ func TestAppendAndRead(t *testing.T) {
 	if len(df.Messages) != 2 {
 		t.Errorf("messages = %d, want 2", len(df.Messages))
 	}
-	if len(df.Reactions) != 1 {
-		t.Errorf("reactions = %d, want 1", len(df.Reactions))
+	// Reaction should be on the first message (M1)
+	if len(df.Messages[0].Reactions) != 1 {
+		t.Errorf("M1 reactions = %d, want 1", len(df.Messages[0].Reactions))
 	}
 }
 

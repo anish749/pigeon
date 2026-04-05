@@ -14,6 +14,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/claude"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
 
@@ -393,12 +394,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		return lastDelivered
 	}
 
-	// Format each message as a simple display line for MCP delivery.
-	lines := make([]string, 0, len(df.Messages))
-	for _, m := range df.Messages {
-		lines = append(lines, fmt.Sprintf("[%s] %s: %s",
-			m.Ts.Format("15:04:05"), m.Sender, m.Text))
-	}
+	lines := modelv1.FormatDateFile(df, time.Local, false)
 
 	// Find connected session.
 	h.mu.RLock()

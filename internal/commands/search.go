@@ -112,9 +112,10 @@ func printGroupedResultsV1(results []storev1.SearchResult) {
 			}
 			for _, line := range section {
 				if line.Msg != nil {
-					fmt.Printf("  [%s] %s: %s\n",
-						line.Msg.Ts.Format("2006-01-02 15:04:05 -07:00"),
-						line.Msg.Sender, line.Msg.Text)
+					rm := modelv1.ResolvedMsg{MsgLine: *line.Msg}
+					for _, s := range modelv1.FormatMsg(rm, time.Local, true) {
+						fmt.Printf("  %s\n", s)
+					}
 				}
 			}
 		}

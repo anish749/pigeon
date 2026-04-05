@@ -52,7 +52,7 @@ func RunRead(p ReadParams) error {
 		return nil
 	}
 
-	lines := formatMessages(df.Messages)
+	lines := modelv1.FormatDateFile(df, time.Local, true)
 
 	dir := acct.ConversationDir(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)
@@ -115,16 +115,3 @@ func parseDisplayName(dirName string) string {
 	return dirName
 }
 
-// formatMessages converts MsgLine structs to display strings.
-func formatMessages(msgs []modelv1.MsgLine) []string {
-	lines := make([]string, 0, len(msgs))
-	for _, m := range msgs {
-		prefix := ""
-		if m.Reply {
-			prefix = "  "
-		}
-		lines = append(lines, fmt.Sprintf("%s[%s] %s: %s",
-			prefix, m.Ts.Format("2006-01-02 15:04:05 -07:00"), m.Sender, m.Text))
-	}
-	return lines
-}

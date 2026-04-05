@@ -72,15 +72,16 @@ func (s *FSStore) AppendThread(acct account.Account, conversation, threadTS stri
 	return s.appendLine(filename, line)
 }
 
-// ReadConversation loads messages from a conversation with in-memory compaction.
-func (s *FSStore) ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.DateFile, error) {
+// ReadConversation loads messages from a conversation, applying compaction
+// and resolution. Reactions are grouped onto their parent messages.
+func (s *FSStore) ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.ResolvedDateFile, error) {
 	dir := s.convDir(acct, conversation)
 	files, err := listDateFiles(dir)
 	if err != nil {
 		return nil, err
 	}
 	if len(files) == 0 {
-		return &modelv1.DateFile{}, nil
+		return &modelv1.ResolvedDateFile{}, nil
 	}
 
 	var selected []string
@@ -95,14 +96,13 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		for _, f := range files {
 			d, err := dateFromFilename(f)
 			if err != nil {
-				continue // non-date files in the directory
+				continue
 			}
 			if !d.Before(cutoff.Truncate(24 * time.Hour)) {
 				selected = append(selected, f)
 			}
 		}
 	default:
-		// Default: today's file, or last file if today doesn't exist
 		today := filepath.Join(dir, time.Now().UTC().Format("2006-01-02")+".txt")
 		if fileExists(today) {
 			selected = []string{today}
@@ -127,17 +127,30 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		merged.Deletes = append(merged.Deletes, df.Deletes...)
 	}
 
-	result := compact.Compact(merged)
+	compacted := compact.Compact(merged)
+	resolved := modelv1.Resolve(compacted)
 
-	if opts.Last > 0 && len(result.Messages) > opts.Last {
-		result.Messages = result.Messages[len(result.Messages)-opts.Last:]
+	// Apply --since precise cutoff (file selection is coarse by date).
+	if opts.Since > 0 {
+		cutoff := time.Now().Add(-opts.Since)
+		var filtered []modelv1.ResolvedMsg
+		for _, m := range resolved.Messages {
+			if !m.Ts.Before(cutoff) {
+				filtered = append(filtered, m)
+			}
+		}
+		resolved.Messages = filtered
 	}
 
-	return result, nil
+	if opts.Last > 0 && len(resolved.Messages) > opts.Last {
+		resolved.Messages = resolved.Messages[len(resolved.Messages)-opts.Last:]
+	}
+
+	return resolved, nil
 }
 
-// ReadThread loads a thread file with in-memory compaction.
-func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ThreadFile, error) {
+// ReadThread loads a thread file, applying compaction and resolution.
+func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
 	filename := filepath.Join(s.convDir(acct, conversation), "threads", threadTS+".txt")
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -152,7 +165,8 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 		slog.Warn("parse thread file: some lines skipped", "thread", threadTS, "error", parseErr)
 	}
 
-	return compact.CompactThread(tf), nil
+	compacted := compact.CompactThread(tf)
+	return modelv1.ResolveThread(compacted), nil
 }
 
 // Search finds messages matching a query across conversations.
