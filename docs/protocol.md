@@ -339,13 +339,19 @@ events to compute the final reaction state per message.
 
 ```
 [TIMESTAMP] [edit:MSG_ID] [from:SENDER_ID] Sender Name: updated message text
+[TIMESTAMP] [edit:MSG_ID] [from:SENDER_ID] [attach:ATTACH_ID type=image/jpeg] Sender Name: updated caption
 ```
 
 - **`[edit:MSG_ID]`**: references the message being edited by its ID.
 - **Message Text**: the new full text of the message, with escaping applied.
+- **Attachments**: an edit can add, change, or remove attachments. The
+  `[attach:...]` tags on the edit line represent the complete set of
+  attachments after the edit. If the edit has no `[attach:...]` tags,
+  the message has no attachments after the edit.
 - Appended like any other event. The reader replaces the original message
-  text with the most recent edit (by timestamp). Maintenance replaces the
-  original message line with the edited text and removes the edit line.
+  text and attachments with the most recent edit (by timestamp).
+  Maintenance replaces the original message line with the edited content
+  and removes the edit line.
 
 ### Delete Line
 
@@ -629,12 +635,13 @@ type ReactLine struct {
 }
 
 type EditLine struct {
-    Ts       time.Time // when the edit happened
-    MsgID    string    // target message ID
-    Sender   string    // who edited (display name)
-    SenderID string    // who edited (platform ID)
-    Via      Via       // message pathway
-    Text     string    // new message text
+    Ts          time.Time    // when the edit happened
+    MsgID       string       // target message ID
+    Sender      string       // who edited (display name)
+    SenderID    string       // who edited (platform ID)
+    Via         Via          // message pathway
+    Text        string       // new message text
+    Attachments []Attachment // complete attachment set after edit
 }
 
 type DeleteLine struct {

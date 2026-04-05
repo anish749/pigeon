@@ -56,12 +56,13 @@ type ReactLine struct {
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts       time.Time // when the edit happened
-	MsgID    string    // target message ID
-	Sender   string    // who edited (display name)
-	SenderID string    // who edited (platform ID)
-	Via      Via       // message pathway
-	Text     string    // new message text
+	Ts          time.Time    // when the edit happened
+	MsgID       string       // target message ID
+	Sender      string       // who edited (display name)
+	SenderID    string       // who edited (platform ID)
+	Via         Via          // message pathway
+	Text        string       // new message text
+	Attachments []Attachment // complete attachment set after edit
 }
 
 // DeleteLine represents a message delete event.
@@ -71,4 +72,14 @@ type DeleteLine struct {
 	Sender   string    // who deleted (display name)
 	SenderID string    // who deleted (platform ID)
 	Via      Via       // message pathway
+}
+
+// Line is a parsed protocol line. Exactly one of Msg, React, Edit, or
+// Delete is non-nil. For LineSeparator, all are nil.
+type Line struct {
+	Type   LineType
+	Msg    *MsgLine
+	React  *ReactLine
+	Edit   *EditLine
+	Delete *DeleteLine
 }

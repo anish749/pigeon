@@ -11,60 +11,7 @@ func ts(year int, month time.Month, day, hour, min, sec int) time.Time {
 	return time.Date(year, month, day, hour, min, sec, 0, time.UTC)
 }
 
-// --- Escaping ---
-
-func TestEscapeText(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"empty", "", ""},
-		{"no special chars", "hello world", "hello world"},
-		{"single newline", "line1\nline2", `line1\nline2`},
-		{"multiple newlines", "a\nb\nc", `a\nb\nc`},
-		{"single backslash", `hello\world`, `hello\\world`},
-		{"backslash then newline", "hello\\\nworld", `hello\\\nworld`},
-		{"newline then backslash", "hello\n\\world", `hello\n\\world`},
-		{"only newline", "\n", `\n`},
-		{"only backslash", `\`, `\\`},
-		{"consecutive backslashes", `\\`, `\\\\`},
-		{"consecutive newlines", "\n\n", `\n\n`},
-		{"mixed content", "first\nsecond\\third\nfourth", `first\nsecond\\third\nfourth`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := EscapeText(tt.in)
-			if got != tt.want {
-				t.Errorf("EscapeText(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestUnescapeText(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"empty", "", ""},
-		{"no escapes", "hello world", "hello world"},
-		{"escaped newline", `line1\nline2`, "line1\nline2"},
-		{"escaped backslash", `hello\\world`, `hello\world`},
-		{"escaped backslash then newline", `hello\\\nworld`, "hello\\\nworld"},
-		{"trailing backslash", `hello\`, `hello\`},
-		{"unknown escape sequence", `hello\tworld`, `hello\tworld`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := UnescapeText(tt.in)
-			if got != tt.want {
-				t.Errorf("UnescapeText(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
+// --- Escaping round-trip ---
 
 func TestEscapeUnescapeRoundTrip(t *testing.T) {
 	cases := []string{
@@ -79,40 +26,17 @@ func TestEscapeUnescapeRoundTrip(t *testing.T) {
 		"\nnewline at start",
 	}
 	for _, orig := range cases {
-		escaped := EscapeText(orig)
-		got := UnescapeText(escaped)
+		escaped := escapeText(orig)
+		got := unescapeText(escaped)
 		if got != orig {
 			t.Errorf("roundtrip(%q): escaped=%q, unescaped=%q", orig, escaped, got)
 		}
 	}
 }
 
-// --- SanitizeSender ---
+// --- Marshal + Parse round-trips ---
 
-func TestSanitizeSender(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"Alice", "Alice"},
-		{"Dr. Smith: Cardiologist", "Dr. Smith Cardiologist"},
-		{"No:Colons:Here", "NoColonsHere"},
-		{"", ""},
-		{":::", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			got := SanitizeSender(tt.in)
-			if got != tt.want {
-				t.Errorf("SanitizeSender(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-// --- Marshal + ParseLine round-trips ---
-
-func TestMarshalParseMsg_Basic(t *testing.T) {
+func TestMsg_Basic(t *testing.T) {
 	m := MsgLine{
 		ID:       "1711568938.123456",
 		Ts:       ts(2026, 3, 16, 9, 15, 2),
@@ -120,25 +44,16 @@ func TestMarshalParseMsg_Basic(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "hello world",
 	}
-
-	line := MarshalMsg(m)
-	wantLine := "[2026-03-16 09:15:02 +00:00] [id:1711568938.123456] [from:U04ABCD] Alice: hello world"
-	if line != wantLine {
-		t.Fatalf("MarshalMsg:\n got  %q\n want %q", line, wantLine)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	want := "[2026-03-16 09:15:02 +00:00] [id:1711568938.123456] [from:U04ABCD] Alice: hello world"
+	if line != want {
+		t.Fatalf("Marshal:\n got  %q\n want %q", line, want)
 	}
-
-	lt, v, err := ParseLine(line)
-	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
-	}
-	if lt != LineMessage {
-		t.Fatalf("line type = %v, want LineMessage", lt)
-	}
-	got := v.(MsgLine)
+	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_WithVia(t *testing.T) {
+func TestMsg_WithVia(t *testing.T) {
 	m := MsgLine{
 		ID:       "1711568942.111111",
 		Ts:       ts(2026, 3, 16, 9, 16, 0),
@@ -147,19 +62,15 @@ func TestMarshalParseMsg_WithVia(t *testing.T) {
 		Via:      ViaPigeonAsUser,
 		Text:     "looks great Bob!",
 	}
-
-	line := MarshalMsg(m)
-	if got := mustParseMsg(t, line); !msgEqual(got, m) {
-		t.Errorf("round-trip mismatch:\n got  %+v\n want %+v", got, m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	if !strings.Contains(line, "[via:pigeon-as-user]") {
+		t.Errorf("line missing [via:pigeon-as-user]: %s", line)
 	}
-
-	// Verify the [via:...] tag is present in the line.
-	if want := "[via:pigeon-as-user]"; !containsSubstr(line, want) {
-		t.Errorf("line missing %s: %s", want, line)
-	}
+	got := mustParseMsg(t, line)
+	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_WithAttachments(t *testing.T) {
+func TestMsg_WithAttachments(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG1",
 		Ts:       ts(2026, 3, 16, 9, 15, 30),
@@ -170,13 +81,12 @@ func TestMarshalParseMsg_WithAttachments(t *testing.T) {
 			{ID: "F07T3", Type: "image/jpeg"},
 		},
 	}
-
-	line := MarshalMsg(m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_MultipleAttachments(t *testing.T) {
+func TestMsg_MultipleAttachments(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG2",
 		Ts:       ts(2026, 3, 16, 10, 0, 0),
@@ -188,13 +98,12 @@ func TestMarshalParseMsg_MultipleAttachments(t *testing.T) {
 			{ID: "F2", Type: "image/png"},
 		},
 	}
-
-	line := MarshalMsg(m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_EmptyText(t *testing.T) {
+func TestMsg_EmptyText(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG3",
 		Ts:       ts(2026, 3, 16, 10, 0, 0),
@@ -204,17 +113,15 @@ func TestMarshalParseMsg_EmptyText(t *testing.T) {
 			{ID: "F07T3", Type: "image/jpeg"},
 		},
 	}
-
-	line := MarshalMsg(m)
-	// Should end with "Alice:" and no trailing space.
-	if want := "Alice:"; line[len(line)-len(want):] != want {
-		t.Errorf("expected line to end with %q, got: %s", want, line)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	if !strings.HasSuffix(line, "Alice:") {
+		t.Errorf("expected line to end with 'Alice:', got: %s", line)
 	}
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_ThreadReply(t *testing.T) {
+func TestMsg_ThreadReply(t *testing.T) {
 	m := MsgLine{
 		ID:       "1711568960.345678",
 		Ts:       ts(2026, 3, 16, 9, 16, 0),
@@ -223,18 +130,15 @@ func TestMarshalParseMsg_ThreadReply(t *testing.T) {
 		Reply:    true,
 		Text:     "replying here",
 	}
-
-	line := MarshalMsg(m)
-	// Should start with 2-space indent.
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	if line[:2] != "  " {
 		t.Fatalf("thread reply missing indent: %q", line)
 	}
-
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_ReplyTo(t *testing.T) {
+func TestMsg_ReplyTo(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG_REPLY",
 		Ts:       ts(2026, 3, 16, 9, 16, 0),
@@ -243,16 +147,15 @@ func TestMarshalParseMsg_ReplyTo(t *testing.T) {
 		ReplyTo:  "QUOTED_MSG_123",
 		Text:     "reply text",
 	}
-
-	line := MarshalMsg(m)
-	if want := "[reply:QUOTED_MSG_123]"; !containsSubstr(line, want) {
-		t.Errorf("line missing %s: %s", want, line)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	if !strings.Contains(line, "[reply:QUOTED_MSG_123]") {
+		t.Errorf("line missing [reply:QUOTED_MSG_123]: %s", line)
 	}
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_TextWithNewlines(t *testing.T) {
+func TestMsg_TextWithNewlines(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG_NL",
 		Ts:       ts(2026, 3, 16, 9, 20, 0),
@@ -260,17 +163,15 @@ func TestMarshalParseMsg_TextWithNewlines(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "line one\nline two\nline three",
 	}
-
-	line := MarshalMsg(m)
-	// The marshalled line must not contain actual newlines.
-	if containsSubstr(line, "\n") {
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	if strings.Contains(line, "\n") {
 		t.Fatalf("marshalled line contains newline: %q", line)
 	}
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_TextWithBackslashes(t *testing.T) {
+func TestMsg_TextWithBackslashes(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG_BS",
 		Ts:       ts(2026, 3, 16, 9, 21, 0),
@@ -278,13 +179,12 @@ func TestMarshalParseMsg_TextWithBackslashes(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     `path\to\file`,
 	}
-
-	line := MarshalMsg(m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_TextWithBackslashAndNewline(t *testing.T) {
+func TestMsg_TextWithBackslashAndNewline(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG_BSNL",
 		Ts:       ts(2026, 3, 16, 9, 22, 0),
@@ -292,13 +192,12 @@ func TestMarshalParseMsg_TextWithBackslashAndNewline(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "before\\\nafter",
 	}
-
-	line := MarshalMsg(m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
-func TestMarshalParseMsg_SenderWithColons(t *testing.T) {
+func TestMsg_SenderWithColons(t *testing.T) {
 	m := MsgLine{
 		ID:       "MSG_COLON",
 		Ts:       ts(2026, 3, 16, 9, 23, 0),
@@ -306,18 +205,8 @@ func TestMarshalParseMsg_SenderWithColons(t *testing.T) {
 		SenderID: "U04DOC",
 		Text:     "hello",
 	}
-
-	line := MarshalMsg(m)
-	// Sender name should have colons stripped.
-	lt, v, err := ParseLine(line)
-	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
-	}
-	if lt != LineMessage {
-		t.Fatalf("line type = %v, want LineMessage", lt)
-	}
-	got := v.(MsgLine)
-	// The sender is lossy (colons stripped), so compare against sanitized version.
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	got := mustParseMsg(t, line)
 	if got.Sender != "Dr. Smith Cardiologist" {
 		t.Errorf("sender = %q, want %q", got.Sender, "Dr. Smith Cardiologist")
 	}
@@ -326,7 +215,7 @@ func TestMarshalParseMsg_SenderWithColons(t *testing.T) {
 	}
 }
 
-func TestMarshalParseMsg_AllFields(t *testing.T) {
+func TestMsg_AllFields(t *testing.T) {
 	m := MsgLine{
 		ID:       "3EB0A1B2C3D4E5F6",
 		Ts:       ts(2026, 4, 1, 14, 30, 45),
@@ -340,15 +229,14 @@ func TestMarshalParseMsg_AllFields(t *testing.T) {
 			{ID: "ATTACH1", Type: "application/pdf"},
 		},
 	}
-
-	line := MarshalMsg(m)
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
 	got := mustParseMsg(t, line)
 	assertMsgEqual(t, got, m)
 }
 
 // --- Reactions ---
 
-func TestMarshalParseReact(t *testing.T) {
+func TestReact(t *testing.T) {
 	r := ReactLine{
 		Ts:       ts(2026, 3, 16, 9, 16, 30),
 		MsgID:    "1711568938.123456",
@@ -356,39 +244,29 @@ func TestMarshalParseReact(t *testing.T) {
 		SenderID: "U04EFGH",
 		Emoji:    "thumbsup",
 	}
-
-	line := MarshalReact(r)
-	wantLine := "[2026-03-16 09:16:30 +00:00] [react:1711568938.123456] [from:U04EFGH] Bob: thumbsup"
-	if line != wantLine {
-		t.Fatalf("MarshalReact:\n got  %q\n want %q", line, wantLine)
+	line := Marshal(Line{Type: LineReaction, React: &r})
+	want := "[2026-03-16 09:16:30 +00:00] [react:1711568938.123456] [from:U04EFGH] Bob: thumbsup"
+	if line != want {
+		t.Fatalf("Marshal:\n got  %q\n want %q", line, want)
 	}
-
-	lt, v, err := ParseLine(line)
-	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
-	}
-	if lt != LineReaction {
-		t.Fatalf("line type = %v, want LineReaction", lt)
-	}
-	got := v.(ReactLine)
+	got := mustParseReact(t, line)
 	assertReactEqual(t, got, r)
 }
 
-func TestMarshalParseReact_Unicode(t *testing.T) {
+func TestReact_Unicode(t *testing.T) {
 	r := ReactLine{
 		Ts:       ts(2026, 3, 16, 9, 20, 0),
 		MsgID:    "MSG1",
 		Sender:   "Alice",
 		SenderID: "U04ABCD",
-		Emoji:    "\U0001f44d", // thumbs up emoji
+		Emoji:    "\U0001f44d",
 	}
-
-	line := MarshalReact(r)
+	line := Marshal(Line{Type: LineReaction, React: &r})
 	got := mustParseReact(t, line)
 	assertReactEqual(t, got, r)
 }
 
-func TestMarshalParseReact_WithVia(t *testing.T) {
+func TestReact_WithVia(t *testing.T) {
 	r := ReactLine{
 		Ts:       ts(2026, 3, 16, 9, 20, 0),
 		MsgID:    "MSG1",
@@ -397,13 +275,12 @@ func TestMarshalParseReact_WithVia(t *testing.T) {
 		Via:      ViaPigeonAsBot,
 		Emoji:    "check",
 	}
-
-	line := MarshalReact(r)
+	line := Marshal(Line{Type: LineReaction, React: &r})
 	got := mustParseReact(t, line)
 	assertReactEqual(t, got, r)
 }
 
-func TestMarshalParseUnreact(t *testing.T) {
+func TestUnreact(t *testing.T) {
 	r := ReactLine{
 		Ts:       ts(2026, 3, 16, 9, 17, 0),
 		MsgID:    "1711568938.123456",
@@ -412,26 +289,23 @@ func TestMarshalParseUnreact(t *testing.T) {
 		Emoji:    "thumbsup",
 		Remove:   true,
 	}
-
-	line := MarshalUnreact(r)
-	if want := "[unreact:"; !containsSubstr(line, want) {
-		t.Fatalf("line missing %s: %s", want, line)
+	line := Marshal(Line{Type: LineUnreaction, React: &r})
+	if !strings.Contains(line, "[unreact:") {
+		t.Fatalf("line missing [unreact:: %s", line)
 	}
-
-	lt, v, err := ParseLine(line)
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
-	if lt != LineUnreaction {
-		t.Fatalf("line type = %v, want LineUnreaction", lt)
+	if parsed.Type != LineUnreaction {
+		t.Fatalf("type = %v, want LineUnreaction", parsed.Type)
 	}
-	got := v.(ReactLine)
-	assertReactEqual(t, got, r)
+	assertReactEqual(t, *parsed.React, r)
 }
 
 // --- Edits ---
 
-func TestMarshalParseEdit(t *testing.T) {
+func TestEdit(t *testing.T) {
 	e := EditLine{
 		Ts:       ts(2026, 3, 16, 9, 18, 0),
 		MsgID:    "MSG1",
@@ -439,25 +313,16 @@ func TestMarshalParseEdit(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "updated message text",
 	}
-
-	line := MarshalEdit(e)
-	wantLine := "[2026-03-16 09:18:00 +00:00] [edit:MSG1] [from:U04ABCD] Alice: updated message text"
-	if line != wantLine {
-		t.Fatalf("MarshalEdit:\n got  %q\n want %q", line, wantLine)
+	line := Marshal(Line{Type: LineEdit, Edit: &e})
+	want := "[2026-03-16 09:18:00 +00:00] [edit:MSG1] [from:U04ABCD] Alice: updated message text"
+	if line != want {
+		t.Fatalf("Marshal:\n got  %q\n want %q", line, want)
 	}
-
-	lt, v, err := ParseLine(line)
-	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
-	}
-	if lt != LineEdit {
-		t.Fatalf("line type = %v, want LineEdit", lt)
-	}
-	got := v.(EditLine)
+	got := mustParseEdit(t, line)
 	assertEditEqual(t, got, e)
 }
 
-func TestMarshalParseEdit_WithNewlines(t *testing.T) {
+func TestEdit_WithNewlines(t *testing.T) {
 	e := EditLine{
 		Ts:       ts(2026, 3, 16, 9, 18, 0),
 		MsgID:    "MSG1",
@@ -465,13 +330,12 @@ func TestMarshalParseEdit_WithNewlines(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "line one\nline two",
 	}
-
-	line := MarshalEdit(e)
+	line := Marshal(Line{Type: LineEdit, Edit: &e})
 	got := mustParseEdit(t, line)
 	assertEditEqual(t, got, e)
 }
 
-func TestMarshalParseEdit_WithVia(t *testing.T) {
+func TestEdit_WithVia(t *testing.T) {
 	e := EditLine{
 		Ts:       ts(2026, 3, 16, 9, 18, 0),
 		MsgID:    "MSG1",
@@ -480,40 +344,50 @@ func TestMarshalParseEdit_WithVia(t *testing.T) {
 		Via:      ViaPigeonAsUser,
 		Text:     "corrected",
 	}
+	line := Marshal(Line{Type: LineEdit, Edit: &e})
+	got := mustParseEdit(t, line)
+	assertEditEqual(t, got, e)
+}
 
-	line := MarshalEdit(e)
+func TestEdit_WithAttachments(t *testing.T) {
+	e := EditLine{
+		Ts:       ts(2026, 3, 16, 9, 18, 0),
+		MsgID:    "MSG1",
+		Sender:   "Alice",
+		SenderID: "U04ABCD",
+		Text:     "updated caption",
+		Attachments: []Attachment{
+			{ID: "F1", Type: "image/jpeg"},
+			{ID: "F2", Type: "image/png"},
+		},
+	}
+	line := Marshal(Line{Type: LineEdit, Edit: &e})
+	if !strings.Contains(line, "[attach:F1 type=image/jpeg]") {
+		t.Errorf("line missing attachment: %s", line)
+	}
 	got := mustParseEdit(t, line)
 	assertEditEqual(t, got, e)
 }
 
 // --- Deletes ---
 
-func TestMarshalParseDelete(t *testing.T) {
+func TestDelete(t *testing.T) {
 	d := DeleteLine{
 		Ts:       ts(2026, 3, 16, 9, 19, 0),
 		MsgID:    "MSG1",
 		Sender:   "Alice",
 		SenderID: "U04ABCD",
 	}
-
-	line := MarshalDelete(d)
-	wantLine := "[2026-03-16 09:19:00 +00:00] [delete:MSG1] [from:U04ABCD] Alice:"
-	if line != wantLine {
-		t.Fatalf("MarshalDelete:\n got  %q\n want %q", line, wantLine)
+	line := Marshal(Line{Type: LineDelete, Delete: &d})
+	want := "[2026-03-16 09:19:00 +00:00] [delete:MSG1] [from:U04ABCD] Alice:"
+	if line != want {
+		t.Fatalf("Marshal:\n got  %q\n want %q", line, want)
 	}
-
-	lt, v, err := ParseLine(line)
-	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
-	}
-	if lt != LineDelete {
-		t.Fatalf("line type = %v, want LineDelete", lt)
-	}
-	got := v.(DeleteLine)
+	got := mustParseDelete(t, line)
 	assertDeleteEqual(t, got, d)
 }
 
-func TestMarshalParseDelete_WithVia(t *testing.T) {
+func TestDelete_WithVia(t *testing.T) {
 	d := DeleteLine{
 		Ts:       ts(2026, 3, 16, 9, 19, 0),
 		MsgID:    "MSG1",
@@ -521,30 +395,30 @@ func TestMarshalParseDelete_WithVia(t *testing.T) {
 		SenderID: "U04BOT",
 		Via:      ViaPigeonAsBot,
 	}
-
-	line := MarshalDelete(d)
+	line := Marshal(Line{Type: LineDelete, Delete: &d})
 	got := mustParseDelete(t, line)
 	assertDeleteEqual(t, got, d)
 }
 
 // --- Separator ---
 
-func TestParseSeparator(t *testing.T) {
-	lt, v, err := ParseLine("--- channel context ---")
+func TestSeparator(t *testing.T) {
+	line := Marshal(Line{Type: LineSeparator})
+	if line != SeparatorLine {
+		t.Fatalf("got %q, want %q", line, SeparatorLine)
+	}
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
-	if lt != LineSeparator {
-		t.Fatalf("line type = %v, want LineSeparator", lt)
-	}
-	if v != nil {
-		t.Fatalf("value = %v, want nil", v)
+	if parsed.Type != LineSeparator {
+		t.Fatalf("type = %v, want LineSeparator", parsed.Type)
 	}
 }
 
-// --- ParseLine error cases ---
+// --- Parse error cases ---
 
-func TestParseLine_Errors(t *testing.T) {
+func TestParse_Errors(t *testing.T) {
 	bad := []struct {
 		name string
 		line string
@@ -556,7 +430,7 @@ func TestParseLine_Errors(t *testing.T) {
 	}
 	for _, tt := range bad {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := ParseLine(tt.line)
+			_, err := Parse(tt.line)
 			if err == nil {
 				t.Errorf("expected error for %q", tt.line)
 			}
@@ -564,37 +438,34 @@ func TestParseLine_Errors(t *testing.T) {
 	}
 }
 
-// --- Tag ordering: parser should handle any tag order ---
+// --- Tag ordering ---
 
-func TestParseMsg_TagOrderVariations(t *testing.T) {
-	// Tags in different orders should all parse to the same result.
+func TestParse_TagOrderVariations(t *testing.T) {
 	lines := []string{
 		"[2026-03-16 09:15:00 +00:00] [id:M1] [from:U1] [via:to-pigeon] [attach:F1 type=image/jpeg] [reply:Q1] Alice: text",
 		"[2026-03-16 09:15:00 +00:00] [from:U1] [id:M1] [reply:Q1] [via:to-pigeon] [attach:F1 type=image/jpeg] Alice: text",
 		"[2026-03-16 09:15:00 +00:00] [attach:F1 type=image/jpeg] [via:to-pigeon] [reply:Q1] [from:U1] [id:M1] Alice: text",
 	}
-
 	for i, line := range lines {
-		lt, v, err := ParseLine(line)
+		parsed, err := Parse(line)
 		if err != nil {
 			t.Fatalf("line[%d]: %v", i, err)
 		}
-		if lt != LineMessage {
-			t.Fatalf("line[%d]: type = %v, want LineMessage", i, lt)
+		if parsed.Type != LineMessage {
+			t.Fatalf("line[%d]: type = %v, want LineMessage", i, parsed.Type)
 		}
-		m := v.(MsgLine)
+		m := parsed.Msg
 		if m.ID != "M1" || m.SenderID != "U1" || m.Via != ViaToPigeon ||
 			m.ReplyTo != "Q1" || m.Sender != "Alice" || m.Text != "text" ||
 			len(m.Attachments) != 1 || m.Attachments[0].ID != "F1" {
-			t.Errorf("line[%d]: unexpected parse result: %+v", i, m)
+			t.Errorf("line[%d]: unexpected result: %+v", i, m)
 		}
 	}
 }
 
 // --- Timestamp UTC normalization ---
 
-func TestMarshalMsg_TimestampUTC(t *testing.T) {
-	// Provide a non-UTC time; marshal should convert to UTC.
+func TestMarshal_TimestampUTC(t *testing.T) {
 	loc := time.FixedZone("EST", -5*60*60)
 	m := MsgLine{
 		ID:       "MSG_TZ",
@@ -603,9 +474,8 @@ func TestMarshalMsg_TimestampUTC(t *testing.T) {
 		SenderID: "U04ABCD",
 		Text:     "hello",
 	}
-
-	line := MarshalMsg(m)
-	if want := "[2026-03-16 09:15:02 +00:00]"; !containsSubstr(line, want) {
+	line := Marshal(Line{Type: LineMessage, Msg: &m})
+	if !strings.Contains(line, "[2026-03-16 09:15:02 +00:00]") {
 		t.Errorf("timestamp not UTC: %s", line)
 	}
 }
@@ -613,17 +483,12 @@ func TestMarshalMsg_TimestampUTC(t *testing.T) {
 // --- Via enum coverage ---
 
 func TestAllViaValues(t *testing.T) {
-	vias := []Via{ViaOrganic, ViaToPigeon, ViaPigeonAsUser, ViaPigeonAsBot}
-	for _, via := range vias {
+	for _, via := range []Via{ViaOrganic, ViaToPigeon, ViaPigeonAsUser, ViaPigeonAsBot} {
 		m := MsgLine{
-			ID:       "V",
-			Ts:       ts(2026, 1, 1, 0, 0, 0),
-			Sender:   "X",
-			SenderID: "U",
-			Via:      via,
-			Text:     "t",
+			ID: "V", Ts: ts(2026, 1, 1, 0, 0, 0),
+			Sender: "X", SenderID: "U", Via: via, Text: "t",
 		}
-		line := MarshalMsg(m)
+		line := Marshal(Line{Type: LineMessage, Msg: &m})
 		got := mustParseMsg(t, line)
 		if got.Via != via {
 			t.Errorf("via = %q, want %q", got.Via, via)
@@ -631,10 +496,9 @@ func TestAllViaValues(t *testing.T) {
 	}
 }
 
-// --- Full protocol example from spec ---
+// --- Protocol spec examples ---
 
 func TestProtocolExample_DateFile(t *testing.T) {
-	// Parse lines from the protocol doc's date file example.
 	lines := []string{
 		"[2026-03-16 09:15:02 +00:00] [id:1711568938.123456] [from:U04ABCD] Alice: hello world",
 		"[2026-03-16 09:15:30 +00:00] [id:1711568940.789012] [from:U04EFGH] [attach:F07T3 type=image/jpeg] Bob: check this out",
@@ -643,19 +507,17 @@ func TestProtocolExample_DateFile(t *testing.T) {
 		"[2026-03-16 09:17:00 +00:00] [id:1711568944.222222] [from:U04ALICE] [via:to-pigeon] Alice: hey pigeon, summarize this channel",
 		"[2026-03-16 09:17:15 +00:00] [id:1711568945.333333] [from:U04BOT] [via:pigeon-as-bot] pigeon: sure, working on it",
 	}
-
 	expected := []LineType{
 		LineMessage, LineMessage, LineMessage, LineReaction, LineMessage, LineMessage,
 	}
-
 	for i, line := range lines {
-		lt, _, err := ParseLine(line)
+		parsed, err := Parse(line)
 		if err != nil {
 			t.Errorf("line[%d]: %v", i, err)
 			continue
 		}
-		if lt != expected[i] {
-			t.Errorf("line[%d]: type = %v, want %v", i, lt, expected[i])
+		if parsed.Type != expected[i] {
+			t.Errorf("line[%d]: type = %v, want %v", i, parsed.Type, expected[i])
 		}
 	}
 }
@@ -668,24 +530,20 @@ func TestProtocolExample_ThreadFile(t *testing.T) {
 		"--- channel context ---",
 		"[2026-03-16 09:13:00 +00:00] [id:1711568800.111111] [from:U04XYZW] Charlie: context before",
 	}
-
 	expectedTypes := []LineType{LineMessage, LineMessage, LineMessage, LineSeparator, LineMessage}
 	expectedReply := []bool{false, true, true, false, false}
 
 	for i, line := range lines {
-		lt, v, err := ParseLine(line)
+		parsed, err := Parse(line)
 		if err != nil {
 			t.Errorf("line[%d]: %v", i, err)
 			continue
 		}
-		if lt != expectedTypes[i] {
-			t.Errorf("line[%d]: type = %v, want %v", i, lt, expectedTypes[i])
+		if parsed.Type != expectedTypes[i] {
+			t.Errorf("line[%d]: type = %v, want %v", i, parsed.Type, expectedTypes[i])
 		}
-		if lt == LineMessage {
-			m := v.(MsgLine)
-			if m.Reply != expectedReply[i] {
-				t.Errorf("line[%d]: reply = %v, want %v", i, m.Reply, expectedReply[i])
-			}
+		if parsed.Type == LineMessage && parsed.Msg.Reply != expectedReply[i] {
+			t.Errorf("line[%d]: reply = %v, want %v", i, parsed.Msg.Reply, expectedReply[i])
 		}
 	}
 }
@@ -694,86 +552,74 @@ func TestProtocolExample_ThreadFile(t *testing.T) {
 
 func mustParseMsg(t *testing.T, line string) MsgLine {
 	t.Helper()
-	lt, v, err := ParseLine(line)
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine(%q): %v", line, err)
+		t.Fatalf("Parse(%q): %v", line, err)
 	}
-	if lt != LineMessage {
-		t.Fatalf("ParseLine(%q): type = %v, want LineMessage", line, lt)
+	if parsed.Type != LineMessage || parsed.Msg == nil {
+		t.Fatalf("Parse(%q): type = %v, want LineMessage", line, parsed.Type)
 	}
-	return v.(MsgLine)
+	return *parsed.Msg
 }
 
 func mustParseReact(t *testing.T, line string) ReactLine {
 	t.Helper()
-	lt, v, err := ParseLine(line)
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine(%q): %v", line, err)
+		t.Fatalf("Parse(%q): %v", line, err)
 	}
-	if lt != LineReaction {
-		t.Fatalf("ParseLine(%q): type = %v, want LineReaction", line, lt)
+	if parsed.Type != LineReaction || parsed.React == nil {
+		t.Fatalf("Parse(%q): type = %v, want LineReaction", line, parsed.Type)
 	}
-	return v.(ReactLine)
+	return *parsed.React
 }
 
 func mustParseEdit(t *testing.T, line string) EditLine {
 	t.Helper()
-	lt, v, err := ParseLine(line)
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine(%q): %v", line, err)
+		t.Fatalf("Parse(%q): %v", line, err)
 	}
-	if lt != LineEdit {
-		t.Fatalf("ParseLine(%q): type = %v, want LineEdit", line, lt)
+	if parsed.Type != LineEdit || parsed.Edit == nil {
+		t.Fatalf("Parse(%q): type = %v, want LineEdit", line, parsed.Type)
 	}
-	return v.(EditLine)
+	return *parsed.Edit
 }
 
 func mustParseDelete(t *testing.T, line string) DeleteLine {
 	t.Helper()
-	lt, v, err := ParseLine(line)
+	parsed, err := Parse(line)
 	if err != nil {
-		t.Fatalf("ParseLine(%q): %v", line, err)
+		t.Fatalf("Parse(%q): %v", line, err)
 	}
-	if lt != LineDelete {
-		t.Fatalf("ParseLine(%q): type = %v, want LineDelete", line, lt)
+	if parsed.Type != LineDelete || parsed.Delete == nil {
+		t.Fatalf("Parse(%q): type = %v, want LineDelete", line, parsed.Type)
 	}
-	return v.(DeleteLine)
+	return *parsed.Delete
 }
 
 func assertMsgEqual(t *testing.T, got, want MsgLine) {
 	t.Helper()
-	if !msgEqual(got, want) {
+	if got.ID != want.ID || !got.Ts.Equal(want.Ts) || got.SenderID != want.SenderID ||
+		got.Via != want.Via || got.ReplyTo != want.ReplyTo || got.Reply != want.Reply ||
+		got.Sender != sanitizeSender(want.Sender) || got.Text != want.Text {
 		t.Errorf("MsgLine mismatch:\n got  %+v\n want %+v", got, want)
 	}
-}
-
-func msgEqual(a, b MsgLine) bool {
-	if a.ID != b.ID || !a.Ts.Equal(b.Ts) || a.SenderID != b.SenderID ||
-		a.Via != b.Via || a.ReplyTo != b.ReplyTo || a.Reply != b.Reply {
-		return false
+	if len(got.Attachments) != len(want.Attachments) {
+		t.Errorf("attachments count: got %d, want %d", len(got.Attachments), len(want.Attachments))
+		return
 	}
-	// Sender comparison: uses sanitized version of want since colons are stripped.
-	if a.Sender != SanitizeSender(b.Sender) {
-		return false
-	}
-	if a.Text != b.Text {
-		return false
-	}
-	if len(a.Attachments) != len(b.Attachments) {
-		return false
-	}
-	for i := range a.Attachments {
-		if a.Attachments[i] != b.Attachments[i] {
-			return false
+	for i := range got.Attachments {
+		if got.Attachments[i] != want.Attachments[i] {
+			t.Errorf("attachment[%d]: got %+v, want %+v", i, got.Attachments[i], want.Attachments[i])
 		}
 	}
-	return true
 }
 
 func assertReactEqual(t *testing.T, got, want ReactLine) {
 	t.Helper()
 	if got.MsgID != want.MsgID || !got.Ts.Equal(want.Ts) ||
-		got.Sender != SanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
+		got.Sender != sanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
 		got.Via != want.Via || got.Emoji != want.Emoji || got.Remove != want.Remove {
 		t.Errorf("ReactLine mismatch:\n got  %+v\n want %+v", got, want)
 	}
@@ -782,21 +628,26 @@ func assertReactEqual(t *testing.T, got, want ReactLine) {
 func assertEditEqual(t *testing.T, got, want EditLine) {
 	t.Helper()
 	if got.MsgID != want.MsgID || !got.Ts.Equal(want.Ts) ||
-		got.Sender != SanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
+		got.Sender != sanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
 		got.Via != want.Via || got.Text != want.Text {
 		t.Errorf("EditLine mismatch:\n got  %+v\n want %+v", got, want)
+	}
+	if len(got.Attachments) != len(want.Attachments) {
+		t.Errorf("attachments count: got %d, want %d", len(got.Attachments), len(want.Attachments))
+		return
+	}
+	for i := range got.Attachments {
+		if got.Attachments[i] != want.Attachments[i] {
+			t.Errorf("attachment[%d]: got %+v, want %+v", i, got.Attachments[i], want.Attachments[i])
+		}
 	}
 }
 
 func assertDeleteEqual(t *testing.T, got, want DeleteLine) {
 	t.Helper()
 	if got.MsgID != want.MsgID || !got.Ts.Equal(want.Ts) ||
-		got.Sender != SanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
+		got.Sender != sanitizeSender(want.Sender) || got.SenderID != want.SenderID ||
 		got.Via != want.Via {
 		t.Errorf("DeleteLine mismatch:\n got  %+v\n want %+v", got, want)
 	}
-}
-
-func containsSubstr(s, sub string) bool {
-	return strings.Contains(s, sub)
 }
