@@ -74,7 +74,7 @@ func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 
 		var rejected *rejectedError
 		if errors.As(err, &rejected) {
-			slog.Error("session rejected by daemon, stopping", "session_id", ds.sessionID, "reason", rejected.reason)
+			slog.Error("session rejected by daemon, stopping", "reason", rejected.reason)
 			ds.notify(ClaudeChannelNotification{
 				Content: "pigeon disconnected — " + rejected.reason,
 			})
@@ -124,7 +124,7 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, msg)
 	}
 
-	slog.Info("sse connected to daemon", "session_id", ds.sessionID, "cwd", ds.cwd)
+	slog.Info("sse connected to daemon")
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {

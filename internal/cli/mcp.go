@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -17,7 +19,14 @@ func newMCPCmd() *cobra.Command {
 		Short:   "Start the MCP server over stdio",
 		GroupID: groupDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.InitFile(logging.MCP)
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+			logging.InitFile(logging.MCP,
+				slog.String("session_id", os.Getenv("PIGEON_SESSION_ID")),
+				slog.String("cwd", cwd),
+			)
 			s := mcpserver.New(paths.SocketPath())
 			slog.Info("serving stdio")
 			return server.ServeStdio(s)

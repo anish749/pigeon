@@ -109,6 +109,7 @@ func (h *Hub) SSEHandler() http.HandlerFunc {
 				}
 				fmt.Fprintf(w, "data: %s\n\n", data)
 				flusher.Flush()
+				slog.Info("sse event flushed", "session_id", sessionID, "bytes", len(data))
 			}
 		}
 	}
