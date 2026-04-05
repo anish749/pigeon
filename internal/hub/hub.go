@@ -129,7 +129,7 @@ func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 		if ch.sessionID != s.SessionID {
 			if old, ok := h.sessions[ch.sessionID]; ok {
 				if err := old.Send(h.ctx, &TextNotificationMsg{
-					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
+					Text: "pigeon disconnected — a new session took over for " + acct.Display() + ". Restart Claude Code to reconnect.",
 				}); err != nil {
 					slog.Error("failed to send disconnect notification",
 						"session_id", ch.sessionID, "error", err)
@@ -198,7 +198,7 @@ func (h *Hub) Register(s *Session) error {
 			// Notify the old session that it's being replaced.
 			if old, ok := h.sessions[ch.sessionID]; ok {
 				if err := old.Send(h.ctx, &TextNotificationMsg{
-					Text: "pigeon disconnected — a new session took over for " + acct.Display(),
+					Text: "pigeon disconnected — a new session took over for " + acct.Display() + ". Restart Claude Code to reconnect.",
 				}); err != nil {
 					slog.Error("failed to send disconnect notification",
 						"session_id", ch.sessionID, "error", err)
