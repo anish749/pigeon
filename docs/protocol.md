@@ -64,7 +64,7 @@ greppable with standard tools. All files are UTF-8 encoded.
 
 2. **Thread files**: one per thread, named by the parent message's platform
    timestamp. Contains the parent, replies, channel context
-   (`threadContextMessages = 7` messages before and 7 after the parent),
+   (`threadContextPerDirection = 7` messages before and 7 after the parent),
    and reactions.
 
 **Three operations** happen on these files:
@@ -450,6 +450,15 @@ When a reaction event arrives, the writer:
 
 Reactions on thread messages are appended to the thread file.
 
+### Edit and Delete Placement
+
+Same rule as reactions. The writer derives the date file from the
+**original message's** timestamp, not the edit/delete event's own
+timestamp. This ensures the edit/delete line lands in the same file as
+the message it targets.
+
+Edits and deletes on thread messages are appended to the thread file.
+
 ### Attachment Storage
 
 When a message with an attachment arrives, the writer:
@@ -487,13 +496,19 @@ Keys are file paths relative to the account directory. Values are the file's
 
 One state file per account, stored alongside `.sync-cursors.yaml`.
 
+### Concurrency
+
+Maintenance runs in the same daemon process as the writers. It acquires
+the same per-file mutex before reading or rewriting a file. Writers block
+while maintenance holds the lock. No external lock file is needed.
+
 ### Run Procedure
 
 1. Load `.maintenance.json` (empty map if missing).
 2. Walk all `.txt` files in the account directory.
 3. `stat` each file to get current `mtime`.
 4. Skip files where `mtime` equals the stored timestamp (unchanged).
-5. For each changed file:
+5. For each changed file (acquire per-file mutex before proceeding):
    a. Parse all lines, classify by type.
    b. Deduplicate message lines by message ID (keep first occurrence).
    c. Deduplicate reaction lines by (message ID, emoji, sender ID) tuple.
@@ -512,7 +527,7 @@ One state file per account, stored alongside `.sync-cursors.yaml`.
    g. Sort message lines by timestamp (stable sort).
    h. Relocate reaction lines after their target message.
    i. Reactions referencing an unknown message ID stay at the end.
-   j. Rewrite the file only if content changed.
+   j. Rewrite the file only if content changed. Release the per-file mutex.
 6. Update `.maintenance.json` with current `mtime` for each processed file.
 
 ### When Maintenance Runs
@@ -759,11 +774,12 @@ protocol version.
   as-is from the platform. Slug transformations are only for directory
   names.
 
-### WhatsApp Group Renames Split Conversations
+### Channel and Group Renames Split Conversations
 
-WhatsApp group conversation directories are named by the slugified group
-name. If a group is renamed, the new name produces a new slug, which
-creates a new directory. Messages before the rename stay in the old
-directory; messages after go to the new one. The protocol does not
-handle merging these. This is a known limitation of using the group name
-as the directory key rather than a stable group JID.
+Conversation directories are named by the channel or group name (slugified
+for WhatsApp groups). If a channel or group is renamed, the new name
+produces a new directory. Messages before the rename stay in the old
+directory; messages after go to the new one. The protocol does not handle
+merging these. This applies to both Slack channels (e.g. `#engineering`
+renamed to `#platform-eng`) and WhatsApp groups. It is a known limitation
+of using names as directory keys rather than stable platform IDs.
