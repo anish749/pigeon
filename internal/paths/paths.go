@@ -88,22 +88,3 @@ func DBLockPath() string {
 	return DefaultDBPath() + ".lock"
 }
 
-// PlatformDir returns the data directory for a specific platform.
-func PlatformDir(platform string) string {
-	return filepath.Join(DataDir(), platform)
-}
-
-// AccountDir returns the data directory for a specific account.
-func AccountDir(platform, account string) string {
-	return filepath.Join(DataDir(), platform, account)
-}
-
-// ThreadDir returns the path to the threads directory for a conversation.
-func ThreadDir(platform, account, conversation string) string {
-	return filepath.Join(DataDir(), platform, account, conversation, "threads")
-}
-
-// ThreadFilePath returns the path to a specific thread file.
-func ThreadFilePath(platform, account, conversation, threadTS string) string {
-	return filepath.Join(ThreadDir(platform, account, conversation), threadTS+".txt")
-}

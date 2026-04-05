@@ -72,14 +72,14 @@ func RunSearch(p SearchParams) error {
 
 // searchPath returns the directory to search based on platform/account filters.
 func searchPath(platform, acctName string) string {
+	root := paths.DefaultDataRoot()
 	switch {
 	case platform != "" && acctName != "":
-		acct := account.New(platform, acctName)
-		return paths.AccountDir(platform, acct.NameSlug())
+		return root.AccountFor(account.New(platform, acctName)).Path()
 	case platform != "":
-		return paths.PlatformDir(platform)
+		return root.Platform(platform).Path()
 	default:
-		return paths.DataDir()
+		return root.Path()
 	}
 }
 

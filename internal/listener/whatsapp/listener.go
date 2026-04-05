@@ -13,6 +13,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
@@ -83,7 +84,7 @@ func (l *Listener) handleLoggedOut(ctx context.Context, evt *events.LoggedOut) {
 	}
 
 	// Delete message data.
-	dataDir := l.acct.DataDir()
+	dataDir := paths.DefaultDataRoot().AccountFor(l.acct).Path()
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.ErrorContext(ctx, "whatsapp: failed to delete message data",
 			"account", l.acct, "error", err)

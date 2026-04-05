@@ -25,6 +25,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/outbox"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 
@@ -494,7 +495,7 @@ func formatAmbiguousContacts(err *walistener.AmbiguousContactError, acct account
 // convActivity returns the most recent message date and total line count
 // for a conversation directory.
 func convActivity(acct account.Account, conversation string) (lastDate string, totalLines int) {
-	dir := acct.ConversationDir(conversation)
+	dir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conversation).Path()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", 0

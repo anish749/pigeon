@@ -128,7 +128,7 @@ func TestRg_NoNewlinesInMessages(t *testing.T) {
 	}
 	s.Append(acct, "#general", m)
 
-	file := s.convDir(acct, "#general") + "/2026-03-16.txt"
+	file := s.convDir(acct, "#general").DateFile("2026-03-16")
 
 	// rg should find all three "line X" substrings on the same single line
 	matches := rgFile(t, "line one", file)
@@ -301,7 +301,7 @@ func TestJq_SortByTimestamp(t *testing.T) {
 	s.Append(acct, "#general", msgLine("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second"))
 	s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "first"))
 
-	file := s.convDir(acct, "#general") + "/2026-03-16.txt"
+	file := s.convDir(acct, "#general").DateFile("2026-03-16")
 
 	// jq -s slurps all lines into an array, sort_by(.ts) sorts, then re-emit .id
 	out, err := exec.Command("jq", "-r", "-s", `sort_by(.ts)[] | .id`, file).Output()

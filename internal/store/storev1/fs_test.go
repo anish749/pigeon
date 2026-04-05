@@ -2,18 +2,18 @@ package storev1
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func setup(t *testing.T) (*FSStore, account.Account) {
 	t.Helper()
-	dir := t.TempDir()
-	store := NewFSStore(dir)
+	root := paths.NewDataRoot(t.TempDir())
+	store := NewFSStore(root)
 	acct := account.New("slack", "acme-corp")
 	return store, acct
 }
@@ -215,8 +215,8 @@ func TestMaintain(t *testing.T) {
 	}
 
 	// Read the raw file to verify it was compacted
-	dir := filepath.Join(s.base, "slack", "acme-corp", "#general")
-	data, err := os.ReadFile(filepath.Join(dir, "2026-03-16.txt"))
+	conv := s.convDir(acct, "#general")
+	data, err := os.ReadFile(conv.DateFile("2026-03-16"))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestMaintain(t *testing.T) {
 	}
 
 	// Verify maintenance state file exists
-	stateFile := filepath.Join(s.base, "slack", "acme-corp", ".maintenance.json")
+	stateFile := s.root.AccountFor(acct).MaintenancePath()
 	if !fileExists(stateFile) {
 		t.Error("maintenance state file not created")
 	}
@@ -244,13 +244,13 @@ func TestMaintain_SkipsUnchangedFiles(t *testing.T) {
 	s.Maintain(acct)
 
 	// Get mtime of file after first maintenance
-	dir := filepath.Join(s.base, "slack", "acme-corp", "#general")
-	info1, _ := os.Stat(filepath.Join(dir, "2026-03-16.txt"))
+	dateFile := s.convDir(acct, "#general").DateFile("2026-03-16")
+	info1, _ := os.Stat(dateFile)
 
 	// Second maintenance (no changes) should not rewrite
 	s.Maintain(acct)
 
-	info2, _ := os.Stat(filepath.Join(dir, "2026-03-16.txt"))
+	info2, _ := os.Stat(dateFile)
 	if !info1.ModTime().Equal(info2.ModTime()) {
 		t.Error("maintenance rewrote file that hadn't changed")
 	}

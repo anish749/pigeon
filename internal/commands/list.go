@@ -10,7 +10,7 @@ import (
 )
 
 func RunList(platform, accountName string) error {
-	s := storev1.NewFSStore(paths.DataDir())
+	s := storev1.NewFSStore(paths.DefaultDataRoot())
 
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {

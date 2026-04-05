@@ -71,7 +71,7 @@ func RunSetupWhatsApp(dbPath string) error {
 			// process, not inside the daemon. The device lock (acquired above)
 			// guarantees the daemon is not running, so there is no concurrent
 			// access to the data directory.
-			setupStore := storev1.NewFSStore(paths.DataDir())
+			setupStore := storev1.NewFSStore(paths.DefaultDataRoot())
 			listener := walistener.New(client, acct, setupStore, nil, nil)
 			client.AddEventHandler(listener.EventHandler(ctx))
 

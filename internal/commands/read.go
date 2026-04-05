@@ -21,7 +21,7 @@ type ReadParams struct {
 }
 
 func RunRead(p ReadParams) error {
-	s := storev1.NewFSStore(paths.DataDir())
+	s := storev1.NewFSStore(paths.DefaultDataRoot())
 	acct := account.New(p.Platform, p.Account)
 	aliases := loadAliases(acct)
 
@@ -54,9 +54,9 @@ func RunRead(p ReadParams) error {
 
 	lines := modelv1.FormatDateFile(df, time.Local, true)
 
-	dir := acct.ConversationDir(conv.dirName)
+	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)
-	fmt.Printf("    %s\n", dir)
+	fmt.Printf("    %s\n", convDir.Path())
 	fmt.Println(strings.Join(lines, "\n"))
 	return nil
 }

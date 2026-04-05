@@ -87,7 +87,7 @@ func DaemonRun(version string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	store := storev1.NewFSStore(paths.DataDir())
+	store := storev1.NewFSStore(paths.DefaultDataRoot())
 
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {

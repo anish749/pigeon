@@ -1,15 +1,12 @@
 // Package account provides a canonical representation of a messaging account
-// (platform + account name pair). All name-derived forms (slugs, display names,
-// data directory paths) are computed from a single source of truth.
+// (platform + account name pair). Slugs and display names are computed from a
+// single source of truth. For filesystem paths, use the paths.DataRoot type chain.
 package account
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/gosimple/slug"
-
-	"github.com/anish749/pigeon/internal/paths"
 )
 
 // Account identifies a messaging account with a platform and display name.
@@ -48,20 +45,7 @@ func (a Account) Display() string {
 	return a.Platform + "/" + a.Name
 }
 
-// DataDir returns the full absolute data directory path for this account,
-// e.g. "~/.local/share/pigeon/slack/coding-with-anish".
-func (a Account) DataDir() string {
-	return filepath.Join(paths.DataDir(), a.Platform, slug.Make(a.Name))
-}
-
 // NameSlug returns just the slugified account name: "coding-with-anish".
-// Use when platform and account are needed as separate path components.
 func (a Account) NameSlug() string {
 	return slug.Make(a.Name)
-}
-
-// ConversationDir returns the full absolute data directory path for a
-// conversation within this account.
-func (a Account) ConversationDir(conversation string) string {
-	return filepath.Join(a.DataDir(), conversation)
 }
