@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -142,7 +142,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 // ConnectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
 func ConnectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsmeow.Client, error) {
 	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
-	container, err := sqlstore.New(ctx, "sqlite3", dsn, walog.New(ctx, "whatsapp-db"))
+	container, err := sqlstore.New(ctx, "sqlite", dsn, walog.New(ctx, "whatsapp-db"))
 	if err != nil {
 		return nil, fmt.Errorf("create device store: %w", err)
 	}
