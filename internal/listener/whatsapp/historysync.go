@@ -10,7 +10,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // handleHistorySync processes a history sync event from whatsmeow, writing all
@@ -160,9 +160,19 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 		}
 		ts := time.Unix(int64(msgTS), 0)
 
-		senderName := l.resolveHistorySender(ctx, chatJID, wmi, isGroup)
+		senderName, senderID := l.resolveHistorySenderWithID(ctx, chatJID, wmi, isGroup)
 
-		if err := store.WriteMessage(l.acct.Platform, l.acct.NameSlug(), convDir, senderName, text, ts); err != nil {
+		line := modelv1.Line{
+			Type: modelv1.LineMessage,
+			Msg: &modelv1.MsgLine{
+				ID:       wmi.GetKey().GetID(),
+				Ts:       ts,
+				Sender:   senderName,
+				SenderID: senderID,
+				Text:     text,
+			},
+		}
+		if err := l.store.Append(l.acct, convDir, line); err != nil {
 			slog.ErrorContext(ctx, "whatsapp: history sync: write failed",
 				"error", err, "account", l.acct, "conv", convDir)
 			continue
@@ -181,13 +191,20 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 // resolveHistorySender returns the display name for a history sync message sender.
 // Uses the shared resolver (backed by the contact store) for consistency with real-time.
 func (l *Listener) resolveHistorySender(ctx context.Context, chatJID types.JID, wmi *waWeb.WebMessageInfo, isGroup bool) string {
+	name, _ := l.resolveHistorySenderWithID(ctx, chatJID, wmi, isGroup)
+	return name
+}
+
+// resolveHistorySenderWithID returns both the display name and the JID string for a history sync sender.
+func (l *Listener) resolveHistorySenderWithID(ctx context.Context, chatJID types.JID, wmi *waWeb.WebMessageInfo, isGroup bool) (string, string) {
 	key := wmi.GetKey()
 
 	if key.GetFromMe() {
 		if l.client.Store.ID != nil {
-			return l.resolver.ContactName(ctx, *l.client.Store.ID)
+			jid := *l.client.Store.ID
+			return l.resolver.ContactName(ctx, jid), jid.String()
 		}
-		return "me"
+		return "me", ""
 	}
 
 	// Determine sender JID.
@@ -202,13 +219,13 @@ func (l *Listener) resolveHistorySender(ctx context.Context, chatJID types.JID, 
 	}
 
 	if senderJIDStr == "" {
-		return l.resolver.ContactName(ctx, chatJID)
+		return l.resolver.ContactName(ctx, chatJID), chatJID.String()
 	}
 
 	senderJID, err := types.ParseJID(senderJIDStr)
 	if err != nil {
-		return senderJIDStr
+		return senderJIDStr, senderJIDStr
 	}
 
-	return l.resolver.ContactName(ctx, senderJID)
+	return l.resolver.ContactName(ctx, senderJID), senderJID.String()
 }

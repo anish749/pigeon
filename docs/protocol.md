@@ -113,12 +113,12 @@ Directory names that require slugification use `gosimple/slug` v1.x rules
 | Account directory | Slug of account name | `acme-corp`, `15551234567` |
 | WhatsApp conversation dir (DM) | E.164 from JID `"+" + jid.User` | `+14155551234` |
 | WhatsApp conversation dir (group) | Slugified group name | `book-club-nyc` |
-| `[from:...]` Slack | Raw user ID | `U04ABCDEF` |
-| `[from:...]` WhatsApp JID | Raw JID as-is | `14155551234@s.whatsapp.net` |
-| `[from:...]` WhatsApp LID | Raw LID as-is | `abc123@lid` |
+| `from` Slack | Raw user ID | `U04ABCDEF` |
+| `from` WhatsApp JID | Raw JID as-is | `14155551234@s.whatsapp.net` |
+| `from` WhatsApp LID | Raw LID as-is | `abc123@lid` |
 | Sender name fallback (WhatsApp) | E.164 `"+" + jid.User` | `+14155551234` |
 
-The `[from:...]` field always contains the raw platform identifier. The
+The `from` field always contains the raw platform identifier. The
 conversation directory and sender name display may use E.164 format with
 a `+` prefix for human readability, but this is a display convention
 derived from the JID, not a transformation of the stored ID.
@@ -193,7 +193,7 @@ To parse a line:
 **Sender name colon stripping**: if a platform display name contains `:`
 characters (e.g. "Dr. Smith: Cardiologist"), the `:` characters are
 stripped from the sender name at write time. This is an accepted lossy
-transformation. The `[from:...]` tag carries the stable identity; the
+transformation. The `from` tag carries the stable identity; the
 sender name is best-effort for display.
 
 ### Line Type Classification
@@ -255,7 +255,7 @@ Every line is one of: **message**, **reaction**, **unreaction**, **edit**,
   For WhatsApp, resolved in priority order: FullName (address book) >
   PushName (user's self-chosen name) > BusinessName > phone number.
   For Slack, resolved from the workspace user directory.
-  The name may change over time; the `[from:...]` JID/user ID is the
+  The name may change over time; the `from` JID/user ID is the
   stable identity. Colons in display names are stripped at write time
   (see Parsing Algorithm).
 - **Message Text**: everything after `:`, with escaping applied (see Escaping).
@@ -339,13 +339,19 @@ events to compute the final reaction state per message.
 
 ```
 [TIMESTAMP] [edit:MSG_ID] [from:SENDER_ID] Sender Name: updated message text
+[TIMESTAMP] [edit:MSG_ID] [from:SENDER_ID] [attach:ATTACH_ID type=image/jpeg] Sender Name: updated caption
 ```
 
 - **`[edit:MSG_ID]`**: references the message being edited by its ID.
 - **Message Text**: the new full text of the message, with escaping applied.
+- **Attachments**: an edit can add, change, or remove attachments. The
+  `[attach:...]` tags on the edit line represent the complete set of
+  attachments after the edit. If the edit has no `[attach:...]` tags,
+  the message has no attachments after the edit.
 - Appended like any other event. The reader replaces the original message
-  text with the most recent edit (by timestamp). Maintenance replaces the
-  original message line with the edited text and removes the edit line.
+  text and attachments with the most recent edit (by timestamp).
+  Maintenance replaces the original message line with the edited content
+  and removes the edit line.
 
 ### Delete Line
 
@@ -570,7 +576,7 @@ Messages are shown with their aggregated reactions beneath:
 [09:15:30] Bob: check this out [📎 image/jpeg]
 ```
 
-The `[id:...]`, `[from:...]`, `[via:...]`, and `[attach:...]` tags are
+The `[id:...]`, `from`, `[via:...]`, and `[attach:...]` tags are
 stripped for display. They are internal metadata. Attachments may be shown
 as a summary indicator.
 
@@ -629,12 +635,13 @@ type ReactLine struct {
 }
 
 type EditLine struct {
-    Ts       time.Time // when the edit happened
-    MsgID    string    // target message ID
-    Sender   string    // who edited (display name)
-    SenderID string    // who edited (platform ID)
-    Via      Via       // message pathway
-    Text     string    // new message text
+    Ts          time.Time    // when the edit happened
+    MsgID       string       // target message ID
+    Sender      string       // who edited (display name)
+    SenderID    string       // who edited (platform ID)
+    Via         Via          // message pathway
+    Text        string       // new message text
+    Attachments []Attachment // complete attachment set after edit
 }
 
 type DeleteLine struct {
@@ -664,32 +671,31 @@ type ThreadFile struct {
 
 ## Greppability
 
-The format is designed for standard text tools:
+Each event is one JSON object per line (JSONL). Standard text tools work
+directly on the files:
 
-- `grep "Alice:" file.txt` finds messages from Alice.
-- `grep "\[react:" file.txt` finds all reactions.
-- `grep "\[react:1711568938" file.txt` finds reactions to a specific message.
-- `grep "\[attach:" file.txt` finds messages with attachments.
-- `grep "\[edit:" file.txt` finds message edits.
-- `grep "\[delete:" file.txt` finds message deletions.
-- `grep "\[via:" file.txt` finds all pigeon-involved messages.
-- `grep "\[via:pigeon-as" file.txt` finds messages sent by pigeon.
-- `grep "\[via:to-pigeon\]" file.txt` finds messages sent to pigeon's bot.
+- `grep "Alice" file.txt` finds messages involving Alice.
+- `grep "react" file.txt` finds all reactions.
+- `grep "thumbsup" file.txt` finds reactions with a specific emoji.
+- `grep "image/jpeg" file.txt` finds messages with JPEG attachments.
+- `grep "pigeon-as" file.txt` finds messages sent by pigeon.
+- `grep "to-pigeon" file.txt` finds messages sent to pigeon's bot.
 - `grep "deploy" file.txt` finds messages mentioning deploy.
 - `wc -l file.txt` counts total events.
-- `grep "\[id:" file.txt | wc -l` counts messages only.
-- `sort` on the timestamp prefix gives chronological order.
+- `grep '"type":"msg"' file.txt | wc -l` counts messages only.
+- `sort file.txt` gives chronological order (JSONL with `"type"` as
+  first field and ISO 8601 timestamps sort lexicographically).
 
 ## Notes
 
 ### Outgoing Messages
 
 Outgoing messages (sent via `pigeon send` or the MCP send tool) use the
-same line format as incoming messages. The `[from:...]` field contains the
+same line format as incoming messages. The `from` field contains the
 account's own platform user ID (WhatsApp: own JID, Slack: bot user ID or
 authenticated user ID). The sender name is resolved the same way as for
 any other user. There is no special line type for outgoing messages.
-Whether a message is "yours" is determined by comparing `[from:...]` to
+Whether a message is "yours" is determined by comparing `from` to
 the account's own ID.
 
 ### Bot Conversations (Slack)
@@ -716,7 +722,7 @@ timeline in `@Alice/2026-03-16.txt`:
 [ts] [id:...] [from:U04USER] [via:pigeon-as-user] User: Alice, 3pm works for me
 ```
 
-| Scenario | `[from:...]` | `[via:...]` |
+| Scenario | `from` | `[via:...]` |
 |----------|-------------|-------------|
 | User sends directly in Slack | User's ID | (absent) |
 | Third party messages the user | Third party's ID | (absent) |
@@ -749,6 +755,29 @@ System messages (channel joins/leaves, topic changes, etc.) are not part
 of Protocol V1. They are not stored. This may be revisited in a future
 protocol version.
 
+## Storage Format Change: Bracket-Tag → JSONL
+
+The original V1 protocol used a custom bracket-tag line format:
+
+```
+[2026-03-16 09:15:02 +00:00] [id:MSG_ID] [from:SENDER_ID] Sender Name: message text
+```
+
+This has been replaced with JSONL (one JSON object per line):
+
+```json
+{"type":"msg","ts":"2026-03-16T09:15:02Z","id":"MSG_ID","from":"SENDER_ID","sender":"Sender Name","text":"message text"}
+```
+
+**Why:** The bracket-tag format required a hand-rolled parser with edge cases
+that were difficult to eliminate: brackets in sender names broke the tag
+parser, colons in sender names were lossy (stripped at write time), newlines
+and backslashes in non-text fields could corrupt the file, and `]` in tag
+values truncated them. JSONL delegates all serialization to `encoding/json`,
+which handles escaping, quoting, and special characters correctly. The
+one-line-per-event property is preserved, as are `grep`, `wc -l`, and `sort`
+compatibility.
+
 ## Known Limitations
 
 ### Do Not
@@ -768,7 +797,7 @@ protocol version.
   always handle unsorted, duplicated input. Correctness must not depend
   on maintenance having run.
 - **Do not use the sender name as an identifier.** Sender names are
-  best-effort display names that can change. Use `[from:...]` for
+  best-effort display names that can change. Use the `from` field for
   identity.
 - **Do not add or remove `+` from phone numbers.** Store identifiers
   as-is from the platform. Slug transformations are only for directory

@@ -3,7 +3,6 @@ package slack
 import (
 	"context"
 	"log/slog"
-	"os"
 	"strings"
 
 	goslack "github.com/slack-go/slack"
@@ -12,7 +11,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
@@ -119,8 +118,10 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
+	var via modelv1.Via
 	if isBotDM {
 		userName = "sent to pigeon by " + userName
+		via = modelv1.ViaToPigeon
 	}
 	text := l.resolver.ResolveText(ctx, msg.Text)
 	ts := ParseTimestamp(msg.TimeStamp)
@@ -130,7 +131,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(msg.Channel, channelName, userName, text, ts, msg.TimeStamp); err != nil {
+		if err := l.messages.Write(msg.Channel, channelName, userName, msg.User, text, ts, msg.TimeStamp, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
@@ -138,13 +139,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	// Write thread replies to the thread file
 	if isThreadReply {
-		// If thread file doesn't exist yet, fetch and write the parent message first
-		threadPath := store.ThreadFilePath(l.acct.Platform, l.acct.NameSlug(), channelName, msg.ThreadTimeStamp)
-		if _, err := os.Stat(threadPath); os.IsNotExist(err) {
+		// Only fetch the parent from Slack API if the thread file doesn't exist yet.
+		if !l.messages.ThreadExists(channelName, msg.ThreadTimeStamp) {
 			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, text, ts, true); err != nil {
+		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, msg.User, text, ts, msg.TimeStamp, true, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
@@ -207,7 +207,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	userName := l.resolver.UserName(ctx, parent.User)
 	text := l.resolver.ResolveText(ctx, parent.Text)
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, text, ts, false); err != nil {
+	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, parent.User, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}

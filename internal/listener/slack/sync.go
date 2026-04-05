@@ -15,7 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
 
 const (
@@ -60,37 +61,78 @@ func saveCursors(acct account.Account, c syncCursors) error {
 // listener stay consistent.
 type MessageStore struct {
 	acct    account.Account
+	store   storev1.Store
 	mu      gosync.Mutex
 	cursors syncCursors
 }
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account) *MessageStore {
+func NewMessageStore(acct account.Account, s storev1.Store) *MessageStore {
 	return &MessageStore{
 		acct:    acct,
+		store:   s,
 		cursors: loadCursors(acct),
 	}
 }
 
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(channelID, channelName, sender, text string, ts time.Time, slackTS string) error {
-	return store.WriteMessage(ms.acct.Platform, ms.acct.NameSlug(), channelName, sender, text, ts)
+func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:       slackTS,
+			Ts:       ts,
+			Sender:   sender,
+			SenderID: senderID,
+			Via:      via,
+			Text:     text,
+		},
+	}
+	return ms.store.Append(ms.acct, channelName, line)
 }
 
 // WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, text string, ts time.Time, isReply bool) error {
-	return store.WriteThreadMessage(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS, sender, text, ts, isReply)
+func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via) error {
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:       slackTS,
+			Ts:       ts,
+			Sender:   sender,
+			SenderID: senderID,
+			Via:      via,
+			Text:     text,
+			Reply:    isReply,
+		},
+	}
+	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
 }
 
 // WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, text string, ts time.Time) error {
-	return store.WriteThreadContext(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS, sender, text, ts)
+func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string) error {
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:       slackTS,
+			Ts:       ts,
+			Sender:   sender,
+			SenderID: senderID,
+			Text:     text,
+		},
+	}
+	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
 }
 
 // EnsureThreadContextSeparator writes the separator line to a thread file.
 func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS string) error {
-	return store.EnsureThreadContextSeparator(ms.acct.Platform, ms.acct.NameSlug(), channelName, threadTS)
+	line := modelv1.Line{Type: modelv1.LineSeparator}
+	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
+}
+
+// ThreadExists checks if a thread file exists for the given thread timestamp.
+func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
+	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
 }
 
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
@@ -225,7 +267,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			text := resolver.ResolveText(ctx, msg.Text)
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, text, ts, msg.Timestamp); err != nil {
+			if err := ms.Write(ch.ID, channelName, userName, msg.User, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -272,8 +314,18 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
-	// Sort date files so user and bot messages are interleaved by timestamp.
-	store.SortDateFiles(acct.Platform, acct.NameSlug())
+	// Run maintenance after sync. Sync writes user messages and bot DM messages
+	// to the same date files, potentially out of order and with duplicates.
+	// Maintenance deduplicates, sorts, and compacts these files on disk.
+	//
+	// This is best-effort: if it fails, correctness is not affected because
+	// readers always dedup and sort in-memory. The periodic maintenance pass
+	// will also pick up any files missed here. We run it eagerly after sync
+	// because we know the files are dirty and it improves on-disk readability
+	// for grep/cat.
+	if err := ms.store.Maintain(acct); err != nil {
+		slog.WarnContext(ctx, "slack sync: maintenance failed", "account", acct, "error", err)
+	}
 
 	return nil
 }
@@ -357,13 +409,19 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			ts := ParseTimestamp(msg.Timestamp)
 
 			var senderName string
+			var senderID string
+			var via modelv1.Via
 			if msg.BotID != "" {
 				senderName = "sent by pigeon"
+				senderID = msg.BotID
+				via = modelv1.ViaPigeonAsBot
 			} else {
 				senderName = "sent to pigeon by " + resolver.UserName(ctx, msg.User)
+				senderID = msg.User
+				via = modelv1.ViaToPigeon
 			}
 
-			if err := ms.Write(ch.ID, channelName, senderName, text, ts, msg.Timestamp); err != nil {
+			if err := ms.Write(ch.ID, channelName, senderName, senderID, text, ts, msg.Timestamp, via); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -516,7 +574,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			text := resolver.ResolveText(ctx, reply.Text)
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, text, ts, isReply); err != nil {
+			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 		}
@@ -546,7 +604,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					userName := resolver.UserName(ctx, ctxMsg.User)
 					text := resolver.ResolveText(ctx, ctxMsg.Text)
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, text, ts); err != nil {
+					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, ctxMsg.User, text, ts, ctxMsg.Timestamp); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}

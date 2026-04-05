@@ -211,7 +211,7 @@ MAINTENANCE
 
 		// Maintenance
 		newResetCmd(),
-		newResetWhatsAppCmd(),
+		newUnlinkWhatsAppCmd(),
 		newUpdateCmd(version),
 	)
 
