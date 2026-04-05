@@ -61,7 +61,8 @@ func Tail(n int, follow bool) error {
 
 // InitFile configures the default slog logger to write to a rotating log file.
 // It ensures the parent directory exists before opening the file.
-func InitFile(f LogFile) {
+// Optional attrs are baked into every log line (e.g. session_id for MCP).
+func InitFile(f LogFile, attrs ...slog.Attr) {
 	filename := f.path()
 	os.MkdirAll(filepath.Dir(filename), 0755)
 
@@ -70,7 +71,16 @@ func InitFile(f LogFile) {
 		MaxSize:    10,
 		MaxBackups: 2,
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-	})))
+	})
+	if len(attrs) > 0 {
+		args := make([]any, len(attrs))
+		for i, a := range attrs {
+			args[i] = a
+		}
+		slog.SetDefault(slog.New(handler).With(args...))
+	} else {
+		slog.SetDefault(slog.New(handler))
+	}
 }

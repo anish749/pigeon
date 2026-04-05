@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -126,6 +127,14 @@ func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 		// Session file was rewritten with a new session ID — repoint the channel.
 		h.mu.Lock()
 		if ch.sessionID != s.SessionID {
+			if old, ok := h.sessions[ch.sessionID]; ok {
+				if err := old.Send(h.ctx, &TextNotificationMsg{
+					Text: "pigeon disconnected — a new session took over for " + acct.Display() + ". Restart Claude Code to reconnect.",
+				}); err != nil {
+					slog.Error("failed to send disconnect notification",
+						"session_id", ch.sessionID, "error", err)
+				}
+			}
 			slog.Info("session file changed, delivery channel repointed",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
 			ch.sessionID = s.SessionID
@@ -156,14 +165,16 @@ func (h *Hub) Register(s *Session) error {
 	}
 	if found == nil {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "no session file found — launch via 'pigeon claude' first",
+			SessionID:  s.SessionID,
+			Reason:     "no session file found — launch via 'pigeon claude' first",
+			StatusCode: http.StatusNotFound,
 		}
 	}
 	if found.CWD != s.CWD {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "working directory mismatch: session file has " + found.CWD + " but shim reported " + s.CWD,
+			SessionID:  s.SessionID,
+			Reason:     "working directory mismatch: session was created in " + found.CWD + " but current directory is " + s.CWD,
+			StatusCode: http.StatusBadRequest,
 		}
 	}
 
@@ -172,8 +183,9 @@ func (h *Hub) Register(s *Session) error {
 
 	if _, exists := h.sessions[s.SessionID]; exists {
 		return &RegistrationError{
-			SessionID: s.SessionID,
-			Reason:    "session already registered",
+			SessionID:  s.SessionID,
+			Reason:     "this session is already connected in another window",
+			StatusCode: http.StatusConflict,
 		}
 	}
 	h.sessions[s.SessionID] = s
@@ -183,6 +195,15 @@ func (h *Hub) Register(s *Session) error {
 	acct := account.New(found.Platform, found.Account)
 	if ch, exists := h.channels[acct.String()]; exists {
 		if ch.sessionID != s.SessionID {
+			// Notify the old session that it's being replaced.
+			if old, ok := h.sessions[ch.sessionID]; ok {
+				if err := old.Send(h.ctx, &TextNotificationMsg{
+					Text: "pigeon disconnected — a new session took over for " + acct.Display() + ". Restart Claude Code to reconnect.",
+				}); err != nil {
+					slog.Error("failed to send disconnect notification",
+						"session_id", ch.sessionID, "error", err)
+				}
+			}
 			slog.Info("delivery channel repointed to new session",
 				"account", acct, "old_session", ch.sessionID, "new_session", s.SessionID)
 			ch.sessionID = s.SessionID
@@ -297,6 +318,7 @@ func (h *Hub) sendHello(ch *channel) {
 	h.mu.RUnlock()
 
 	if session == nil {
+		slog.Warn("sendHello: session not found", "session_id", ch.sessionID)
 		return
 	}
 
@@ -315,6 +337,8 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 	if err := session.Send(h.ctx, hello); err != nil {
 		slog.Error("failed to send hello", "session_id", ch.sessionID, "error", err)
+	} else {
+		slog.Info("hello sent", "session_id", ch.sessionID, "account", ch.acct)
 	}
 }
 
@@ -379,8 +403,9 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 
 // RegistrationError is returned when session registration fails.
 type RegistrationError struct {
-	SessionID string
-	Reason    string
+	SessionID  string
+	Reason     string
+	StatusCode int // HTTP status code to return to the client.
 }
 
 func (e *RegistrationError) Error() string {

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,9 +16,21 @@ import (
 	"time"
 )
 
+// rejectedError is returned when the daemon permanently rejects this session.
+// The MCP client should not retry.
+type rejectedError struct {
+	reason string
+}
+
+func (e *rejectedError) Error() string {
+	return e.reason
+}
+
 type ClaudeChannelNotification struct {
 	Content string         `json:"content"`
-	Meta    map[string]any `json:"meta"`
+	// Meta must be non-nil (at minimum an empty map). Claude Code ignores
+	// channel notifications where meta serializes as null instead of {}.
+	Meta map[string]any `json:"meta"`
 }
 
 // pigeonDaemonStreamingClient manages the SSE connection to the pigeon daemon and forwards
@@ -53,13 +66,26 @@ func startPigeonDaemonStream(ctx context.Context, socketPath string, notify func
 }
 
 // run connects to the daemon's SSE endpoint and forwards messages.
-// Reconnects automatically on failure. Blocks until ctx is cancelled.
+// Reconnects automatically on transient failures. Stops on permanent rejection.
 func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 	for {
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
 			return
 		}
+
+		var rejected *rejectedError
+		if errors.As(err, &rejected) {
+			slog.Error("session rejected by daemon, stopping", "reason", rejected.reason)
+			if err := ds.notify(ClaudeChannelNotification{
+				Content: "pigeon disconnected — " + rejected.reason,
+				Meta:    map[string]any{},
+			}); err != nil {
+				slog.Error("failed to notify client of rejection", "error", err)
+			}
+			return
+		}
+
 		slog.Warn("sse connection lost, reconnecting", "error", err)
 		select {
 		case <-time.After(2 * time.Second):
@@ -96,10 +122,14 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("unexpected status %d (and failed to read body: %w)", resp.StatusCode, err)
 		}
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		msg := strings.TrimSpace(string(body))
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return &rejectedError{reason: msg}
+		}
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, msg)
 	}
 
-	slog.Info("sse connected to daemon", "session_id", ds.sessionID, "cwd", ds.cwd)
+	slog.Info("sse connected to daemon")
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -111,9 +141,16 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 		var notification ClaudeChannelNotification
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &notification); err != nil {
 			slog.Warn("sse parse error", "error", err)
+			if err := ds.notify(ClaudeChannelNotification{
+				Content: "pigeon: failed to parse daemon event: " + err.Error(),
+				Meta:    map[string]any{},
+			}); err != nil {
+				slog.Error("failed to notify client of parse error", "error", err)
+			}
 			continue
 		}
 
+		slog.Info("forwarding notification", "content_len", len(notification.Content), "meta", notification.Meta)
 		if err := ds.notify(notification); err != nil {
 			slog.Error("channel notification failed", "error", err)
 		}
