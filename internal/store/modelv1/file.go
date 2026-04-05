@@ -45,7 +45,7 @@ func MarshalDateFile(f *DateFile) ([]byte, error) {
 }
 
 // ParseThreadFile parses raw file bytes into a ThreadFile. The thread file
-// has structure: parent (first message), replies (indented), separator,
+// has structure: parent (first message), replies (reply=true), separator,
 // context messages, and reactions/edits/deletes.
 func ParseThreadFile(data []byte) (*ThreadFile, error) {
 	f := &ThreadFile{}
@@ -114,7 +114,7 @@ func MarshalThreadFile(f *ThreadFile) ([]byte, error) {
 	// Replies
 	for i := range f.Replies {
 		r := f.Replies[i]
-		r.Reply = true // ensure indent
+		r.Reply = true // ensure reply flag
 		if err := write(Line{Type: LineMessage, Msg: &r}); err != nil {
 			return nil, fmt.Errorf("marshal thread file: %w", err)
 		}
@@ -211,4 +211,3 @@ func collectDateFileLines(f *DateFile) []Line {
 	}
 	return lines
 }
-

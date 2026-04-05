@@ -9,7 +9,7 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// These tests verify the protocol's greppability claims by writing real files
+// These tests verify the JSONL format's greppability by writing real files
 // and running actual grep/wc commands against them.
 
 func seedGrepData(t *testing.T) (*FSStore, account.Account) {
@@ -98,75 +98,76 @@ func dateFilePath(s *FSStore, acct account.Account) string {
 	return s.convDir(acct, "#general") + "/2026-03-16.txt"
 }
 
-func TestGrep_FindMessagesByAlice(t *testing.T) {
+func TestGrep_FindMessagesBySender(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, "Alice:", dateFilePath(s, acct))
+	matches := grepFile(t, `"sender":"Alice"`, dateFilePath(s, acct))
 	if len(matches) < 2 {
-		t.Errorf("grep 'Alice:' found %d lines, want >= 2", len(matches))
+		t.Errorf("grep found %d lines, want >= 2", len(matches))
 	}
 }
 
 func TestGrep_FindAllReactions(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[react:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"type":"react"`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[react:' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindReactionsToSpecificMessage(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[react:M1\]`, dateFilePath(s, acct))
+	// Match react lines targeting M1
+	matches := grepFile(t, `"type":"react".*"msg":"M1"`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[react:M1]' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindAttachments(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[attach:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"attach":\[`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[attach:' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindEdits(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[edit:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"type":"edit"`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[edit:' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindDeletes(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[delete:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"type":"delete"`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[delete:' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindPigeonMessages(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[via:pigeon-as`, dateFilePath(s, acct))
+	matches := grepFile(t, `"via":"pigeon-as`, dateFilePath(s, acct))
 	if len(matches) != 2 {
-		t.Errorf("grep '[via:pigeon-as' found %d lines, want 2 (as-user + as-bot)", len(matches))
+		t.Errorf("grep found %d lines, want 2 (as-user + as-bot)", len(matches))
 	}
 }
 
 func TestGrep_FindToPigeon(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[via:to-pigeon\]`, dateFilePath(s, acct))
+	matches := grepFile(t, `"via":"to-pigeon"`, dateFilePath(s, acct))
 	if len(matches) != 1 {
-		t.Errorf("grep '[via:to-pigeon]' found %d lines, want 1", len(matches))
+		t.Errorf("grep found %d lines, want 1", len(matches))
 	}
 }
 
 func TestGrep_FindAllVia(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[via:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"via":"`, dateFilePath(s, acct))
 	if len(matches) != 3 {
-		t.Errorf("grep '[via:' found %d lines, want 3", len(matches))
+		t.Errorf("grep found %d lines, want 3", len(matches))
 	}
 }
 
@@ -189,9 +190,9 @@ func TestWc_CountsTotalEvents(t *testing.T) {
 
 func TestGrep_CountMessagesOnly(t *testing.T) {
 	s, acct := seedGrepData(t)
-	matches := grepFile(t, `\[id:`, dateFilePath(s, acct))
+	matches := grepFile(t, `"type":"msg"`, dateFilePath(s, acct))
 	if len(matches) != 6 {
-		t.Errorf("grep '[id:' found %d lines, want 6 messages", len(matches))
+		t.Errorf("grep found %d lines, want 6 messages", len(matches))
 	}
 }
 
@@ -220,7 +221,7 @@ func TestGrep_NoNewlinesInMessages(t *testing.T) {
 	if len(matches) != 1 {
 		t.Errorf("grep 'line one' found %d lines, want 1", len(matches))
 	}
-	// Same line should contain "line two" (escaped as \n, still on same grep match)
+	// Same line should contain "line two" (JSON escapes \n, still on same grep match)
 	if len(matches) == 1 && !strings.Contains(matches[0], `line two`) {
 		t.Error("multiline message not on single line")
 	}
@@ -236,6 +237,7 @@ func TestGrep_SortOnTimestampWorks(t *testing.T) {
 	file := s.convDir(acct, "#general") + "/2026-03-16.txt"
 
 	// sort on the file should produce chronological order
+	// (JSON with "ts" field in ISO 8601 sorts lexicographically)
 	out, err := exec.Command("sort", file).Output()
 	if err != nil {
 		t.Fatalf("sort: %v", err)
