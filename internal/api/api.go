@@ -100,6 +100,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
+	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 
 	srv := &http.Server{
 		Handler: mux,
@@ -371,6 +372,17 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	}
 
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
+}
+
+func (s *Server) handleSessionConnected(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id query param required", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"connected": s.hub.SessionConnected(sessionID),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

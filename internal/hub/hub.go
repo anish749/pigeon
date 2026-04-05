@@ -260,6 +260,14 @@ func (h *Hub) Sessions() int {
 	return len(h.sessions)
 }
 
+// SessionConnected reports whether the given session ID has an active SSE connection.
+func (h *Hub) SessionConnected(sessionID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, ok := h.sessions[sessionID]
+	return ok
+}
+
 // NotifySession sends a text message to a specific session by ID, using the
 // same path as incoming messages. Returns an error if the session is not connected.
 func (h *Hub) NotifySession(sessionID string, text string) error {

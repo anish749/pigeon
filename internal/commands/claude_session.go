@@ -1,8 +1,12 @@
 package commands
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"syscall"
@@ -14,6 +18,7 @@ import (
 	"github.com/anish/claude-msg-utils/internal/account"
 	"github.com/anish/claude-msg-utils/internal/claude"
 	"github.com/anish/claude-msg-utils/internal/config"
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 // errGoBack signals that the user wants to return to the account selector.
@@ -131,17 +136,28 @@ func selectAccount() (account.Account, error) {
 func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	s := sf.Data()
 	acct := account.New(s.Platform, s.Account)
+	connected := isSessionConnected(s.SessionID)
+
 	fmt.Printf("\n%sFound existing session for %s%s%s\n", bold, cyan, acct.Display(), reset)
-	fmt.Printf("  Session ID:  %s%s%s\n", dim, s.SessionID, reset)
-	fmt.Printf("  Directory:   %s%s%s\n", dim, s.CWD, reset)
-	fmt.Printf("  Created:     %s%s%s\n\n", dim, s.CreatedAt.Format("2006-01-02 15:04"), reset)
+	fmt.Printf("  Claude Code session ID: %s%s%s\n", dim, s.SessionID, reset)
+	fmt.Printf("  Directory:              %s%s%s\n", dim, s.CWD, reset)
+	fmt.Printf("  Created:                %s%s%s\n", dim, s.CreatedAt.Format("2006-01-02 15:04"), reset)
+	if connected {
+		fmt.Printf("  Status:                 %s✓ Connected in another window%s\n", green, reset)
+	}
+	fmt.Println()
 
 	if cwd != s.CWD {
 		fmt.Printf("  %s⚠  Your current directory is %s%s\n", yellow, cwd, reset)
 		fmt.Printf("  %s   Resuming will change your working directory to %s%s\n\n", yellow, s.CWD, reset)
 	}
 
-	fmt.Printf("  %s⚠  A new session will disconnect pigeon from the current one.%s\n", yellow, reset)
+	if connected {
+		fmt.Printf("  %s⚠  Pigeon is connected to this session in another window.%s\n", yellow, reset)
+		fmt.Printf("  %s   It will stay connected there, resuming won't transfer it here.%s\n\n", dim, reset)
+	}
+
+	fmt.Printf("  %s⚠  Creating a new Claude Code session will disconnect pigeon from the current one.%s\n", yellow, reset)
 	fmt.Printf("  %s   Everything in the working directory is accessible to pigeon.%s\n\n", dim, reset)
 
 	prompt := promptui.Select{
@@ -296,4 +312,29 @@ func validateAccount(acct account.Account) error {
 	default:
 		return fmt.Errorf("unsupported platform: %s (supported: slack, whatsapp)", acct.Platform)
 	}
+}
+
+// isSessionConnected asks the daemon whether the given session ID has an active
+// SSE connection. Returns false if the daemon is unreachable.
+func isSessionConnected(sessionID string) bool {
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", paths.SocketPath())
+			},
+		},
+	}
+	resp, err := client.Get("http://pigeon/api/session/connected?session_id=" + sessionID)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Connected bool `json:"connected"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
+	return result.Connected
 }
