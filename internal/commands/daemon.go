@@ -76,6 +76,14 @@ func DaemonRun(version string) error {
 		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", paths.ConfigPath())
 	}
 
+	// Check for updates before starting listeners. If an update is available,
+	// re-exec immediately so listeners start with the new binary.
+	if updated, err := selfupdate.CheckOnce(version); err != nil {
+		slog.Error("startup update check failed", "error", err)
+	} else if updated {
+		return daemonReexec()
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -117,15 +125,21 @@ func DaemonRun(version string) error {
 		slog.Info("shutting down")
 		return nil
 	case <-reexec:
-		slog.Info("update applied, re-execing daemon")
 		cancel()
-
-		exePath, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("locate executable for re-exec: %w", err)
-		}
-		// Remove socket so the new process can bind it.
-		os.Remove(paths.SocketPath())
-		return syscall.Exec(exePath, os.Args, os.Environ())
+		return daemonReexec()
 	}
+}
+
+// daemonReexec replaces the current process with the updated binary on disk.
+// The new process starts from main() with the same PID and arguments.
+func daemonReexec() error {
+	slog.Info("update applied, re-execing daemon")
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate executable for re-exec: %w", err)
+	}
+	// Remove socket so the new process can bind it.
+	os.Remove(paths.SocketPath())
+	return syscall.Exec(exePath, os.Args, os.Environ())
 }
