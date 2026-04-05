@@ -21,6 +21,7 @@ import (
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/storev1"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
@@ -67,7 +68,12 @@ func RunSetupWhatsApp(dbPath string) error {
 			acct := account.New("whatsapp", acctName)
 
 			// Register listener to capture history sync events during setup.
-			listener := walistener.New(client, acct, nil, nil)
+			// This creates its own FSStore because setup runs as a standalone
+			// process, not inside the daemon. The device lock (acquired above)
+			// guarantees the daemon is not running, so there is no concurrent
+			// access to the data directory.
+			setupStore := storev1.NewFSStore(paths.DataDir())
+			listener := walistener.New(client, acct, setupStore, nil, nil)
 			client.AddEventHandler(listener.EventHandler(ctx))
 
 			// Track sync activity so we can detect completion.

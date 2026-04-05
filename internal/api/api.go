@@ -25,7 +25,8 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/outbox"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
@@ -55,15 +56,17 @@ type Server struct {
 	slack    map[string]*SlackSender    // account slug → sender
 	hub      *hub.Hub
 	outbox   *outbox.Outbox
+	store    storev1.Store
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox, s storev1.Store) *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),
 		hub:      h,
 		outbox:   ob,
+		store:    s,
 	}
 }
 
@@ -213,10 +216,28 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 	// Store locally.
 	convDir := sender.Resolver.ConvDir(ctx, recipientJID)
 	senderName := "me"
+	var senderID string
 	if sender.Client.Store.ID != nil {
-		senderName = sender.Resolver.ContactName(ctx, types.NewJID(sender.Client.Store.ID.User, types.DefaultUserServer))
+		myJID := types.NewJID(sender.Client.Store.ID.User, types.DefaultUserServer)
+		senderName = sender.Resolver.ContactName(ctx, myJID)
+		senderID = myJID.String()
 	}
-	if err := store.WriteMessage(sender.Acct.Platform, sender.Acct.NameSlug(), convDir, senderName, req.Message, resp.Timestamp); err != nil {
+	via := modelv1.ViaPigeonAsUser
+	if !req.AsUser {
+		via = modelv1.ViaPigeonAsBot
+	}
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:       resp.ID,
+			Ts:       resp.Timestamp,
+			Sender:   senderName,
+			SenderID: senderID,
+			Via:      via,
+			Text:     req.Message,
+		},
+	}
+	if err := s.store.Append(sender.Acct, convDir, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 	}
 
@@ -361,12 +382,27 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 
 	// Store locally.
 	msgTS := slacklistener.ParseTimestamp(ts)
+	via := modelv1.ViaPigeonAsBot
+	if req.AsUser {
+		via = modelv1.ViaPigeonAsUser
+	}
+	line := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID:     ts,
+			Ts:     msgTS,
+			Sender: senderName,
+			Via:    via,
+			Text:   req.Message,
+		},
+	}
 	if req.Thread != "" {
-		if err := store.WriteThreadMessage(sender.Acct.Platform, sender.Acct.NameSlug(), channelName, req.Thread, senderName, req.Message, msgTS, true); err != nil {
+		line.Msg.Reply = true
+		if err := s.store.AppendThread(sender.Acct, channelName, req.Thread, line); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent thread message", "error", err)
 		}
 	} else {
-		if err := store.WriteMessage(sender.Acct.Platform, sender.Acct.NameSlug(), channelName, senderName, req.Message, msgTS); err != nil {
+		if err := s.store.Append(sender.Acct, channelName, line); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 		}
 	}

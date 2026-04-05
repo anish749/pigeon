@@ -14,7 +14,8 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/claude"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	storev1 "github.com/anish749/pigeon/internal/store/storev1"
 )
 
 // RouteState describes the outcome of routing a message through the hub.
@@ -77,6 +78,7 @@ type Hub struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session // SessionID → connected session
 	channels map[string]*channel // account slug → delivery channel
+	store    storev1.Store
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
@@ -84,7 +86,7 @@ type Hub struct {
 // New creates a Hub, loads session files, starts delivery goroutines, and
 // watches for new session files. Returns an error if session files cannot
 // be read (no sessions configured yet is not an error). Call Stop() to shut down.
-func New(ctx context.Context) (*Hub, error) {
+func New(ctx context.Context, s storev1.Store) (*Hub, error) {
 	sessions, err := claude.ListAllSessions()
 	if err != nil {
 		return nil, fmt.Errorf("load session files: %w", err)
@@ -94,6 +96,7 @@ func New(ctx context.Context) (*Hub, error) {
 	h := &Hub{
 		sessions: make(map[string]*Session),
 		channels: make(map[string]*channel),
+		store:    s,
 		ctx:      ctx,
 		cancel:   cancel,
 	}
@@ -365,14 +368,14 @@ func (h *Hub) sendHello(ch *channel) {
 }
 
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
-	convs, err := store.ListConversations(ch.acct.Platform, ch.acct.NameSlug(), nil)
+	convs, err := h.store.ListConversations(ch.acct)
 	if err != nil {
 		slog.Error("failed to list conversations for drain",
 			"account", ch.acct, "error", err)
 		return lastDelivered
 	}
 	for _, c := range convs {
-		lastDelivered = h.drainConversation(ch, c.DirName, lastDelivered)
+		lastDelivered = h.drainConversation(ch, c, lastDelivered)
 	}
 	return lastDelivered
 }
@@ -380,16 +383,18 @@ func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.T
 func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	now := time.Now()
 	since := now.Sub(lastDelivered)
-	lines, err := store.ReadMessages(ch.acct.Platform, ch.acct.NameSlug(), conversation, store.ReadOpts{Since: since})
+	df, err := h.store.ReadConversation(ch.acct, conversation, storev1.ReadOpts{Since: since})
 	if err != nil {
 		slog.Error("failed to read messages",
 			"account", ch.acct, "conversation", conversation, "error", err)
 		return lastDelivered
 	}
 
-	if len(lines) == 0 {
+	if df == nil || len(df.Messages) == 0 {
 		return lastDelivered
 	}
+
+	lines := modelv1.FormatDateFile(df, time.Local, false)
 
 	// Find connected session.
 	h.mu.RLock()

@@ -26,13 +26,13 @@ type SearchOpts struct {
 	Since    time.Duration // search within this duration from now
 }
 
-// SearchResult is a set of matching lines from one conversation/date.
+// SearchResult is a set of matching messages from one conversation/date.
 type SearchResult struct {
 	Platform     string
 	Account      string
 	Conversation string
 	Date         string
-	Lines        []modelv1.Line
+	Messages     []modelv1.ResolvedMsg
 	MatchCount   int
 }
 
@@ -45,12 +45,12 @@ type Store interface {
 	// AppendThread writes a single event line to a thread file.
 	AppendThread(acct account.Account, conversation, threadTS string, line modelv1.Line) error
 
-	// ReadConversation loads messages from a conversation, applying in-memory
-	// compaction (dedup, sort, edit/delete reconciliation, reaction aggregation).
-	ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.DateFile, error)
+	// ReadConversation loads messages from a conversation, applying compaction
+	// and resolution (reactions grouped onto messages).
+	ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.ResolvedDateFile, error)
 
-	// ReadThread loads a thread file, applying in-memory compaction.
-	ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ThreadFile, error)
+	// ReadThread loads a thread file, applying compaction and resolution.
+	ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error)
 
 	// Search finds messages matching a query across conversations.
 	Search(query string, opts SearchOpts) ([]SearchResult, error)

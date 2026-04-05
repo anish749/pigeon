@@ -6,15 +6,16 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/storev1"
 )
 
 func RunList(platform, accountName string) error {
+	s := storev1.NewFSStore(paths.DataDir())
+
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {
 		acct := account.New(platform, accountName)
-		aliases := loadAliases(acct)
-		convs, err := store.ListConversations(acct.Platform, acct.NameSlug(), aliases)
+		convs, err := s.ListConversations(acct)
 		if err != nil {
 			return err
 		}
@@ -24,14 +25,14 @@ func RunList(platform, accountName string) error {
 		}
 		fmt.Printf("Conversations in %s:\n\n", acct.Display())
 		for _, c := range convs {
-			fmt.Printf("  %-20s  %s\n", c.Identifier, c.DisplayName)
+			fmt.Printf("  %s\n", c)
 		}
 		return nil
 	}
 
 	// Level 2: list accounts for a specific platform
 	if platform != "" {
-		accounts, err := store.ListAccounts(platform)
+		accounts, err := s.ListAccounts(platform)
 		if err != nil {
 			return err
 		}
@@ -48,7 +49,7 @@ func RunList(platform, accountName string) error {
 	}
 
 	// Level 1: list all platforms and their accounts
-	platforms, err := store.ListPlatforms()
+	platforms, err := s.ListPlatforms()
 	if err != nil {
 		return fmt.Errorf("cannot read data directory %s: %w", paths.DataDir(), err)
 	}
@@ -57,7 +58,7 @@ func RunList(platform, accountName string) error {
 		return nil
 	}
 	for _, p := range platforms {
-		accounts, err := store.ListAccounts(p)
+		accounts, err := s.ListAccounts(p)
 		if err != nil {
 			continue
 		}

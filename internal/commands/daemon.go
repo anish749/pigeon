@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/storev1"
 )
 
 func DaemonStart() error {
@@ -77,19 +78,21 @@ func DaemonRun() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	msgHub, err := hub.New(ctx)
+	store := storev1.NewFSStore(paths.DataDir())
+
+	msgHub, err := hub.New(ctx, store)
 	if err != nil {
 		return fmt.Errorf("start hub: %w", err)
 	}
 	defer msgHub.Stop()
 
 	ob := outbox.New()
-	apiServer := api.NewServer(msgHub, ob)
+	apiServer := api.NewServer(msgHub, ob, store)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, msgHub.Route)
+	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, msgHub.Route)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	go apiServer.Start(ctx, paths.SocketPath())
