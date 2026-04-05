@@ -15,7 +15,9 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-func RunResetWhatsApp(account string) error {
+// RunUnlinkWhatsApp unpairs the WhatsApp device, deletes message data,
+// and removes the account from config. This is the inverse of setup-whatsapp.
+func RunUnlinkWhatsApp(account string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
