@@ -36,6 +36,6 @@ func newLogCmd() *cobra.Command {
 			return tail.Run()
 		},
 	}
-	cmd.Flags().IntP("lines", "n", 50, "number of lines to show from each file before following")
+	cmd.Flags().IntP("lines", "n", 50, "last N lines to show from each file before following")
 	return cmd
 }
