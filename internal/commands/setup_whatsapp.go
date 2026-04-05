@@ -30,7 +30,7 @@ func RunSetupWhatsApp(dbPath string) error {
 	}
 
 	// Acquire device lock to prevent daemon from using this device during pairing.
-	lock, err := daemon.LockDevice(dbPath)
+	lock, err := daemon.LockDevice()
 	if err != nil {
 		return fmt.Errorf("cannot pair while daemon is connected to this device — run 'pigeon daemon stop' first")
 	}

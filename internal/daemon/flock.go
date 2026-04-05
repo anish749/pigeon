@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/anish/claude-msg-utils/internal/paths"
 )
 
 // ErrDeviceLocked is returned when a WhatsApp device is already in use by another process.
 var ErrDeviceLocked = errors.New("device is locked by another process (is the daemon running?)")
 
-// LockDevice acquires an exclusive advisory lock on a WhatsApp database.
+// LockDevice acquires an exclusive advisory lock on the WhatsApp database.
 // Returns the lock file which must be closed to release the lock.
 // Returns ErrDeviceLocked if another process holds the lock.
-func LockDevice(dbPath string) (*os.File, error) {
-	lockPath := dbPath + ".lock"
+func LockDevice() (*os.File, error) {
+	lockPath := paths.DBLockPath()
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", lockPath, err)

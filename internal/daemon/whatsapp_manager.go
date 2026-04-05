@@ -94,7 +94,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 		return
 	}
 
-	lock, err := LockDevice(wa.DB)
+	lock, err := LockDevice()
 	if err != nil {
 		slog.ErrorContext(ctx, "could not lock WhatsApp device, skipping", "account", wa.Account, "error", err)
 		return
