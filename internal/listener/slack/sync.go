@@ -17,7 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	storev1 "github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 const (
@@ -62,13 +62,13 @@ func saveCursors(acct account.Account, c syncCursors) error {
 // listener stay consistent.
 type MessageStore struct {
 	acct    account.Account
-	store   storev1.Store
+	store   store.Store
 	mu      gosync.Mutex
 	cursors syncCursors
 }
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account, s storev1.Store) *MessageStore {
+func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
 	return &MessageStore{
 		acct:    acct,
 		store:   s,

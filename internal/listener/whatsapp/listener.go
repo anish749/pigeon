@@ -15,7 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	storev1 "github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // Listener receives WhatsApp events and writes messages to local text files.
@@ -23,7 +23,7 @@ type Listener struct {
 	client    *whatsmeow.Client
 	acct      account.Account
 	resolver  *Resolver
-	store     storev1.Store
+	store     store.Store
 	syncing   atomic.Bool           // true while history sync is in progress
 	onLogout  func()                // called when device is unpaired remotely
 	onMessage hub.MessageNotifyFunc // called when a message is received
@@ -32,7 +32,7 @@ type Listener struct {
 // New creates a WhatsApp listener for the given client and account.
 // onLogout is called when the device is unpaired from the phone (may be nil).
 // onMessage is called when a message is received and written to disk (may be nil).
-func New(client *whatsmeow.Client, acct account.Account, s storev1.Store, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
+func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
 	return &Listener{
 		client:    client,
 		acct:      acct,

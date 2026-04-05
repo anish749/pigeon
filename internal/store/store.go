@@ -3,7 +3,7 @@
 // The Store type owns a base directory and provides structured read/write
 // access to conversation data. All files follow the protocol V1 format
 // defined in docs/protocol.md.
-package storev1
+package store
 
 import (
 	"time"

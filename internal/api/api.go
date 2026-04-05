@@ -27,7 +27,7 @@ import (
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	storev1 "github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
@@ -57,11 +57,11 @@ type Server struct {
 	slack    map[string]*SlackSender    // account slug → sender
 	hub      *hub.Hub
 	outbox   *outbox.Outbox
-	store    storev1.Store
+	store    store.Store
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox, s storev1.Store) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store) *Server {
 	return &Server{
 		whatsapp: make(map[string]*WhatsAppSender),
 		slack:    make(map[string]*SlackSender),

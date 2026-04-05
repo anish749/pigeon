@@ -16,7 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
-	storev1 "github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
@@ -26,7 +26,7 @@ import (
 type WhatsAppManager struct {
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
-	store     storev1.Store
+	store     store.Store
 	running   map[string]*runningWAAccount // account → state
 }
 
@@ -37,7 +37,7 @@ type runningWAAccount struct {
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
 // the given API server. onMessage is called when a message is received (may be nil).
-func NewWhatsAppManager(apiServer *api.Server, s storev1.Store, onMessage hub.MessageNotifyFunc) *WhatsAppManager {
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,
 		onMessage: onMessage,

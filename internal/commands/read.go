@@ -8,7 +8,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 type ReadParams struct {
@@ -21,7 +21,7 @@ type ReadParams struct {
 }
 
 func RunRead(p ReadParams) error {
-	s := storev1.NewFSStore(paths.DefaultDataRoot())
+	s := store.NewFSStore(paths.DefaultDataRoot())
 	acct := account.New(p.Platform, p.Account)
 	aliases := loadAliases(acct)
 
@@ -30,7 +30,7 @@ func RunRead(p ReadParams) error {
 		return err
 	}
 
-	opts := storev1.ReadOpts{
+	opts := store.ReadOpts{
 		Date: p.Date,
 		Last: p.Last,
 	}
@@ -81,7 +81,7 @@ type conversation struct {
 
 // findConversation searches for a conversation matching the query by directory name,
 // display name, or alias. Returns the first match. Case-insensitive.
-func findConversation(s storev1.Store, acct account.Account, query string, aliases map[string][]string) (*conversation, error) {
+func findConversation(s store.Store, acct account.Account, query string, aliases map[string][]string) (*conversation, error) {
 	convs, err := s.ListConversations(acct)
 	if err != nil {
 		return nil, err

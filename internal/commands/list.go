@@ -6,11 +6,11 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/storev1"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 func RunList(platform, accountName string) error {
-	s := storev1.NewFSStore(paths.DefaultDataRoot())
+	s := store.NewFSStore(paths.DefaultDataRoot())
 
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {
