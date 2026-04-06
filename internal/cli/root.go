@@ -34,7 +34,7 @@ func newRootCmd(version string) *cobra.Command {
 		Long: `pigeon — messaging data CLI for AI agents
 
 Reads locally-stored messaging data (WhatsApp, Slack, etc.) and provides
-listeners that receive real-time messages and save them as text files.
+listeners that receive real-time messages and save them as JSONL files.
 
 ─────────────────────────────────────────────────────────
 
@@ -73,12 +73,45 @@ DATA LAYOUT
     ├── slack/
     │   ├── acme-corp/                     # workspace
     │   │   ├── #engineering/              # channel
-    │   │   │   └── 2026-03-16.jsonl
+    │   │   │   ├── 2026-03-16.jsonl
+    │   │   │   └── threads/              # thread replies
+    │   │   │       └── 1711568940.789012.jsonl
     │   │   └── @dave/                     # DM
     │   │       └── 2026-03-16.jsonl
 
   Hierarchy: platform / account / conversation / YYYY-MM-DD.jsonl
-  Message format: [2026-03-16 09:15:02] Alice: Hey, are you free?
+  Each file is JSONL — one JSON object per line, greppable with rg and jq.
+
+  JSON fields:
+    type      "msg", "react", "unreact", "edit", "delete", "separator"
+    ts        ISO 8601 timestamp (e.g. "2026-03-16T09:15:02Z")
+    id        message ID                sender   display name
+    from      platform user ID          text     message body
+    via       "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
+
+─────────────────────────────────────────────────────────
+
+DIRECT FILE ACCESS — rg and jq
+
+  The JSONL files are designed for direct access with ripgrep and jq.
+  This is useful for queries that go beyond what pigeon search offers.
+
+  Search with rg:
+
+    rg "deploy" ~/.local/share/pigeon/                                # all messages mentioning "deploy"
+    rg "deploy" ~/.local/share/pigeon/slack/acme-corp/                # scoped to workspace
+    rg "deploy" ~/.local/share/pigeon/ --glob '*.jsonl'               # only message files
+
+  Pipe to jq for structured queries:
+
+    rg "deploy" ~/.local/share/pigeon/ | cut -d: -f2- | jq 'select(.type == "msg")'
+    rg "." ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'
+    rg "." ~/.local/share/pigeon/ --glob '*.jsonl' | cut -d: -f2- | jq -s 'map(select(.type == "msg")) | group_by(.sender) | map({sender: .[0].sender, count: length}) | sort_by(-.count)'
+
+  jq on a single file (no rg needed):
+
+    jq 'select(.type == "msg")' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
+    jq -r 'select(.sender == "Alice") | .text' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
 
 ─────────────────────────────────────────────────────────
 
