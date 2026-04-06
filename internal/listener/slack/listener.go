@@ -117,7 +117,15 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
+	// Skip bot messages (BotID set), system events like channel_join/channel_topic
+	// (SubType set, except thread_broadcast which is a real user message), and
+	// messages with empty text (can happen when the bot token lacks scopes like
+	// channels:history — Slack returns the message envelope but strips the content).
 	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+		slog.WarnContext(ctx, "slack: skipping message",
+			"channel", msg.Channel, "ts", msg.TimeStamp,
+			"botID", msg.BotID, "subType", msg.SubType,
+			"emptyText", msg.Text == "", "account", l.acct)
 		return
 	}
 
