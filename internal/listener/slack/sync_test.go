@@ -1,17 +1,34 @@
 package slack
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
 
-func TestAdvanceCursor_EmptyCursors(t *testing.T) {
-	// Simulate the post-reset state: cursors map is initialized but empty.
-	// AdvanceCursor must not panic.
-	ms := &MessageStore{
-		cursors: make(syncCursors),
-	}
-	// Should not panic.
-	ms.AdvanceCursor("C12345", "1234567890.000001")
+	"github.com/anish749/pigeon/internal/account"
+)
 
-	if got, ok := ms.Cursor("C12345"); !ok || got != "1234567890.000001" {
-		t.Errorf("Cursor() = %q, %v; want %q, true", got, ok, "1234567890.000001")
+func TestLoadCursors_EmptyFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+
+	acct := account.New("slack", "test-workspace")
+
+	// Create the account directory with an empty cursor file,
+	// matching the state after a reset.
+	acctDir := filepath.Join(tmp, "slack", "test-workspace")
+	if err := os.MkdirAll(acctDir, 0755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(acctDir, ".sync-cursors.yaml"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := loadCursors(acct)
+	if c == nil {
+		t.Fatal("loadCursors returned nil map for empty file")
+	}
+
+	// Must be safe to write to.
+	c["C12345"] = "1234567890.000001"
 }
