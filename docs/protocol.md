@@ -12,17 +12,20 @@ greppable with standard tools. All files are UTF-8 encoded.
 │       ├── .maintenance.json                   # maintenance state (see Maintenance Protocol)
 │       ├── .sync-cursors.yaml                  # sync state (per-channel cursors)
 │       ├── #{channel}/                         # public channel conversation
+│       │   ├── .meta.json                       # conversation metadata (see Conversation Metadata)
 │       │   ├── YYYY-MM-DD.txt                  # date file (rolling, one per day)
 │       │   ├── attachments/                    # attachment storage
 │       │   │   └── {ATTACHMENT_ID}.{ext}       # downloaded file
 │       │   └── threads/
 │       │       └── {THREAD_TS}.txt             # thread file (one per thread)
 │       ├── @{user}/                            # DM conversation
+│       │   ├── .meta.json
 │       │   ├── YYYY-MM-DD.txt
 │       │   ├── attachments/
 │       │   └── threads/
 │       │       └── {THREAD_TS}.txt
 │       └── @mpdm-{participants}/               # group DM conversation
+│           ├── .meta.json
 │           ├── YYYY-MM-DD.txt
 │           ├── attachments/
 │           └── threads/
@@ -31,9 +34,11 @@ greppable with standard tools. All files are UTF-8 encoded.
     └── {phone-slug}/                           # account (slug, e.g. 15551234567)
         ├── .maintenance.json                   # maintenance state
         ├── {contact_or_phone}/                 # 1:1 conversation
+        │   ├── .meta.json
         │   ├── YYYY-MM-DD.txt
         │   └── attachments/
         └── {group-name-slug}/                   # group conversation (slugified)
+            ├── .meta.json
             ├── YYYY-MM-DD.txt
             └── attachments/
 ```
@@ -52,6 +57,25 @@ greppable with standard tools. All files are UTF-8 encoded.
 - **Attachment files** are stored in a per-conversation `attachments/`
   directory, named by their platform attachment ID with original extension.
 - WhatsApp does not currently have thread files.
+
+## Conversation Metadata
+
+Each conversation directory contains a `.meta.json` file that maps the
+display name (used as directory name) back to stable platform IDs. Written
+on conversation creation, updated if identifiers change.
+
+| Field | Present | Description |
+|-------|---------|-------------|
+| `name` | always | Display name as shown in `pigeon list` |
+| `type` | always | `channel`, `dm`, `group_dm` (Slack) or `dm`, `group` (WhatsApp) |
+| `channel_id` | Slack | Channel ID (`C`, `D`, or `G` prefixed) |
+| `user_id` | Slack DMs | DM partner's user ID (`U` prefixed), not the authenticated user's |
+| `jid` | WhatsApp | JID — `{phone}@s.whatsapp.net` for DMs, `{id}@g.us` for groups |
+
+Example: `{"name":"@Alice","type":"dm","channel_id":"D04MNOPQR03","user_id":"U04ABCDEF"}`
+
+Readers must handle missing `.meta.json` gracefully — older conversations
+may not have one. Not on the hot path.
 
 ## File Types and Operations
 
