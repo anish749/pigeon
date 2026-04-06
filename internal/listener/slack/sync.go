@@ -42,6 +42,8 @@ func loadCursors(acct account.Account) syncCursors {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return make(syncCursors)
 	}
+	// yaml.Unmarshal on an empty file succeeds but leaves the map nil.
+	// This happens after a reset clears message data but leaves an empty cursor file.
 	if c == nil {
 		return make(syncCursors)
 	}
