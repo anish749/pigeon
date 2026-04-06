@@ -56,13 +56,17 @@ const (
 	activeRatioThreshold = 0.65
 )
 
+// messageSearcher abstracts the Slack search API for testability.
+type messageSearcher interface {
+	SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error)
+}
+
 // computeSyncPriority determines which channels need syncing by using
-// search.messages to discover recent activity. userAPI must be a client
-// authenticated with a user token that has the search:read scope.
+// search.messages to discover recent activity.
 //
 // cursors is the current sync cursor state. conversations is the full list
 // of channels to sync (already filtered to member channels).
-func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *syncPriority {
+func computeSyncPriority(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *syncPriority {
 	// Case 1: No cursors — first sync, must check everything.
 	if len(cursors) == 0 {
 		return &syncPriority{reason: "first sync, no cursors"}
@@ -93,7 +97,7 @@ func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rat
 		Count:         searchPageSize,
 		Page:          1,
 	}
-	result, err := userAPI.SearchMessagesContext(ctx, query, params)
+	result, err := searcher.SearchMessagesContext(ctx, query, params)
 	if err != nil {
 		slog.WarnContext(ctx, "sync priority: search failed, syncing all",
 			"error", err, "query", query)
@@ -110,18 +114,19 @@ func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rat
 	}
 
 	active := collectChannelIDs(result.Matches)
-	totalPages := (result.Total + searchPageSize - 1) / searchPageSize
+	searchTotal := result.Total
+	totalPages := (searchTotal + searchPageSize - 1) / searchPageSize
 	totalChannels := len(conversations)
 
 	slog.InfoContext(ctx, "sync priority: search page 1",
-		"query", query, "total_messages", result.Total,
+		"query", query, "total_messages", searchTotal,
 		"total_pages", totalPages, "active_channels", len(active),
 		"total_channels", totalChannels)
 
 	// If already over the active ratio threshold, sync all.
 	if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
 		return &syncPriority{
-			searchTotal: result.Total,
+			searchTotal: searchTotal,
 			reason: fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold after page 1",
 				len(active), totalChannels, activeRatioThreshold*100),
 		}
@@ -133,7 +138,7 @@ func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rat
 			break
 		}
 		params.Page = page
-		result, err = userAPI.SearchMessagesContext(ctx, query, params)
+		result, err = searcher.SearchMessagesContext(ctx, query, params)
 		if err != nil {
 			slog.WarnContext(ctx, "sync priority: search page failed, using results so far",
 				"page", page, "error", err)
@@ -158,7 +163,7 @@ func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rat
 		// Stop if active set crossed the threshold.
 		if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
 			return &syncPriority{
-				searchTotal: result.Total,
+				searchTotal: searchTotal,
 				reason: fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",
 					len(active), totalChannels, activeRatioThreshold*100, page),
 			}
@@ -167,9 +172,9 @@ func computeSyncPriority(ctx context.Context, userAPI *goslack.Client, gate *rat
 
 	return &syncPriority{
 		activeChannels: active,
-		searchTotal:    result.Total,
+		searchTotal:    searchTotal,
 		reason: fmt.Sprintf("search found %d active channels out of %d (%d messages, query=%q)",
-			len(active), totalChannels, result.Total, query),
+			len(active), totalChannels, searchTotal, query),
 	}
 }
 
