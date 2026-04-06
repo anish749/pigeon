@@ -135,7 +135,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	userName, userID, err := resolveSender(ctx, l.resolver, msg.User, msg.BotID, msg.Username)
+	userName, userID, err := l.resolver.SenderName(ctx, msg.User, msg.BotID, msg.Username)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve sender",
 			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
@@ -231,7 +231,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	if parent.Text == "" {
 		return
 	}
-	userName, userID, err := resolveSender(ctx, l.resolver, parent.User, parent.BotID, parent.Username)
+	userName, userID, err := l.resolver.SenderName(ctx, parent.User, parent.BotID, parent.Username)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to resolve thread parent sender", "error", err,
 			"account", l.acct, "thread_ts", threadTS)

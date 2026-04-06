@@ -148,6 +148,7 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 
 	user, err := r.api.GetUserInfoContext(ctx, userID)
 	if err != nil {
+		// TODO: handle error. this eneds to boil up the error to the caller.
 		slog.WarnContext(ctx, "failed to resolve slack user", "user_id", userID, "error", err)
 		return userID
 	}
@@ -184,6 +185,25 @@ func (r *Resolver) BotName(ctx context.Context, botID string) (string, error) {
 	r.users[botID] = bot.Name
 	r.mu.Unlock()
 	return bot.Name, nil
+}
+
+// SenderName resolves a message sender to (name, id). Tries the user ID first,
+// then the message's Username field (common for bots), then a bot API lookup.
+func (r *Resolver) SenderName(ctx context.Context, userID, botID, username string) (string, string, error) {
+	if userID != "" {
+		return r.UserName(ctx, userID), userID, nil
+	}
+	if username != "" {
+		return username, botID, nil
+	}
+	if botID != "" {
+		name, err := r.BotName(ctx, botID)
+		if err != nil {
+			return "", "", err
+		}
+		return name, botID, nil
+	}
+	return "", "", fmt.Errorf("message has no user, bot, or username")
 }
 
 // ChannelName resolves a Slack channel ID to a formatted name. Falls back to API lookup on cache miss.

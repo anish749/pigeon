@@ -24,20 +24,7 @@ func TestAllowedSubType(t *testing.T) {
 	}
 }
 
-// stubResolver implements just enough of Resolver for resolveSender tests.
-type stubResolver struct {
-	users map[string]string
-}
-
-func (r *stubResolver) UserName(_ context.Context, userID string) string {
-	if name, ok := r.users[userID]; ok {
-		return name
-	}
-	return userID
-}
-
-func TestResolveSender(t *testing.T) {
-	// Build a minimal Resolver with a pre-populated cache.
+func TestSenderName(t *testing.T) {
 	r := &Resolver{users: map[string]string{"U123": "alice", "B789": "PagerDuty"}}
 
 	tests := []struct {
@@ -76,7 +63,7 @@ func TestResolveSender(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, id, err := resolveSender(context.Background(), r, tt.userID, tt.botID, tt.username)
+			name, id, err := r.SenderName(context.Background(), tt.userID, tt.botID, tt.username)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got name=%q id=%q", name, id)
