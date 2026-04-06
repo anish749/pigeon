@@ -46,8 +46,10 @@ type SlackSender struct {
 	Resolver *slacklistener.Resolver
 	Messages *slacklistener.MessageStore
 	Acct     account.Account
-	BotName  string // the bot's display name
-	UserName string // the authenticated user's display name
+	BotName   string // the bot's display name
+	BotUserID string // the bot's Slack user ID
+	UserName  string // the authenticated user's display name
+	UserID    string // the authenticated user's Slack user ID
 }
 
 // Server is the daemon's HTTP API server.
@@ -388,14 +390,19 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	if req.AsUser {
 		via = modelv1.ViaPigeonAsUser
 	}
+	senderID := sender.BotUserID
+	if req.AsUser {
+		senderID = sender.UserID
+	}
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
-			ID:     ts,
-			Ts:     msgTS,
-			Sender: senderName,
-			Via:    via,
-			Text:   req.Message,
+			ID:       ts,
+			Ts:       msgTS,
+			Sender:   senderName,
+			SenderID: senderID,
+			Via:      via,
+			Text:     req.Message,
 		},
 	}
 	if req.Thread != "" {
