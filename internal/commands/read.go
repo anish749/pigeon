@@ -54,10 +54,32 @@ func RunRead(p ReadParams) error {
 	lines := modelv1.FormatDateFile(df, time.Local, readErr)
 
 	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
-	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)
+	header := fmt.Sprintf("--- %s/%s", acct.Display(), conv.displayName)
+	if meta, err := s.ReadMeta(acct, conv.dirName); err != nil {
+		return fmt.Errorf("read metadata for %s: %w", conv.dirName, err)
+	} else if meta != nil {
+		header += " (" + formatMetaIDs(meta) + ")"
+	}
+	header += " ---"
+	fmt.Println(header)
 	fmt.Printf("    %s\n", convDir.Path())
 	fmt.Println(strings.Join(lines, "\n"))
 	return nil
+}
+
+func formatMetaIDs(meta *modelv1.ConvMeta) string {
+	var parts []string
+	if meta.UserID != "" {
+		parts = append(parts, meta.UserID)
+	}
+	if meta.ChannelID != "" {
+		parts = append(parts, meta.ChannelID)
+	}
+	if meta.JID != "" {
+		parts = append(parts, meta.JID)
+	}
+	parts = append(parts, string(meta.Type))
+	return strings.Join(parts, ", ")
 }
 
 // parseDuration handles Go durations plus "d" for days.

@@ -25,7 +25,10 @@ func RunList(platform, accountName string) error {
 		}
 		fmt.Printf("Conversations in %s:\n\n", acct.Display())
 		for _, c := range convs {
-			meta, _ := s.ReadMeta(acct, c)
+			meta, err := s.ReadMeta(acct, c)
+			if err != nil {
+				return fmt.Errorf("read metadata for %s: %w", c, err)
+			}
 			if meta != nil && meta.UserID != "" {
 				fmt.Printf("  %s  %s\n", c, meta.UserID)
 			} else {
