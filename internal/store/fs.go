@@ -88,6 +88,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		for _, f := range files {
 			d, err := dateFromFilename(f)
 			if err != nil {
+				slog.Warn("skip date file: bad filename", "file", f, "error", err)
 				continue
 			}
 			if !d.Before(cutoff.Truncate(24 * time.Hour)) {

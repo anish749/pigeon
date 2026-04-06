@@ -165,8 +165,8 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 	return name
 }
 
-// BotName resolves a Slack bot ID to a display name via cache or API lookup.
-func (r *Resolver) BotName(ctx context.Context, botID string) (string, error) {
+// botName resolves a Slack bot ID to a display name via cache or API lookup.
+func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 	r.mu.RLock()
 	name, ok := r.users[botID]
 	r.mu.RUnlock()
@@ -197,7 +197,7 @@ func (r *Resolver) SenderName(ctx context.Context, userID, botID, username strin
 		return username, botID, nil
 	}
 	if botID != "" {
-		name, err := r.BotName(ctx, botID)
+		name, err := r.botName(ctx, botID)
 		if err != nil {
 			return "", "", err
 		}
@@ -219,6 +219,7 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 		ChannelID: channelID,
 	})
 	if err != nil {
+		// TODO: handle error. this eneds to boil up the error to the caller.
 		slog.WarnContext(ctx, "failed to resolve slack channel", "channel_id", channelID, "error", err)
 		return channelID
 	}
