@@ -255,7 +255,7 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		},
 	}
 
-	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+	if err := l.messages.AppendReaction(channelName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 	}
 
@@ -285,7 +285,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		},
 	}
 
-	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+	if err := l.messages.AppendEdit(channelName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
@@ -325,7 +325,7 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		},
 	}
 
-	if err := l.messages.Store().Append(l.acct, channelName, line); err != nil {
+	if err := l.messages.AppendDelete(channelName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
 	}
 
