@@ -34,7 +34,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 //
 // TODO: include attachments
 // TODO: include reactions
-func formatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
+func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -47,6 +47,11 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
 	if m.ReplyTo != "" {
 		meta += fmt.Sprintf(" [reply_to:%s]", m.ReplyTo)
 	}
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
 	lines = append(lines, meta)
 
 	return lines
@@ -55,13 +60,13 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
 // channel notifications. See formatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.
-func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, errs ...error) []string {
+func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMeta *ConvMeta, errs ...error) []string {
 	if f == nil {
 		return nil
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, formatMsgNotification(m, loc)...)
+		lines = append(lines, formatMsgNotification(m, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)
