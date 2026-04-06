@@ -229,9 +229,25 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
 	}
 
+	// Filter out muted channels — they still get registered in the resolver
+	// above so real-time messages work, but we don't spend sync budget on them.
+	muted, err := fetchMutedChannels(ctx, api)
+	if err != nil {
+		slog.WarnContext(ctx, "slack sync: failed to fetch muted channels, syncing all", "error", err)
+	}
+	var unmutedConversations []goslack.Channel
+	var skippedMuted int
+	for _, ch := range memberConversations {
+		if muted[ch.ID] {
+			skippedMuted++
+			continue
+		}
+		unmutedConversations = append(unmutedConversations, ch)
+	}
+
 	// Determine which channels need syncing. Returns a sorted, filtered list:
 	// only channels with recent activity (or all channels on first sync / small workspaces).
-	conversations := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
+	conversations := prioritizeChannels(ctx, api, gate, ms.cursors, unmutedConversations)
 
 	// Count by type for progress reporting.
 	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
@@ -255,6 +271,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		"private", totalPrivate,
 		"public", totalPublic,
 		"skipped_non_member", skippedPublic,
+		"skipped_muted", skippedMuted,
 		"total_member", len(memberConversations),
 		"to_sync", len(conversations),
 	)
@@ -563,6 +580,24 @@ func listUserConversations(ctx context.Context, api *goslack.Client, gate *rateL
 		cursor = nextCursor
 	}
 	return all, nil
+}
+
+// fetchMutedChannels returns a set of channel IDs that the user has muted.
+func fetchMutedChannels(ctx context.Context, api *goslack.Client) (map[string]bool, error) {
+	prefs, err := api.GetUserPrefsContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get user prefs: %w", err)
+	}
+	raw := prefs.UserPrefs.MutedChannels
+	if raw == "" {
+		return nil, nil
+	}
+	ids := strings.Split(raw, ",")
+	muted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		muted[id] = true
+	}
+	return muted, nil
 }
 
 // fetchHistory retrieves messages in a channel since the given Slack timestamp,
