@@ -2,15 +2,20 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
@@ -37,10 +42,36 @@ func DaemonStop() error {
 
 func DaemonStatus() error {
 	running, pid := daemon.Status()
-	if running {
-		fmt.Printf("Running (pid=%d, log=%s)\n", pid, paths.DaemonLogPath())
-	} else {
+	if !running {
 		fmt.Println("Not running.")
+		return nil
+	}
+
+	// Daemon is running — query its API for full status.
+	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/status")
+	if err != nil {
+		// Fall back to basic info if API is unreachable.
+		fmt.Printf("Running (pid=%d, log=%s)\n", pid, paths.DaemonLogPath())
+		return nil
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read status response: %w", err)
+	}
+
+	var status api.StatusResponse
+	if err := json.Unmarshal(data, &status); err != nil {
+		return fmt.Errorf("parse status response: %w", err)
+	}
+
+	uptime := time.Since(status.StartedAt).Truncate(time.Second)
+	fmt.Printf("Running (pid=%d, version=%s, uptime=%s, log=%s)\n", status.PID, status.Version, uptime, status.LogFile)
+	for platform, accounts := range status.Listeners {
+		if len(accounts) > 0 {
+			fmt.Printf("  %s: %s\n", platform, strings.Join(accounts, ", "))
+		}
 	}
 	return nil
 }
@@ -96,7 +127,7 @@ func DaemonRun(version string) error {
 	defer msgHub.Stop()
 
 	ob := outbox.New()
-	apiServer := api.NewServer(msgHub, ob, store)
+	apiServer := api.NewServer(msgHub, ob, store, version)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)
