@@ -83,6 +83,18 @@ func startPigeonDaemonStream(ctx context.Context, notify func(*ClaudeChannelNoti
 // run connects to the daemon's SSE endpoint and forwards messages.
 // Reconnects automatically on transient failures. Stops on permanent rejection.
 func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
+	// Claude Code sends notifications/initialized before its channel notification
+	// reader is fully wired up. If we connect to the daemon SSE stream immediately,
+	// the hello message arrives within milliseconds and is silently dropped because
+	// the client isn't listening yet. A short delay gives the client time to finish
+	// initialization. Empirically, 2 seconds is sufficient; without any delay the
+	// first notification is consistently lost.
+	select {
+	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
+		return
+	}
+
 	for {
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
