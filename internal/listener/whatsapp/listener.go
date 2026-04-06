@@ -127,6 +127,17 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
 	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
 
+	var displayName string
+	if evt.Info.Chat.Server == types.GroupServer {
+		displayName = l.resolver.GroupName(ctx, evt.Info.Chat)
+	} else {
+		displayName = l.resolver.ContactName(ctx, evt.Info.Chat)
+	}
+	meta := l.resolver.ConvMeta(ctx, evt.Info.Chat, displayName)
+	if _, err := l.store.WriteMetaIfNotExists(l.acct, convDir, meta); err != nil {
+		slog.WarnContext(ctx, "whatsapp: write meta failed", "conv", convDir, "error", err)
+	}
+
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{

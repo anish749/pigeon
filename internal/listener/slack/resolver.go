@@ -11,6 +11,8 @@ import (
 	"time"
 
 	goslack "github.com/slack-go/slack"
+
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // mentionRe matches Slack user mentions: <@U12345678> or <@U12345678|displayname>
@@ -40,6 +42,7 @@ type Resolver struct {
 	mu       sync.RWMutex
 	users    map[string]string // user ID → display name
 	channels map[string]string // channel ID → name
+	dmUsers  map[string]string // channel ID → DM partner's user ID
 	members  map[string]bool   // channel IDs the user has joined
 }
 
@@ -49,6 +52,7 @@ func NewResolver(api *goslack.Client) *Resolver {
 		api:      api,
 		users:    make(map[string]string),
 		channels: make(map[string]string),
+		dmUsers:  make(map[string]string),
 		members:  make(map[string]bool),
 	}
 }
@@ -133,6 +137,9 @@ func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel)
 	name := FormatChannelName(ch)
 	if ch.IsIM {
 		name = "@" + r.UserName(ctx, ch.User)
+		r.mu.Lock()
+		r.dmUsers[ch.ID] = ch.User
+		r.mu.Unlock()
 	}
 	r.RegisterChannel(ch.ID, name)
 }
@@ -229,6 +236,9 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 	}
 	r.mu.Lock()
 	r.channels[channelID] = name
+	if ch.IsIM {
+		r.dmUsers[channelID] = ch.User
+	}
 	r.mu.Unlock()
 	return name
 }
@@ -350,6 +360,24 @@ func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, str
 	}
 	r.RegisterChannel(query, name)
 	return query, name, nil
+}
+
+// ConvMeta builds a ConvMeta for the given channel from cached resolver state.
+func (r *Resolver) ConvMeta(channelID, channelName string) modelv1.ConvMeta {
+	r.mu.RLock()
+	userID := r.dmUsers[channelID]
+	r.mu.RUnlock()
+
+	switch {
+	case userID != "":
+		return modelv1.NewSlackDM(channelName, channelID, userID)
+	case strings.HasPrefix(channelName, "@mpdm-"):
+		return modelv1.NewSlackGroupDM(channelName, channelID)
+	case strings.HasPrefix(channelName, "@"):
+		return modelv1.NewSlackDM(channelName, channelID, "")
+	default:
+		return modelv1.NewSlackChannel(channelName, channelID)
+	}
 }
 
 // FormatChannelName returns a human-readable channel name with prefix (# for channels, @ for DMs).

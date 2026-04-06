@@ -158,6 +158,13 @@ func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
 }
 
+// EnsureMeta writes .meta.json for a conversation if it doesn't already exist.
+func (ms *MessageStore) EnsureMeta(conversation string, meta modelv1.ConvMeta) {
+	if _, err := ms.store.WriteMetaIfNotExists(ms.acct, conversation, meta); err != nil {
+		slog.Warn("write meta failed", "conversation", conversation, "error", err)
+	}
+}
+
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
 func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
 	ms.mu.Lock()
@@ -210,6 +217,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 	for _, ch := range memberConversations {
 		resolver.RegisterConversation(ctx, ch)
 		resolver.AddMember(ch.ID)
+		channelName := resolver.ChannelName(ctx, ch.ID)
+		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
 	}
 
 	// Determine which channels need syncing. Returns a sorted, filtered list:
@@ -424,6 +433,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		} else {
 			channelName = FormatChannelName(ch)
 		}
+		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
 
 		oldest := defaultOldest
 		if c, ok := ms.Cursor(ch.ID); ok {
