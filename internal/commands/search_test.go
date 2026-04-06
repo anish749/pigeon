@@ -94,11 +94,10 @@ func setupThreadFixture(t *testing.T) string {
 }
 
 // TestCaptureRg_ThreadGlob verifies that captureRg finds messages in thread
-// files when the includes list contains the threads glob.
+// files when the includes list contains the thread glob.
 //
-// Bug: the glob "threads/*.txt" only matches if threads/ is a direct child of
-// the search root. But thread files live at <conv>/threads/<ts>.txt, so the
-// correct glob is "**/threads/*.txt".
+// Thread files live at <conv>/threads/<ts>.txt — the glob must use **/
+// to match nested paths.
 func TestCaptureRg_ThreadGlob(t *testing.T) {
 	rgPath, err := exec.LookPath("rg")
 	if err != nil {
@@ -108,21 +107,21 @@ func TestCaptureRg_ThreadGlob(t *testing.T) {
 	dir := setupThreadFixture(t)
 
 	// Search with the thread glob — this should find thread file matches.
-	includes := []string{"threads/*.txt"}
+	includes := []string{threadGlob}
 	output, err := captureRg(rgPath, "deploy", dir, includes, 0)
 	if err != nil {
 		t.Fatalf("captureRg: %v", err)
 	}
 	if len(output) == 0 {
-		t.Error("captureRg with threads/*.txt glob returned no output; thread files were not searched")
+		t.Error("captureRg with thread glob returned no output; thread files were not searched")
 	}
 }
 
 // TestCaptureGrepFallback_ThreadGlob verifies that captureGrepFallback finds
-// messages in thread files when the includes list contains the threads glob.
+// messages in thread files when the includes list contains the thread glob.
 //
-// Bug: grep --include 'threads/*.txt' matches against basenames only. Since no
-// basename contains a slash, this pattern never matches thread files.
+// grep --include can't match path patterns, so the fallback uses
+// find -exec grep to search thread files.
 func TestCaptureGrepFallback_ThreadGlob(t *testing.T) {
 	if _, err := exec.LookPath("grep"); err != nil {
 		t.Skip("grep not available")
@@ -131,13 +130,13 @@ func TestCaptureGrepFallback_ThreadGlob(t *testing.T) {
 	dir := setupThreadFixture(t)
 
 	// Search with only the thread glob — should find thread file matches.
-	includes := []string{"threads/*.txt"}
+	includes := []string{threadGlob}
 	output, err := captureGrepFallback("deploy", dir, includes, 0)
 	if err != nil {
 		t.Fatalf("captureGrepFallback: %v", err)
 	}
 	if len(output) == 0 {
-		t.Error("captureGrepFallback with threads/*.txt glob returned no output; thread files were not searched")
+		t.Error("captureGrepFallback with thread glob returned no output; thread files were not searched")
 	}
 }
 
