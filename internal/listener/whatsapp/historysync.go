@@ -184,15 +184,11 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 		slog.InfoContext(ctx, "whatsapp: history sync: conversation done",
 			"conv", convDir, "messages", written, "account", l.acct)
 
-		meta := modelv1.ConversationMeta{
-			JID: chatJID.String(),
-		}
+		var meta modelv1.ConversationMeta
 		if isGroup {
-			meta.Type = "group"
-			meta.Name = l.resolver.GroupName(ctx, chatJID)
+			meta = modelv1.NewWhatsAppGroupMeta(l.resolver.GroupName(ctx, chatJID), chatJID.String())
 		} else {
-			meta.Type = "dm"
-			meta.Name = l.resolver.ContactName(ctx, chatJID)
+			meta = modelv1.NewWhatsAppDMMeta(l.resolver.ContactName(ctx, chatJID), chatJID.String())
 		}
 		if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
 			slog.WarnContext(ctx, "whatsapp: history sync: failed to write .meta.json",

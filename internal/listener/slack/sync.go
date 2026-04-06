@@ -212,13 +212,14 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		resolver.AddMember(ch.ID)
 
 		channelName := resolver.ChannelName(ctx, ch.ID)
-		meta := modelv1.ConversationMeta{
-			Name:      channelName,
-			Type:      slackChannelType(ch),
-			ChannelID: ch.ID,
-		}
-		if ch.IsIM {
-			meta.UserID = ch.User
+		var meta modelv1.ConversationMeta
+		switch {
+		case ch.IsIM:
+			meta = modelv1.NewSlackDMMeta(channelName, ch.ID, ch.User)
+		case ch.IsMpIM:
+			meta = modelv1.NewSlackGroupDMMeta(channelName, ch.ID)
+		default:
+			meta = modelv1.NewSlackChannelMeta(channelName, ch.ID)
 		}
 		if err := ms.store.WriteMeta(acct, channelName, meta); err != nil {
 			slog.WarnContext(ctx, "slack sync: failed to write .meta.json",

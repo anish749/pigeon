@@ -251,14 +251,11 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 	}
 
 	// Write .meta.json for the conversation.
-	meta := modelv1.ConversationMeta{
-		Name: sender.Resolver.ContactName(ctx, recipientJID),
-		Type: "dm",
-		JID:  recipientJID.String(),
-	}
+	var meta modelv1.ConversationMeta
 	if recipientJID.Server == types.GroupServer {
-		meta.Type = "group"
-		meta.Name = sender.Resolver.GroupName(ctx, recipientJID)
+		meta = modelv1.NewWhatsAppGroupMeta(sender.Resolver.GroupName(ctx, recipientJID), recipientJID.String())
+	} else {
+		meta = modelv1.NewWhatsAppDMMeta(sender.Resolver.ContactName(ctx, recipientJID), recipientJID.String())
 	}
 	if err := s.store.WriteMeta(sender.Acct, convDir, meta); err != nil {
 		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
@@ -436,18 +433,14 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	}
 
 	// Write .meta.json for the conversation.
-	meta := modelv1.ConversationMeta{
-		Name:      channelName,
-		ChannelID: channelID,
-	}
+	var meta modelv1.ConversationMeta
 	switch {
 	case strings.HasPrefix(channelName, "@mpdm-"):
-		meta.Type = "group_dm"
+		meta = modelv1.NewSlackGroupDMMeta(channelName, channelID)
 	case strings.HasPrefix(channelName, "@"):
-		meta.Type = "dm"
-		meta.UserID = sender.Resolver.DMUserID(channelName)
+		meta = modelv1.NewSlackDMMeta(channelName, channelID, sender.Resolver.DMUserID(channelName))
 	default:
-		meta.Type = "channel"
+		meta = modelv1.NewSlackChannelMeta(channelName, channelID)
 	}
 	if err := s.store.WriteMeta(sender.Acct, channelName, meta); err != nil {
 		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)

@@ -148,15 +148,11 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	// Write .meta.json for the conversation. Resolve LID → JID so the
 	// stored identifier is the stable phone-number JID, not the opaque LID.
 	resolvedChat := l.resolver.ResolveJID(ctx, evt.Info.Chat)
-	meta := modelv1.ConversationMeta{
-		JID: resolvedChat.String(),
-	}
+	var meta modelv1.ConversationMeta
 	if resolvedChat.Server == types.GroupServer {
-		meta.Type = "group"
-		meta.Name = l.resolver.GroupName(ctx, resolvedChat)
+		meta = modelv1.NewWhatsAppGroupMeta(l.resolver.GroupName(ctx, resolvedChat), resolvedChat.String())
 	} else {
-		meta.Type = "dm"
-		meta.Name = l.resolver.ContactName(ctx, resolvedChat)
+		meta = modelv1.NewWhatsAppDMMeta(l.resolver.ContactName(ctx, resolvedChat), resolvedChat.String())
 	}
 	if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
 		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
