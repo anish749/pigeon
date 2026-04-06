@@ -30,7 +30,7 @@ func RunList(platform, accountName string) error {
 				return fmt.Errorf("read metadata for %s: %w", c, err)
 			}
 			if meta != nil && meta.UserID != "" {
-				fmt.Printf("  %s  %s\n", c, meta.UserID)
+				fmt.Printf("  %s  [user_id:%s]\n", c, meta.UserID)
 			} else {
 				fmt.Printf("  %s\n", c)
 			}

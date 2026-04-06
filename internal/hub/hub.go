@@ -441,6 +441,12 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		Conversation: conversation,
 		MsgLines:     lines,
 	}
+	if meta, err := h.store.ReadMeta(ch.acct, conversation); err != nil {
+		slog.Error("failed to read conversation metadata", "conversation", conversation, "error", err)
+	} else if meta != nil {
+		msg.UserID = meta.UserID
+		msg.ChannelID = meta.ChannelID
+	}
 	if err := session.Send(h.ctx, msg); err != nil {
 		slog.Error("failed to deliver message",
 			"session_id", ch.sessionID, "error", err)

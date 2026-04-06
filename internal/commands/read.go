@@ -70,13 +70,13 @@ func RunRead(p ReadParams) error {
 func formatMetaIDs(meta *modelv1.ConvMeta) string {
 	var parts []string
 	if meta.UserID != "" {
-		parts = append(parts, meta.UserID)
+		parts = append(parts, "user_id:"+meta.UserID)
 	}
 	if meta.ChannelID != "" {
-		parts = append(parts, meta.ChannelID)
+		parts = append(parts, "channel_id:"+meta.ChannelID)
 	}
 	if meta.JID != "" {
-		parts = append(parts, meta.JID)
+		parts = append(parts, "jid:"+meta.JID)
 	}
 	parts = append(parts, string(meta.Type))
 	return strings.Join(parts, ", ")

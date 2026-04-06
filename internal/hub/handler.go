@@ -15,10 +15,12 @@ import (
 
 // IncomingMsg is the JSON payload sent over SSE to MCP shim processes.
 type IncomingMsg struct {
-	Platform     string   `json:"platform"`     // "whatsapp" or "slack"
-	Account      string   `json:"account"`      // phone number or workspace
-	Conversation string   `json:"conversation"` // conversation directory name or channel name
-	MsgLines     []string `json:"msg_lines"`    // raw lines from store, e.g. "[2026-04-04 14:00:00 +02:00] Alice: hey"
+	Platform     string   `json:"platform"`              // "whatsapp" or "slack"
+	Account      string   `json:"account"`               // phone number or workspace
+	Conversation string   `json:"conversation"`          // conversation directory name or channel name
+	UserID       string   `json:"user_id,omitempty"`     // Slack DM partner's user ID
+	ChannelID    string   `json:"channel_id,omitempty"`  // Slack channel ID
+	MsgLines     []string `json:"msg_lines"`             // raw lines from store, e.g. "[2026-04-04 14:00:00 +02:00] Alice: hey"
 }
 
 var _ NotificationMsg = (*IncomingMsg)(nil)
@@ -28,11 +30,18 @@ func (i *IncomingMsg) Content() string {
 }
 
 func (i *IncomingMsg) Meta() map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"platform":     i.Platform,
 		"account":      i.Account,
 		"conversation": i.Conversation,
 	}
+	if i.UserID != "" {
+		m["user_id"] = i.UserID
+	}
+	if i.ChannelID != "" {
+		m["channel_id"] = i.ChannelID
+	}
+	return m
 }
 
 // SSEHandler returns an http.HandlerFunc that serves the SSE endpoint for
