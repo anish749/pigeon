@@ -242,8 +242,13 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		resolver.AddMember(ch.ID)
 	}
 
+	// Determine which channels need syncing by querying search.messages.
+	priority := computeSyncPriority(ctx, goslack.New(userToken), gate, ms.cursors, conversations)
+	slog.InfoContext(ctx, "slack sync: priority", "account", acct, "reason", priority.reason)
+
 	// Track per-category progress
 	var doneDMs, doneMpIMs, donePrivate, donePublic int
+	var skippedByPriority int
 
 	var synced, totalMessages int
 	for _, ch := range conversations {
@@ -254,6 +259,21 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		gate.channel = resolver.ChannelName(ctx, ch.ID)
 		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
 			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
+
+		if !priority.shouldSync(ch.ID) {
+			skippedByPriority++
+			switch channelPriority(ch) {
+			case 0:
+				doneDMs++
+			case 1:
+				doneMpIMs++
+			case 2:
+				donePrivate++
+			case 3:
+				donePublic++
+			}
+			continue
+		}
 
 		// Use cursor if resuming, otherwise go back 90 days.
 		// The first page of fetchHistory doubles as the activity check —
@@ -344,7 +364,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 	}
 
 	slog.InfoContext(ctx, "slack sync: complete",
-		"account", acct, "channels", synced, "messages", totalMessages)
+		"account", acct, "channels", synced, "messages", totalMessages,
+		"skipped_by_priority", skippedByPriority)
 
 	// Sync bot DM conversations so pigeon messages appear in the unified timeline.
 	if err := syncBotDMs(ctx, botToken, resolver, acct, ms, gate, defaultOldest, activityCutoff); err != nil {
