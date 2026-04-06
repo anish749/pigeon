@@ -2,7 +2,6 @@ package slack
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -146,31 +145,6 @@ func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, sender
 		},
 	}
 	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
-// writeReactions writes LineReaction events for reactions on a Slack message.
-// Slack groups reactions by emoji with a user list; this expands them into
-// one LineReaction per user per emoji. Deduplication is handled by compaction.
-func writeReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, channelName string, msg goslack.Message) error {
-	var errs []error
-	for _, reaction := range msg.Reactions {
-		for _, userID := range reaction.Users {
-			line := modelv1.Line{
-				Type: modelv1.LineReaction,
-				React: &modelv1.ReactLine{
-					Ts:       ParseTimestamp(msg.Timestamp),
-					MsgID:    msg.Timestamp,
-					Sender:   resolver.UserName(ctx, userID),
-					SenderID: userID,
-					Emoji:    reaction.Name,
-				},
-			}
-			if err := ms.AppendReaction(channelName, line); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // EnsureThreadContextSeparator writes the separator line to a thread file.
