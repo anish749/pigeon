@@ -190,7 +190,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	default:
 		meta = modelv1.NewSlackChannelMeta(channelName, msg.Channel)
 	}
-	if err := l.messages.store.WriteMeta(l.acct, channelName, meta); err != nil {
+	if err := l.messages.WriteMetaIfNotExists(channelName, meta); err != nil {
 		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)
 	}
 

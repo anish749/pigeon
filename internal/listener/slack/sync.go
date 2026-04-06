@@ -80,6 +80,19 @@ func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
 	}
 }
 
+// WriteMetaIfNotExists writes .meta.json for a conversation, skipping if the
+// file already exists (identifiers don't change between messages).
+func (ms *MessageStore) WriteMetaIfNotExists(conversation string, meta modelv1.ConversationMeta) error {
+	existing, err := ms.store.ReadMeta(ms.acct, conversation)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	return ms.store.WriteMeta(ms.acct, conversation, meta)
+}
+
 // AppendReaction stores a reaction or unreaction event in the date file
 // corresponding to the target message's timestamp.
 func (ms *MessageStore) AppendReaction(channelName string, line modelv1.Line) error {
@@ -221,7 +234,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		default:
 			meta = modelv1.NewSlackChannelMeta(channelName, ch.ID)
 		}
-		if err := ms.store.WriteMeta(acct, channelName, meta); err != nil {
+		if err := ms.WriteMetaIfNotExists(channelName, meta); err != nil {
 			slog.WarnContext(ctx, "slack sync: failed to write .meta.json",
 				"channel", channelName, "error", err)
 		}

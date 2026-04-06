@@ -145,17 +145,19 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	slog.InfoContext(ctx, "message saved",
 		"from", senderName, "conv", convDir, "text_len", len(text))
 
-	// Write .meta.json for the conversation. Resolve LID → JID so the
+	// Write .meta.json if it doesn't exist yet. Resolve LID → JID so the
 	// stored identifier is the stable phone-number JID, not the opaque LID.
-	resolvedChat := l.resolver.ResolveJID(ctx, evt.Info.Chat)
-	var meta modelv1.ConversationMeta
-	if resolvedChat.Server == types.GroupServer {
-		meta = modelv1.NewWhatsAppGroupMeta(l.resolver.GroupName(ctx, resolvedChat), resolvedChat.String())
-	} else {
-		meta = modelv1.NewWhatsAppDMMeta(l.resolver.ContactName(ctx, resolvedChat), resolvedChat.String())
-	}
-	if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
-		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
+	if existing, _ := l.store.ReadMeta(l.acct, convDir); existing == nil {
+		resolvedChat := l.resolver.ResolveJID(ctx, evt.Info.Chat)
+		var meta modelv1.ConversationMeta
+		if resolvedChat.Server == types.GroupServer {
+			meta = modelv1.NewWhatsAppGroupMeta(l.resolver.GroupName(ctx, resolvedChat), resolvedChat.String())
+		} else {
+			meta = modelv1.NewWhatsAppDMMeta(l.resolver.ContactName(ctx, resolvedChat), resolvedChat.String())
+		}
+		if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
+			slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
+		}
 	}
 
 	if l.onMessage != nil {
