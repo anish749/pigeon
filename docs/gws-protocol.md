@@ -50,33 +50,53 @@ Gmail), the poller clears the cursor and re-seeds on the next cycle.
 ```
 ~/.local/share/pigeon/
 ├── gmail/
-│   └── {account-slug}/
-│       ├── .sync-cursors.yaml              # historyId
-│       └── YYYY-MM-DD.txt                  # email messages (JSONL)
+│   ├── {account-slug}/                     # e.g. user-at-company-com
+│   │   ├── .sync-cursors.yaml              # historyId
+│   │   └── YYYY-MM-DD.jsonl               # email messages
+│   └── {another-account-slug}/             # multiple accounts supported
+│       ├── .sync-cursors.yaml
+│       └── YYYY-MM-DD.jsonl
 ├── gdrive/
-│   └── {account-slug}/
-│       ├── .sync-cursors.yaml              # Drive pageToken
-│       ├── {doc-title-slug}/               # Google Doc
-│       │   ├── content.md                  # document body (markdown)
-│       │   ├── comments.txt                # comment threads (JSONL)
-│       │   └── .meta.json                  # sync metadata
-│       └── {sheet-title-slug}/             # Google Sheet
-│           ├── {SheetName}.csv             # cell values per sheet
-│           ├── {SheetName}.formulas.csv    # formulas per sheet (optional)
-│           ├── comments.txt                # comment threads (JSONL)
-│           └── .meta.json                  # sync metadata
+│   ├── {account-slug}/
+│   │   ├── .sync-cursors.yaml              # Drive pageToken
+│   │   ├── {doc-title-slug}/               # Google Doc
+│   │   │   ├── {TabName}.md                # one markdown file per tab
+│   │   │   ├── comments.jsonl              # comment threads
+│   │   │   └── .meta.json                  # sync metadata
+│   │   └── {sheet-title-slug}/             # Google Sheet
+│   │       ├── {SheetName}.csv             # cell values per sheet
+│   │       ├── {SheetName}.formulas.csv    # formulas per sheet (optional)
+│   │       ├── comments.jsonl              # comment threads
+│   │       └── .meta.json                  # sync metadata
+│   └── {another-account-slug}/
+│       └── ...
 └── gcalendar/
-    └── {account-slug}/
-        ├── .sync-cursors.yaml              # per-calendar syncTokens
-        └── {calendar-slug}/                # "primary", etc.
-            └── YYYY-MM-DD.txt              # events by start date (JSONL)
+    ├── {account-slug}/
+    │   ├── .sync-cursors.yaml              # per-calendar syncTokens
+    │   └── {calendar-slug}/                # "primary", etc.
+    │       └── YYYY-MM-DD.jsonl            # events by start date
+    └── {another-account-slug}/
+        └── ...
 ```
+
+### Multiple Accounts
+
+Each platform supports multiple Google accounts. Each account gets its
+own directory with independent cursors. The poller iterates over all
+configured accounts on each cycle.
+
+A single user might have:
+- `gmail/personal-at-email-com/` and `gmail/work-at-company-com/`
+- `gdrive/personal-at-email-com/` and `gdrive/work-at-company-com/`
+
+Each account authenticates independently via gws. Account configuration
+lives in pigeon's config file alongside Slack and WhatsApp accounts.
 
 ### Account Slugs
 
 The account slug is derived from the Google account email address using
 the same `gosimple/slug` rules as other platforms. Example:
-`anish749@gmail.com` → `anish749-at-gmail-com`.
+`user@company.com` → `user-at-company-com`.
 
 ### Cursor File
 
@@ -125,7 +145,7 @@ simultaneously).
 #### Email Line
 
 ```json
-{"type":"email","id":"19d644c4ddc7c70c","threadId":"19d644c4ddc7c70c","ts":"2026-04-06T10:15:02Z","from":"alice@example.com","fromName":"Alice Smith","to":["bob@example.com"],"cc":["charlie@example.com"],"subject":"Q2 planning","labels":["INBOX","IMPORTANT"],"snippet":"Hey team, let's discuss...","text":"Hey team, let's discuss the Q2 roadmap.\n\nBest,\nAlice","attach":[{"id":"part-1","type":"application/pdf","name":"roadmap.pdf"}]}
+{"type":"email","id":"19d644c4ddc7c70c","threadId":"19d644c4ddc7c70c","ts":"2026-04-06T10:15:02Z","from":"alice@example.com","fromName":"Alice","to":["bob@example.com"],"cc":["charlie@example.com"],"subject":"Q2 planning","labels":["INBOX","IMPORTANT"],"snippet":"Hey team, let's discuss...","text":"Hey team, let's discuss the Q2 roadmap.\n\nBest,\nAlice","attach":[{"id":"part-1","type":"application/pdf","name":"roadmap.pdf"}]}
 ```
 
 | Field | Type | Description |
@@ -154,7 +174,7 @@ Appended when `history.list` reports a message was deleted (trashed/removed).
 
 ### Date File
 
-Path: `gmail/{account}/YYYY-MM-DD.txt`
+Path: `gmail/{account}/YYYY-MM-DD.jsonl`
 
 Messages are filed by their `internalDate` (when Gmail received them).
 One file per day. Append-only.
@@ -204,37 +224,51 @@ deletes and removes both lines.
 Each Google Doc is a directory named by the slugified document title.
 The directory contains:
 
-- `content.md` — the document body exported as markdown.
-- `comments.txt` — comment threads as JSONL.
+- `{TabName}.md` — one markdown file per document tab.
+- `comments.jsonl` — comment threads as JSONL.
 - `.meta.json` — sync metadata.
+
+### Document Tabs
+
+Google Docs support multiple tabs within a single document. Each tab
+is exported as a separate markdown file named by the tab title. For
+single-tab documents (the common case), this produces one file named
+after the default tab (e.g. `Tab 1.md`).
+
+The `documents.get` API returns a `tabs` array. Each tab has
+`tabProperties.title` and `tabProperties.tabId`. The poller exports
+each tab independently via `docs documents.get` with
+`includeTabsContent=true`, then converts each tab's body to markdown.
 
 ### Sync Flow
 
 1. Poll `drive changes list` with `pageToken`.
 2. For each changed file where `mimeType` is
    `application/vnd.google-apps.document`:
-   a. Export the document: `drive files export` with
-      `mimeType=text/markdown`. Store as `content.md`.
-   b. Fetch comments: `drive comments list` with all fields.
-      Append new comments and replies to `comments.txt`.
+   a. Fetch the document: `docs documents get` with
+      `includeTabsContent=true`.
+   b. For each tab, convert the body to markdown. Store as
+      `{TabName}.md`. If a tab is renamed, the old file remains
+      and a new file is created.
+   c. Fetch comments: `drive comments list` with all fields.
+      Append new comments and replies to `comments.jsonl`.
 3. The document directory name is the slugified title from the file
    metadata. If the title changes, a new directory is created (same
    limitation as channel renames in the messaging protocol).
 
-### Content File
+### Content Files
 
-Path: `gdrive/{account}/{doc-slug}/content.md`
+Path: `gdrive/{account}/{doc-slug}/{TabName}.md`
 
-The full document body exported as markdown by the Google Drive API.
-**Replaced** on each sync (not appended). This file is directly
-greppable — it is plain markdown, not JSONL.
+Each tab's body exported as markdown. **Replaced** on each sync (not
+appended). Directly greppable — plain markdown, not JSONL.
 
-The Drive API's markdown export preserves:
+The markdown export preserves:
 - Headings, bold, italic, links, lists, tables.
 - Inline images as markdown image references.
 
 It does **not** preserve:
-- Comments (stored separately in `comments.txt`).
+- Comments (stored separately in `comments.jsonl`).
 - Suggestions/tracked changes.
 - Drawing objects.
 
@@ -243,7 +277,7 @@ It does **not** preserve:
 #### Comment Line
 
 ```json
-{"type":"comment","id":"AAABedbmvS8","ts":"2025-04-04T15:42:13Z","author":"Chris Metcalf","content":"416 may return a body...","anchor":"416","resolved":false}
+{"type":"comment","id":"AAABedbmvS8","ts":"2025-04-04T15:42:13Z","author":"User A","content":"416 may return a body...","anchor":"416","resolved":false}
 ```
 
 | Field | Type | Description |
@@ -259,7 +293,7 @@ It does **not** preserve:
 #### Reply Line
 
 ```json
-{"type":"reply","id":"reply-xyz","commentId":"AAABedbmvS8","ts":"2025-04-04T16:00:00Z","author":"Todd Greer","content":"You can do this with the current design...","action":"reopen"}
+{"type":"reply","id":"reply-xyz","commentId":"AAABedbmvS8","ts":"2025-04-04T16:00:00Z","author":"User B","content":"You can do this with the current design...","action":"reopen"}
 ```
 
 | Field | Type | Description |
@@ -277,14 +311,13 @@ It does **not** preserve:
 Comments are **append-only**. On each sync:
 
 1. Fetch all comments with `drive comments list` (paginate).
-2. For each comment not already in `comments.txt` (by ID), append it.
+2. For each comment not already in `comments.jsonl` (by ID), append it.
 3. For each reply not already stored (by ID), append it.
 4. If a comment's `resolved` status changed, append an updated comment
    line. The reader uses the latest line for a given comment ID.
 
 Deduplication on read: by `id` for comments, by `id` for replies. Keep
-the last occurrence (latest state wins, unlike messages where first
-occurrence wins).
+the last occurrence (latest state wins).
 
 ### Metadata File
 
@@ -292,11 +325,12 @@ Path: `gdrive/{account}/{doc-slug}/.meta.json`
 
 ```json
 {
-  "fileId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+  "fileId": "1abc...",
   "mimeType": "application/vnd.google-apps.document",
   "title": "Project Roadmap",
   "modifiedTime": "2026-03-15T14:22:00Z",
-  "syncedAt": "2026-03-16T09:00:00Z"
+  "syncedAt": "2026-03-16T09:00:00Z",
+  "tabs": [{"id": "t.0", "title": "Tab 1"}, {"id": "t.1", "title": "Notes"}]
 }
 ```
 
@@ -307,6 +341,7 @@ Path: `gdrive/{account}/{doc-slug}/.meta.json`
 | `title` | Original document title (before slugification) |
 | `modifiedTime` | Last modified time from Drive metadata |
 | `syncedAt` | When pigeon last synced this document |
+| `tabs` | Tab ID and title for each document tab |
 
 Used for incremental sync: skip re-export if `modifiedTime` hasn't
 changed since `syncedAt`.
@@ -326,7 +361,7 @@ title. The directory contains:
 
 - `{SheetName}.csv` — cell values for each sheet tab.
 - `{SheetName}.formulas.csv` — formulas for each sheet tab (optional).
-- `comments.txt` — comment threads as JSONL (same format as Docs).
+- `comments.jsonl` — comment threads as JSONL (same format as Docs).
 - `.meta.json` — sync metadata.
 
 ### Sync Flow
@@ -381,7 +416,7 @@ the list of sheet names for efficient re-sync:
 {
   "fileId": "1abc...",
   "mimeType": "application/vnd.google-apps.spreadsheet",
-  "title": "Q2 Budget",
+  "title": "Budget",
   "modifiedTime": "2026-03-15T14:22:00Z",
   "syncedAt": "2026-03-16T09:00:00Z",
   "sheets": ["Summary", "Revenue", "Expenses"]
@@ -440,7 +475,7 @@ slugified).
 
 ### Date File
 
-Path: `gcalendar/{account}/{calendar-slug}/YYYY-MM-DD.txt`
+Path: `gcalendar/{account}/{calendar-slug}/YYYY-MM-DD.jsonl`
 
 Events are filed by their **start date**. Timed events use the local
 date from the `start.dateTime` field. All-day events use `start.date`.
@@ -494,16 +529,16 @@ grep '"from":"alice@' ~/.local/share/pigeon/gmail/
 grep -i 'planning' ~/.local/share/pigeon/gcalendar/
 
 # Find resolved comments
-grep '"resolved":true' ~/.local/share/pigeon/gdrive/*/comments.txt
+grep '"resolved":true' ~/.local/share/pigeon/gdrive/*/comments.jsonl
 
 # Find replies that resolved a comment thread
-grep '"action":"resolve"' ~/.local/share/pigeon/gdrive/*/comments.txt
+grep '"action":"resolve"' ~/.local/share/pigeon/gdrive/*/comments.jsonl
 
 # Find emails with PDF attachments
 grep 'application/pdf' ~/.local/share/pigeon/gmail/
 
 # Count emails per day
-wc -l ~/.local/share/pigeon/gmail/account/2026-04-*.txt
+wc -l ~/.local/share/pigeon/gmail/account/2026-04-*.jsonl
 ```
 
 ### Content Files (Docs as Markdown, Sheets as CSV)
@@ -529,8 +564,8 @@ rg 'quarterly' ~/.local/share/pigeon/
 The existing `pigeon search` command uses ripgrep on `*.txt` files
 and parses JSONL output. To support GWS data:
 
-1. Extend search to include `*.md` and `*.csv` files.
-2. For JSONL files (`*.txt`), parse by `type` field to format results
+1. Extend search to include `*.jsonl`, `*.md`, and `*.csv` files.
+2. For JSONL files (`*.jsonl`), parse by `type` field to format results
    (email, event, comment, reply — in addition to existing msg, react,
    edit, delete).
 3. For content files (`*.md`, `*.csv`), return raw text matches with
@@ -551,7 +586,7 @@ and parses JSONL output. To support GWS data:
 ### Google Docs
 
 1. Read `content.md` and display as-is (markdown).
-2. Parse `comments.txt`, deduplicate by `id` (keep last occurrence).
+2. Parse `comments.jsonl`, deduplicate by `id` (keep last occurrence).
 3. Display comments grouped by anchor text, with replies nested.
 4. Resolved comments can be shown or hidden based on user preference.
 
@@ -580,7 +615,7 @@ timestamp, rewrite.
 
 - `content.md` and `*.csv` are replaced on each sync — no maintenance
   needed for content files.
-- `comments.txt`: deduplicate comments by `id` (keep last), deduplicate
+- `comments.jsonl`: deduplicate comments by `id` (keep last), deduplicate
   replies by `id` (keep last), sort by timestamp, rewrite.
 
 ### Calendar
@@ -644,12 +679,18 @@ type ReplyLine struct {
 // Drive Metadata
 
 type DocMeta struct {
-    FileID       string   `json:"fileId"`
-    MimeType     string   `json:"mimeType"`
-    Title        string   `json:"title"`
-    ModifiedTime string   `json:"modifiedTime"`
-    SyncedAt     string   `json:"syncedAt"`
-    Sheets       []string `json:"sheets,omitempty"` // sheet names (Sheets only)
+    FileID       string    `json:"fileId"`
+    MimeType     string    `json:"mimeType"`
+    Title        string    `json:"title"`
+    ModifiedTime string    `json:"modifiedTime"`
+    SyncedAt     string    `json:"syncedAt"`
+    Tabs         []TabMeta `json:"tabs,omitempty"`   // doc tabs (Docs only)
+    Sheets       []string  `json:"sheets,omitempty"` // sheet names (Sheets only)
+}
+
+type TabMeta struct {
+    ID    string `json:"id"`    // tab ID (e.g. "t.0")
+    Title string `json:"title"` // tab title (e.g. "Tab 1")
 }
 
 // Calendar
