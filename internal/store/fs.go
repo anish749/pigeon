@@ -288,8 +288,8 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	return errors.Join(errs...)
 }
 
-// WriteMeta writes or overwrites the .meta.json sidecar for a conversation.
-func (s *FSStore) WriteMeta(acct account.Account, conversation string, meta modelv1.ConvMeta) error {
+// writeMeta writes or overwrites the .meta.json sidecar for a conversation.
+func (s *FSStore) writeMeta(acct account.Account, conversation string, meta modelv1.ConvMeta) error {
 	conv := s.convDir(acct, conversation)
 	if err := os.MkdirAll(conv.Path(), 0755); err != nil {
 		return fmt.Errorf("create conversation dir: %w", err)
@@ -308,7 +308,7 @@ func (s *FSStore) WriteMetaIfNotExists(acct account.Account, conversation string
 	if fileExists(path) {
 		return false, nil
 	}
-	return true, s.WriteMeta(acct, conversation, meta)
+	return true, s.writeMeta(acct, conversation, meta)
 }
 
 // ReadMeta reads the .meta.json sidecar for a conversation.
