@@ -84,27 +84,16 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 			selected = []string{target}
 		}
 	case opts.Since > 0:
-		cutoff := time.Now().Add(-opts.Since)
-		for _, f := range files {
-			d, err := dateFromFilename(f)
-			if err != nil {
-				slog.Warn("skip date file: bad filename", "file", f, "error", err)
-				continue
-			}
-			if !d.Before(cutoff.Truncate(24 * time.Hour)) {
-				selected = append(selected, f)
-			}
-		}
+		cutoffDate := time.Now().Add(-opts.Since).Truncate(24 * time.Hour).Format("2006-01-02")
+		i := sort.SearchStrings(files, filepath.Join(conv.Path(), cutoffDate+paths.FileExt))
+		selected = files[i:]
 	case opts.Last > 0:
 		// For --last N, read all files so we can slice after compaction.
 		selected = files
 	default:
-		today := conv.DateFile(time.Now().UTC().Format("2006-01-02"))
-		if fileExists(today) {
-			selected = []string{today}
-		} else {
-			selected = []string{files[len(files)-1]}
-		}
+		// No filter specified: return the last 25 messages.
+		selected = files
+		opts.Last = 25
 	}
 
 	merged := &modelv1.DateFile{}
@@ -407,14 +396,6 @@ func listSubdirs(dir string) ([]string, error) {
 	return dirs, nil
 }
 
-func dateFromFilename(path string) (time.Time, error) {
-	name := strings.TrimSuffix(filepath.Base(path), paths.FileExt)
-	t, err := time.Parse("2006-01-02", name)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse date from filename %s: %w", path, err)
-	}
-	return t, nil
-}
 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
