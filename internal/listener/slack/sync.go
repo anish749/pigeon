@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -145,6 +146,31 @@ func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, sender
 		},
 	}
 	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
+}
+
+// writeReactions writes LineReaction events for reactions on a Slack message.
+// Slack groups reactions by emoji with a user list; this expands them into
+// one LineReaction per user per emoji. Deduplication is handled by compaction.
+func writeReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, channelName string, msg goslack.Message) error {
+	var errs []error
+	for _, reaction := range msg.Reactions {
+		for _, userID := range reaction.Users {
+			line := modelv1.Line{
+				Type: modelv1.LineReaction,
+				React: &modelv1.ReactLine{
+					Ts:       ParseTimestamp(msg.Timestamp),
+					MsgID:    msg.Timestamp,
+					Sender:   resolver.UserName(ctx, userID),
+					SenderID: userID,
+					Emoji:    reaction.Name,
+				},
+			}
+			if err := ms.AppendReaction(channelName, line); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // EnsureThreadContextSeparator writes the separator line to a thread file.
@@ -301,24 +327,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 			written++
-
-			// Sync reactions attached to this message.
-			for _, reaction := range msg.Reactions {
-				for _, userID := range reaction.Users {
-					reactLine := modelv1.Line{
-						Type: modelv1.LineReaction,
-						React: &modelv1.ReactLine{
-							Ts:       ts,
-							MsgID:    msg.Timestamp,
-							Sender:   resolver.UserName(ctx, userID),
-							SenderID: userID,
-							Emoji:    reaction.Name,
-						},
-					}
-					if err := ms.AppendReaction(channelName, reactLine); err != nil {
-						slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
-					}
-				}
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
 			}
 		}
 
@@ -479,6 +489,9 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			written++
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: bot DM reaction write failed", "error", err)
+			}
 		}
 
 		if lastTS != "" {
@@ -629,6 +642,9 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
 			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
+			}
+			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
+				slog.WarnContext(ctx, "slack sync: thread reaction write failed", "error", err)
 			}
 		}
 
