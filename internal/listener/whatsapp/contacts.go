@@ -14,7 +14,7 @@ import (
 // The first entry in each slice is the best display name.
 // Used by search/list/read commands for name resolution without a running daemon.
 func LoadContactAliases(ctx context.Context, dbPath string, deviceJID types.JID) (map[string][]string, error) {
-	dsn := fmt.Sprintf("file:%s?_foreign_keys=on", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)", dbPath)
 	container, err := sqlstore.New(ctx, "sqlite", dsn, nil)
 	if err != nil {
 		return nil, fmt.Errorf("open whatsmeow store: %w", err)
