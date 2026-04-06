@@ -248,14 +248,3 @@ func channelPriority(ch goslack.Channel) int {
 	}
 	return 3
 }
-
-// slackChannelType returns the .meta.json type value for a Slack channel.
-func slackChannelType(ch goslack.Channel) string {
-	if ch.IsIM {
-		return "dm"
-	}
-	if ch.IsMpIM {
-		return "group_dm"
-	}
-	return "channel"
-}
