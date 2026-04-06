@@ -126,14 +126,24 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 		Page:          1,
 	}
 	// Search is an optimization, not a requirement. If it fails (missing scope,
-	// network error, rate limit), we fall back to syncing all channels — the same
-	// behavior as before this optimization existed. No error is returned because
-	// the caller's sync will still succeed, just without the filtering benefit.
-	result, err := searcher.SearchMessagesContext(ctx, query, params)
-	if err != nil {
-		slog.WarnContext(ctx, "sync priority: search failed, syncing all",
-			"error", err, "query", query)
-		return syncAll(fmt.Sprintf("search failed: %v", err))
+	// network error), we fall back to syncing all channels — the same behavior
+	// as before this optimization existed.
+	var result *goslack.SearchMessages
+	for {
+		var err error
+		result, err = searcher.SearchMessagesContext(ctx, query, params)
+		if gate.update(err) {
+			if err := gate.wait(ctx); err != nil {
+				return syncAll("rate limit wait cancelled")
+			}
+			continue
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "sync priority: search failed, syncing all",
+				"error", err, "query", query)
+			return syncAll(fmt.Sprintf("search failed: %v", err))
+		}
+		break
 	}
 
 	if result.Total == 0 {
@@ -165,7 +175,12 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 			return syncAll(fmt.Sprintf("rate limit wait cancelled at page %d", page))
 		}
 		params.Page = page
+		var err error
 		result, err = searcher.SearchMessagesContext(ctx, query, params)
+		if gate.update(err) {
+			page-- // retry the same page after wait
+			continue
+		}
 		if err != nil {
 			// Mid-pagination failure: we have a partial channel set that may be
 			// missing active channels from unseen pages. Using it would silently
