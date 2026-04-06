@@ -301,6 +301,25 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 			written++
+
+			// Sync reactions attached to this message.
+			for _, reaction := range msg.Reactions {
+				for _, userID := range reaction.Users {
+					reactLine := modelv1.Line{
+						Type: modelv1.LineReaction,
+						React: &modelv1.ReactLine{
+							Ts:       ts,
+							MsgID:    msg.Timestamp,
+							Sender:   resolver.UserName(ctx, userID),
+							SenderID: userID,
+							Emoji:    reaction.Name,
+						},
+					}
+					if err := ms.AppendReaction(channelName, reactLine); err != nil {
+						slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
+					}
+				}
+			}
 		}
 
 		// Sync thread replies for messages with threads

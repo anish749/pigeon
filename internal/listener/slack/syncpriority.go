@@ -13,7 +13,7 @@ import (
 const (
 	// minChannelsForSearch is the minimum number of channels before we bother
 	// querying search. Below this, syncing all channels is fast enough.
-	minChannelsForSearch = 50
+	minChannelsForSearch = 75
 
 	// searchPageSize is the number of results per search page (max 100).
 	searchPageSize = 100
