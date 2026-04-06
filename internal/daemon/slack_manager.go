@@ -122,8 +122,10 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	}
 
 	var userName string
+	var userID string
 	if authResp, err := userAPI.AuthTestContext(ctx); err == nil {
 		userName = resolver.UserName(ctx, authResp.UserID)
+		userID = authResp.UserID
 	} else {
 		slog.WarnContext(ctx, "failed to get Slack auth info", "account", acct, "error", err)
 	}
@@ -149,12 +151,14 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
 
 	return &api.SlackSender{
-		BotAPI:   botAPI,
-		UserAPI:  userAPI,
-		Resolver: resolver,
-		Messages: messages,
-		Acct:     acct,
-		BotName:  botName,
-		UserName: userName,
+		BotAPI:    botAPI,
+		UserAPI:   userAPI,
+		Resolver:  resolver,
+		Messages:  messages,
+		Acct:      acct,
+		BotName:   botName,
+		BotUserID: botUserID,
+		UserName:  userName,
+		UserID:    userID,
 	}
 }
