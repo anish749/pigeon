@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -107,7 +108,7 @@ func TestCaptureRg_ThreadGlob(t *testing.T) {
 	dir := setupThreadFixture(t)
 
 	// Search with the thread glob — this should find thread file matches.
-	includes := []string{threadGlob}
+	includes := []string{paths.ThreadGlobRg}
 	output, err := captureRg(rgPath, "deploy", dir, includes, 0)
 	if err != nil {
 		t.Fatalf("captureRg: %v", err)
@@ -130,7 +131,7 @@ func TestCaptureGrepFallback_ThreadGlob(t *testing.T) {
 	dir := setupThreadFixture(t)
 
 	// Search with only the thread glob — should find thread file matches.
-	includes := []string{threadGlob}
+	includes := []string{paths.ThreadGlobRg}
 	output, err := captureGrepFallback("deploy", dir, includes, 0)
 	if err != nil {
 		t.Fatalf("captureGrepFallback: %v", err)

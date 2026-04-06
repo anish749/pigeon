@@ -125,7 +125,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 	}
 	// Always include thread files — can't date-filter by filename.
 	// **/threads/*.txt matches nested paths like #general/threads/1742100000.txt.
-	includes = append(includes, threadGlob)
+	includes = append(includes, paths.ThreadGlobRg)
 
 	if len(includes) == 1 {
 		// Only the threads glob, no date files matched.
@@ -133,11 +133,6 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 	}
 	return includes, nil
 }
-
-// threadGlob is the glob pattern for thread files. rg handles this natively
-// via --glob. The grep fallback uses find(1) instead since --include only
-// matches basenames.
-const threadGlob = "**/threads/*.txt"
 
 // captureGrep runs rg (or grep) and returns the raw output.
 func captureGrep(query, dir string, includes []string, context int) ([]byte, error) {
@@ -171,7 +166,7 @@ func captureGrepFallback(query, dir string, includes []string, context int) ([]b
 	var dateIncludes []string
 	searchThreads := false
 	for _, inc := range includes {
-		if inc == threadGlob {
+		if inc == paths.ThreadGlobRg {
 			searchThreads = true
 		} else {
 			dateIncludes = append(dateIncludes, inc)
@@ -230,7 +225,7 @@ func grepThreadFiles(query, dir string, context int) ([]byte, error) {
 	// find <dir> -path '*/threads/*.txt' -exec grep -H --color=never <query> {} +
 	// The + terminator batches files into one grep call. If find matches
 	// no files, grep is never invoked and find exits 0.
-	args := []string{dir, "-path", "*/threads/*.txt", "-exec", "grep"}
+	args := []string{dir, "-path", paths.ThreadGlobFind, "-exec", "grep"}
 	args = append(args, grepArgs...)
 	args = append(args, "{}", "+")
 

@@ -106,3 +106,16 @@ func (c ConversationDir) ThreadsDir() string {
 func (c ConversationDir) ThreadFile(threadTS string) string {
 	return filepath.Join(c.Path(), "threads", threadTS+".txt")
 }
+
+// Thread directory and file glob patterns for search tools.
+const (
+	// ThreadsSubdir is the directory name for thread files within a conversation.
+	ThreadsSubdir = "threads"
+
+	// ThreadGlobRg is the glob pattern for rg --glob to match thread files
+	// nested at <conversation>/threads/<ts>.txt.
+	ThreadGlobRg = "**/threads/*.txt"
+
+	// ThreadGlobFind is the -path pattern for find(1) to match thread files.
+	ThreadGlobFind = "*/threads/*.txt"
+)
