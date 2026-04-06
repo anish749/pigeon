@@ -118,6 +118,10 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 		Count:         searchPageSize,
 		Page:          1,
 	}
+	// Search is an optimization, not a requirement. If it fails (missing scope,
+	// network error, rate limit), we fall back to syncing all channels — the same
+	// behavior as before this optimization existed. No error is returned because
+	// the caller's sync will still succeed, just without the filtering benefit.
 	result, err := searcher.SearchMessagesContext(ctx, query, params)
 	if err != nil {
 		slog.WarnContext(ctx, "sync priority: search failed, syncing all",
