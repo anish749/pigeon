@@ -23,16 +23,28 @@ var channelMentionRe = regexp.MustCompile(`<#(C[A-Z0-9]+)\|([^>]+)>`)
 
 // ResolveText replaces Slack markup in message text with human-readable names.
 // Converts <@U12345678> to @displayname and <#C12345678|name> to #name.
-func (r *Resolver) ResolveText(ctx context.Context, text string) string {
+func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error) {
+	var resolveErr error
 	text = mentionRe.ReplaceAllStringFunc(text, func(match string) string {
+		if resolveErr != nil {
+			return match
+		}
 		sub := mentionRe.FindStringSubmatch(match)
 		if len(sub) < 2 {
 			return match
 		}
-		return "@" + r.UserName(ctx, sub[1])
+		name, err := r.UserName(ctx, sub[1])
+		if err != nil {
+			resolveErr = err
+			return match
+		}
+		return "@" + name
 	})
+	if resolveErr != nil {
+		return "", resolveErr
+	}
 	text = channelMentionRe.ReplaceAllString(text, "#$2")
-	return text
+	return text, nil
 }
 
 // Resolver caches Slack user and channel name lookups and tracks
@@ -133,31 +145,34 @@ func (r *Resolver) RegisterChannel(channelID, name string) {
 
 // RegisterConversation registers a channel in the cache, resolving IM user IDs
 // to display names. Used by sync to register channels discovered via the user token.
-func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel) {
+func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel) error {
 	name := FormatChannelName(ch)
 	if ch.IsIM {
-		name = "@" + r.UserName(ctx, ch.User)
+		userName, err := r.UserName(ctx, ch.User)
+		if err != nil {
+			return fmt.Errorf("resolve IM user %s: %w", ch.User, err)
+		}
+		name = "@" + userName
 		r.mu.Lock()
 		r.dmUsers[ch.ID] = ch.User
 		r.mu.Unlock()
 	}
 	r.RegisterChannel(ch.ID, name)
+	return nil
 }
 
 // UserName resolves a Slack user ID to a display name. Falls back to API lookup on cache miss.
-func (r *Resolver) UserName(ctx context.Context, userID string) string {
+func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) {
 	r.mu.RLock()
 	name, ok := r.users[userID]
 	r.mu.RUnlock()
 	if ok {
-		return name
+		return name, nil
 	}
 
 	user, err := r.api.GetUserInfoContext(ctx, userID)
 	if err != nil {
-		// TODO: handle error. this eneds to boil up the error to the caller.
-		slog.WarnContext(ctx, "failed to resolve slack user", "user_id", userID, "error", err)
-		return userID
+		return "", fmt.Errorf("resolve user %s: %w", userID, err)
 	}
 	name = user.Profile.DisplayName
 	if name == "" {
@@ -169,7 +184,7 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 	r.mu.Lock()
 	r.users[userID] = name
 	r.mu.Unlock()
-	return name
+	return name, nil
 }
 
 // botName resolves a Slack bot ID to a display name via cache or API lookup.
@@ -198,7 +213,11 @@ func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 // then the message's Username field (common for bots), then a bot API lookup.
 func (r *Resolver) SenderName(ctx context.Context, userID, botID, username string) (string, string, error) {
 	if userID != "" {
-		return r.UserName(ctx, userID), userID, nil
+		name, err := r.UserName(ctx, userID)
+		if err != nil {
+			return "", "", err
+		}
+		return name, userID, nil
 	}
 	if username != "" {
 		return username, botID, nil
@@ -214,25 +233,27 @@ func (r *Resolver) SenderName(ctx context.Context, userID, botID, username strin
 }
 
 // ChannelName resolves a Slack channel ID to a formatted name. Falls back to API lookup on cache miss.
-func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
+func (r *Resolver) ChannelName(ctx context.Context, channelID string) (string, error) {
 	r.mu.RLock()
 	name, ok := r.channels[channelID]
 	r.mu.RUnlock()
 	if ok {
-		return name
+		return name, nil
 	}
 
 	ch, err := r.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
 		ChannelID: channelID,
 	})
 	if err != nil {
-		// TODO: handle error. this eneds to boil up the error to the caller.
-		slog.WarnContext(ctx, "failed to resolve slack channel", "channel_id", channelID, "error", err)
-		return channelID
+		return "", fmt.Errorf("resolve channel %s: %w", channelID, err)
 	}
 	name = FormatChannelName(*ch)
 	if ch.IsIM {
-		name = "@" + r.UserName(ctx, ch.User)
+		userName, err := r.UserName(ctx, ch.User)
+		if err != nil {
+			return "", err
+		}
+		name = "@" + userName
 	}
 	r.mu.Lock()
 	r.channels[channelID] = name
@@ -240,7 +261,7 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 		r.dmUsers[channelID] = ch.User
 	}
 	r.mu.Unlock()
-	return name
+	return name, nil
 }
 
 // UserMatch represents a user that matched a search query.
@@ -356,7 +377,11 @@ func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, str
 	}
 	name := FormatChannelName(*ch)
 	if ch.IsIM {
-		name = "@" + r.UserName(ctx, ch.User)
+		userName, err := r.UserName(ctx, ch.User)
+		if err != nil {
+			return "", "", err
+		}
+		name = "@" + userName
 	}
 	r.RegisterChannel(query, name)
 	return query, name, nil
