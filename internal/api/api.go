@@ -54,22 +54,26 @@ type SlackSender struct {
 
 // Server is the daemon's HTTP API server.
 type Server struct {
-	mu       sync.RWMutex
-	whatsapp map[string]*WhatsAppSender // account slug → sender
-	slack    map[string]*SlackSender    // account slug → sender
-	hub      *hub.Hub
-	outbox   *outbox.Outbox
-	store    store.Store
+	mu        sync.RWMutex
+	whatsapp  map[string]*WhatsAppSender // account slug → sender
+	slack     map[string]*SlackSender    // account slug → sender
+	hub       *hub.Hub
+	outbox    *outbox.Outbox
+	store     store.Store
+	version   string
+	startedAt time.Time
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string) *Server {
 	return &Server{
-		whatsapp: make(map[string]*WhatsAppSender),
-		slack:    make(map[string]*SlackSender),
-		hub:      h,
-		outbox:   ob,
-		store:    s,
+		whatsapp:  make(map[string]*WhatsAppSender),
+		slack:     make(map[string]*SlackSender),
+		hub:       h,
+		outbox:    ob,
+		store:     s,
+		version:   version,
+		startedAt: time.Now(),
 	}
 }
 
@@ -107,6 +111,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
+	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 
 	srv := &http.Server{
@@ -417,6 +422,38 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	}
 
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
+}
+
+// StatusResponse is the daemon API response for GET /api/status.
+type StatusResponse struct {
+	Version   string              `json:"version"`
+	PID       int                 `json:"pid"`
+	StartedAt time.Time           `json:"started_at"`
+	LogFile   string              `json:"log_file"`
+	Listeners map[string][]string `json:"listeners"`
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	listeners := make(map[string][]string, 2)
+	for slug := range s.slack {
+		listeners["slack"] = append(listeners["slack"], slug)
+	}
+	for slug := range s.whatsapp {
+		listeners["whatsapp"] = append(listeners["whatsapp"], slug)
+	}
+	s.mu.RUnlock()
+
+	sort.Strings(listeners["slack"])
+	sort.Strings(listeners["whatsapp"])
+
+	writeJSON(w, http.StatusOK, StatusResponse{
+		Version:   s.version,
+		PID:       os.Getpid(),
+		StartedAt: s.startedAt,
+		LogFile:   paths.DaemonLogPath(),
+		Listeners: listeners,
+	})
 }
 
 func (s *Server) handleSessionConnected(w http.ResponseWriter, r *http.Request) {
