@@ -25,13 +25,9 @@ const (
 	activeRatioThreshold = 0.65
 )
 
-// messageSearcher abstracts the Slack search API for testability.
-type messageSearcher interface {
+// slackPrioritizer abstracts Slack APIs used for sync prioritization.
+type slackPrioritizer interface {
 	SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error)
-}
-
-// userPrefsFetcher abstracts user preferences for testability.
-type userPrefsFetcher interface {
 	GetUserPrefsContext(ctx context.Context) (*goslack.UserPrefsCarrier, error)
 }
 
@@ -41,16 +37,16 @@ type userPrefsFetcher interface {
 // On first sync (no cursors) or for small workspaces, all channels are returned.
 // On subsequent syncs, search.messages discovers which channels had activity
 // since the last sync, and only those are returned.
-func prioritizeChannels(ctx context.Context, searcher messageSearcher, prefs userPrefsFetcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
+func prioritizeChannels(ctx context.Context, api slackPrioritizer, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
 	// Filter out muted channels before any other prioritization.
-	conversations = filterMuted(ctx, prefs, conversations)
+	conversations = filterMuted(ctx, api, conversations)
 
 	// Sort all conversations: DMs first, then group IMs, private, public.
 	sort.SliceStable(conversations, func(i, j int) bool {
 		return channelPriority(conversations[i]) < channelPriority(conversations[j])
 	})
 
-	activeSet := discoverActiveChannels(ctx, searcher, gate, cursors, conversations)
+	activeSet := discoverActiveChannels(ctx, api, gate, cursors, conversations)
 	if activeSet == nil {
 		// nil means "sync all" — no filtering possible or needed.
 		return conversations
@@ -101,7 +97,7 @@ func syncAll(reason string) *activeChannelSet {
 // discoverActiveChannels queries search.messages to find which channels had
 // activity since the most recent cursor. Returns nil if all channels should
 // be synced (first sync, few channels, search error, too many active).
-func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *activeChannelSet {
+func discoverActiveChannels(ctx context.Context, searcher slackPrioritizer, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *activeChannelSet {
 	if len(cursors) == 0 {
 		return syncAll("first sync, no cursors")
 	}
@@ -151,7 +147,7 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 // searchActiveChannelIDs paginates through search.messages results, collecting
 // unique channel IDs that had activity. Returns nil if all channels should be
 // synced (too many active, or a mid-pagination error).
-func searchActiveChannelIDs(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, query string, totalChannels int) (map[string]bool, int, error) {
+func searchActiveChannelIDs(ctx context.Context, searcher slackPrioritizer, gate *rateLimitGate, query string, totalChannels int) (map[string]bool, int, error) {
 	params := goslack.SearchParameters{
 		Sort:          "timestamp",
 		SortDirection: "desc",
@@ -205,7 +201,7 @@ func searchActiveChannelIDs(ctx context.Context, searcher messageSearcher, gate 
 }
 
 // searchWithRetry calls SearchMessagesContext, retrying on rate limit errors.
-func searchWithRetry(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
+func searchWithRetry(ctx context.Context, searcher slackPrioritizer, gate *rateLimitGate, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
 	for {
 		if err := gate.wait(ctx); err != nil {
 			return nil, fmt.Errorf("rate limit wait: %w", err)
@@ -246,13 +242,10 @@ func collectChannelIDs(matches []goslack.SearchMessage) map[string]bool {
 
 // filterMuted removes muted channels from the conversation list.
 // If prefs is nil or the fetch fails, returns conversations unchanged.
-func filterMuted(ctx context.Context, prefs userPrefsFetcher, conversations []goslack.Channel) []goslack.Channel {
-	if prefs == nil {
-		return conversations
-	}
-	muted, err := fetchMutedChannels(ctx, prefs)
+func filterMuted(ctx context.Context, api slackPrioritizer, conversations []goslack.Channel) []goslack.Channel {
+	muted, err := fetchMutedChannels(ctx, api)
 	if err != nil {
-		slog.WarnContext(ctx, "sync priority: failed to fetch muted channels, syncing all", "error", err)
+		slog.WarnContext(ctx, "sync priority: failed to fetch muted channels, skipping mute filter", "error", err)
 		return conversations
 	}
 	if len(muted) == 0 {
@@ -274,10 +267,13 @@ func filterMuted(ctx context.Context, prefs userPrefsFetcher, conversations []go
 }
 
 // fetchMutedChannels returns a set of channel IDs that the user has muted.
-func fetchMutedChannels(ctx context.Context, prefs userPrefsFetcher) (map[string]bool, error) {
-	carrier, err := prefs.GetUserPrefsContext(ctx)
+func fetchMutedChannels(ctx context.Context, api slackPrioritizer) (map[string]bool, error) {
+	carrier, err := api.GetUserPrefsContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get user prefs: %w", err)
+	}
+	if carrier.UserPrefs == nil {
+		return nil, nil
 	}
 	raw := carrier.UserPrefs.MutedChannels
 	if raw == "" {

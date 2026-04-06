@@ -9,15 +9,17 @@ import (
 	goslack "github.com/slack-go/slack"
 )
 
-// fakeSearcher implements messageSearcher for tests.
-type fakeSearcher struct {
-	pages map[int]*goslack.SearchMessages
-	err   error
+// fakePrioritizer implements slackPrioritizer for tests.
+type fakePrioritizer struct {
+	pages       map[int]*goslack.SearchMessages
+	searchErr   error
+	mutedIDs    string // comma-separated channel IDs
+	prefsErr    error
 }
 
-func (f *fakeSearcher) SearchMessagesContext(_ context.Context, _ string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakePrioritizer) SearchMessagesContext(_ context.Context, _ string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
+	if f.searchErr != nil {
+		return nil, f.searchErr
 	}
 	if resp, ok := f.pages[params.Page]; ok {
 		return resp, nil
@@ -25,17 +27,30 @@ func (f *fakeSearcher) SearchMessagesContext(_ context.Context, _ string, params
 	return &goslack.SearchMessages{}, nil
 }
 
-type failingPageSearcher struct {
-	base     *fakeSearcher
+func (f *fakePrioritizer) GetUserPrefsContext(_ context.Context) (*goslack.UserPrefsCarrier, error) {
+	if f.prefsErr != nil {
+		return nil, f.prefsErr
+	}
+	return &goslack.UserPrefsCarrier{
+		UserPrefs: &goslack.UserPrefs{MutedChannels: f.mutedIDs},
+	}, nil
+}
+
+type failingPagePrioritizer struct {
+	base     *fakePrioritizer
 	failPage int
 	failErr  error
 }
 
-func (f *failingPageSearcher) SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
+func (f *failingPagePrioritizer) SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
 	if params.Page == f.failPage {
 		return nil, f.failErr
 	}
 	return f.base.SearchMessagesContext(ctx, query, params)
+}
+
+func (f *failingPagePrioritizer) GetUserPrefsContext(ctx context.Context) (*goslack.UserPrefsCarrier, error) {
+	return f.base.GetUserPrefsContext(ctx)
 }
 
 func makeChannels(n int) []goslack.Channel {
@@ -67,46 +82,46 @@ func noopGate() *rateLimitGate {
 // --- prioritizeChannels tests ---
 
 func TestPrioritize_NoCursors_ReturnsAll(t *testing.T) {
-	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, nil, noopGate(), nil, makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), &fakePrioritizer{}, noopGate(), nil, makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_FewChannels_ReturnsAll(t *testing.T) {
-	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, nil, noopGate(), cursorAt(time.Now()), makeChannels(30))
+	toSync := prioritizeChannels(context.Background(), &fakePrioritizer{}, noopGate(), cursorAt(time.Now()), makeChannels(30))
 	if len(toSync) != 30 {
 		t.Fatalf("expected 30 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_ZeroResults_ReturnsNone(t *testing.T) {
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 0},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 0 {
 		t.Fatalf("expected 0 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_SearchError_ReturnsAll(t *testing.T) {
-	searcher := &fakeSearcher{err: fmt.Errorf("missing_scope")}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	searcher := &fakePrioritizer{searchErr: fmt.Errorf("missing_scope")}
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels on error, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_SmallActiveSet(t *testing.T) {
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 3, Matches: makeMatches("C0001", "C0005", "C0010")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 3 {
 		t.Fatalf("expected 3 channels, got %d", len(toSync))
 	}
@@ -126,12 +141,12 @@ func TestPrioritize_ExceedsThresholdPage1_ReturnsAll(t *testing.T) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("C%04d", i)
 	}
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 70, Matches: makeMatches(ids...)},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels when threshold exceeded, got %d", len(toSync))
 	}
@@ -146,13 +161,13 @@ func TestPrioritize_ExceedsThresholdOnLaterPage_ReturnsAll(t *testing.T) {
 	for i := range page2IDs {
 		page2IDs[i] = fmt.Sprintf("C%04d", 30+i)
 	}
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 200, Matches: makeMatches(page1IDs...)},
 			2: {Total: 200, Matches: makeMatches(page2IDs...)},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels when threshold exceeded on page 2, got %d", len(toSync))
 	}
@@ -162,36 +177,36 @@ func TestPrioritize_DuplicatePageStillPaginates(t *testing.T) {
 	// Page 1 and 2 have the same channels, but page 3 adds a new one.
 	// All pages should be visited — duplicates on a page don't mean we're done.
 	matches := makeMatches("C0001", "C0002", "C0003", "C0004", "C0005")
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 300, Matches: matches},
 			2: {Total: 300, Matches: matches},
 			3: {Total: 300, Matches: makeMatches("C0001", "C0099")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 6 {
 		t.Fatalf("expected 6 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_MultiPageAccumulation(t *testing.T) {
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 300, Matches: makeMatches("C0001", "C0002")},
 			2: {Total: 300, Matches: makeMatches("C0003", "C0004")},
 			3: {Total: 300, Matches: makeMatches("C0001", "C0003")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 4 {
 		t.Fatalf("expected 4 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_PageErrorSyncsAll(t *testing.T) {
-	searcher := &failingPageSearcher{
-		base: &fakeSearcher{
+	searcher := &failingPagePrioritizer{
+		base: &fakePrioritizer{
 			pages: map[int]*goslack.SearchMessages{
 				1: {Total: 200, Matches: makeMatches("C0001", "C0002")},
 			},
@@ -201,7 +216,7 @@ func TestPrioritize_PageErrorSyncsAll(t *testing.T) {
 	}
 	// Mid-pagination failure falls back to syncing all channels rather than
 	// trusting a partial set that may be missing active channels.
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels on page error, got %d", len(toSync))
 	}
@@ -213,12 +228,12 @@ func TestPrioritize_ResultIsSorted(t *testing.T) {
 		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0001", IsIM: true}}}, // DM
 		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0002", IsMpIM: true}}}, // mpim
 	}
-	searcher := &fakeSearcher{
+	searcher := &fakePrioritizer{
 		pages: map[int]*goslack.SearchMessages{
 			1: {Total: 3, Matches: makeMatches("C0000", "C0001", "C0002")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), channels)
+	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), channels)
 
 	if len(toSync) != 3 {
 		t.Fatalf("expected 3, got %d", len(toSync))
