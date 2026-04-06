@@ -334,8 +334,8 @@ func (s *FSStore) maintainFile(path string) error {
 		return err
 	}
 
-	// Determine if this is a thread file (lives in a threads/ directory).
-	if strings.Contains(path, "/threads/") {
+	// Determine if this is a thread file (parent directory is "threads").
+	if filepath.Base(filepath.Dir(path)) == paths.ThreadsSubdir {
 		tf, parseErr := modelv1.ParseThreadFile(data)
 		if parseErr != nil {
 			slog.Warn("parse thread file: some lines skipped", "file", path, "error", parseErr)
