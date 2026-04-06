@@ -422,10 +422,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	}
 
 	convMeta, metaErr := h.store.ReadMeta(ch.acct, conversation)
-	if metaErr != nil {
-		slog.Error("failed to read conversation metadata", "conversation", conversation, "error", metaErr)
-	}
-	lines := modelv1.FormatDateFileNotification(df, time.Local, convMeta, readErr)
+	lines := modelv1.FormatDateFileNotification(df, time.Local, convMeta, readErr, metaErr)
 
 	// Find connected session.
 	h.mu.RLock()
