@@ -12,17 +12,20 @@ greppable with standard tools. All files are UTF-8 encoded.
 │       ├── .maintenance.json                   # maintenance state (see Maintenance Protocol)
 │       ├── .sync-cursors.yaml                  # sync state (per-channel cursors)
 │       ├── #{channel}/                         # public channel conversation
+│       │   ├── .meta.json                       # conversation metadata (see Conversation Metadata)
 │       │   ├── YYYY-MM-DD.txt                  # date file (rolling, one per day)
 │       │   ├── attachments/                    # attachment storage
 │       │   │   └── {ATTACHMENT_ID}.{ext}       # downloaded file
 │       │   └── threads/
 │       │       └── {THREAD_TS}.txt             # thread file (one per thread)
 │       ├── @{user}/                            # DM conversation
+│       │   ├── .meta.json
 │       │   ├── YYYY-MM-DD.txt
 │       │   ├── attachments/
 │       │   └── threads/
 │       │       └── {THREAD_TS}.txt
 │       └── @mpdm-{participants}/               # group DM conversation
+│           ├── .meta.json
 │           ├── YYYY-MM-DD.txt
 │           ├── attachments/
 │           └── threads/
@@ -31,9 +34,11 @@ greppable with standard tools. All files are UTF-8 encoded.
     └── {phone-slug}/                           # account (slug, e.g. 15551234567)
         ├── .maintenance.json                   # maintenance state
         ├── {contact_or_phone}/                 # 1:1 conversation
+        │   ├── .meta.json
         │   ├── YYYY-MM-DD.txt
         │   └── attachments/
         └── {group-name-slug}/                   # group conversation (slugified)
+            ├── .meta.json
             ├── YYYY-MM-DD.txt
             └── attachments/
 ```
@@ -52,6 +57,89 @@ greppable with standard tools. All files are UTF-8 encoded.
 - **Attachment files** are stored in a per-conversation `attachments/`
   directory, named by their platform attachment ID with original extension.
 - WhatsApp does not currently have thread files.
+
+## Conversation Metadata
+
+Each conversation directory contains a `.meta.json` file with platform
+identifiers for that conversation. This file maps display names (used as
+directory names) back to stable platform IDs.
+
+`.meta.json` is written when the conversation is first created (during sync
+or when the first message arrives) and updated if identifiers change. It
+is a single JSON object. All fields except `name` are platform-specific
+and only present when applicable.
+
+### Schema
+
+```json
+{
+  "name": "display name",
+  "type": "conversation type",
+  "channel_id": "platform channel ID",
+  "user_id": "platform user ID (DMs only)",
+  "jid": "WhatsApp JID"
+}
+```
+
+- **`name`**: the conversation's display name as shown in `pigeon list`.
+  Always present.
+- **`type`**: conversation type. Always present. Values are
+  platform-specific:
+
+  | Platform | Type | Meaning |
+  |----------|------|---------|
+  | Slack | `channel` | Public or private channel |
+  | Slack | `dm` | 1:1 direct message |
+  | Slack | `group_dm` | Multi-party direct message (MPDM) |
+  | WhatsApp | `dm` | 1:1 conversation |
+  | WhatsApp | `group` | Group conversation |
+
+- **`channel_id`**: Slack channel ID (`C`, `D`, or `G` prefixed). Present
+  for all Slack conversations.
+- **`user_id`**: Slack user ID (`U` prefixed). Present only for 1:1 DMs
+  (including Slack Connect). This is the DM partner's user ID, not the
+  authenticated user's.
+- **`jid`**: WhatsApp JID. Present for all WhatsApp conversations. DMs
+  use `{phone}@s.whatsapp.net`, groups use `{id}@g.us`.
+
+### Examples
+
+**Slack public channel** (`#engineering/.meta.json`):
+```json
+{"name": "#engineering", "type": "channel", "channel_id": "C04ABCDEF01"}
+```
+
+**Slack private channel** (`#secret-project/.meta.json`):
+```json
+{"name": "#secret-project", "type": "channel", "channel_id": "C04GHIJKL02"}
+```
+
+**Slack 1:1 DM** (`@Alice/.meta.json`):
+```json
+{"name": "@Alice", "type": "dm", "channel_id": "D04MNOPQR03", "user_id": "U04ABCDEF"}
+```
+
+**Slack group DM** (`@mpdm-alice--bob--charlie-1/.meta.json`):
+```json
+{"name": "@mpdm-alice--bob--charlie-1", "type": "group_dm", "channel_id": "G04STUVWX04"}
+```
+
+**WhatsApp DM** (`+14155551234_Alice/.meta.json`):
+```json
+{"name": "Alice", "type": "dm", "jid": "14155551234@s.whatsapp.net"}
+```
+
+**WhatsApp group** (`book-club-nyc/.meta.json`):
+```json
+{"name": "Book Club NYC", "type": "group", "jid": "120363012345678901@g.us"}
+```
+
+### Guarantees
+
+- Readers must handle missing `.meta.json` gracefully — older conversations
+  created before this protocol addition may not have one.
+- The file is not on the hot path. It is not read during message append
+  or real-time delivery.
 
 ## File Types and Operations
 
