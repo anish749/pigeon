@@ -142,6 +142,17 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	isGroup := chatJID.Server == types.GroupServer
 	convDir := l.resolver.ConvDir(ctx, chatJID)
 
+	displayName := convDir
+	if isGroup {
+		displayName = l.resolver.GroupName(ctx, chatJID)
+	} else {
+		displayName = l.resolver.ContactName(ctx, chatJID)
+	}
+	meta := l.resolver.ConvMeta(ctx, chatJID, displayName)
+	if _, err := l.store.WriteMetaIfNotExists(l.acct, convDir, meta); err != nil {
+		slog.WarnContext(ctx, "whatsapp: write meta failed", "conv", convDir, "error", err)
+	}
+
 	var written int
 	for _, hsMsg := range conv.GetMessages() {
 		wmi := hsMsg.GetMessage()
@@ -183,17 +194,6 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	if written > 0 {
 		slog.InfoContext(ctx, "whatsapp: history sync: conversation done",
 			"conv", convDir, "messages", written, "account", l.acct)
-
-		var meta modelv1.ConversationMeta
-		if isGroup {
-			meta = modelv1.NewWhatsAppGroupMeta(l.resolver.GroupName(ctx, chatJID), chatJID.String())
-		} else {
-			meta = modelv1.NewWhatsAppDMMeta(l.resolver.ContactName(ctx, chatJID), chatJID.String())
-		}
-		if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
-			slog.WarnContext(ctx, "whatsapp: history sync: failed to write .meta.json",
-				"conv", convDir, "error", err)
-		}
 	}
 
 	return written

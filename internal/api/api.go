@@ -222,8 +222,18 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 		return SendResponse{Error: fmt.Sprintf("send: %v", err)}
 	}
 
-	// Store locally.
+	// Ensure .meta.json exists for this conversation.
 	convDir := sender.Resolver.ConvDir(ctx, recipientJID)
+	displayName := sender.Resolver.ContactName(ctx, recipientJID)
+	if recipientJID.Server == types.GroupServer {
+		displayName = sender.Resolver.GroupName(ctx, recipientJID)
+	}
+	waMeta := sender.Resolver.ConvMeta(ctx, recipientJID, displayName)
+	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, convDir, waMeta); err != nil {
+		slog.ErrorContext(ctx, "write meta failed", "conv", convDir, "error", err)
+	}
+
+	// Store locally.
 	senderName := "me"
 	var senderID string
 	if sender.Client.Store.ID != nil {
@@ -248,17 +258,6 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 	}
 	if err := s.store.Append(sender.Acct, convDir, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
-	}
-
-	// Write .meta.json for the conversation.
-	var meta modelv1.ConversationMeta
-	if recipientJID.Server == types.GroupServer {
-		meta = modelv1.NewWhatsAppGroupMeta(sender.Resolver.GroupName(ctx, recipientJID), recipientJID.String())
-	} else {
-		meta = modelv1.NewWhatsAppDMMeta(sender.Resolver.ContactName(ctx, recipientJID), recipientJID.String())
-	}
-	if err := s.store.WriteMeta(sender.Acct, convDir, meta); err != nil {
-		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
 	}
 
 	return SendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
@@ -400,6 +399,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
 
+	// Ensure .meta.json exists for this conversation.
+	slackMeta := sender.Resolver.ConvMeta(channelID, channelName)
+	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, channelName, slackMeta); err != nil {
+		slog.ErrorContext(ctx, "write meta failed", "channel", channelName, "error", err)
+	}
+
 	// Store locally.
 	msgTS := slacklistener.ParseTimestamp(ts)
 	via := modelv1.ViaPigeonAsBot
@@ -430,20 +435,6 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		if err := s.store.Append(sender.Acct, channelName, line); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 		}
-	}
-
-	// Write .meta.json for the conversation.
-	var meta modelv1.ConversationMeta
-	switch {
-	case strings.HasPrefix(channelName, "@mpdm-"):
-		meta = modelv1.NewSlackGroupDMMeta(channelName, channelID)
-	case strings.HasPrefix(channelName, "@"):
-		meta = modelv1.NewSlackDMMeta(channelName, channelID, sender.Resolver.DMUserID(channelName))
-	default:
-		meta = modelv1.NewSlackChannelMeta(channelName, channelID)
-	}
-	if err := s.store.WriteMeta(sender.Acct, channelName, meta); err != nil {
-		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)
 	}
 
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}

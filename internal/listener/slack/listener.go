@@ -141,7 +141,13 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
 		return
 	}
-	channelName := l.resolver.ChannelName(ctx, msg.Channel)
+	channelName, err := l.resolver.ChannelName(ctx, msg.Channel)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping message, cannot resolve channel",
+			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
+		return
+	}
+	l.messages.EnsureMeta(channelName, l.resolver.ConvMeta(msg.Channel, channelName))
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
@@ -150,7 +156,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		userName = "sent to pigeon by " + userName
 		via = modelv1.ViaToPigeon
 	}
-	text := l.resolver.ResolveText(ctx, msg.Text)
+	text, err := l.resolver.ResolveText(ctx, msg.Text)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
+			"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
+		return
+	}
 	ts := ParseTimestamp(msg.TimeStamp)
 
 	isThreadReply := msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp
@@ -179,20 +190,6 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	slog.InfoContext(ctx, "slack message saved",
 		"from", userName, "channel", channelName, "account", l.acct, "text_len", len(msg.Text))
-
-	// Write .meta.json for the conversation.
-	var meta modelv1.ConversationMeta
-	switch msg.ChannelType {
-	case "im":
-		meta = modelv1.NewSlackDMMeta(channelName, msg.Channel, l.resolver.DMUserID(channelName))
-	case "mpim":
-		meta = modelv1.NewSlackGroupDMMeta(channelName, msg.Channel)
-	default:
-		meta = modelv1.NewSlackChannelMeta(channelName, msg.Channel)
-	}
-	if err := l.messages.WriteMetaIfNotExists(channelName, meta); err != nil {
-		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)
-	}
 
 	// Notify the hub for messages the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always
@@ -251,7 +248,12 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 			"account", l.acct, "thread_ts", threadTS)
 		return
 	}
-	text := l.resolver.ResolveText(ctx, parent.Text)
+	text, err := l.resolver.ResolveText(ctx, parent.Text)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to resolve thread parent text", "error", err,
+			"account", l.acct, "thread_ts", threadTS)
+		return
+	}
 	ts := ParseTimestamp(parent.Timestamp)
 	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, userID, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
@@ -265,8 +267,18 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	channelName := l.resolver.ChannelName(ctx, item.Channel)
-	userName := l.resolver.UserName(ctx, userID)
+	channelName, err := l.resolver.ChannelName(ctx, item.Channel)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve channel",
+			"channel", item.Channel, "error", err, "account", l.acct)
+		return
+	}
+	userName, err := l.resolver.UserName(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve user",
+			"user_id", userID, "channel", channelName, "error", err, "account", l.acct)
+		return
+	}
 
 	if err := writeReaction(l.messages, channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
@@ -282,9 +294,24 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		return
 	}
 
-	channelName := l.resolver.ChannelName(ctx, msg.Channel)
-	userName := l.resolver.UserName(ctx, msg.Message.User)
-	text := l.resolver.ResolveText(ctx, msg.Message.Text)
+	channelName, err := l.resolver.ChannelName(ctx, msg.Channel)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve channel",
+			"channel", msg.Channel, "error", err, "account", l.acct)
+		return
+	}
+	userName, err := l.resolver.UserName(ctx, msg.Message.User)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve user",
+			"user_id", msg.Message.User, "channel", channelName, "error", err, "account", l.acct)
+		return
+	}
+	text, err := l.resolver.ResolveText(ctx, msg.Message.Text)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve text",
+			"channel", channelName, "error", err, "account", l.acct)
+		return
+	}
 	ts := time.Now().UTC()
 
 	line := modelv1.Line{
@@ -308,7 +335,12 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 
 // handleDelete stores a message delete event.
 func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEvent) {
-	channelName := l.resolver.ChannelName(ctx, msg.Channel)
+	channelName, err := l.resolver.ChannelName(ctx, msg.Channel)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping delete, cannot resolve channel",
+			"channel", msg.Channel, "error", err, "account", l.acct)
+		return
+	}
 	ts := time.Now().UTC()
 
 	// For message_deleted, the deleted message's timestamp is in msg.PreviousMessage
@@ -324,7 +356,13 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 
 	var senderName, senderID string
 	if msg.PreviousMessage != nil {
-		senderName = l.resolver.UserName(ctx, msg.PreviousMessage.User)
+		name, err := l.resolver.UserName(ctx, msg.PreviousMessage.User)
+		if err != nil {
+			slog.WarnContext(ctx, "slack: skipping delete, cannot resolve user",
+				"user_id", msg.PreviousMessage.User, "channel", channelName, "error", err, "account", l.acct)
+			return
+		}
+		senderName = name
 		senderID = msg.PreviousMessage.User
 	}
 

@@ -47,12 +47,13 @@ type Store interface {
 	// ListConversations returns all conversation directories for an account.
 	ListConversations(acct account.Account) ([]string, error)
 
-	// WriteMeta writes .meta.json for a conversation directory.
-	WriteMeta(acct account.Account, conversation string, meta modelv1.ConversationMeta) error
+	// WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
+	// Returns true if written, false if already present.
+	WriteMetaIfNotExists(acct account.Account, conversation string, meta modelv1.ConvMeta) (bool, error)
 
-	// ReadMeta reads .meta.json for a conversation. Returns nil if the
-	// file does not exist.
-	ReadMeta(acct account.Account, conversation string) (*modelv1.ConversationMeta, error)
+	// ReadMeta reads the .meta.json sidecar for a conversation.
+	// Returns nil, nil if the file does not exist.
+	ReadMeta(acct account.Account, conversation string) (*modelv1.ConvMeta, error)
 
 	// Maintain runs the maintenance pass for an account: dedup, sort,
 	// reconcile edits/deletes/reactions, and rewrite modified files.

@@ -92,7 +92,7 @@ func (c ConversationDir) Path() string {
 	return filepath.Join(c.account.Path(), c.name)
 }
 
-// MetaFile returns the path to the conversation metadata file.
+// MetaFile returns the path to the conversation's .meta.json sidecar.
 func (c ConversationDir) MetaFile() string {
 	return filepath.Join(c.Path(), ".meta.json")
 }

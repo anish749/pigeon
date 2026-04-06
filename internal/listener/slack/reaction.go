@@ -36,7 +36,12 @@ func writeReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, c
 	var errs []error
 	for _, reaction := range msg.Reactions {
 		for _, userID := range reaction.Users {
-			if err := writeReaction(ms, channelName, msg.Timestamp, resolver.UserName(ctx, userID), userID, reaction.Name, false); err != nil {
+			userName, err := resolver.UserName(ctx, userID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := writeReaction(ms, channelName, msg.Timestamp, userName, userID, reaction.Name, false); err != nil {
 				errs = append(errs, err)
 			}
 		}
