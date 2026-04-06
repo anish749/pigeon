@@ -117,11 +117,10 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	// Skip bot messages (BotID set), system events like channel_join/channel_topic
-	// (SubType set, except thread_broadcast which is a real user message), and
-	// messages with empty text (can happen when the bot token lacks scopes like
-	// channels:history — Slack returns the message envelope but strips the content).
-	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+	// Skip system events (channel_join, channel_topic, etc.) and messages with
+	// empty text. Allow bot_message and thread_broadcast subtypes through —
+	// bot messages contain valuable info (alerts, CI, integrations).
+	if msg.Text == "" || !allowedSubType(msg.SubType) {
 		slog.WarnContext(ctx, "slack: skipping message",
 			"channel", msg.Channel, "ts", msg.TimeStamp,
 			"botID", msg.BotID, "subType", msg.SubType,
@@ -136,7 +135,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	userName := l.resolver.UserName(ctx, msg.User)
+	userName, userID := resolveSender(ctx, l.resolver, msg.User, msg.BotID, msg.Username)
 	channelName := l.resolver.ChannelName(ctx, msg.Channel)
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
@@ -154,7 +153,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(msg.Channel, channelName, userName, msg.User, text, ts, msg.TimeStamp, via); err != nil {
+		if err := l.messages.Write(msg.Channel, channelName, userName, userID, text, ts, msg.TimeStamp, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
@@ -167,7 +166,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, msg.User, text, ts, msg.TimeStamp, true, via); err != nil {
+		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, userID, text, ts, msg.TimeStamp, true, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
@@ -227,10 +226,10 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	if parent.Text == "" {
 		return
 	}
-	userName := l.resolver.UserName(ctx, parent.User)
+	userName, userID := resolveSender(ctx, l.resolver, parent.User, parent.BotID, parent.Username)
 	text := l.resolver.ResolveText(ctx, parent.Text)
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, parent.User, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
+	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, userID, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}

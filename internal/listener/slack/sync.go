@@ -280,11 +280,10 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Skip bot messages (BotID set), system events like channel_join/channel_topic
-			// (SubType set, except thread_broadcast which is a real user message), and
-			// messages with empty text (can happen when the bot token lacks scopes like
-			// channels:history — Slack returns the message envelope but strips the content).
-			if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+			// Skip system events (channel_join, channel_topic, etc.) and messages
+			// with empty text. Allow bot messages through — they contain valuable
+			// info (alerts, CI, integrations).
+			if msg.Text == "" || !allowedSubType(msg.SubType) {
 				slog.WarnContext(ctx, "slack sync: skipping message",
 					"channel", channelName, "ts", msg.Timestamp,
 					"botID", msg.BotID, "subType", msg.SubType,
@@ -292,11 +291,11 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 
-			userName := resolver.UserName(ctx, msg.User)
+			userName, userID := resolveSender(ctx, resolver, msg.User, msg.BotID, msg.Username)
 			text := resolver.ResolveText(ctx, msg.Text)
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, msg.User, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
+			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -603,18 +602,14 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.BotID != "" || reply.Text == "" {
+			if reply.Text == "" || !allowedSubType(reply.SubType) {
 				continue
 			}
-			// Skip subtypes except thread_broadcast
-			if reply.SubType != "" && reply.SubType != "thread_broadcast" {
-				continue
-			}
-			userName := resolver.UserName(ctx, reply.User)
+			userName, userID := resolveSender(ctx, resolver, reply.User, reply.BotID, reply.Username)
 			text := resolver.ResolveText(ctx, reply.Text)
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
+			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -638,16 +633,13 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if ctxMsg.BotID != "" || ctxMsg.Text == "" {
+					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
 						continue
 					}
-					if ctxMsg.SubType != "" && ctxMsg.SubType != "thread_broadcast" {
-						continue
-					}
-					userName := resolver.UserName(ctx, ctxMsg.User)
+					userName, userID := resolveSender(ctx, resolver, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
 					text := resolver.ResolveText(ctx, ctxMsg.Text)
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, ctxMsg.User, text, ts, ctxMsg.Timestamp); err != nil {
+					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, userID, text, ts, ctxMsg.Timestamp); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}
