@@ -196,23 +196,26 @@ func TestPrioritize_ExceedsThresholdOnLaterPage_ReturnsAll(t *testing.T) {
 	}
 }
 
-func TestPrioritize_StopsOnPlateau(t *testing.T) {
+func TestPrioritize_DuplicatePageStillPaginates(t *testing.T) {
 	channels := makeChannels(100)
 	cursors := cursorAt(time.Now())
 
+	// Page 1 and 2 have the same channels, but page 3 adds a new one.
+	// All pages should be visited — duplicates on a page don't mean we're done.
 	matches := makeMatches("C0001", "C0002", "C0003", "C0004", "C0005")
 	searcher := &fakeSearcher{
 		pages: map[int]*goslack.SearchMessages{
-			1: {Total: 200, Matches: matches},
-			2: {Total: 200, Matches: matches}, // all duplicates
+			1: {Total: 300, Matches: matches},
+			2: {Total: 300, Matches: matches},                     // all duplicates
+			3: {Total: 300, Matches: makeMatches("C0001", "C0099")}, // new channel on page 3
 		},
 	}
 	toSync, skipped, _ := prioritizeChannels(context.Background(), searcher, noopGate(), cursors, channels)
-	if len(toSync) != 5 {
-		t.Fatalf("expected 5 channels after plateau, got %d", len(toSync))
+	if len(toSync) != 6 {
+		t.Fatalf("expected 6 channels, got %d", len(toSync))
 	}
-	if skipped != 95 {
-		t.Fatalf("expected 95 skipped, got %d", skipped)
+	if skipped != 94 {
+		t.Fatalf("expected 94 skipped, got %d", skipped)
 	}
 }
 
@@ -236,7 +239,7 @@ func TestPrioritize_MultiPageAccumulation(t *testing.T) {
 	}
 }
 
-func TestPrioritize_PageErrorUsesPartialResults(t *testing.T) {
+func TestPrioritize_PageErrorSyncsAll(t *testing.T) {
 	channels := makeChannels(100)
 	cursors := cursorAt(time.Now())
 
@@ -249,12 +252,14 @@ func TestPrioritize_PageErrorUsesPartialResults(t *testing.T) {
 		failPage: 2,
 		failErr:  fmt.Errorf("timeout"),
 	}
+	// Mid-pagination failure falls back to syncing all channels rather than
+	// trusting a partial set that may be missing active channels.
 	toSync, skipped, _ := prioritizeChannels(context.Background(), searcher, noopGate(), cursors, channels)
-	if len(toSync) != 2 {
-		t.Fatalf("expected 2 channels from page 1, got %d", len(toSync))
+	if len(toSync) != 100 {
+		t.Fatalf("expected 100 channels on page error, got %d", len(toSync))
 	}
-	if skipped != 98 {
-		t.Fatalf("expected 98 skipped, got %d", skipped)
+	if skipped != 0 {
+		t.Fatalf("expected 0 skipped on page error, got %d", skipped)
 	}
 }
 

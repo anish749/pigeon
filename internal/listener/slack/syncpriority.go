@@ -155,14 +155,17 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 
 	for page := 2; page <= totalPages; page++ {
 		if err := gate.wait(ctx); err != nil {
-			break
+			return syncAll(fmt.Sprintf("rate limit wait cancelled at page %d", page))
 		}
 		params.Page = page
 		result, err = searcher.SearchMessagesContext(ctx, query, params)
 		if err != nil {
-			slog.WarnContext(ctx, "sync priority: search page failed, using results so far",
+			// Mid-pagination failure: we have a partial channel set that may be
+			// missing active channels from unseen pages. Using it would silently
+			// skip channels that had activity. Fall back to syncing all.
+			slog.WarnContext(ctx, "sync priority: search page failed, syncing all",
 				"page", page, "error", err)
-			break
+			return syncAll(fmt.Sprintf("search page %d failed: %v", page, err))
 		}
 
 		prevCount := len(active)
@@ -174,10 +177,6 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 		slog.InfoContext(ctx, "sync priority: search page",
 			"page", page, "new_channels", newOnPage,
 			"active_channels", len(active))
-
-		if newOnPage == 0 {
-			break
-		}
 
 		if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
 			return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",
