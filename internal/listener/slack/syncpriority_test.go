@@ -67,14 +67,14 @@ func noopGate() *rateLimitGate {
 // --- prioritizeChannels tests ---
 
 func TestPrioritize_NoCursors_ReturnsAll(t *testing.T) {
-	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, noopGate(), nil, makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, nil, noopGate(), nil, makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels, got %d", len(toSync))
 	}
 }
 
 func TestPrioritize_FewChannels_ReturnsAll(t *testing.T) {
-	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, noopGate(), cursorAt(time.Now()), makeChannels(30))
+	toSync := prioritizeChannels(context.Background(), &fakeSearcher{}, nil, noopGate(), cursorAt(time.Now()), makeChannels(30))
 	if len(toSync) != 30 {
 		t.Fatalf("expected 30 channels, got %d", len(toSync))
 	}
@@ -86,7 +86,7 @@ func TestPrioritize_ZeroResults_ReturnsNone(t *testing.T) {
 			1: {Total: 0},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 0 {
 		t.Fatalf("expected 0 channels, got %d", len(toSync))
 	}
@@ -94,7 +94,7 @@ func TestPrioritize_ZeroResults_ReturnsNone(t *testing.T) {
 
 func TestPrioritize_SearchError_ReturnsAll(t *testing.T) {
 	searcher := &fakeSearcher{err: fmt.Errorf("missing_scope")}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels on error, got %d", len(toSync))
 	}
@@ -106,7 +106,7 @@ func TestPrioritize_SmallActiveSet(t *testing.T) {
 			1: {Total: 3, Matches: makeMatches("C0001", "C0005", "C0010")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 3 {
 		t.Fatalf("expected 3 channels, got %d", len(toSync))
 	}
@@ -131,7 +131,7 @@ func TestPrioritize_ExceedsThresholdPage1_ReturnsAll(t *testing.T) {
 			1: {Total: 70, Matches: makeMatches(ids...)},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels when threshold exceeded, got %d", len(toSync))
 	}
@@ -152,7 +152,7 @@ func TestPrioritize_ExceedsThresholdOnLaterPage_ReturnsAll(t *testing.T) {
 			2: {Total: 200, Matches: makeMatches(page2IDs...)},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels when threshold exceeded on page 2, got %d", len(toSync))
 	}
@@ -169,7 +169,7 @@ func TestPrioritize_DuplicatePageStillPaginates(t *testing.T) {
 			3: {Total: 300, Matches: makeMatches("C0001", "C0099")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 6 {
 		t.Fatalf("expected 6 channels, got %d", len(toSync))
 	}
@@ -183,7 +183,7 @@ func TestPrioritize_MultiPageAccumulation(t *testing.T) {
 			3: {Total: 300, Matches: makeMatches("C0001", "C0003")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 4 {
 		t.Fatalf("expected 4 channels, got %d", len(toSync))
 	}
@@ -201,7 +201,7 @@ func TestPrioritize_PageErrorSyncsAll(t *testing.T) {
 	}
 	// Mid-pagination failure falls back to syncing all channels rather than
 	// trusting a partial set that may be missing active channels.
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), makeChannels(100))
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), makeChannels(100))
 	if len(toSync) != 100 {
 		t.Fatalf("expected 100 channels on page error, got %d", len(toSync))
 	}
@@ -218,7 +218,7 @@ func TestPrioritize_ResultIsSorted(t *testing.T) {
 			1: {Total: 3, Matches: makeMatches("C0000", "C0001", "C0002")},
 		},
 	}
-	toSync := prioritizeChannels(context.Background(), searcher, noopGate(), cursorAt(time.Now()), channels)
+	toSync := prioritizeChannels(context.Background(), searcher, nil, noopGate(), cursorAt(time.Now()), channels)
 
 	if len(toSync) != 3 {
 		t.Fatalf("expected 3, got %d", len(toSync))

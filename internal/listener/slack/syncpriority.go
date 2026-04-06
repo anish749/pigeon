@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -29,13 +30,21 @@ type messageSearcher interface {
 	SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error)
 }
 
+// userPrefsFetcher abstracts user preferences for testability.
+type userPrefsFetcher interface {
+	GetUserPrefsContext(ctx context.Context) (*goslack.UserPrefsCarrier, error)
+}
+
 // prioritizeChannels takes the full set of member conversations and returns
 // the subset that needs syncing, sorted by type (DMs → mpims → private → public).
 //
 // On first sync (no cursors) or for small workspaces, all channels are returned.
 // On subsequent syncs, search.messages discovers which channels had activity
 // since the last sync, and only those are returned.
-func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
+func prioritizeChannels(ctx context.Context, searcher messageSearcher, prefs userPrefsFetcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
+	// Filter out muted channels before any other prioritization.
+	conversations = filterMuted(ctx, prefs, conversations)
+
 	// Sort all conversations: DMs first, then group IMs, private, public.
 	sort.SliceStable(conversations, func(i, j int) bool {
 		return channelPriority(conversations[i]) < channelPriority(conversations[j])
@@ -233,6 +242,53 @@ func collectChannelIDs(matches []goslack.SearchMessage) map[string]bool {
 		}
 	}
 	return ids
+}
+
+// filterMuted removes muted channels from the conversation list.
+// If prefs is nil or the fetch fails, returns conversations unchanged.
+func filterMuted(ctx context.Context, prefs userPrefsFetcher, conversations []goslack.Channel) []goslack.Channel {
+	if prefs == nil {
+		return conversations
+	}
+	muted, err := fetchMutedChannels(ctx, prefs)
+	if err != nil {
+		slog.WarnContext(ctx, "sync priority: failed to fetch muted channels, syncing all", "error", err)
+		return conversations
+	}
+	if len(muted) == 0 {
+		return conversations
+	}
+	var filtered []goslack.Channel
+	var skipped int
+	for _, ch := range conversations {
+		if muted[ch.ID] {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, ch)
+	}
+	if skipped > 0 {
+		slog.InfoContext(ctx, "sync priority: skipped muted channels", "skipped", skipped)
+	}
+	return filtered
+}
+
+// fetchMutedChannels returns a set of channel IDs that the user has muted.
+func fetchMutedChannels(ctx context.Context, prefs userPrefsFetcher) (map[string]bool, error) {
+	carrier, err := prefs.GetUserPrefsContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get user prefs: %w", err)
+	}
+	raw := carrier.UserPrefs.MutedChannels
+	if raw == "" {
+		return nil, nil
+	}
+	ids := strings.Split(raw, ",")
+	muted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		muted[id] = true
+	}
+	return muted, nil
 }
 
 // channelPriority returns a sort key: DMs(0) < group IMs(1) < private channels(2) < public(3).
