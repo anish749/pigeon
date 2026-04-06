@@ -7,6 +7,59 @@ import (
 	"time"
 )
 
+func TestFormatConvMeta_SlackDM(t *testing.T) {
+	meta := &ConvMeta{Name: "@Magnus", Type: ConvDM, ChannelID: "D08J1DUQ11Q", UserID: "U08H20E757W"}
+	got := FormatConvMeta(meta)
+	want := "[type:dm] [channel_id:D08J1DUQ11Q] [user_id:U08H20E757W]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_SlackChannel(t *testing.T) {
+	meta := &ConvMeta{Name: "#random", Type: ConvChannel, ChannelID: "C06UQPRB5UH"}
+	got := FormatConvMeta(meta)
+	want := "[type:channel] [channel_id:C06UQPRB5UH]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_SlackGroupDM(t *testing.T) {
+	meta := &ConvMeta{Name: "@mpdm-alice--bob-1", Type: ConvGroupDM, ChannelID: "G01ABC"}
+	got := FormatConvMeta(meta)
+	want := "[type:group_dm] [channel_id:G01ABC]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_WhatsAppDM(t *testing.T) {
+	meta := &ConvMeta{Name: "Alice", Type: ConvDM, JID: "14155551234@s.whatsapp.net", LID: "abc123@lid"}
+	got := FormatConvMeta(meta)
+	want := "[type:dm] [jid:14155551234@s.whatsapp.net] [lid:abc123@lid]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_WhatsAppGroup(t *testing.T) {
+	meta := &ConvMeta{Name: "Family", Type: ConvGroup, JID: "12345@g.us"}
+	got := FormatConvMeta(meta)
+	want := "[type:group] [jid:12345@g.us]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_Empty(t *testing.T) {
+	meta := &ConvMeta{Name: "test"}
+	got := FormatConvMeta(meta)
+	if got != "" {
+		t.Errorf("expected empty string for meta with no IDs or type, got %q", got)
+	}
+}
+
 func TestFormatMsg_Full(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
@@ -102,7 +155,7 @@ func TestNotificationFormat_Basic(t *testing.T) {
 			Sender: "Alice", SenderID: "U1", Text: "hello world",
 		},
 	}
-	lines := formatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -122,7 +175,7 @@ func TestNotificationFormat_Via(t *testing.T) {
 			Via: ViaToPigeon,
 		},
 	}
-	lines := formatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[via:to-pigeon]") {
 		t.Errorf("expected via tag, got %q", lines[1])
 	}
@@ -136,7 +189,7 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 			ReplyTo: "M1",
 		},
 	}
-	lines := formatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
@@ -150,9 +203,42 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 			Via: ViaPigeonAsUser, ReplyTo: "M1",
 		},
 	}
-	lines := formatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[via:pigeon-as-user]") || !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected both optional tags, got %q", lines[1])
+	}
+}
+
+func TestNotificationFormat_WithConvMeta(t *testing.T) {
+	m := ResolvedMsg{
+		MsgLine: MsgLine{
+			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+			Sender: "Magnus", SenderID: "U08H", Text: "hey",
+		},
+	}
+	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
+	lines := formatMsgNotification(m, time.UTC, meta)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	want := "  [09:00:00] [message_id:M1] [sender_id:U08H] [type:dm] [channel_id:D08J] [user_id:U08H]"
+	if lines[1] != want {
+		t.Errorf("got  %q\nwant %q", lines[1], want)
+	}
+}
+
+func TestNotificationFormat_WithChannelMeta(t *testing.T) {
+	m := ResolvedMsg{
+		MsgLine: MsgLine{
+			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+			Sender: "Alice", SenderID: "U1", Text: "hello",
+		},
+	}
+	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
+	lines := formatMsgNotification(m, time.UTC, meta)
+	want := "  [09:00:00] [message_id:M1] [sender_id:U1] [type:channel] [channel_id:C06U]"
+	if lines[1] != want {
+		t.Errorf("got  %q\nwant %q", lines[1], want)
 	}
 }
 
@@ -163,7 +249,7 @@ func TestFormatDateFileNotification(t *testing.T) {
 			{MsgLine: MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "world"}},
 		},
 	}
-	lines := FormatDateFileNotification(f, time.UTC)
+	lines := FormatDateFileNotification(f, time.UTC, nil)
 	// 2 messages × 2 lines each = 4
 	if len(lines) != 4 {
 		t.Fatalf("lines = %d, want 4", len(lines))
@@ -177,7 +263,7 @@ func TestFormatDateFileNotification(t *testing.T) {
 }
 
 func TestFormatDateFileNotification_Nil(t *testing.T) {
-	lines := FormatDateFileNotification(nil, time.UTC)
+	lines := FormatDateFileNotification(nil, time.UTC, nil)
 	if lines != nil {
 		t.Errorf("expected nil, got %v", lines)
 	}
@@ -189,7 +275,7 @@ func TestFormatDateFileNotification_WithError(t *testing.T) {
 			{MsgLine: MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}},
 		},
 	}
-	lines := FormatDateFileNotification(f, time.UTC, errors.New("read thread 123: file corrupted"))
+	lines := FormatDateFileNotification(f, time.UTC, nil, errors.New("read thread 123: file corrupted"))
 	// 1 message × 2 lines + 1 warning = 3
 	if len(lines) != 3 {
 		t.Fatalf("lines = %d, want 3", len(lines))

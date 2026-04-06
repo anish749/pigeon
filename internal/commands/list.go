@@ -7,6 +7,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func RunList(platform, accountName string) error {
@@ -25,6 +26,16 @@ func RunList(platform, accountName string) error {
 		}
 		fmt.Printf("Conversations in %s:\n\n", acct.Display())
 		for _, c := range convs {
+			meta, err := s.ReadMeta(acct, c)
+			if err != nil {
+				return fmt.Errorf("read metadata for %s: %w", c, err)
+			}
+			if meta != nil {
+				if ids := modelv1.FormatConvMeta(meta); ids != "" {
+					fmt.Printf("  %s  %s\n", c, ids)
+					continue
+				}
+			}
 			fmt.Printf("  %s\n", c)
 		}
 		return nil
