@@ -383,18 +383,16 @@ func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.T
 func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered time.Time) time.Time {
 	now := time.Now()
 	since := now.Sub(lastDelivered)
-	df, err := h.store.ReadConversation(ch.acct, conversation, store.ReadOpts{Since: since})
-	if err != nil {
-		slog.Error("failed to read messages",
-			"account", ch.acct, "conversation", conversation, "error", err)
-		return lastDelivered
-	}
-
+	df, readErr := h.store.ReadConversation(ch.acct, conversation, store.ReadOpts{Since: since})
 	if df == nil || len(df.Messages) == 0 {
+		if readErr != nil {
+			slog.Error("failed to read messages",
+				"account", ch.acct, "conversation", conversation, "error", readErr)
+		}
 		return lastDelivered
 	}
 
-	lines := modelv1.FormatDateFile(df, time.Local)
+	lines := modelv1.FormatDateFile(df, time.Local, readErr)
 
 	// Find connected session.
 	h.mu.RLock()
