@@ -269,3 +269,163 @@ func TestReadConversation_Empty(t *testing.T) {
 		t.Errorf("messages = %d, want 0", len(df.Messages))
 	}
 }
+
+// --- Thread interleaving ---
+
+func TestInterleaveThreads_RepliesAfterParent(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write parent to date file
+	parent := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "thread start")
+	s.Append(acct, "#general", parent)
+
+	// Write another message after parent
+	m2 := msgLine("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "unrelated")
+	s.Append(acct, "#general", m2)
+
+	// Write parent + reply to thread file
+	s.AppendThread(acct, "#general", "P1", parent)
+	reply := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0),
+			Sender: "Bob", SenderID: "U2", Text: "reply here", Reply: true,
+		},
+	}
+	s.AppendThread(acct, "#general", "P1", reply)
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	// Should be: parent, reply (interleaved), m2
+	if len(df.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(df.Messages))
+	}
+	if df.Messages[0].ID != "P1" {
+		t.Errorf("messages[0] = %q, want P1", df.Messages[0].ID)
+	}
+	if df.Messages[1].ID != "R1" || !df.Messages[1].Reply {
+		t.Errorf("messages[1] = %q reply=%v, want R1 reply=true", df.Messages[1].ID, df.Messages[1].Reply)
+	}
+	if df.Messages[2].ID != "M2" {
+		t.Errorf("messages[2] = %q, want M2", df.Messages[2].ID)
+	}
+}
+
+func TestInterleaveThreads_NoThreadDir(t *testing.T) {
+	s, acct := setup(t)
+
+	m1 := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	s.Append(acct, "#general", m1)
+
+	// No thread files — should return messages unchanged, no error
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 1 {
+		t.Errorf("messages = %d, want 1", len(df.Messages))
+	}
+}
+
+func TestInterleaveThreads_CorruptThreadFile(t *testing.T) {
+	s, acct := setup(t)
+
+	m1 := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	s.Append(acct, "#general", m1)
+
+	// Create a corrupt thread file
+	conv := s.convDir(acct, "#general")
+	os.MkdirAll(conv.ThreadsDir(), 0755)
+	os.WriteFile(conv.ThreadFile("CORRUPT"), []byte("not valid jsonl\n"), 0644)
+
+	// Should return messages (partial data). Corrupt thread file parses with
+	// skipped lines but has no valid parent, so it's not interleaved.
+	df, _ := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if df == nil {
+		t.Fatal("expected partial data, got nil")
+	}
+	if len(df.Messages) != 1 {
+		t.Errorf("messages = %d, want 1 (original message preserved)", len(df.Messages))
+	}
+}
+
+func TestInterleaveThreads_MultipleThreads(t *testing.T) {
+	s, acct := setup(t)
+
+	p1 := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "first thread")
+	p2 := msgLine("P2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second thread")
+	s.Append(acct, "#general", p1)
+	s.Append(acct, "#general", p2)
+
+	// Thread 1
+	s.AppendThread(acct, "#general", "P1", p1)
+	r1 := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+		ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "reply to first", Reply: true,
+	}}
+	s.AppendThread(acct, "#general", "P1", r1)
+
+	// Thread 2
+	s.AppendThread(acct, "#general", "P2", p2)
+	r2 := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+		ID: "R2", Ts: ts(2026, 3, 16, 9, 6, 0), Sender: "Alice", SenderID: "U1", Text: "reply to second", Reply: true,
+	}}
+	s.AppendThread(acct, "#general", "P2", r2)
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	// P1, R1, P2, R2
+	if len(df.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4", len(df.Messages))
+	}
+	ids := make([]string, len(df.Messages))
+	for i, m := range df.Messages {
+		ids[i] = m.ID
+	}
+	want := []string{"P1", "R1", "P2", "R2"}
+	for i, id := range ids {
+		if id != want[i] {
+			t.Errorf("messages[%d] = %q, want %q (order: %v)", i, id, want[i], ids)
+			break
+		}
+	}
+}
+
+func TestInterleaveThreads_ThreadWithReactions(t *testing.T) {
+	s, acct := setup(t)
+
+	p1 := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "thread start")
+	s.Append(acct, "#general", p1)
+
+	// Thread with reply + reaction
+	s.AppendThread(acct, "#general", "P1", p1)
+	reply := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+		ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "nice", Reply: true,
+	}}
+	s.AppendThread(acct, "#general", "P1", reply)
+	react := modelv1.Line{Type: modelv1.LineReaction, React: &modelv1.ReactLine{
+		Ts: ts(2026, 3, 16, 9, 2, 0), MsgID: "P1", Sender: "Bob", SenderID: "U2", Emoji: "thumbsup",
+	}}
+	// Reaction goes to both date file and thread file (per protocol).
+	s.Append(acct, "#general", react)
+	s.AppendThread(acct, "#general", "P1", react)
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	// Parent + reply interleaved
+	if len(df.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2", len(df.Messages))
+	}
+	// Parent should have the reaction from the date file
+	if len(df.Messages[0].Reactions) != 1 {
+		t.Errorf("parent reactions = %d, want 1", len(df.Messages[0].Reactions))
+	}
+}

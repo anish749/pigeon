@@ -140,6 +140,8 @@ func daemonReexec() error {
 		return fmt.Errorf("locate executable for re-exec: %w", err)
 	}
 	// Remove socket so the new process can bind it.
-	os.Remove(paths.SocketPath())
+	if err := os.Remove(paths.SocketPath()); err != nil && !os.IsNotExist(err) {
+		slog.Error("failed to remove socket before re-exec", "error", err)
+	}
 	return syscall.Exec(exePath, os.Args, os.Environ())
 }

@@ -646,12 +646,8 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		lineType = modelv1.LineUnreaction
 	}
 
-	// Get bot identity for the from field.
 	senderName := sender.BotName
-	var senderID string
-	if authResp, authErr := sender.BotAPI.AuthTestContext(ctx); authErr == nil {
-		senderID = authResp.UserID
-	}
+	senderID := sender.BotUserID
 
 	// Use the message timestamp for file placement: the protocol requires
 	// reactions to land in the same date file as the target message.

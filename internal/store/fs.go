@@ -126,7 +126,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	resolved := modelv1.Resolve(compacted)
 
 	// Interleave thread replies after their parent message.
-	resolved = s.interleaveThreads(acct, conversation, resolved)
+	resolved, interleaveErr := s.interleaveThreads(acct, conversation, resolved)
 
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
@@ -144,7 +144,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		resolved.Messages = resolved.Messages[len(resolved.Messages)-opts.Last:]
 	}
 
-	return resolved, nil
+	// Return partial data + error. The caller gets whatever threads
+	// succeeded and can decide how to handle the error.
+	return resolved, interleaveErr
 }
 
 // ThreadExists checks if a thread file exists for the given thread timestamp.
@@ -173,12 +175,16 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 
 // interleaveThreads reads thread files for the conversation and splices
 // replies into the resolved output after their parent message, matched by ID.
-func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) *modelv1.ResolvedDateFile {
+func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) (*modelv1.ResolvedDateFile, error) {
 	entries, err := os.ReadDir(s.convDir(acct, conversation).ThreadsDir())
 	if err != nil {
-		return resolved
+		if os.IsNotExist(err) {
+			return resolved, nil
+		}
+		return resolved, fmt.Errorf("read threads dir: %w", err)
 	}
 
+	var errs []error
 	threads := make(map[string]*modelv1.ResolvedThreadFile)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
@@ -186,14 +192,18 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		}
 		threadTS := strings.TrimSuffix(e.Name(), ".txt")
 		tf, err := s.ReadThread(acct, conversation, threadTS)
-		if err != nil || tf == nil {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read thread %s: %w", threadTS, err))
+			continue
+		}
+		if tf == nil {
 			continue
 		}
 		threads[tf.Parent.ID] = tf
 	}
 
 	if len(threads) == 0 {
-		return resolved
+		return resolved, errors.Join(errs...)
 	}
 
 	var result []modelv1.ResolvedMsg
@@ -207,7 +217,7 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		}
 	}
 
-	return &modelv1.ResolvedDateFile{Messages: result}
+	return &modelv1.ResolvedDateFile{Messages: result}, errors.Join(errs...)
 }
 
 // ListPlatforms returns all platform directories.
