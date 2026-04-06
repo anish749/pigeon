@@ -222,8 +222,18 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 		return SendResponse{Error: fmt.Sprintf("send: %v", err)}
 	}
 
-	// Store locally.
+	// Ensure .meta.json exists for this conversation.
 	convDir := sender.Resolver.ConvDir(ctx, recipientJID)
+	displayName := sender.Resolver.ContactName(ctx, recipientJID)
+	if recipientJID.Server == types.GroupServer {
+		displayName = sender.Resolver.GroupName(ctx, recipientJID)
+	}
+	waMeta := sender.Resolver.ConvMeta(ctx, recipientJID, displayName)
+	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, convDir, waMeta); err != nil {
+		slog.ErrorContext(ctx, "write meta failed", "conv", convDir, "error", err)
+	}
+
+	// Store locally.
 	senderName := "me"
 	var senderID string
 	if sender.Client.Store.ID != nil {
@@ -387,6 +397,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 				channelName, err, channelName)}
 		}
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
+	}
+
+	// Ensure .meta.json exists for this conversation.
+	slackMeta := sender.Resolver.ConvMeta(channelID, channelName)
+	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, channelName, slackMeta); err != nil {
+		slog.ErrorContext(ctx, "write meta failed", "channel", channelName, "error", err)
 	}
 
 	// Store locally.

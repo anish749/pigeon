@@ -288,6 +288,46 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	return errors.Join(errs...)
 }
 
+// writeMeta writes or overwrites the .meta.json sidecar for a conversation.
+func (s *FSStore) writeMeta(acct account.Account, conversation string, meta modelv1.ConvMeta) error {
+	conv := s.convDir(acct, conversation)
+	if err := os.MkdirAll(conv.Path(), 0755); err != nil {
+		return fmt.Errorf("create conversation dir: %w", err)
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal meta: %w", err)
+	}
+	return os.WriteFile(conv.MetaFile(), data, 0644)
+}
+
+// WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
+// Returns true if written, false if already present.
+func (s *FSStore) WriteMetaIfNotExists(acct account.Account, conversation string, meta modelv1.ConvMeta) (bool, error) {
+	path := s.convDir(acct, conversation).MetaFile()
+	if fileExists(path) {
+		return false, nil
+	}
+	return true, s.writeMeta(acct, conversation, meta)
+}
+
+// ReadMeta reads the .meta.json sidecar for a conversation.
+// Returns nil, nil if the file does not exist.
+func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.ConvMeta, error) {
+	data, err := os.ReadFile(s.convDir(acct, conversation).MetaFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read meta: %w", err)
+	}
+	var meta modelv1.ConvMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse meta: %w", err)
+	}
+	return &meta, nil
+}
+
 // --- internal helpers ---
 
 func (s *FSStore) appendLine(filename string, line modelv1.Line) error {

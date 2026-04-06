@@ -9,6 +9,8 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func containsLower(s, substr string) bool {
@@ -100,6 +102,26 @@ func (r *Resolver) ConvDir(ctx context.Context, chatJID types.JID) string {
 
 	jid := r.ResolveJID(ctx, chatJID)
 	return "+" + jid.User
+}
+
+// ConvMeta builds a ConvMeta for a WhatsApp conversation.
+// chatJID is the conversation JID (may already be resolved from LID).
+// displayName is the human-readable name for the conversation.
+func (r *Resolver) ConvMeta(ctx context.Context, chatJID types.JID, displayName string) modelv1.ConvMeta {
+	if chatJID.Server == types.GroupServer {
+		return modelv1.NewWhatsAppGroup(displayName, chatJID.String())
+	}
+	jid := r.ResolveJID(ctx, chatJID)
+	var jidStr, lidStr string
+	if jid.Server == types.HiddenUserServer {
+		lidStr = jid.String()
+	} else {
+		jidStr = jid.String()
+		if chatJID != jid {
+			lidStr = chatJID.String()
+		}
+	}
+	return modelv1.NewWhatsAppDM(displayName, jidStr, lidStr)
 }
 
 // ContactMatch represents a contact that matched a search query.
