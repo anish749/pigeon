@@ -12,25 +12,60 @@ const mcpServerName = "pigeon"
 // If the server already exists with the correct command, this is a no-op.
 // If it exists with a stale command (e.g. old binary path), it is replaced.
 func EnsureMCPServer(claudePath, pigeonPath string) error {
-	out, err := exec.Command(claudePath, "mcp", "get", mcpServerName).CombinedOutput()
+	cli := &execCLI{claudePath: claudePath}
+	return ensureMCP(cli, pigeonPath)
+}
+
+// claudeCLI abstracts the claude mcp subcommands for testing.
+type claudeCLI interface {
+	MCPGet(name string) (string, error)
+	MCPRemove(name string) error
+	MCPAdd(name, command string, args ...string) error
+}
+
+func ensureMCP(cli claudeCLI, pigeonPath string) error {
+	output, err := cli.MCPGet(mcpServerName)
 	if err != nil {
-		return addMCPServer(claudePath, pigeonPath)
+		// Not registered — add it.
+		return cli.MCPAdd(mcpServerName, pigeonPath, "mcp")
 	}
 
-	output := string(out)
 	if parseMCPField(output, "Command:") == pigeonPath && parseMCPField(output, "Args:") == "mcp" {
 		return nil
 	}
 
 	// Stale config — remove and re-add.
-	if rmOut, err := exec.Command(claudePath, "mcp", "remove", mcpServerName, "-s", "user").CombinedOutput(); err != nil {
-		return fmt.Errorf("remove stale MCP server: %s", rmOut)
+	if err := cli.MCPRemove(mcpServerName); err != nil {
+		return err
 	}
-	return addMCPServer(claudePath, pigeonPath)
+	return cli.MCPAdd(mcpServerName, pigeonPath, "mcp")
 }
 
-func addMCPServer(claudePath, pigeonPath string) error {
-	out, err := exec.Command(claudePath, "mcp", "add", "--transport", "stdio", "--scope", "user", mcpServerName, "--", pigeonPath, "mcp").CombinedOutput()
+// execCLI implements claudeCLI by shelling out to the real claude binary.
+type execCLI struct {
+	claudePath string
+}
+
+func (c *execCLI) MCPGet(name string) (string, error) {
+	out, err := exec.Command(c.claudePath, "mcp", "get", name).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("mcp get %s: %s", name, out)
+	}
+	return string(out), nil
+}
+
+func (c *execCLI) MCPRemove(name string) error {
+	out, err := exec.Command(c.claudePath, "mcp", "remove", name, "-s", "user").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("remove MCP server: %s", out)
+	}
+	return nil
+}
+
+func (c *execCLI) MCPAdd(name, command string, args ...string) error {
+	cmdArgs := []string{"mcp", "add", "--transport", "stdio", "--scope", "user", name, "--", command}
+	cmdArgs = append(cmdArgs, args...)
+	out, err := exec.Command(c.claudePath, cmdArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("register MCP server: %s", out)
 	}
