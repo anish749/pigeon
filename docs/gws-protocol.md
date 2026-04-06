@@ -5,6 +5,14 @@ standard tools. This protocol covers four data types: Gmail messages,
 Google Docs, Google Sheets, and Google Calendar events. All files are
 UTF-8 encoded.
 
+## Deduplication Rule
+
+All JSONL line types use the same rule: **deduplicate by ID, keep last
+occurrence.** This applies uniformly to emails, comments, replies, and
+calendar events. For immutable data (messages), duplicates are identical
+so first vs last produces the same result. For mutable data (events,
+comment resolved status), keeping last ensures the latest state wins.
+
 ## Polling and Sync
 
 All four data types use poll-based sync via the `gws` CLI. Each service
@@ -179,7 +187,7 @@ Thread grouping is a display-time operation, not a storage concern.
 
 ### Deduplication
 
-Messages are deduplicated by `id` (keep first occurrence). Delete lines
+Messages are deduplicated by `id` (keep last occurrence). Delete lines
 cause the target message to be excluded on read. Maintenance applies
 deletes and removes both lines.
 
@@ -445,8 +453,11 @@ The reader deduplicates by event `id`, keeping the **last occurrence**
 (latest state wins). Maintenance compacts duplicate event IDs down to
 the most recent version.
 
-This differs from the messaging protocol where first occurrence wins.
-Calendar events are mutable objects — the latest version is the truth.
+All JSONL types across pigeon use the same dedup rule: keep last
+occurrence by ID. This works uniformly for immutable data (duplicate
+messages are identical, so first vs last doesn't matter) and mutable
+data (calendar events, comment resolved status) where the latest
+version is the truth.
 
 ### Cancelled Events
 
@@ -532,7 +543,7 @@ and parses JSONL output. To support GWS data:
 ### Gmail
 
 1. Parse all email lines from the requested date range.
-2. Deduplicate by `id` (keep first occurrence).
+2. Deduplicate by `id` (keep last occurrence).
 3. Apply deletes (exclude emails with a matching `email-delete` line).
 4. Sort by timestamp.
 5. Optionally group by `threadId` for threaded display.
