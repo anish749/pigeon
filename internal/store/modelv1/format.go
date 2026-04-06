@@ -123,6 +123,31 @@ func formatWarning(errs ...error) string {
 	return "\u26a0 " + joined.Error()
 }
 
+// FormatConvMeta renders conversation metadata as a bracketed tag line.
+// Returns empty string if there are no IDs to show.
+func FormatConvMeta(meta *ConvMeta) string {
+	var parts []string
+	if meta.Type != "" {
+		parts = append(parts, fmt.Sprintf("[type:%s]", meta.Type))
+	}
+	if meta.ChannelID != "" {
+		parts = append(parts, fmt.Sprintf("[channel_id:%s]", meta.ChannelID))
+	}
+	if meta.UserID != "" {
+		parts = append(parts, fmt.Sprintf("[user_id:%s]", meta.UserID))
+	}
+	if meta.JID != "" {
+		parts = append(parts, fmt.Sprintf("[jid:%s]", meta.JID))
+	}
+	if meta.LID != "" {
+		parts = append(parts, fmt.Sprintf("[lid:%s]", meta.LID))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
 // formatReactions renders a list of reactions as a single display line.
 // e.g. "👍 Bob, Charlie · 🎉 Dave"
 func formatReactions(reactions []ReactLine) string {

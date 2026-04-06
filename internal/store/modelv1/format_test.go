@@ -7,6 +7,59 @@ import (
 	"time"
 )
 
+func TestFormatConvMeta_SlackDM(t *testing.T) {
+	meta := &ConvMeta{Name: "@Magnus", Type: ConvDM, ChannelID: "D08J1DUQ11Q", UserID: "U08H20E757W"}
+	got := FormatConvMeta(meta)
+	want := "[type:dm] [channel_id:D08J1DUQ11Q] [user_id:U08H20E757W]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_SlackChannel(t *testing.T) {
+	meta := &ConvMeta{Name: "#random", Type: ConvChannel, ChannelID: "C06UQPRB5UH"}
+	got := FormatConvMeta(meta)
+	want := "[type:channel] [channel_id:C06UQPRB5UH]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_SlackGroupDM(t *testing.T) {
+	meta := &ConvMeta{Name: "@mpdm-alice--bob-1", Type: ConvGroupDM, ChannelID: "G01ABC"}
+	got := FormatConvMeta(meta)
+	want := "[type:group_dm] [channel_id:G01ABC]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_WhatsAppDM(t *testing.T) {
+	meta := &ConvMeta{Name: "Alice", Type: ConvDM, JID: "14155551234@s.whatsapp.net", LID: "abc123@lid"}
+	got := FormatConvMeta(meta)
+	want := "[type:dm] [jid:14155551234@s.whatsapp.net] [lid:abc123@lid]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_WhatsAppGroup(t *testing.T) {
+	meta := &ConvMeta{Name: "Family", Type: ConvGroup, JID: "12345@g.us"}
+	got := FormatConvMeta(meta)
+	want := "[type:group] [jid:12345@g.us]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatConvMeta_Empty(t *testing.T) {
+	meta := &ConvMeta{Name: "test"}
+	got := FormatConvMeta(meta)
+	if got != "" {
+		t.Errorf("expected empty string for meta with no IDs or type, got %q", got)
+	}
+}
+
 func TestFormatMsg_Full(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{

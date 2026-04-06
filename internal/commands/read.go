@@ -58,7 +58,9 @@ func RunRead(p ReadParams) error {
 	if meta, err := s.ReadMeta(acct, conv.dirName); err != nil {
 		return fmt.Errorf("read metadata for %s: %w", conv.dirName, err)
 	} else if meta != nil {
-		header += " (" + formatMetaIDs(meta) + ")"
+		if ids := modelv1.FormatConvMeta(meta); ids != "" {
+			header += " " + ids
+		}
 	}
 	header += " ---"
 	fmt.Println(header)
@@ -67,20 +69,6 @@ func RunRead(p ReadParams) error {
 	return nil
 }
 
-func formatMetaIDs(meta *modelv1.ConvMeta) string {
-	var parts []string
-	if meta.UserID != "" {
-		parts = append(parts, "user_id:"+meta.UserID)
-	}
-	if meta.ChannelID != "" {
-		parts = append(parts, "channel_id:"+meta.ChannelID)
-	}
-	if meta.JID != "" {
-		parts = append(parts, "jid:"+meta.JID)
-	}
-	parts = append(parts, string(meta.Type))
-	return strings.Join(parts, ", ")
-}
 
 // parseDuration handles Go durations plus "d" for days.
 func parseDuration(s string) (time.Duration, error) {

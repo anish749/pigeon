@@ -434,18 +434,19 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		return lastDelivered
 	}
 
-	// Send all lines as a single message.
+	// Send all lines as a single message, with metadata header.
+	if meta, err := h.store.ReadMeta(ch.acct, conversation); err != nil {
+		slog.Error("failed to read conversation metadata", "conversation", conversation, "error", err)
+	} else if meta != nil {
+		if header := modelv1.FormatConvMeta(meta); header != "" {
+			lines = append([]string{header}, lines...)
+		}
+	}
 	msg := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: conversation,
 		MsgLines:     lines,
-	}
-	if meta, err := h.store.ReadMeta(ch.acct, conversation); err != nil {
-		slog.Error("failed to read conversation metadata", "conversation", conversation, "error", err)
-	} else if meta != nil {
-		msg.UserID = meta.UserID
-		msg.ChannelID = meta.ChannelID
 	}
 	if err := session.Send(h.ctx, msg); err != nil {
 		slog.Error("failed to deliver message",
