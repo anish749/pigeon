@@ -217,3 +217,17 @@ func collectChannelIDs(matches []goslack.SearchMessage) map[string]bool {
 	}
 	return ids
 }
+
+// channelPriority returns a sort key: DMs(0) < group IMs(1) < private channels(2) < public(3).
+func channelPriority(ch goslack.Channel) int {
+	if ch.IsIM {
+		return 0
+	}
+	if ch.IsMpIM {
+		return 1
+	}
+	if ch.IsPrivate {
+		return 2
+	}
+	return 3
+}
