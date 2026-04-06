@@ -70,7 +70,8 @@ on conversation creation, updated if identifiers change.
 | `type` | always | `channel`, `dm`, `group_dm` (Slack) or `dm`, `group` (WhatsApp) |
 | `channel_id` | Slack | Channel ID (`C`, `D`, or `G` prefixed) |
 | `user_id` | Slack DMs | DM partner's user ID (`U` prefixed), not the authenticated user's |
-| `jid` | WhatsApp | JID — `{phone}@s.whatsapp.net` for DMs, `{id}@g.us` for groups |
+| `jid` | WhatsApp | Phone-based JID — `{phone}@s.whatsapp.net` for DMs, `{id}@g.us` for groups |
+| `lid` | WhatsApp DMs | Opaque linked ID — `{id}@lid`, used when phone number is hidden |
 
 Example: `{"name":"@Alice","type":"dm","channel_id":"D04MNOPQR03","user_id":"U04ABCDEF"}`
 

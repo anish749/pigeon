@@ -17,7 +17,8 @@ type ConvMeta struct {
 	Type      ConvType `json:"type"`                 // conversation type
 	ChannelID string   `json:"channel_id,omitempty"` // Slack channel ID (C/D/G prefixed)
 	UserID    string   `json:"user_id,omitempty"`    // Slack DM partner's user ID (U prefixed)
-	JID       string   `json:"jid,omitempty"`        // WhatsApp JID
+	JID       string   `json:"jid,omitempty"`        // WhatsApp JID (phone-based, e.g. 14155551234@s.whatsapp.net)
+	LID       string   `json:"lid,omitempty"`        // WhatsApp LID (opaque, e.g. abc123@lid)
 }
 
 // NewSlackChannel creates metadata for a Slack channel (public or private).
@@ -36,8 +37,9 @@ func NewSlackGroupDM(name, channelID string) ConvMeta {
 }
 
 // NewWhatsAppDM creates metadata for a WhatsApp 1:1 conversation.
-func NewWhatsAppDM(name, jid string) ConvMeta {
-	return ConvMeta{Name: name, Type: ConvDM, JID: jid}
+// jid is the phone-based JID, lid is the opaque linked ID. At least one must be non-empty.
+func NewWhatsAppDM(name, jid, lid string) ConvMeta {
+	return ConvMeta{Name: name, Type: ConvDM, JID: jid, LID: lid}
 }
 
 // NewWhatsAppGroup creates metadata for a WhatsApp group conversation.
