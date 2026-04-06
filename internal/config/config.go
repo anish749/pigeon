@@ -12,6 +12,14 @@ import (
 type Config struct {
 	WhatsApp []WhatsAppConfig `yaml:"whatsapp,omitempty"`
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
+	GWS      []GWSConfig      `yaml:"gws,omitempty"`
+}
+
+// GWSConfig holds configuration for a single Google Workspace account.
+type GWSConfig struct {
+	Account  string   `yaml:"account"`             // display name for this account
+	Email    string   `yaml:"email"`               // Google account email (used for account slug)
+	Services []string `yaml:"services,omitempty"`   // which services to poll: "gmail", "gdrive", "gcalendar"
 }
 
 type WhatsAppConfig struct {
@@ -94,4 +102,15 @@ func (c *Config) AddSlack(entry SlackConfig) {
 		}
 	}
 	c.Slack = append(c.Slack, entry)
+}
+
+// AddGWS upserts a GWS configuration entry by email.
+func (c *Config) AddGWS(entry GWSConfig) {
+	for i, existing := range c.GWS {
+		if existing.Email == entry.Email {
+			c.GWS[i] = entry
+			return
+		}
+	}
+	c.GWS = append(c.GWS, entry)
 }
