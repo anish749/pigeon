@@ -220,9 +220,13 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				"channel", ch.ID, "error", err)
 		}
 		resolver.AddMember(ch.ID)
-		if channelName, err := resolver.ChannelName(ctx, ch.ID); err == nil {
-			ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
+		channelName, err := resolver.ChannelName(ctx, ch.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "slack sync: cannot resolve channel name for meta",
+				"channel_id", ch.ID, "error", err)
+			continue
 		}
+		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
 	}
 
 	// Determine which channels need syncing. Returns a sorted, filtered list:
