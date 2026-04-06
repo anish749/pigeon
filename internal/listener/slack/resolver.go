@@ -148,6 +148,7 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 
 	user, err := r.api.GetUserInfoContext(ctx, userID)
 	if err != nil {
+		// TODO: handle error. this eneds to boil up the error to the caller.
 		slog.WarnContext(ctx, "failed to resolve slack user", "user_id", userID, "error", err)
 		return userID
 	}
@@ -164,6 +165,47 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 	return name
 }
 
+// botName resolves a Slack bot ID to a display name via cache or API lookup.
+func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
+	r.mu.RLock()
+	name, ok := r.users[botID]
+	r.mu.RUnlock()
+	if ok {
+		return name, nil
+	}
+
+	bot, err := r.api.GetBotInfoContext(ctx, goslack.GetBotInfoParameters{Bot: botID})
+	if err != nil {
+		return "", fmt.Errorf("resolve bot %s: %w", botID, err)
+	}
+	if bot.Name == "" {
+		return "", fmt.Errorf("resolve bot %s: API returned empty name", botID)
+	}
+	r.mu.Lock()
+	r.users[botID] = bot.Name
+	r.mu.Unlock()
+	return bot.Name, nil
+}
+
+// SenderName resolves a message sender to (name, id). Tries the user ID first,
+// then the message's Username field (common for bots), then a bot API lookup.
+func (r *Resolver) SenderName(ctx context.Context, userID, botID, username string) (string, string, error) {
+	if userID != "" {
+		return r.UserName(ctx, userID), userID, nil
+	}
+	if username != "" {
+		return username, botID, nil
+	}
+	if botID != "" {
+		name, err := r.botName(ctx, botID)
+		if err != nil {
+			return "", "", err
+		}
+		return name, botID, nil
+	}
+	return "", "", fmt.Errorf("message has no user, bot, or username")
+}
+
 // ChannelName resolves a Slack channel ID to a formatted name. Falls back to API lookup on cache miss.
 func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 	r.mu.RLock()
@@ -177,6 +219,7 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) string {
 		ChannelID: channelID,
 	})
 	if err != nil {
+		// TODO: handle error. this eneds to boil up the error to the caller.
 		slog.WarnContext(ctx, "failed to resolve slack channel", "channel_id", channelID, "error", err)
 		return channelID
 	}
