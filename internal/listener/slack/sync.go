@@ -255,6 +255,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
 			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
 
+		// Use cursor if resuming, otherwise go back 90 days.
 		oldest := defaultOldest
 		if cursor, ok := ms.Cursor(ch.ID); ok {
 			oldest = cursor
