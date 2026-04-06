@@ -120,6 +120,11 @@ func DaemonAutoUpdate(ctx context.Context, currentVersion string, onReexec func(
 }
 
 func doUpdate(currentVersion string, verbose bool) (bool, error) {
+	if currentVersion == "dev" {
+		slog.Warn("skipping update check: running dev build")
+		return false, nil
+	}
+
 	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
 		return false, fmt.Errorf("create update source: %w", err)
