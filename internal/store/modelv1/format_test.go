@@ -1,6 +1,7 @@
 package modelv1
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +172,53 @@ func TestFormatThreadFile_Nil(t *testing.T) {
 	lines := FormatThreadFile(nil, time.UTC)
 	if lines != nil {
 		t.Errorf("expected nil, got %v", lines)
+	}
+}
+
+func TestFormatDateFile_WithError(t *testing.T) {
+	f := &ResolvedDateFile{
+		Messages: []ResolvedMsg{
+			{MsgLine: MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}},
+		},
+	}
+	lines := FormatDateFile(f, time.UTC, errors.New("read thread 123: file corrupted"))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	if !strings.HasPrefix(lines[1], "\u26a0 ") {
+		t.Errorf("expected warning prefix, got %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "file corrupted") {
+		t.Errorf("expected error text in warning, got %q", lines[1])
+	}
+}
+
+func TestFormatDateFile_NilErrorNoWarning(t *testing.T) {
+	f := &ResolvedDateFile{
+		Messages: []ResolvedMsg{
+			{MsgLine: MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "hello"}},
+		},
+	}
+	lines := FormatDateFile(f, time.UTC, nil)
+	if len(lines) != 1 {
+		t.Errorf("lines = %d, want 1 (nil error should not add warning)", len(lines))
+	}
+}
+
+func TestFormatThreadFile_WithError(t *testing.T) {
+	f := &ResolvedThreadFile{
+		Parent: ResolvedMsg{
+			MsgLine: MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "thread start"},
+		},
+	}
+	lines := FormatThreadFile(f, time.UTC, errors.New("partial read failure"))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	if !strings.HasPrefix(lines[1], "\u26a0 ") {
+		t.Errorf("expected warning prefix, got %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "partial read failure") {
+		t.Errorf("expected error text in warning, got %q", lines[1])
 	}
 }

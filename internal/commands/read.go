@@ -42,17 +42,16 @@ func RunRead(p ReadParams) error {
 		opts.Since = d
 	}
 
-	df, err := s.ReadConversation(acct, conv.dirName, opts)
-	if err != nil {
-		return err
-	}
-
+	df, readErr := s.ReadConversation(acct, conv.dirName, opts)
 	if df == nil || len(df.Messages) == 0 {
+		if readErr != nil {
+			return readErr
+		}
 		fmt.Println("No messages found.")
 		return nil
 	}
 
-	lines := modelv1.FormatDateFile(df, time.Local)
+	lines := modelv1.FormatDateFile(df, time.Local, readErr)
 
 	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
 	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)

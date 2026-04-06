@@ -1,6 +1,7 @@
 package modelv1
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,7 +30,8 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 }
 
 // FormatDateFile renders a resolved conversation day as display lines.
-func FormatDateFile(f *ResolvedDateFile, loc *time.Location) []string {
+// If any non-nil errors are passed, a warning line is appended at the end.
+func FormatDateFile(f *ResolvedDateFile, loc *time.Location, errs ...error) []string {
 	if f == nil {
 		return nil
 	}
@@ -37,11 +39,15 @@ func FormatDateFile(f *ResolvedDateFile, loc *time.Location) []string {
 	for _, m := range f.Messages {
 		lines = append(lines, FormatMsg(m, loc)...)
 	}
+	if w := formatWarning(errs...); w != "" {
+		lines = append(lines, w)
+	}
 	return lines
 }
 
 // FormatThreadFile renders a resolved thread as display lines.
-func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location) []string {
+// If any non-nil errors are passed, a warning line is appended at the end.
+func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, errs ...error) []string {
 	if f == nil {
 		return nil
 	}
@@ -61,7 +67,20 @@ func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location) []string {
 		lines = append(lines, FormatMsg(c, loc)...)
 	}
 
+	if w := formatWarning(errs...); w != "" {
+		lines = append(lines, w)
+	}
 	return lines
+}
+
+// formatWarning joins non-nil errors into a single warning line.
+// Returns empty string if all errors are nil.
+func formatWarning(errs ...error) string {
+	joined := errors.Join(errs...)
+	if joined == nil {
+		return ""
+	}
+	return "\u26a0 " + joined.Error()
 }
 
 // formatReactions renders a list of reactions as a single display line.
