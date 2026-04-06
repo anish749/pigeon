@@ -83,11 +83,18 @@ DATA LAYOUT
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
   JSON fields:
-    type      "msg", "react", "unreact", "edit", "delete", "separator"
-    ts        ISO 8601 timestamp (e.g. "2026-03-16T09:15:02Z")
-    id        message ID                sender   display name
-    from      platform user ID          text     message body
-    via       "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
+    type      event type: "msg", "react", "unreact", "edit", "delete", "separator"
+    ts        timestamp (ISO 8601, e.g. "2026-03-16T09:15:02Z")
+    id        message ID (on msg events)
+    msg       target message ID (on react/edit/delete events)
+    sender    display name
+    from      platform user ID (stable identity)
+    text      message body (on msg/edit events)
+    via       message pathway: "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
+    emoji     reaction emoji (on react/unreact events)
+    attach    attachments array, each with "id" and "type" (MIME)
+    reply     true if thread reply (on msg events)
+    replyTo   quoted message ID (on msg events, WhatsApp quote-reply)
 
 ─────────────────────────────────────────────────────────
 
