@@ -244,26 +244,8 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 
 	channelName := l.resolver.ChannelName(ctx, item.Channel)
 	userName := l.resolver.UserName(ctx, userID)
-	msgTS := ParseTimestamp(item.Timestamp)
 
-	lineType := modelv1.LineReaction
-	if remove {
-		lineType = modelv1.LineUnreaction
-	}
-
-	line := modelv1.Line{
-		Type: lineType,
-		React: &modelv1.ReactLine{
-			Ts:       msgTS,
-			MsgID:    item.Timestamp,
-			Sender:   userName,
-			SenderID: userID,
-			Emoji:    emoji,
-			Remove:   remove,
-		},
-	}
-
-	if err := l.messages.AppendReaction(channelName, line); err != nil {
+	if err := writeReaction(l.messages, channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 	}
 

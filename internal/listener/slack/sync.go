@@ -301,6 +301,9 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 			written++
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
+			}
 		}
 
 		// Sync thread replies for messages with threads
@@ -460,6 +463,9 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			written++
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: bot DM reaction write failed", "error", err)
+			}
 		}
 
 		if lastTS != "" {
@@ -610,6 +616,9 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
 			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
+			}
+			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
+				slog.WarnContext(ctx, "slack sync: thread reaction write failed", "error", err)
 			}
 		}
 
