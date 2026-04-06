@@ -159,7 +159,7 @@ func captureRg(rgPath, query, dir string, includes []string, context int) ([]byt
 }
 
 func captureGrepFallback(query, dir string, includes []string, context int) ([]byte, error) {
-	args := []string{"-r", "--no-color"}
+	args := []string{"-r", "--color=never"}
 	for _, inc := range includes {
 		args = append(args, "--include", inc)
 	}
