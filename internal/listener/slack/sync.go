@@ -242,6 +242,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		"to_sync", len(conversations),
 	)
 
+	// Track per-category progress
 	var doneDMs, doneMpIMs, donePrivate, donePublic int
 	var synced, totalMessages int
 	for _, ch := range conversations {
