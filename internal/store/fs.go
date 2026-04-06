@@ -91,12 +91,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		// For --last N, read all files so we can slice after compaction.
 		selected = files
 	default:
-		today := conv.DateFile(time.Now().UTC().Format("2006-01-02"))
-		if fileExists(today) {
-			selected = []string{today}
-		} else {
-			selected = []string{files[len(files)-1]}
-		}
+		// No filter specified: return the last 25 messages.
+		selected = files
+		opts.Last = 25
 	}
 
 	merged := &modelv1.DateFile{}
