@@ -250,6 +250,20 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 		slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 	}
 
+	// Write .meta.json for the conversation.
+	meta := store.ConversationMeta{
+		Name: sender.Resolver.ContactName(ctx, recipientJID),
+		Type: "dm",
+		JID:  recipientJID.String(),
+	}
+	if recipientJID.Server == types.GroupServer {
+		meta.Type = "group"
+		meta.Name = sender.Resolver.GroupName(ctx, recipientJID)
+	}
+	if err := s.store.WriteMeta(sender.Acct, convDir, meta); err != nil {
+		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
+	}
+
 	return SendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
 }
 
@@ -419,6 +433,24 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		if err := s.store.Append(sender.Acct, channelName, line); err != nil {
 			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
 		}
+	}
+
+	// Write .meta.json for the conversation.
+	meta := store.ConversationMeta{
+		Name:      channelName,
+		ChannelID: channelID,
+	}
+	switch {
+	case strings.HasPrefix(channelName, "@mpdm-"):
+		meta.Type = "group_dm"
+	case strings.HasPrefix(channelName, "@"):
+		meta.Type = "dm"
+		meta.UserID = sender.Resolver.DMUserID(channelName)
+	default:
+		meta.Type = "channel"
+	}
+	if err := s.store.WriteMeta(sender.Acct, channelName, meta); err != nil {
+		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)
 	}
 
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}

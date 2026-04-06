@@ -10,6 +10,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -183,6 +184,21 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	if written > 0 {
 		slog.InfoContext(ctx, "whatsapp: history sync: conversation done",
 			"conv", convDir, "messages", written, "account", l.acct)
+
+		meta := store.ConversationMeta{
+			JID: chatJID.String(),
+		}
+		if isGroup {
+			meta.Type = "group"
+			meta.Name = l.resolver.GroupName(ctx, chatJID)
+		} else {
+			meta.Type = "dm"
+			meta.Name = l.resolver.ContactName(ctx, chatJID)
+		}
+		if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
+			slog.WarnContext(ctx, "whatsapp: history sync: failed to write .meta.json",
+				"conv", convDir, "error", err)
+		}
 	}
 
 	return written

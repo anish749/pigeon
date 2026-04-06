@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -179,6 +180,24 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	slog.InfoContext(ctx, "slack message saved",
 		"from", userName, "channel", channelName, "account", l.acct, "text_len", len(msg.Text))
+
+	// Write .meta.json for the conversation.
+	meta := store.ConversationMeta{
+		Name:      channelName,
+		ChannelID: msg.Channel,
+	}
+	switch msg.ChannelType {
+	case "im":
+		meta.Type = "dm"
+		meta.UserID = l.resolver.DMUserID(channelName)
+	case "mpim":
+		meta.Type = "group_dm"
+	default:
+		meta.Type = "channel"
+	}
+	if err := l.messages.store.WriteMeta(l.acct, channelName, meta); err != nil {
+		slog.WarnContext(ctx, "failed to write .meta.json", "channel", channelName, "error", err)
+	}
 
 	// Notify the hub for messages the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always

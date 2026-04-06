@@ -145,6 +145,21 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	slog.InfoContext(ctx, "message saved",
 		"from", senderName, "conv", convDir, "text_len", len(text))
 
+	// Write .meta.json for the conversation.
+	meta := store.ConversationMeta{
+		JID: evt.Info.Chat.String(),
+	}
+	if evt.Info.Chat.Server == types.GroupServer {
+		meta.Type = "group"
+		meta.Name = l.resolver.GroupName(ctx, evt.Info.Chat)
+	} else {
+		meta.Type = "dm"
+		meta.Name = l.resolver.ContactName(ctx, evt.Info.Chat)
+	}
+	if err := l.store.WriteMeta(l.acct, convDir, meta); err != nil {
+		slog.WarnContext(ctx, "failed to write .meta.json", "conv", convDir, "error", err)
+	}
+
 	if l.onMessage != nil {
 		l.onMessage(l.acct, convDir)
 	}

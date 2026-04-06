@@ -220,6 +220,47 @@ func (s *FSStore) ListAccounts(platform string) ([]string, error) {
 	return listSubdirs(s.root.Platform(platform).Path())
 }
 
+// ConversationMeta is the per-conversation .meta.json content.
+type ConversationMeta struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	ChannelID string `json:"channel_id,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	JID       string `json:"jid,omitempty"`
+}
+
+// WriteMeta writes .meta.json for a conversation directory.
+func (s *FSStore) WriteMeta(acct account.Account, conversation string, meta ConversationMeta) error {
+	conv := s.convDir(acct, conversation)
+	if err := os.MkdirAll(conv.Path(), 0755); err != nil {
+		return fmt.Errorf("create conversation dir: %w", err)
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal meta: %w", err)
+	}
+	data = append(data, '\n')
+	return os.WriteFile(conv.MetaFile(), data, 0644)
+}
+
+// ReadMeta reads .meta.json for a conversation. Returns nil if the file
+// does not exist.
+func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*ConversationMeta, error) {
+	conv := s.convDir(acct, conversation)
+	data, err := os.ReadFile(conv.MetaFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var meta ConversationMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse .meta.json: %w", err)
+	}
+	return &meta, nil
+}
+
 // ListConversations returns all conversation directories for an account.
 func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 	dir := s.root.AccountFor(acct).Path()

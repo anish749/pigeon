@@ -47,6 +47,13 @@ type Store interface {
 	// ListConversations returns all conversation directories for an account.
 	ListConversations(acct account.Account) ([]string, error)
 
+	// WriteMeta writes .meta.json for a conversation directory.
+	WriteMeta(acct account.Account, conversation string, meta ConversationMeta) error
+
+	// ReadMeta reads .meta.json for a conversation. Returns nil if the
+	// file does not exist.
+	ReadMeta(acct account.Account, conversation string) (*ConversationMeta, error)
+
 	// Maintain runs the maintenance pass for an account: dedup, sort,
 	// reconcile edits/deletes/reactions, and rewrite modified files.
 	Maintain(acct account.Account) error

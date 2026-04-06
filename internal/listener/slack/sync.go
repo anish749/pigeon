@@ -204,12 +204,26 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		memberConversations = append(memberConversations, ch)
 	}
 
-	// Register all channel names and membership in resolver so the real-time
-	// listener knows about them. This must happen for all member conversations,
-	// not just the ones selected for sync.
+	// Register all channel names and membership in resolver, and write
+	// .meta.json for each conversation. This must happen for all member
+	// conversations, not just the ones selected for sync.
 	for _, ch := range memberConversations {
 		resolver.RegisterConversation(ctx, ch)
 		resolver.AddMember(ch.ID)
+
+		channelName := resolver.ChannelName(ctx, ch.ID)
+		meta := store.ConversationMeta{
+			Name:      channelName,
+			Type:      slackChannelType(ch),
+			ChannelID: ch.ID,
+		}
+		if ch.IsIM {
+			meta.UserID = ch.User
+		}
+		if err := ms.store.WriteMeta(acct, channelName, meta); err != nil {
+			slog.WarnContext(ctx, "slack sync: failed to write .meta.json",
+				"channel", channelName, "error", err)
+		}
 	}
 
 	// Determine which channels need syncing. Returns a sorted, filtered list:
