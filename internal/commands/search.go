@@ -86,10 +86,12 @@ func searchPath(platform, acctName string) string {
 // fileIncludes returns --glob patterns to restrict search to date files
 // within the --since window plus all thread files. Thread files are always
 // included because their filenames are timestamps, not dates — we can't
-// filter them by name. If since is empty, returns *.jsonl (all files).
+// filter them by name. Non-date-named files (*.md, *.csv, comments.jsonl)
+// are always included because they can't be date-filtered.
+// If since is empty, returns globs for all searchable file types.
 func fileIncludes(searchDir, since string) ([]string, error) {
 	if since == "" {
-		return []string{"*" + paths.FileExt}, nil
+		return []string{"*" + paths.FileExt, "*.md", "*.csv"}, nil
 	}
 
 	dur, err := parseDuration(since)
@@ -105,6 +107,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 			return nil
 		}
 		name := info.Name()
+		// Match date-named files: YYYY-MM-DD.jsonl
 		if len(name) != len("YYYY-MM-DD"+paths.FileExt) {
 			return nil
 		}
@@ -127,8 +130,11 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 	// **/threads/*.jsonl matches nested paths like #general/threads/1742100000.jsonl.
 	includes = append(includes, paths.ThreadGlobRg)
 
-	if len(includes) == 1 {
-		// Only the threads glob, no date files matched.
+	// Always include non-date-named content files (GWS docs, sheets, comments).
+	includes = append(includes, "*.md", "*.csv", "comments.jsonl")
+
+	if len(includes) == 4 {
+		// Only the always-included globs, no date files matched.
 		return nil, fmt.Errorf("no date files within --%s window", since)
 	}
 	return includes, nil
