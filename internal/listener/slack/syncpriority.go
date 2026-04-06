@@ -38,7 +38,7 @@ type messageSearcher interface {
 //
 // All conversations are registered in the resolver regardless of whether they
 // are selected for sync — the real-time listener needs the full membership set.
-func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) (toSync []goslack.Channel, skipped int, reason string) {
+func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
 	// Sort all conversations: DMs first, then group IMs, private, public.
 	sort.SliceStable(conversations, func(i, j int) bool {
 		return channelPriority(conversations[i]) < channelPriority(conversations[j])
@@ -47,9 +47,11 @@ func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rat
 	activeSet := discoverActiveChannels(ctx, searcher, gate, cursors, conversations)
 	if activeSet == nil {
 		// nil means "sync all" — no filtering possible or needed.
-		return conversations, 0, activeSet.reason()
+		return conversations
 	}
 
+	var toSync []goslack.Channel
+	var skipped int
 	for _, ch := range conversations {
 		if activeSet.has(ch.ID) {
 			toSync = append(toSync, ch)
@@ -57,7 +59,12 @@ func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rat
 			skipped++
 		}
 	}
-	return toSync, skipped, activeSet.reason()
+
+	slog.InfoContext(ctx, "sync priority: result",
+		"to_sync", len(toSync), "skipped", skipped,
+		"total", len(conversations), "reason", activeSet.reason())
+
+	return toSync
 }
 
 // activeChannelSet holds the result of the search-based discovery.
@@ -168,15 +175,9 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 			return syncAll(fmt.Sprintf("search page %d failed: %v", page, err))
 		}
 
-		prevCount := len(active)
 		for id := range collectChannelIDs(result.Matches) {
 			active[id] = true
 		}
-		newOnPage := len(active) - prevCount
-
-		slog.InfoContext(ctx, "sync priority: search page",
-			"page", page, "new_channels", newOnPage,
-			"active_channels", len(active))
 
 		if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
 			return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",

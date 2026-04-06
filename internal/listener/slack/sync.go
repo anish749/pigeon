@@ -214,7 +214,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 
 	// Determine which channels need syncing. Returns a sorted, filtered list:
 	// only channels with recent activity (or all channels on first sync / small workspaces).
-	conversations, skippedByPriority, priorityReason := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
+	conversations := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
 
 	// Count by type for progress reporting.
 	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
@@ -238,10 +238,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		"private", totalPrivate,
 		"public", totalPublic,
 		"skipped_non_member", skippedPublic,
-		"skipped_no_activity", skippedByPriority,
 		"total_member", len(memberConversations),
 		"to_sync", len(conversations),
-		"priority", priorityReason,
 	)
 
 	var doneDMs, doneMpIMs, donePrivate, donePublic int
