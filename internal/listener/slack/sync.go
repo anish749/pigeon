@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -153,6 +154,59 @@ func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS strin
 	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
 }
 
+// syncMessage filters, resolves, writes a Slack message, and syncs its reactions.
+// Returns true if the message was written (false if filtered out).
+// Skips bot messages, system events (except thread_broadcast), and empty text.
+// The write function is called with the resolved fields; its signature varies
+// by target (channel date file vs thread file).
+func syncMessage(ctx context.Context, ms *MessageStore, resolver *Resolver, channelName string, msg goslack.Message, write func(sender, senderID, text string, ts time.Time) error) bool {
+	if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+		return false
+	}
+
+	userName := resolver.UserName(ctx, msg.User)
+	text := resolver.ResolveText(ctx, msg.Text)
+	ts := ParseTimestamp(msg.Timestamp)
+
+	if err := write(userName, msg.User, text, ts); err != nil {
+		slog.WarnContext(ctx, "slack sync: write failed", "error", err)
+		return false
+	}
+
+	syncReactions(ctx, ms, resolver, channelName, msg)
+	return true
+}
+
+// syncReactions writes LineReaction events for each reaction on a Slack message.
+// Slack groups reactions by emoji with a user list; this expands them into
+// one LineReaction per user per emoji. Deduplication is handled by compaction.
+func syncReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, channelName string, msg goslack.Message) {
+	if len(msg.Reactions) == 0 {
+		return
+	}
+	var errs []error
+	for _, reaction := range msg.Reactions {
+		for _, userID := range reaction.Users {
+			line := modelv1.Line{
+				Type: modelv1.LineReaction,
+				React: &modelv1.ReactLine{
+					Ts:       ParseTimestamp(msg.Timestamp),
+					MsgID:    msg.Timestamp,
+					Sender:   resolver.UserName(ctx, userID),
+					SenderID: userID,
+					Emoji:    reaction.Name,
+				},
+			}
+			if err := ms.AppendReaction(channelName, line); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
+	}
+}
+
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
@@ -277,48 +331,13 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		var lastTS string
 		written := 0
 		for _, msg := range msgs {
-			// Track the latest timestamp regardless of whether we write the message
+			// Track the latest timestamp regardless of whether we write the message.
 			lastTS = msg.Timestamp
 
-			// Skip bot messages (BotID set), system events like channel_join/channel_topic
-			// (SubType set, except thread_broadcast which is a real user message), and
-			// messages with empty text (can happen when the bot token lacks scopes like
-			// channels:history — Slack returns the message envelope but strips the content).
-			if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
-				slog.WarnContext(ctx, "slack sync: skipping message",
-					"channel", channelName, "ts", msg.Timestamp,
-					"botID", msg.BotID, "subType", msg.SubType,
-					"emptyText", msg.Text == "")
-				continue
-			}
-
-			userName := resolver.UserName(ctx, msg.User)
-			text := resolver.ResolveText(ctx, msg.Text)
-			ts := ParseTimestamp(msg.Timestamp)
-
-			if err := ms.Write(ch.ID, channelName, userName, msg.User, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
-				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
-				continue
-			}
-			written++
-
-			// Sync reactions attached to this message.
-			for _, reaction := range msg.Reactions {
-				for _, userID := range reaction.Users {
-					reactLine := modelv1.Line{
-						Type: modelv1.LineReaction,
-						React: &modelv1.ReactLine{
-							Ts:       ts,
-							MsgID:    msg.Timestamp,
-							Sender:   resolver.UserName(ctx, userID),
-							SenderID: userID,
-							Emoji:    reaction.Name,
-						},
-					}
-					if err := ms.AppendReaction(channelName, reactLine); err != nil {
-						slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
-					}
-				}
+			if syncMessage(ctx, ms, resolver, channelName, msg, func(sender, senderID, text string, ts time.Time) error {
+				return ms.Write(ch.ID, channelName, sender, senderID, text, ts, msg.Timestamp, modelv1.ViaOrganic)
+			}) {
+				written++
 			}
 		}
 
@@ -479,6 +498,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			written++
+			syncReactions(ctx, ms, resolver, channelName, msg)
 		}
 
 		if lastTS != "" {
@@ -616,20 +636,10 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.BotID != "" || reply.Text == "" {
-				continue
-			}
-			// Skip subtypes except thread_broadcast
-			if reply.SubType != "" && reply.SubType != "thread_broadcast" {
-				continue
-			}
-			userName := resolver.UserName(ctx, reply.User)
-			text := resolver.ResolveText(ctx, reply.Text)
-			ts := ParseTimestamp(reply.Timestamp)
-			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
-				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
-			}
+			isReply := reply.Timestamp != msg.Timestamp
+			syncMessage(ctx, ms, resolver, channelName, reply, func(sender, senderID, text string, ts time.Time) error {
+				return ms.WriteThreadMessage(channelName, msg.Timestamp, sender, senderID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic)
+			})
 		}
 
 		// Write surrounding channel context: the next N messages after the parent
