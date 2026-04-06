@@ -54,7 +54,7 @@ func newReadCmd() *cobra.Command {
 	cmd.Flags().StringP("account", "a", "", "account name")
 	cmd.Flags().StringP("contact", "c", "", "contact name, phone, or channel")
 	cmd.Flags().String("date", "", "specific date (YYYY-MM-DD)")
-	cmd.Flags().Int("last", 0, "show last N messages")
+	cmd.Flags().Int("last", 0, "show last N messages (default 25 when no filter specified)")
 	cmd.Flags().String("since", "", "messages from last duration (e.g. 30m, 2h, 7d)")
 	cmd.MarkFlagRequired("platform")
 	cmd.MarkFlagRequired("account")
