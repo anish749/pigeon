@@ -97,16 +97,6 @@ func (c ConversationDir) DateFile(date string) string {
 	return filepath.Join(c.Path(), date+".txt")
 }
 
-// ThreadsDir returns the path to the threads subdirectory.
-func (c ConversationDir) ThreadsDir() string {
-	return filepath.Join(c.Path(), "threads")
-}
-
-// ThreadFile returns the path to a specific thread file.
-func (c ConversationDir) ThreadFile(threadTS string) string {
-	return filepath.Join(c.Path(), "threads", threadTS+".txt")
-}
-
 // Thread directory and file glob patterns for search tools.
 const (
 	// ThreadsSubdir is the directory name for thread files within a conversation.
@@ -114,8 +104,18 @@ const (
 
 	// ThreadGlobRg is the glob pattern for rg --glob to match thread files
 	// nested at <conversation>/threads/<ts>.txt.
-	ThreadGlobRg = "**/threads/*.txt"
+	ThreadGlobRg = "**/" + ThreadsSubdir + "/*.txt"
 
 	// ThreadGlobFind is the -path pattern for find(1) to match thread files.
-	ThreadGlobFind = "*/threads/*.txt"
+	ThreadGlobFind = "*/" + ThreadsSubdir + "/*.txt"
 )
+
+// ThreadsDir returns the path to the threads subdirectory.
+func (c ConversationDir) ThreadsDir() string {
+	return filepath.Join(c.Path(), ThreadsSubdir)
+}
+
+// ThreadFile returns the path to a specific thread file.
+func (c ConversationDir) ThreadFile(threadTS string) string {
+	return filepath.Join(c.Path(), ThreadsSubdir, threadTS+".txt")
+}
