@@ -254,7 +254,9 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 		return fmt.Errorf("resolve pigeon binary path: %w", err)
 	}
 
-	mcpConfig := fmt.Sprintf(`{"mcpServers":{"pigeon":{"command":%q,"args":["mcp"]}}}`, pigeonPath)
+	if err := claude.EnsureMCPServer(claudePath, pigeonPath); err != nil {
+		return err
+	}
 
 	var args []string
 	if resume {
@@ -262,7 +264,6 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 		args = []string{
 			"claude",
 			"--resume", sessionID,
-			"--mcp-config", mcpConfig,
 			"--dangerously-load-development-channels", "server:pigeon",
 		}
 	} else {
@@ -271,7 +272,6 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 			"claude",
 			"--session-id", sessionID,
 			"--name", name,
-			"--mcp-config", mcpConfig,
 			"--dangerously-load-development-channels", "server:pigeon",
 		}
 	}
