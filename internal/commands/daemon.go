@@ -73,6 +73,12 @@ func DaemonStatus() error {
 			fmt.Printf("  %s: %s\n", platform, strings.Join(accounts, ", "))
 		}
 	}
+	if len(status.ClaudeSessions) > 0 {
+		fmt.Println("  claude sessions:")
+		for _, s := range status.ClaudeSessions {
+			fmt.Printf("    %s  %s  cwd=%s\n", s.Account, s.SessionID, s.CWD)
+		}
+	}
 	return nil
 }
 

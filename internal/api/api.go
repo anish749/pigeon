@@ -431,6 +431,14 @@ type StatusResponse struct {
 	StartedAt time.Time           `json:"started_at"`
 	LogFile   string              `json:"log_file"`
 	Listeners map[string][]string `json:"listeners"`
+	ClaudeSessions []ClaudeSessionInfo `json:"claude_sessions"`
+}
+
+// ClaudeSessionInfo describes a connected Claude Code session in the status response.
+type ClaudeSessionInfo struct {
+	SessionID string `json:"session_id"`
+	CWD       string `json:"cwd"`
+	Account   string `json:"account"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -447,12 +455,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	sort.Strings(listeners["slack"])
 	sort.Strings(listeners["whatsapp"])
 
+	connected := s.hub.ConnectedClaudeSessions()
+	claudeSessions := make([]ClaudeSessionInfo, len(connected))
+	for i, cs := range connected {
+		claudeSessions[i] = ClaudeSessionInfo{
+			SessionID: cs.SessionID,
+			CWD:       cs.CWD,
+			Account:   cs.Account,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, StatusResponse{
 		Version:   s.version,
 		PID:       os.Getpid(),
 		StartedAt: s.startedAt,
 		LogFile:   paths.DaemonLogPath(),
 		Listeners: listeners,
+		ClaudeSessions: claudeSessions,
 	})
 }
 

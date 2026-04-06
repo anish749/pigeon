@@ -277,6 +277,35 @@ func (h *Hub) Sessions() int {
 	return len(h.sessions)
 }
 
+// ClaudeSessionInfo describes a connected Claude Code session.
+type ClaudeSessionInfo struct {
+	SessionID string
+	CWD       string
+	Account   string
+}
+
+// ConnectedClaudeSessions returns info about all currently connected Claude Code sessions.
+func (h *Hub) ConnectedClaudeSessions() []ClaudeSessionInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// Build sessionID → account from channels.
+	sessionAcct := make(map[string]string, len(h.channels))
+	for _, ch := range h.channels {
+		sessionAcct[ch.sessionID] = ch.acct.Display()
+	}
+
+	var out []ClaudeSessionInfo
+	for id, s := range h.sessions {
+		out = append(out, ClaudeSessionInfo{
+			SessionID: id,
+			CWD:       s.CWD,
+			Account:   sessionAcct[id],
+		})
+	}
+	return out
+}
+
 // SessionConnected reports whether the given session ID has an active SSE connection.
 func (h *Hub) SessionConnected(sessionID string) bool {
 	h.mu.RLock()
