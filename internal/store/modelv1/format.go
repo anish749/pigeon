@@ -29,12 +29,12 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
-// FormatMsgNotification renders a message for Claude Code channel notifications.
+// formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
 // TODO: include attachments
 // TODO: include reactions
-func FormatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
+func formatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -53,7 +53,7 @@ func FormatMsgNotification(m ResolvedMsg, loc *time.Location) []string {
 }
 
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
-// channel notifications. See FormatMsgNotification for per-message format.
+// channel notifications. See formatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.
 func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, errs ...error) []string {
 	if f == nil {
@@ -61,7 +61,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, errs ..
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, FormatMsgNotification(m, loc)...)
+		lines = append(lines, formatMsgNotification(m, loc)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)

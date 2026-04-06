@@ -95,14 +95,14 @@ func TestFormatMsg_Timezone(t *testing.T) {
 	}
 }
 
-func TestFormatMsgNotification_Basic(t *testing.T) {
+func TestNotificationFormat_Basic(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
 			Sender: "Alice", SenderID: "U1", Text: "hello world",
 		},
 	}
-	lines := FormatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -114,7 +114,7 @@ func TestFormatMsgNotification_Basic(t *testing.T) {
 	}
 }
 
-func TestFormatMsgNotification_Via(t *testing.T) {
+func TestNotificationFormat_Via(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
@@ -122,13 +122,13 @@ func TestFormatMsgNotification_Via(t *testing.T) {
 			Via: ViaToPigeon,
 		},
 	}
-	lines := FormatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC)
 	if !strings.Contains(lines[1], "[via:to-pigeon]") {
 		t.Errorf("expected via tag, got %q", lines[1])
 	}
 }
 
-func TestFormatMsgNotification_ReplyTo(t *testing.T) {
+func TestNotificationFormat_ReplyTo(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
@@ -136,13 +136,13 @@ func TestFormatMsgNotification_ReplyTo(t *testing.T) {
 			ReplyTo: "M1",
 		},
 	}
-	lines := FormatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
 }
 
-func TestFormatMsgNotification_AllOptional(t *testing.T) {
+func TestNotificationFormat_AllOptional(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
@@ -150,7 +150,7 @@ func TestFormatMsgNotification_AllOptional(t *testing.T) {
 			Via: ViaPigeonAsUser, ReplyTo: "M1",
 		},
 	}
-	lines := FormatMsgNotification(m, time.UTC)
+	lines := formatMsgNotification(m, time.UTC)
 	if !strings.Contains(lines[1], "[via:pigeon-as-user]") || !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected both optional tags, got %q", lines[1])
 	}
