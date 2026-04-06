@@ -7,6 +7,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func RunList(platform, accountName string) error {
@@ -29,11 +30,13 @@ func RunList(platform, accountName string) error {
 			if err != nil {
 				return fmt.Errorf("read metadata for %s: %w", c, err)
 			}
-			if meta != nil && meta.UserID != "" {
-				fmt.Printf("  %s  [user_id:%s]\n", c, meta.UserID)
-			} else {
-				fmt.Printf("  %s\n", c)
+			if meta != nil {
+				if ids := modelv1.FormatConvMeta(meta); ids != "" {
+					fmt.Printf("  %s  %s\n", c, ids)
+					continue
+				}
 			}
+			fmt.Printf("  %s\n", c)
 		}
 		return nil
 	}
