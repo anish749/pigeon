@@ -26,8 +26,8 @@ import (
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
@@ -41,11 +41,11 @@ type WhatsAppSender struct {
 
 // SlackSender holds everything needed to send a Slack message.
 type SlackSender struct {
-	BotAPI   *goslack.Client // bot token client (default for sends)
-	UserAPI  *goslack.Client // user token client (--as-user sends)
-	Resolver *slacklistener.Resolver
-	Messages *slacklistener.MessageStore
-	Acct     account.Account
+	BotAPI    *goslack.Client // bot token client (default for sends)
+	UserAPI   *goslack.Client // user token client (--as-user sends)
+	Resolver  *slacklistener.Resolver
+	Messages  *slacklistener.MessageStore
+	Acct      account.Account
 	BotName   string // the bot's display name
 	BotUserID string // the bot's Slack user ID
 	UserName  string // the authenticated user's display name
@@ -426,12 +426,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 
 // StatusResponse is the daemon API response for GET /api/status.
 type StatusResponse struct {
-	Version   string              `json:"version"`
-	PID       int                 `json:"pid"`
-	StartedAt time.Time           `json:"started_at"`
-	LogFile   string              `json:"log_file"`
-	Listeners map[string][]string `json:"listeners"`
-	ClaudeSessions []ClaudeSessionInfo `json:"claude_sessions"`
+	Version                 string              `json:"version"`
+	PID                     int                 `json:"pid"`
+	StartedAt               time.Time           `json:"started_at"`
+	LogFile                 string              `json:"log_file"`
+	Listeners               map[string][]string `json:"listeners"`
+	ConnectedClaudeSessions []ClaudeSessionInfo `json:"connected_claude_sessions"`
 }
 
 // ClaudeSessionInfo describes a connected Claude Code session in the status response.
@@ -466,12 +466,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, StatusResponse{
-		Version:   s.version,
-		PID:       os.Getpid(),
-		StartedAt: s.startedAt,
-		LogFile:   paths.DaemonLogPath(),
-		Listeners: listeners,
-		ClaudeSessions: claudeSessions,
+		Version:                 s.version,
+		PID:                     os.Getpid(),
+		StartedAt:               s.startedAt,
+		LogFile:                 paths.DaemonLogPath(),
+		Listeners:               listeners,
+		ConnectedClaudeSessions: claudeSessions,
 	})
 }
 
