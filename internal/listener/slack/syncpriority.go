@@ -35,9 +35,6 @@ type messageSearcher interface {
 // On first sync (no cursors) or for small workspaces, all channels are returned.
 // On subsequent syncs, search.messages discovers which channels had activity
 // since the last sync, and only those are returned.
-//
-// All conversations are registered in the resolver regardless of whether they
-// are selected for sync — the real-time listener needs the full membership set.
 func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
 	// Sort all conversations: DMs first, then group IMs, private, public.
 	sort.SliceStable(conversations, func(i, j int) bool {
@@ -88,7 +85,6 @@ func (a *activeChannelSet) reason() string {
 
 // syncAll returns nil to signal that all channels should be synced.
 func syncAll(reason string) *activeChannelSet {
-	// We log the reason here so the caller just sees nil = sync all.
 	slog.Info("sync priority: sync all", "reason", reason)
 	return nil
 }
@@ -115,99 +111,104 @@ func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate 
 	afterDate := maxCursor.Add(-24 * time.Hour).Format("2006-01-02")
 	query := "after:" + afterDate
 
-	if err := gate.wait(ctx); err != nil {
-		return syncAll("rate limit wait cancelled")
+	active, total, err := searchActiveChannelIDs(ctx, searcher, gate, query, len(conversations))
+	if err != nil {
+		return syncAll(fmt.Sprintf("search failed: %v", err))
 	}
 
+	// nil means searchActiveChannelIDs decided to sync all (threshold exceeded
+	// or mid-pagination error). Distinct from empty map which means no activity.
+	if active == nil {
+		return syncAll(fmt.Sprintf("search found too many active channels (%d messages, query=%q)", total, query))
+	}
+
+	if len(active) == 0 {
+		reason := fmt.Sprintf("search returned 0 results for %q", query)
+		slog.InfoContext(ctx, "sync priority: no activity", "query", query)
+		return &activeChannelSet{ids: active, reasonString: reason}
+	}
+
+	reason := fmt.Sprintf("search found %d active channels out of %d (%d messages, query=%q)",
+		len(active), len(conversations), total, query)
+	slog.InfoContext(ctx, "sync priority: filtered", "reason", reason)
+
+	return &activeChannelSet{
+		ids:          active,
+		searchTotal:  total,
+		reasonString: reason,
+	}
+}
+
+// searchActiveChannelIDs paginates through search.messages results, collecting
+// unique channel IDs that had activity. Returns nil if all channels should be
+// synced (too many active, or a mid-pagination error).
+func searchActiveChannelIDs(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, query string, totalChannels int) (map[string]bool, int, error) {
 	params := goslack.SearchParameters{
 		Sort:          "timestamp",
 		SortDirection: "desc",
 		Count:         searchPageSize,
 		Page:          1,
 	}
+
 	// Search is an optimization, not a requirement. If it fails (missing scope,
 	// network error), we fall back to syncing all channels — the same behavior
 	// as before this optimization existed.
-	var result *goslack.SearchMessages
-	for {
-		var err error
-		result, err = searcher.SearchMessagesContext(ctx, query, params)
-		if gate.update(err) {
-			if err := gate.wait(ctx); err != nil {
-				return syncAll("rate limit wait cancelled")
-			}
-			continue
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "sync priority: search failed, syncing all",
-				"error", err, "query", query)
-			return syncAll(fmt.Sprintf("search failed: %v", err))
-		}
-		break
+	result, err := searchWithRetry(ctx, searcher, gate, query, params)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	if result.Total == 0 {
-		reason := fmt.Sprintf("search returned 0 results for %q", query)
-		slog.InfoContext(ctx, "sync priority: no activity", "query", query)
-		return &activeChannelSet{
-			ids:          make(map[string]bool),
-			reasonString: reason,
-		}
+		return make(map[string]bool), 0, nil
 	}
 
 	active := collectChannelIDs(result.Matches)
-	searchTotal := result.Total
-	totalPages := (searchTotal + searchPageSize - 1) / searchPageSize
-	totalChannels := len(conversations)
+	totalPages := (result.Total + searchPageSize - 1) / searchPageSize
 
 	slog.InfoContext(ctx, "sync priority: search page 1",
-		"query", query, "total_messages", searchTotal,
+		"query", query, "total_messages", result.Total,
 		"total_pages", totalPages, "active_channels", len(active),
 		"total_channels", totalChannels)
 
 	if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
-		return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold after page 1",
-			len(active), totalChannels, activeRatioThreshold*100))
+		return nil, result.Total, nil
 	}
 
 	for page := 2; page <= totalPages; page++ {
-		if err := gate.wait(ctx); err != nil {
-			return syncAll(fmt.Sprintf("rate limit wait cancelled at page %d", page))
-		}
 		params.Page = page
-		var err error
-		result, err = searcher.SearchMessagesContext(ctx, query, params)
-		if gate.update(err) {
-			page-- // retry the same page after wait
-			continue
-		}
+		pageResult, err := searchWithRetry(ctx, searcher, gate, query, params)
 		if err != nil {
-			// Mid-pagination failure: we have a partial channel set that may be
-			// missing active channels from unseen pages. Using it would silently
-			// skip channels that had activity. Fall back to syncing all.
-			slog.WarnContext(ctx, "sync priority: search page failed, syncing all",
-				"page", page, "error", err)
-			return syncAll(fmt.Sprintf("search page %d failed: %v", page, err))
+			// Mid-pagination failure: partial channel set may be missing active
+			// channels from unseen pages. Fall back to syncing all.
+			return nil, result.Total, nil
 		}
 
-		for id := range collectChannelIDs(result.Matches) {
+		for id := range collectChannelIDs(pageResult.Matches) {
 			active[id] = true
 		}
 
 		if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
-			return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",
-				len(active), totalChannels, activeRatioThreshold*100, page))
+			return nil, result.Total, nil
 		}
 	}
 
-	reason := fmt.Sprintf("search found %d active channels out of %d (%d messages, query=%q)",
-		len(active), totalChannels, searchTotal, query)
-	slog.InfoContext(ctx, "sync priority: filtered", "reason", reason)
+	return active, result.Total, nil
+}
 
-	return &activeChannelSet{
-		ids:          active,
-		searchTotal:  searchTotal,
-		reasonString: reason,
+// searchWithRetry calls SearchMessagesContext, retrying on rate limit errors.
+func searchWithRetry(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
+	for {
+		if err := gate.wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limit wait: %w", err)
+		}
+		result, err := searcher.SearchMessagesContext(ctx, query, params)
+		if gate.update(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 }
 
