@@ -231,6 +231,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 
 	// Determine which channels need syncing. Returns a sorted, filtered list:
 	// only channels with recent activity (or all channels on first sync / small workspaces).
+	// Muted channels are excluded — they still get registered in the resolver
+	// above so real-time messages work, but we don't spend sync budget on them.
 	conversations := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
 
 	// Count by type for progress reporting.
