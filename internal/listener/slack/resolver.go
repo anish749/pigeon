@@ -164,28 +164,26 @@ func (r *Resolver) UserName(ctx context.Context, userID string) string {
 	return name
 }
 
-// BotName resolves a Slack bot ID to a display name. Falls back to API lookup on cache miss.
-func (r *Resolver) BotName(ctx context.Context, botID string) string {
-	// Bots can also appear in the users cache (their bot user ID maps to a name).
+// BotName resolves a Slack bot ID to a display name via cache or API lookup.
+func (r *Resolver) BotName(ctx context.Context, botID string) (string, error) {
 	r.mu.RLock()
 	name, ok := r.users[botID]
 	r.mu.RUnlock()
 	if ok {
-		return name
+		return name, nil
 	}
 
-	bot, err := r.api.GetBotInfoContext(ctx, botID)
+	bot, err := r.api.GetBotInfoContext(ctx, goslack.GetBotInfoParameters{Bot: botID})
 	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve slack bot", "bot_id", botID, "error", err)
-		return ""
+		return "", fmt.Errorf("resolve bot %s: %w", botID, err)
 	}
-	if bot.Name != "" {
-		r.mu.Lock()
-		r.users[botID] = bot.Name
-		r.mu.Unlock()
-		return bot.Name
+	if bot.Name == "" {
+		return "", fmt.Errorf("resolve bot %s: API returned empty name", botID)
 	}
-	return ""
+	r.mu.Lock()
+	r.users[botID] = bot.Name
+	r.mu.Unlock()
+	return bot.Name, nil
 }
 
 // ChannelName resolves a Slack channel ID to a formatted name. Falls back to API lookup on cache miss.

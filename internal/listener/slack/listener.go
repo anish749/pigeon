@@ -135,7 +135,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	userName, userID := resolveSender(ctx, l.resolver, msg.User, msg.BotID, msg.Username)
+	userName, userID, err := resolveSender(ctx, l.resolver, msg.User, msg.BotID, msg.Username)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping message, cannot resolve sender",
+			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
+		return
+	}
 	channelName := l.resolver.ChannelName(ctx, msg.Channel)
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
@@ -226,7 +231,12 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	if parent.Text == "" {
 		return
 	}
-	userName, userID := resolveSender(ctx, l.resolver, parent.User, parent.BotID, parent.Username)
+	userName, userID, err := resolveSender(ctx, l.resolver, parent.User, parent.BotID, parent.Username)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to resolve thread parent sender", "error", err,
+			"account", l.acct, "thread_ts", threadTS)
+		return
+	}
 	text := l.resolver.ResolveText(ctx, parent.Text)
 	ts := ParseTimestamp(parent.Timestamp)
 	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, userID, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {

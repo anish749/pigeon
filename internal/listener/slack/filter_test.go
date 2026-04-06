@@ -37,9 +37,8 @@ func (r *stubResolver) UserName(_ context.Context, userID string) string {
 }
 
 func TestResolveSender(t *testing.T) {
-	// resolveSender needs a real *Resolver, but we only use UserName.
 	// Build a minimal Resolver with a pre-populated cache.
-	r := &Resolver{users: map[string]string{"U123": "alice"}}
+	r := &Resolver{users: map[string]string{"U123": "alice", "B789": "PagerDuty"}}
 
 	tests := []struct {
 		name     string
@@ -48,6 +47,7 @@ func TestResolveSender(t *testing.T) {
 		username string
 		wantName string
 		wantID   string
+		wantErr  bool
 	}{
 		{
 			name:     "human user",
@@ -63,21 +63,29 @@ func TestResolveSender(t *testing.T) {
 			wantID:   "B456",
 		},
 		{
-			name:     "bot without username",
+			name:     "bot with name in cache",
 			botID:    "B789",
-			wantName: "B789",
+			wantName: "PagerDuty",
 			wantID:   "B789",
 		},
 		{
-			name:     "no identifiers",
-			wantName: "unknown",
-			wantID:   "",
+			name:    "no identifiers",
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, id := resolveSender(context.Background(), r, tt.userID, tt.botID, tt.username)
+			name, id, err := resolveSender(context.Background(), r, tt.userID, tt.botID, tt.username)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got name=%q id=%q", name, id)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if name != tt.wantName {
 				t.Errorf("name = %q, want %q", name, tt.wantName)
 			}
