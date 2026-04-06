@@ -212,7 +212,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		resolver.AddMember(ch.ID)
 
 		channelName := resolver.ChannelName(ctx, ch.ID)
-		meta := store.ConversationMeta{
+		meta := modelv1.ConversationMeta{
 			Name:      channelName,
 			Type:      slackChannelType(ch),
 			ChannelID: ch.ID,

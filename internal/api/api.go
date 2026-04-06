@@ -251,7 +251,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 	}
 
 	// Write .meta.json for the conversation.
-	meta := store.ConversationMeta{
+	meta := modelv1.ConversationMeta{
 		Name: sender.Resolver.ContactName(ctx, recipientJID),
 		Type: "dm",
 		JID:  recipientJID.String(),
@@ -436,7 +436,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	}
 
 	// Write .meta.json for the conversation.
-	meta := store.ConversationMeta{
+	meta := modelv1.ConversationMeta{
 		Name:      channelName,
 		ChannelID: channelID,
 	}

@@ -146,7 +146,7 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		"from", senderName, "conv", convDir, "text_len", len(text))
 
 	// Write .meta.json for the conversation.
-	meta := store.ConversationMeta{
+	meta := modelv1.ConversationMeta{
 		JID: evt.Info.Chat.String(),
 	}
 	if evt.Info.Chat.Server == types.GroupServer {
