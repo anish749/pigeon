@@ -42,6 +42,9 @@ func loadCursors(acct account.Account) syncCursors {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return make(syncCursors)
 	}
+	if c == nil {
+		return make(syncCursors)
+	}
 	return c
 }
 
