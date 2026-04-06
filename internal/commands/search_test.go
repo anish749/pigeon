@@ -56,13 +56,13 @@ func TestGrepFallback_NoColorFlag(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		testMsg("M1", testTs(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
 	})
 
 	// captureGrepFallback should find the match without erroring.
 	// On macOS, --no-color causes grep to exit 2, which surfaces as a non-nil error.
-	output, err := captureGrepFallback("deploy", dir, []string{"*.txt"}, 0)
+	output, err := captureGrepFallback("deploy", dir, []string{"*.jsonl"}, 0)
 	if err != nil {
 		t.Fatalf("captureGrepFallback returned error: %v (likely --no-color is invalid on this grep)", err)
 	}
@@ -74,19 +74,19 @@ func TestGrepFallback_NoColorFlag(t *testing.T) {
 // setupThreadFixture creates a directory structure matching the pigeon layout
 // with both date files and thread files nested under conversations:
 //
-//	<root>/slack/acme/#general/2026-03-16.txt        (channel messages)
-//	<root>/slack/acme/#general/threads/1742100000.txt (thread messages)
+//	<root>/slack/acme/#general/2026-03-16.jsonl        (channel messages)
+//	<root>/slack/acme/#general/threads/1742100000.jsonl (thread messages)
 func setupThreadFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
 	// Channel message
-	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		testMsg("M1", testTs(2026, 3, 16, 9, 0, 0), "Alice", "U1", "thread parent about deploy"),
 	})
 
-	// Thread file: nested at <conversation>/threads/<ts>.txt
-	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "threads", "1742100000.txt"), []modelv1.Line{
+	// Thread file: nested at <conversation>/threads/<ts>.jsonl
+	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "threads", "1742100000.jsonl"), []modelv1.Line{
 		testMsg("M1", testTs(2026, 3, 16, 9, 0, 0), "Alice", "U1", "thread parent about deploy"),
 		testMsg("R1", testTs(2026, 3, 16, 9, 5, 0), "Bob", "U2", "deploy reply in thread"),
 	})
@@ -97,7 +97,7 @@ func setupThreadFixture(t *testing.T) string {
 // TestCaptureRg_ThreadGlob verifies that captureRg finds messages in thread
 // files when the includes list contains the thread glob.
 //
-// Thread files live at <conv>/threads/<ts>.txt — the glob must use **/
+// Thread files live at <conv>/threads/<ts>.jsonl — the glob must use **/
 // to match nested paths.
 func TestCaptureRg_ThreadGlob(t *testing.T) {
 	rgPath, err := exec.LookPath("rg")
@@ -160,7 +160,7 @@ func TestFileIncludes_ThreadGlob(t *testing.T) {
 	// Verify that includes contains a thread glob
 	hasThreadGlob := false
 	for _, inc := range includes {
-		if inc == "threads/*.txt" || inc == "**/threads/*.txt" {
+		if inc == "threads/*.jsonl" || inc == "**/threads/*.jsonl" {
 			hasThreadGlob = true
 			break
 		}

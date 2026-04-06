@@ -187,10 +187,10 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 	var errs []error
 	threads := make(map[string]*modelv1.ResolvedThreadFile)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), paths.FileExt) {
 			continue
 		}
-		threadTS := strings.TrimSuffix(e.Name(), ".txt")
+		threadTS := strings.TrimSuffix(e.Name(), paths.FileExt)
 		tf, err := s.ReadThread(acct, conversation, threadTS)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read thread %s: %w", threadTS, err))
@@ -261,7 +261,7 @@ func (s *FSStore) Maintain(acct account.Account) error {
 
 	var errs []error
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".txt") {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
 			return nil
 		}
 		rel, relErr := filepath.Rel(dir, path)
@@ -369,7 +369,7 @@ func (s *FSStore) maintainFile(path string) error {
 	return os.WriteFile(path, newData, 0644)
 }
 
-var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.txt$`)
+var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl$`)
 
 func listDateFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
@@ -407,7 +407,7 @@ func listSubdirs(dir string) ([]string, error) {
 }
 
 func dateFromFilename(path string) (time.Time, error) {
-	name := strings.TrimSuffix(filepath.Base(path), ".txt")
+	name := strings.TrimSuffix(filepath.Base(path), paths.FileExt)
 	t, err := time.Parse("2006-01-02", name)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse date from filename %s: %w", path, err)

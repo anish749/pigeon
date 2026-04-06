@@ -92,9 +92,12 @@ func (c ConversationDir) Path() string {
 	return filepath.Join(c.account.Path(), c.name)
 }
 
+// FileExt is the file extension for all message data files.
+const FileExt = ".jsonl"
+
 // DateFile returns the path to a daily message file.
 func (c ConversationDir) DateFile(date string) string {
-	return filepath.Join(c.Path(), date+".txt")
+	return filepath.Join(c.Path(), date+FileExt)
 }
 
 // Thread directory and file glob patterns for search tools.
@@ -103,11 +106,11 @@ const (
 	ThreadsSubdir = "threads"
 
 	// ThreadGlobRg is the glob pattern for rg --glob to match thread files
-	// nested at <conversation>/threads/<ts>.txt.
-	ThreadGlobRg = "**/" + ThreadsSubdir + "/*.txt"
+	// nested at <conversation>/threads/<ts>.jsonl.
+	ThreadGlobRg = "**/" + ThreadsSubdir + "/*" + FileExt
 
 	// ThreadGlobFind is the -path pattern for find(1) to match thread files.
-	ThreadGlobFind = "*/" + ThreadsSubdir + "/*.txt"
+	ThreadGlobFind = "*/" + ThreadsSubdir + "/*" + FileExt
 )
 
 // ThreadsDir returns the path to the threads subdirectory.
@@ -117,5 +120,5 @@ func (c ConversationDir) ThreadsDir() string {
 
 // ThreadFile returns the path to a specific thread file.
 func (c ConversationDir) ThreadFile(threadTS string) string {
-	return filepath.Join(c.Path(), ThreadsSubdir, threadTS+".txt")
+	return filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt)
 }

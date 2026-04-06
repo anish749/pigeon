@@ -510,8 +510,8 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 
 	var dates []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".txt") {
-			dates = append(dates, strings.TrimSuffix(e.Name(), ".txt"))
+		if !e.IsDir() && strings.HasSuffix(e.Name(), paths.FileExt) {
+			dates = append(dates, strings.TrimSuffix(e.Name(), paths.FileExt))
 		}
 	}
 	if len(dates) == 0 {
@@ -521,7 +521,7 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 
 	// Count lines across all files.
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), paths.FileExt) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))

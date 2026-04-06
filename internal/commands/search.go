@@ -86,10 +86,10 @@ func searchPath(platform, acctName string) string {
 // fileIncludes returns --glob patterns to restrict search to date files
 // within the --since window plus all thread files. Thread files are always
 // included because their filenames are timestamps, not dates — we can't
-// filter them by name. If since is empty, returns *.txt (all files).
+// filter them by name. If since is empty, returns *.jsonl (all files).
 func fileIncludes(searchDir, since string) ([]string, error) {
 	if since == "" {
-		return []string{"*.txt"}, nil
+		return []string{"*" + paths.FileExt}, nil
 	}
 
 	dur, err := parseDuration(since)
@@ -105,7 +105,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 			return nil
 		}
 		name := info.Name()
-		if len(name) != len("YYYY-MM-DD.txt") {
+		if len(name) != len("YYYY-MM-DD"+paths.FileExt) {
 			return nil
 		}
 		dateStr := name[:10]
@@ -124,7 +124,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 		includes = append(includes, name)
 	}
 	// Always include thread files — can't date-filter by filename.
-	// **/threads/*.txt matches nested paths like #general/threads/1742100000.txt.
+	// **/threads/*.jsonl matches nested paths like #general/threads/1742100000.jsonl.
 	includes = append(includes, paths.ThreadGlobRg)
 
 	if len(includes) == 1 {
@@ -214,7 +214,7 @@ func captureGrepFallback(query, dir string, includes []string, context int) ([]b
 
 // grepThreadFiles searches thread files using find(1) to locate them and
 // grep to search. This is needed because grep --include only matches
-// basenames and can't express a path pattern like */threads/*.txt.
+// basenames and can't express a path pattern like */threads/*.jsonl.
 func grepThreadFiles(query, dir string, context int) ([]byte, error) {
 	grepArgs := []string{"-H", "--color=never"}
 	if context > 0 {
@@ -222,7 +222,7 @@ func grepThreadFiles(query, dir string, context int) ([]byte, error) {
 	}
 	grepArgs = append(grepArgs, query)
 
-	// find <dir> -path '*/threads/*.txt' -exec grep -H --color=never <query> {} +
+	// find <dir> -path '*/threads/*.jsonl' -exec grep -H --color=never <query> {} +
 	// The + terminator batches files into one grep call. If find matches
 	// no files, grep is never invoked and find exits 0.
 	args := []string{dir, "-path", paths.ThreadGlobFind, "-exec", "grep"}

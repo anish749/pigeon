@@ -47,8 +47,8 @@ func reactJSON(t time.Time, msgID, sender, senderID, emoji string) string {
 
 func TestParseGrepOutput_BasicMessages(t *testing.T) {
 	lines := []string{
-		"/data/slack/acme-corp/#general/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
-		"/data/slack/acme-corp/#general/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "nice deploy"),
+		"/data/slack/acme-corp/#general/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
+		"/data/slack/acme-corp/#general/2026-03-16.jsonl:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "nice deploy"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
 
@@ -78,10 +78,10 @@ func TestParseGrepOutput_BasicMessages(t *testing.T) {
 
 func TestParseGrepOutput_SkipsNonMessageEvents(t *testing.T) {
 	lines := []string{
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"),
-		"/data/slack/acme/ch/2026-03-16.txt:" + reactJSON(ts(2026, 3, 16, 9, 1, 0), "M1", "Bob", "U2", "thumbsup"),
-		"/data/slack/acme/ch/2026-03-16.txt:" + `{"type":"edit","ts":"2026-03-16T09:02:00Z","msg":"M1","sender":"Alice","from":"U1","text":"updated"}`,
-		"/data/slack/acme/ch/2026-03-16.txt:" + `{"type":"delete","ts":"2026-03-16T09:03:00Z","msg":"M1","sender":"Alice","from":"U1"}`,
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + reactJSON(ts(2026, 3, 16, 9, 1, 0), "M1", "Bob", "U2", "thumbsup"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + `{"type":"edit","ts":"2026-03-16T09:02:00Z","msg":"M1","sender":"Alice","from":"U1","text":"updated"}`,
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + `{"type":"delete","ts":"2026-03-16T09:03:00Z","msg":"M1","sender":"Alice","from":"U1"}`,
 	}
 	output := []byte(strings.Join(lines, "\n"))
 	matches, _ := ParseGrepOutput(output, "/data")
@@ -92,9 +92,9 @@ func TestParseGrepOutput_SkipsNonMessageEvents(t *testing.T) {
 
 func TestParseGrepOutput_SkipsContextSeparators(t *testing.T) {
 	lines := []string{
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "first"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "first"),
 		"--",
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
 	matches, _ := ParseGrepOutput(output, "/data")
@@ -106,7 +106,7 @@ func TestParseGrepOutput_SkipsContextSeparators(t *testing.T) {
 func TestParseGrepOutput_SkipsGarbageLines(t *testing.T) {
 	lines := []string{
 		"this is not valid output",
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"),
 		"another garbage line",
 	}
 	output := []byte(strings.Join(lines, "\n"))
@@ -118,7 +118,7 @@ func TestParseGrepOutput_SkipsGarbageLines(t *testing.T) {
 
 func TestParseGrepOutput_TextWithBraces(t *testing.T) {
 	msg := fmt.Sprintf(`{"type":"msg","id":"M1","ts":"2026-03-16T09:00:00Z","sender":"Alice","from":"U1","text":"meeting at {office} tomorrow"}`)
-	line := "/data/slack/acme/ch/2026-03-16.txt:" + msg
+	line := "/data/slack/acme/ch/2026-03-16.jsonl:" + msg
 	matches, _ := ParseGrepOutput([]byte(line), "/data")
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
@@ -130,9 +130,9 @@ func TestParseGrepOutput_TextWithBraces(t *testing.T) {
 
 func TestParseGrepOutput_ReturnsErrorForBadJSON(t *testing.T) {
 	lines := []string{
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "good"),
-		"/data/slack/acme/ch/2026-03-16.txt:{bad json here}",
-		"/data/slack/acme/ch/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "also good"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "good"),
+		"/data/slack/acme/ch/2026-03-16.jsonl:{bad json here}",
+		"/data/slack/acme/ch/2026-03-16.jsonl:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "also good"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
 	matches, err := ParseGrepOutput(output, "/data")
@@ -154,9 +154,9 @@ func TestParseGrepOutput_EmptyOutput(t *testing.T) {
 
 func TestParseGrepOutput_MultipleConversations(t *testing.T) {
 	lines := []string{
-		"/data/slack/acme/#general/2026-03-16.txt:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy"),
-		"/data/slack/acme/#random/2026-03-16.txt:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy too"),
-		"/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:" + msgJSON("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "C1", "deploy three"),
+		"/data/slack/acme/#general/2026-03-16.jsonl:" + msgJSON("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy"),
+		"/data/slack/acme/#random/2026-03-16.jsonl:" + msgJSON("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy too"),
+		"/data/whatsapp/15551234567/+14155551234/2026-03-16.jsonl:" + msgJSON("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "C1", "deploy three"),
 	}
 	output := []byte(strings.Join(lines, "\n"))
 	matches, _ := ParseGrepOutput(output, "/data")
@@ -191,7 +191,7 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 		modelv1.ViaPigeonAsUser, "hello\nworld", "Q1", true,
 		[]modelv1.Attachment{{ID: "F1", Type: "image/jpeg"}},
 	}
-	line := fmt.Sprintf("/data/slack/acme/ch/2026-03-16.txt:%s", jsonLine(msg))
+	line := fmt.Sprintf("/data/slack/acme/ch/2026-03-16.jsonl:%s", jsonLine(msg))
 	matches, _ := ParseGrepOutput([]byte(line), "/data")
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
@@ -217,28 +217,28 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 // --- ParseFilePath ---
 
 func TestParseFilePath_FullDepth(t *testing.T) {
-	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.jsonl:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_PlatformScope(t *testing.T) {
-	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.jsonl:", "/data/slack")
 	if plat != "" || acct != "acme-corp" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, acme-corp, #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_AccountScope(t *testing.T) {
-	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.jsonl:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 2026-03-16)", plat, acct, conv, date)
 	}
 }
 
 func TestParseFilePath_ThreadFile(t *testing.T) {
-	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data")
+	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.jsonl:", "/data")
 	if plat != "slack" || acct != "acme-corp" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, #general, 1711568940.789012)", plat, acct, conv, date)
 	}
@@ -248,7 +248,7 @@ func TestParseFilePath_ThreadFile(t *testing.T) {
 }
 
 func TestParseFilePath_ThreadFile_AccountScope(t *testing.T) {
-	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.txt:", "/data/slack/acme-corp")
+	plat, acct, conv, date, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/threads/1711568940.789012.jsonl:", "/data/slack/acme-corp")
 	if plat != "" || acct != "" || conv != "#general" || date != "1711568940.789012" {
 		t.Errorf("got (%q, %q, %q, %q), want (, , #general, 1711568940.789012)", plat, acct, conv, date)
 	}
@@ -258,7 +258,7 @@ func TestParseFilePath_ThreadFile_AccountScope(t *testing.T) {
 }
 
 func TestParseFilePath_DateFile_NotThread(t *testing.T) {
-	_, _, _, _, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.txt:", "/data")
+	_, _, _, _, thread, _ := ParseFilePath("/data/slack/acme-corp/#general/2026-03-16.jsonl:", "/data")
 	if thread {
 		t.Error("thread = true, want false for date file")
 	}
@@ -313,7 +313,7 @@ func TestFilterThreadsBySince_KeepsAllNonThread(t *testing.T) {
 }
 
 func TestParseFilePath_WhatsApp(t *testing.T) {
-	plat, acct, conv, date, _, _ := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.txt:", "/data")
+	plat, acct, conv, date, _, _ := ParseFilePath("/data/whatsapp/15551234567/+14155551234/2026-03-16.jsonl:", "/data")
 	if plat != "whatsapp" || acct != "15551234567" || conv != "+14155551234" || date != "2026-03-16" {
 		t.Errorf("got (%q, %q, %q, %q)", plat, acct, conv, date)
 	}
