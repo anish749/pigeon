@@ -41,6 +41,7 @@ type Resolver struct {
 	users    map[string]string // user ID → display name
 	channels map[string]string // channel ID → name
 	members  map[string]bool   // channel IDs the user has joined
+	imUsers  map[string]string // channel name (e.g. "@Khalid M") → user ID
 }
 
 // NewResolver creates a new Slack name resolver.
@@ -50,6 +51,7 @@ func NewResolver(api *goslack.Client) *Resolver {
 		users:    make(map[string]string),
 		channels: make(map[string]string),
 		members:  make(map[string]bool),
+		imUsers:  make(map[string]string),
 	}
 }
 
@@ -89,6 +91,7 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 		if ch.IsIM {
 			if userName, ok := r.users[ch.User]; ok {
 				name = "@" + userName
+				r.imUsers[name] = ch.User
 			}
 		}
 		r.channels[ch.ID] = name
@@ -118,6 +121,15 @@ func (r *Resolver) IsMember(channelID string) bool {
 	ok := r.members[channelID]
 	r.mu.RUnlock()
 	return ok
+}
+
+// DMUserID returns the Slack user ID for a DM conversation name (e.g. "@Khalid M").
+// Returns empty string if the conversation is not a known DM.
+func (r *Resolver) DMUserID(channelName string) string {
+	r.mu.RLock()
+	uid := r.imUsers[channelName]
+	r.mu.RUnlock()
+	return uid
 }
 
 // RegisterChannel adds a channel name to the cache.

@@ -111,6 +111,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
+	mux.HandleFunc("GET /api/conversations", s.handleConversations)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 
@@ -484,6 +485,57 @@ func (s *Server) handleSessionConnected(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"connected": s.hub.SessionConnected(sessionID),
 	})
+}
+
+// DMUserID returns the Slack user ID for a DM conversation on the given account.
+// Returns empty string if not a DM or the account has no resolver.
+func (s *Server) DMUserID(acct account.Account, conversation string) string {
+	s.mu.RLock()
+	sender := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if sender == nil {
+		return ""
+	}
+	return sender.Resolver.DMUserID(conversation)
+}
+
+// ConversationInfo is one entry in the /api/conversations response.
+type ConversationInfo struct {
+	Name   string `json:"name"`
+	UserID string `json:"user_id,omitempty"`
+}
+
+func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
+	platform := r.URL.Query().Get("platform")
+	acctName := r.URL.Query().Get("account")
+	if platform == "" || acctName == "" {
+		http.Error(w, "platform and account query params required", http.StatusBadRequest)
+		return
+	}
+
+	acct := account.New(platform, acctName)
+
+	// List conversations from the store.
+	convs, err := s.store.ListConversations(acct)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Look up DM user IDs from the resolver if available.
+	s.mu.RLock()
+	sender := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+
+	result := make([]ConversationInfo, len(convs))
+	for i, name := range convs {
+		result[i] = ConversationInfo{Name: name}
+		if sender != nil {
+			result[i].UserID = sender.Resolver.DMUserID(name)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

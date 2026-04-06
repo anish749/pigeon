@@ -134,6 +134,7 @@ func DaemonRun(version string) error {
 
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
+	msgHub.SetDMUserIDFunc(apiServer.DMUserID)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route)
 	go waMgr.Run(ctx, cfg.WhatsApp)

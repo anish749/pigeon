@@ -73,14 +73,19 @@ const (
 	signalConnected                    // session just connected — send hello and drain all
 )
 
+// DMUserIDFunc resolves a DM conversation name (e.g. "@Khalid M") to a
+// platform user ID. Returns empty string if not a DM or unknown.
+type DMUserIDFunc func(acct account.Account, conversation string) string
+
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session // SessionID → connected session
-	channels map[string]*channel // account slug → delivery channel
-	store    store.Store
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu           sync.RWMutex
+	sessions     map[string]*Session // SessionID → connected session
+	channels     map[string]*channel // account slug → delivery channel
+	store        store.Store
+	dmUserIDFunc DMUserIDFunc
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // New creates a Hub, loads session files, starts delivery goroutines, and
@@ -162,6 +167,12 @@ func (h *Hub) reconcileChannels(sessions []*claude.Session) {
 // Stop shuts down all delivery goroutines.
 func (h *Hub) Stop() {
 	h.cancel()
+}
+
+// SetDMUserIDFunc sets the function used to resolve DM conversation names
+// to platform user IDs for MCP notification metadata.
+func (h *Hub) SetDMUserIDFunc(f DMUserIDFunc) {
+	h.dmUserIDFunc = f
 }
 
 // Register adds a connected MCP shim session to the hub. Validates the
@@ -440,6 +451,9 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		Account:      ch.acct.Name,
 		Conversation: conversation,
 		MsgLines:     lines,
+	}
+	if h.dmUserIDFunc != nil {
+		msg.UserID = h.dmUserIDFunc(ch.acct, conversation)
 	}
 	if err := session.Send(h.ctx, msg); err != nil {
 		slog.Error("failed to deliver message",

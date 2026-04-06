@@ -1,10 +1,15 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/url"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -15,7 +20,7 @@ func RunList(platform, accountName string) error {
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {
 		acct := account.New(platform, accountName)
-		convs, err := s.ListConversations(acct)
+		convs, err := listConversations(acct, s)
 		if err != nil {
 			return err
 		}
@@ -25,7 +30,11 @@ func RunList(platform, accountName string) error {
 		}
 		fmt.Printf("Conversations in %s:\n\n", acct.Display())
 		for _, c := range convs {
-			fmt.Printf("  %s\n", c)
+			if c.UserID != "" {
+				fmt.Printf("  %s  %s\n", c.Name, c.UserID)
+			} else {
+				fmt.Printf("  %s\n", c.Name)
+			}
 		}
 		return nil
 	}
@@ -70,6 +79,51 @@ func RunList(platform, accountName string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// listConversations tries the daemon API first (which includes user IDs for DMs),
+// falling back to the filesystem store.
+func listConversations(acct account.Account, s store.Store) ([]api.ConversationInfo, error) {
+	convs, err := listConversationsFromDaemon(acct)
+	if err == nil {
+		return convs, nil
+	}
+
+	// Fallback: read from disk (no user IDs available).
+	names, err := s.ListConversations(acct)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.ConversationInfo, len(names))
+	for i, name := range names {
+		result[i] = api.ConversationInfo{Name: name}
+	}
+	return result, nil
+}
+
+func listConversationsFromDaemon(acct account.Account) ([]api.ConversationInfo, error) {
+	client := daemonclient.DefaultPgnHTTPClient
+	u := fmt.Sprintf("http://pigeon/api/conversations?platform=%s&account=%s",
+		url.QueryEscape(acct.Platform), url.QueryEscape(acct.Name))
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("daemon returned %d: %s", resp.StatusCode, data)
+	}
+
+	var convs []api.ConversationInfo
+	if err := json.Unmarshal(data, &convs); err != nil {
+		return nil, err
+	}
+	return convs, nil
 }
 
 // canonicalAccountNames replaces filesystem directory names (slugs) with
