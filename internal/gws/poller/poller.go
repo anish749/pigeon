@@ -66,4 +66,7 @@ func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
 	if err := PollCalendar(p.accountDir, cursors); err != nil {
 		slog.Error("poll calendar", "err", err)
 	}
+	if err := PollDrive(p.dataDir, cursors); err != nil {
+		slog.Error("poll drive", "err", err)
+	}
 }
