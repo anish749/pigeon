@@ -14,8 +14,8 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/claude"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // RouteState describes the outcome of routing a message through the hub.
@@ -275,6 +275,35 @@ func (h *Hub) Sessions() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.sessions)
+}
+
+// ClaudeSessionInfo describes a connected Claude Code session.
+type ClaudeSessionInfo struct {
+	SessionID string
+	CWD       string
+	Account   string
+}
+
+// ConnectedClaudeSessions returns info about all currently connected Claude Code sessions.
+func (h *Hub) ConnectedClaudeSessions() []ClaudeSessionInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// Build sessionID → account from channels.
+	sessionAcct := make(map[string]string, len(h.channels))
+	for _, ch := range h.channels {
+		sessionAcct[ch.sessionID] = ch.acct.Display()
+	}
+
+	var out []ClaudeSessionInfo
+	for id, s := range h.sessions {
+		out = append(out, ClaudeSessionInfo{
+			SessionID: id,
+			CWD:       s.CWD,
+			Account:   sessionAcct[id],
+		})
+	}
+	return out
 }
 
 // SessionConnected reports whether the given session ID has an active SSE connection.

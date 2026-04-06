@@ -42,6 +42,11 @@ func loadCursors(acct account.Account) syncCursors {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return make(syncCursors)
 	}
+	// yaml.Unmarshal on an empty file succeeds but leaves the map nil.
+	// This happens after a reset clears message data but leaves an empty cursor file.
+	if c == nil {
+		return make(syncCursors)
+	}
 	return c
 }
 
@@ -278,7 +283,15 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
+			// Skip bot messages (BotID set), system events like channel_join/channel_topic
+			// (SubType set, except thread_broadcast which is a real user message), and
+			// messages with empty text (can happen when the bot token lacks scopes like
+			// channels:history — Slack returns the message envelope but strips the content).
 			if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+				slog.WarnContext(ctx, "slack sync: skipping message",
+					"channel", channelName, "ts", msg.Timestamp,
+					"botID", msg.BotID, "subType", msg.SubType,
+					"emptyText", msg.Text == "")
 				continue
 			}
 
@@ -303,6 +316,11 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Use the current oldest as a sentinel — next run will resume from here
 			// and immediately get an empty response.
 			ms.AdvanceCursor(ch.ID, oldest)
+		}
+
+		if len(msgs) > 0 && written == 0 && threadsSynced == 0 {
+			slog.ErrorContext(ctx, "slack sync: all messages filtered",
+				"channel", channelName, "fetched", len(msgs), "account", acct)
 		}
 
 		if written > 0 || threadsSynced > 0 {
