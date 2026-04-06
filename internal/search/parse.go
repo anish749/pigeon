@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -24,7 +25,7 @@ type Match struct {
 }
 
 // ParseGrepOutput extracts message-type events from rg/grep output.
-// Each output line has the form: /path/to/file.txt:{"type":"msg",...}
+// Each output line has the form: /path/to/file.jsonl:{"type":"msg",...}
 // Only message events are returned; reactions, edits, deletes, and
 // context separator lines are skipped. Lines that fail to parse are
 // collected into the returned error, but successfully parsed matches
@@ -38,8 +39,8 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 		}
 
 		// rg/grep output format:
-		//   match lines:   /path/to/file.txt:{"type":"msg",...}
-		//   context lines: /path/to/file.txt-{"type":"msg",...}
+		//   match lines:   /path/to/file.jsonl:{"type":"msg",...}
+		//   context lines: /path/to/file.jsonl-{"type":"msg",...}
 		// Split on ":{" or "-{" — the delimiter is grep's : (match) or - (context).
 		idx := bytes.Index(line, []byte(":{"))
 		if idx < 0 {
@@ -127,8 +128,8 @@ func FilterThreadsBySince(matches []Match, since time.Duration) []Match {
 // output file path. The path is relative to searchDir. The trailing colon
 // from grep output is stripped.
 //
-// Date files:   platform/account/conversation/YYYY-MM-DD.txt
-// Thread files:  platform/account/conversation/threads/THREAD_TS.txt
+// Date files:   platform/account/conversation/YYYY-MM-DD.jsonl
+// Thread files:  platform/account/conversation/threads/THREAD_TS.jsonl
 //
 // When searchDir already includes platform or account, those leading
 // components are absent from the relative path.
@@ -142,7 +143,7 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	parts := strings.Split(rel, string(filepath.Separator))
 
 	// Strip "threads" directory if present — thread files are
-	// conversation/threads/TS.txt; we want the conversation, not "threads".
+	// conversation/threads/TS.jsonl; we want the conversation, not "threads".
 	for i, p := range parts {
 		if p == "threads" {
 			thread = true
@@ -152,7 +153,7 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	}
 
 	dateFile := parts[len(parts)-1]
-	date = strings.TrimSuffix(dateFile, ".txt")
+	date = strings.TrimSuffix(dateFile, paths.FileExt)
 
 	switch len(parts) {
 	case 4:

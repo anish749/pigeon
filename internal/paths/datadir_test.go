@@ -50,8 +50,8 @@ func TestAccountDir_Conversation(t *testing.T) {
 func TestConversationDir_DateFile(t *testing.T) {
 	conv := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws").Conversation("#general")
 	got := conv.DateFile("2024-01-15")
-	if got != "/tmp/test/slack/ws/#general/2024-01-15.txt" {
-		t.Errorf("DateFile() = %q, want /tmp/test/slack/ws/#general/2024-01-15.txt", got)
+	if got != "/tmp/test/slack/ws/#general/2024-01-15.jsonl" {
+		t.Errorf("DateFile() = %q, want /tmp/test/slack/ws/#general/2024-01-15.jsonl", got)
 	}
 }
 
@@ -66,8 +66,8 @@ func TestConversationDir_ThreadsDir(t *testing.T) {
 func TestConversationDir_ThreadFile(t *testing.T) {
 	conv := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws").Conversation("#general")
 	got := conv.ThreadFile("1234567890.123456")
-	if got != "/tmp/test/slack/ws/#general/threads/1234567890.123456.txt" {
-		t.Errorf("ThreadFile() = %q, want /tmp/test/slack/ws/#general/threads/1234567890.123456.txt", got)
+	if got != "/tmp/test/slack/ws/#general/threads/1234567890.123456.jsonl" {
+		t.Errorf("ThreadFile() = %q, want /tmp/test/slack/ws/#general/threads/1234567890.123456.jsonl", got)
 	}
 }
 

@@ -67,17 +67,17 @@ DATA LAYOUT
     ├── whatsapp/
     │   ├── +14155551234/                  # account (phone number)
     │   │   ├── +14155559876_Alice/        # conversation (phone_name)
-    │   │   │   └── 2026-03-16.txt
+    │   │   │   └── 2026-03-16.jsonl
     │   │   └── +14155550000_Bob/
-    │   │       └── 2026-03-16.txt
+    │   │       └── 2026-03-16.jsonl
     ├── slack/
     │   ├── acme-corp/                     # workspace
     │   │   ├── #engineering/              # channel
-    │   │   │   └── 2026-03-16.txt
+    │   │   │   └── 2026-03-16.jsonl
     │   │   └── @dave/                     # DM
-    │   │       └── 2026-03-16.txt
+    │   │       └── 2026-03-16.jsonl
 
-  Hierarchy: platform / account / conversation / YYYY-MM-DD.txt
+  Hierarchy: platform / account / conversation / YYYY-MM-DD.jsonl
   Message format: [2026-03-16 09:15:02] Alice: Hey, are you free?
 
 ─────────────────────────────────────────────────────────

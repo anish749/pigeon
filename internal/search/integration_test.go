@@ -93,7 +93,7 @@ func TestIntegration_RgBasicSearch(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
 		msg("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "nice work"),
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Alice", "U1", "deploy the hotfix too"),
@@ -128,7 +128,7 @@ func TestIntegration_RgSkipsNonMessageEvents(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello world"),
 		react(ts(2026, 3, 16, 9, 1, 0), "M1", "Bob", "U2", "thumbsup"),
 	})
@@ -151,13 +151,13 @@ func TestIntegration_RgMultipleConversations(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy general"),
 	})
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#random", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#random", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy random"),
 	})
-	writeJSONL(t, filepath.Join(dir, "whatsapp", "15551234567", "+14155551234", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "whatsapp", "15551234567", "+14155551234", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "C1", "deploy whatsapp"),
 	})
 
@@ -183,7 +183,7 @@ func TestIntegration_RgThreadFiles(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "threads", "1711568940.789012.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "threads", "1711568940.789012.jsonl"), []modelv1.Line{
 		msg("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy thread parent"),
 		msg("R1", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy reply"),
 	})
@@ -206,7 +206,7 @@ func TestIntegration_RgWithContext(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "before"),
 		msg("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy is done"),
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "U3", "after"),
@@ -228,7 +228,7 @@ func TestIntegration_RgTextWithBraces(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "meeting at {office} tomorrow"),
 	})
 
@@ -249,7 +249,7 @@ func TestIntegration_RgTextWithNewlines(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "line one\nline two\nline three"),
 	})
 
@@ -280,7 +280,7 @@ func TestIntegration_RgPreservesAllFields(t *testing.T) {
 			Attachments: []modelv1.Attachment{{ID: "F1", Type: "image/jpeg"}},
 		},
 	}
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{m})
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{m})
 
 	output := runRg(t, rgPath, "searchable", dir)
 	matches, err := ParseGrepOutput(output, dir)
@@ -310,7 +310,7 @@ func TestIntegration_RgNoMatches(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello world"),
 	})
 
@@ -329,7 +329,7 @@ func TestIntegration_RgSenderWithSpecialChars(t *testing.T) {
 	dir := t.TempDir()
 
 	// Colons in sender names — the old bracket format couldn't handle this
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Dr. Smith: Cardiologist", "U1", "searchme"),
 	})
 
@@ -350,7 +350,7 @@ func TestIntegration_RgOutputIsValidJSON(t *testing.T) {
 	rgPath := requireRg(t)
 	dir := t.TempDir()
 
-	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.txt"), []modelv1.Line{
+	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "test message"),
 	})
 
