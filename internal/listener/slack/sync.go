@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	gosync "sync"
 	"time"
@@ -191,8 +190,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		return fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Filter out public channels the user hasn't joined and Slackbot
-	var conversations []goslack.Channel
+	// Filter out public channels the user hasn't joined and Slackbot.
+	var memberConversations []goslack.Channel
 	var skippedPublic int
 	for _, ch := range allConversations {
 		if !ch.IsIM && !ch.IsMpIM && !ch.IsPrivate && !ch.IsMember {
@@ -202,10 +201,22 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		if ch.IsIM && ch.User == "USLACKBOT" {
 			continue
 		}
-		conversations = append(conversations, ch)
+		memberConversations = append(memberConversations, ch)
 	}
 
-	// Count by type after filtering
+	// Register all channel names and membership in resolver so the real-time
+	// listener knows about them. This must happen for all member conversations,
+	// not just the ones selected for sync.
+	for _, ch := range memberConversations {
+		resolver.RegisterConversation(ctx, ch)
+		resolver.AddMember(ch.ID)
+	}
+
+	// Determine which channels need syncing. Returns a sorted, filtered list:
+	// only channels with recent activity (or all channels on first sync / small workspaces).
+	conversations, skippedByPriority, priorityReason := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
+
+	// Count by type for progress reporting.
 	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
 	for _, ch := range conversations {
 		switch channelPriority(ch) {
@@ -220,11 +231,6 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		}
 	}
 
-	// Sort: DMs first, then group IMs, then private channels, then public channels
-	sort.SliceStable(conversations, func(i, j int) bool {
-		return channelPriority(conversations[i]) < channelPriority(conversations[j])
-	})
-
 	slog.InfoContext(ctx, "slack sync: conversations",
 		"account", acct,
 		"dms", totalDMs,
@@ -232,24 +238,13 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		"private", totalPrivate,
 		"public", totalPublic,
 		"skipped_non_member", skippedPublic,
-		"total", len(conversations),
+		"skipped_no_activity", skippedByPriority,
+		"total_member", len(memberConversations),
+		"to_sync", len(conversations),
+		"priority", priorityReason,
 	)
 
-	// Register all channel names and membership in resolver so real-time
-	// listener knows about them and can filter non-member public channels.
-	for _, ch := range conversations {
-		resolver.RegisterConversation(ctx, ch)
-		resolver.AddMember(ch.ID)
-	}
-
-	// Determine which channels need syncing by querying search.messages.
-	priority := computeSyncPriority(ctx, goslack.New(userToken), gate, ms.cursors, conversations)
-	slog.InfoContext(ctx, "slack sync: priority", "account", acct, "reason", priority.reason)
-
-	// Track per-category progress
 	var doneDMs, doneMpIMs, donePrivate, donePublic int
-	var skippedByPriority int
-
 	var synced, totalMessages int
 	for _, ch := range conversations {
 		if ctx.Err() != nil {
@@ -260,24 +255,6 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
 			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
 
-		if !priority.shouldSync(ch.ID) {
-			skippedByPriority++
-			switch channelPriority(ch) {
-			case 0:
-				doneDMs++
-			case 1:
-				doneMpIMs++
-			case 2:
-				donePrivate++
-			case 3:
-				donePublic++
-			}
-			continue
-		}
-
-		// Use cursor if resuming, otherwise go back 90 days.
-		// The first page of fetchHistory doubles as the activity check —
-		// if it comes back empty, we move on. No separate probe call.
 		oldest := defaultOldest
 		if cursor, ok := ms.Cursor(ch.ID); ok {
 			oldest = cursor
@@ -364,8 +341,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 	}
 
 	slog.InfoContext(ctx, "slack sync: complete",
-		"account", acct, "channels", synced, "messages", totalMessages,
-		"skipped_by_priority", skippedByPriority)
+		"account", acct, "channels", synced, "messages", totalMessages)
 
 	// Sync bot DM conversations so pigeon messages appear in the unified timeline.
 	if err := syncBotDMs(ctx, botToken, resolver, acct, ms, gate, defaultOldest, activityCutoff); err != nil {

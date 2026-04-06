@@ -4,43 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	goslack "github.com/slack-go/slack"
 )
-
-// syncPriority determines which channels need syncing by querying the Slack
-// search API to discover channels with recent activity.
-//
-// Decision tree:
-//
-//  1. No cursors (first sync) → sync all channels.
-//  2. Few channels (< minChannelsForSearch) → sync all, not worth optimizing.
-//  3. Query search.messages with after:<date> derived from the most recent cursor.
-//     a. Total == 0 → no activity, skip sync entirely.
-//     b. Paginate, collecting unique channel IDs. Stop when a page adds no new IDs
-//        or the active set exceeds activeRatioThreshold of total channels.
-//     c. If active set is large (> activeRatioThreshold) → sync all.
-//     d. Otherwise → sync only the active set.
-type syncPriority struct {
-	// activeChannels is the set of channel IDs with recent activity.
-	// nil means "sync all" (no filtering).
-	activeChannels map[string]bool
-
-	// searchTotal is the total number of messages the search found.
-	searchTotal int
-
-	// reason describes why this priority was chosen (for logging).
-	reason string
-}
-
-// shouldSync reports whether a channel should be synced.
-func (p *syncPriority) shouldSync(channelID string) bool {
-	if p.activeChannels == nil {
-		return true // sync all
-	}
-	return p.activeChannels[channelID]
-}
 
 const (
 	// minChannelsForSearch is the minimum number of channels before we bother
@@ -61,36 +29,89 @@ type messageSearcher interface {
 	SearchMessagesContext(ctx context.Context, query string, params goslack.SearchParameters) (*goslack.SearchMessages, error)
 }
 
-// computeSyncPriority determines which channels need syncing by using
-// search.messages to discover recent activity.
+// prioritizeChannels takes the full set of member conversations and returns
+// the subset that needs syncing, sorted by type (DMs → mpims → private → public).
 //
-// cursors is the current sync cursor state. conversations is the full list
-// of channels to sync (already filtered to member channels).
-func computeSyncPriority(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *syncPriority {
-	// Case 1: No cursors — first sync, must check everything.
+// On first sync (no cursors) or for small workspaces, all channels are returned.
+// On subsequent syncs, search.messages discovers which channels had activity
+// since the last sync, and only those are returned.
+//
+// All conversations are registered in the resolver regardless of whether they
+// are selected for sync — the real-time listener needs the full membership set.
+func prioritizeChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) (toSync []goslack.Channel, skipped int, reason string) {
+	// Sort all conversations: DMs first, then group IMs, private, public.
+	sort.SliceStable(conversations, func(i, j int) bool {
+		return channelPriority(conversations[i]) < channelPriority(conversations[j])
+	})
+
+	activeSet := discoverActiveChannels(ctx, searcher, gate, cursors, conversations)
+	if activeSet == nil {
+		// nil means "sync all" — no filtering possible or needed.
+		return conversations, 0, activeSet.reason()
+	}
+
+	for _, ch := range conversations {
+		if activeSet.has(ch.ID) {
+			toSync = append(toSync, ch)
+		} else {
+			skipped++
+		}
+	}
+	return toSync, skipped, activeSet.reason()
+}
+
+// activeChannelSet holds the result of the search-based discovery.
+// nil means "sync all channels" (first sync, small workspace, search failed, etc).
+type activeChannelSet struct {
+	ids          map[string]bool
+	searchTotal  int
+	reasonString string
+}
+
+func (a *activeChannelSet) has(id string) bool {
+	return a.ids[id]
+}
+
+func (a *activeChannelSet) reason() string {
+	if a == nil {
+		return ""
+	}
+	return a.reasonString
+}
+
+// syncAll returns nil to signal that all channels should be synced.
+func syncAll(reason string) *activeChannelSet {
+	// We log the reason here so the caller just sees nil = sync all.
+	slog.Info("sync priority: sync all", "reason", reason)
+	return nil
+}
+
+// discoverActiveChannels queries search.messages to find which channels had
+// activity since the most recent cursor. Returns nil if all channels should
+// be synced (first sync, few channels, search error, too many active).
+func discoverActiveChannels(ctx context.Context, searcher messageSearcher, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *activeChannelSet {
 	if len(cursors) == 0 {
-		return &syncPriority{reason: "first sync, no cursors"}
+		return syncAll("first sync, no cursors")
 	}
 
-	// Case 2: Few channels — not worth the search overhead.
 	if len(conversations) < minChannelsForSearch {
-		return &syncPriority{reason: fmt.Sprintf("only %d channels, below threshold", len(conversations))}
+		return syncAll(fmt.Sprintf("only %d channels, below threshold", len(conversations)))
 	}
 
-	// Derive the after: date from the most recent cursor. This represents the
-	// last time any channel was synced. Subtract one day because search.messages
-	// uses day-level granularity (after:YYYY-MM-DD means "after end of that day").
 	maxCursor := maxCursorTime(cursors)
 	if maxCursor.IsZero() {
-		return &syncPriority{reason: "no valid cursor timestamps"}
+		return syncAll("no valid cursor timestamps")
 	}
+
+	// Subtract one day because search uses day-level granularity
+	// (after:YYYY-MM-DD means "after end of that day").
 	afterDate := maxCursor.Add(-24 * time.Hour).Format("2006-01-02")
 	query := "after:" + afterDate
 
-	// First page: discover total and start collecting active channel IDs.
 	if err := gate.wait(ctx); err != nil {
-		return &syncPriority{reason: "rate limit wait cancelled"}
+		return syncAll("rate limit wait cancelled")
 	}
+
 	params := goslack.SearchParameters{
 		Sort:          "timestamp",
 		SortDirection: "desc",
@@ -101,15 +122,15 @@ func computeSyncPriority(ctx context.Context, searcher messageSearcher, gate *ra
 	if err != nil {
 		slog.WarnContext(ctx, "sync priority: search failed, syncing all",
 			"error", err, "query", query)
-		return &syncPriority{reason: fmt.Sprintf("search failed: %v", err)}
+		return syncAll(fmt.Sprintf("search failed: %v", err))
 	}
 
-	// Case: no activity since the cursor date.
 	if result.Total == 0 {
-		return &syncPriority{
-			activeChannels: make(map[string]bool),
-			searchTotal:    0,
-			reason:         fmt.Sprintf("search returned 0 results for %q", query),
+		reason := fmt.Sprintf("search returned 0 results for %q", query)
+		slog.InfoContext(ctx, "sync priority: no activity", "query", query)
+		return &activeChannelSet{
+			ids:          make(map[string]bool),
+			reasonString: reason,
 		}
 	}
 
@@ -123,16 +144,11 @@ func computeSyncPriority(ctx context.Context, searcher messageSearcher, gate *ra
 		"total_pages", totalPages, "active_channels", len(active),
 		"total_channels", totalChannels)
 
-	// If already over the active ratio threshold, sync all.
 	if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
-		return &syncPriority{
-			searchTotal: searchTotal,
-			reason: fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold after page 1",
-				len(active), totalChannels, activeRatioThreshold*100),
-		}
+		return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold after page 1",
+			len(active), totalChannels, activeRatioThreshold*100))
 	}
 
-	// Paginate remaining pages, collecting new channel IDs.
 	for page := 2; page <= totalPages; page++ {
 		if err := gate.wait(ctx); err != nil {
 			break
@@ -155,26 +171,24 @@ func computeSyncPriority(ctx context.Context, searcher messageSearcher, gate *ra
 			"page", page, "new_channels", newOnPage,
 			"active_channels", len(active))
 
-		// Stop if this page added no new channels — we've plateaued.
 		if newOnPage == 0 {
 			break
 		}
 
-		// Stop if active set crossed the threshold.
 		if float64(len(active)) > activeRatioThreshold*float64(totalChannels) {
-			return &syncPriority{
-				searchTotal: searchTotal,
-				reason: fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",
-					len(active), totalChannels, activeRatioThreshold*100, page),
-			}
+			return syncAll(fmt.Sprintf("active channels %d/%d exceeds %.0f%% threshold at page %d",
+				len(active), totalChannels, activeRatioThreshold*100, page))
 		}
 	}
 
-	return &syncPriority{
-		activeChannels: active,
-		searchTotal:    searchTotal,
-		reason: fmt.Sprintf("search found %d active channels out of %d (%d messages, query=%q)",
-			len(active), totalChannels, searchTotal, query),
+	reason := fmt.Sprintf("search found %d active channels out of %d (%d messages, query=%q)",
+		len(active), totalChannels, searchTotal, query)
+	slog.InfoContext(ctx, "sync priority: filtered", "reason", reason)
+
+	return &activeChannelSet{
+		ids:          active,
+		searchTotal:  searchTotal,
+		reasonString: reason,
 	}
 }
 
