@@ -127,9 +127,6 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 
 	// Interleave thread replies after their parent message.
 	resolved, interleaveErr := s.interleaveThreads(acct, conversation, resolved)
-	if interleaveErr != nil {
-		slog.Warn("thread interleaving: some threads skipped", "conversation", conversation, "error", interleaveErr)
-	}
 
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
@@ -147,7 +144,9 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		resolved.Messages = resolved.Messages[len(resolved.Messages)-opts.Last:]
 	}
 
-	return resolved, nil
+	// Return partial data + error. The caller gets whatever threads
+	// succeeded and can decide how to handle the error.
+	return resolved, interleaveErr
 }
 
 // ThreadExists checks if a thread file exists for the given thread timestamp.
