@@ -60,6 +60,9 @@ func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
 	if ctx.Err() != nil {
 		return
 	}
+	if err := PollGmail(p.accountDir, cursors); err != nil {
+		slog.Error("poll gmail", "err", err)
+	}
 	if err := PollCalendar(p.accountDir, cursors); err != nil {
 		slog.Error("poll calendar", "err", err)
 	}
