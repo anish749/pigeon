@@ -14,8 +14,9 @@ type gmailProfile struct {
 
 // gmailHistoryResponse is the response from users.history.list.
 type gmailHistoryResponse struct {
-	History   []gmailHistoryRecord `json:"history"`
-	HistoryID string               `json:"historyId"`
+	History       []gmailHistoryRecord `json:"history"`
+	HistoryID     string               `json:"historyId"`
+	NextPageToken string               `json:"nextPageToken"`
 }
 
 type gmailHistoryRecord struct {
@@ -40,37 +41,50 @@ func PollGmail(cursors *Cursors) error {
 		return seedGmailCursor(cursors)
 	}
 
-	var resp gmailHistoryResponse
-	err := gws.RunParsed(&resp,
-		"gmail", "users", "history", "list",
-		"--params", gws.ParamsJSON(map[string]string{
+	var added int
+	pageToken := ""
+	for {
+		params := map[string]string{
 			"userId":         "me",
 			"startHistoryId": cursors.Gmail.HistoryID,
 			"historyTypes":   "messageAdded",
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("poll gmail: %w", err)
-	}
-
-	var added int
-	for _, record := range resp.History {
-		for _, msg := range record.MessagesAdded {
-			added++
-			slog.Info("gmail: new message",
-				"message_id", msg.Message.ID,
-				"thread_id", msg.Message.ThreadID,
-				"labels", msg.Message.LabelIDs,
-			)
 		}
+		if pageToken != "" {
+			params["pageToken"] = pageToken
+		}
+
+		var resp gmailHistoryResponse
+		err := gws.RunParsed(&resp,
+			"gmail", "users", "history", "list",
+			"--params", gws.ParamsJSON(params),
+		)
+		if err != nil {
+			return fmt.Errorf("poll gmail: %w", err)
+		}
+
+		for _, record := range resp.History {
+			for _, msg := range record.MessagesAdded {
+				added++
+				slog.Info("gmail: new message",
+					"message_id", msg.Message.ID,
+					"thread_id", msg.Message.ThreadID,
+					"labels", msg.Message.LabelIDs,
+				)
+			}
+		}
+
+		if resp.HistoryID != "" {
+			cursors.Gmail.HistoryID = resp.HistoryID
+		}
+
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 
 	if added > 0 {
 		slog.Info("gmail: poll complete", "new_messages", added)
-	}
-
-	if resp.HistoryID != "" {
-		cursors.Gmail.HistoryID = resp.HistoryID
 	}
 	return nil
 }

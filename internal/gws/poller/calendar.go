@@ -45,65 +45,92 @@ func PollCalendar(cursors *Cursors) error {
 		return seedCalendarCursor(cursors)
 	}
 
-	var resp calendarEventsResponse
-	err := gws.RunParsed(&resp,
-		"calendar", "events", "list",
-		"--params", gws.ParamsJSON(map[string]string{
+	var total int
+	pageToken := ""
+	for {
+		params := map[string]string{
 			"calendarId": defaultCalendarID,
 			"syncToken":  syncToken,
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("poll calendar: %w", err)
-	}
+		}
+		if pageToken != "" {
+			params["pageToken"] = pageToken
+		}
 
-	for _, event := range resp.Items {
-		if event.Status == "cancelled" {
-			slog.Info("calendar: event cancelled",
+		var resp calendarEventsResponse
+		err := gws.RunParsed(&resp,
+			"calendar", "events", "list",
+			"--params", gws.ParamsJSON(params),
+		)
+		if err != nil {
+			return fmt.Errorf("poll calendar: %w", err)
+		}
+
+		for _, event := range resp.Items {
+			total++
+			if event.Status == "cancelled" {
+				slog.Info("calendar: event cancelled",
+					"event_id", event.ID,
+					"summary", event.Summary,
+				)
+				continue
+			}
+			slog.Info("calendar: event changed",
 				"event_id", event.ID,
 				"summary", event.Summary,
+				"start", event.Start.String(),
+				"end", event.End.String(),
+				"updated", event.Updated,
 			)
-			continue
 		}
-		slog.Info("calendar: event changed",
-			"event_id", event.ID,
-			"summary", event.Summary,
-			"start", event.Start.String(),
-			"end", event.End.String(),
-			"updated", event.Updated,
-		)
+
+		// syncToken only appears on the last page.
+		if resp.NextSyncToken != "" {
+			cursors.Calendar[defaultCalendarID] = resp.NextSyncToken
+			break
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 
-	if len(resp.Items) > 0 {
-		slog.Info("calendar: poll complete", "changes", len(resp.Items))
-	}
-
-	// Paginate if needed — syncToken only appears on the last page.
-	if resp.NextSyncToken != "" {
-		cursors.Calendar[defaultCalendarID] = resp.NextSyncToken
+	if total > 0 {
+		slog.Info("calendar: poll complete", "changes", total)
 	}
 	return nil
 }
 
 func seedCalendarCursor(cursors *Cursors) error {
-	// Fetch future events only — a single page is usually enough to get a
-	// syncToken without paginating through the entire calendar history.
-	var resp calendarEventsResponse
-	err := gws.RunParsed(&resp,
-		"calendar", "events", "list",
-		"--params", gws.ParamsJSON(map[string]string{
+	// Fetch future events only — far fewer pages than the full calendar history.
+	// Paginate until we get a syncToken (only on the last page).
+	pageToken := ""
+	for {
+		params := map[string]string{
 			"calendarId": defaultCalendarID,
 			"maxResults": "2500",
 			"timeMin":    time.Now().UTC().Format(time.RFC3339),
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("seed calendar cursor: %w", err)
+		}
+		if pageToken != "" {
+			params["pageToken"] = pageToken
+		}
+
+		var resp calendarEventsResponse
+		err := gws.RunParsed(&resp,
+			"calendar", "events", "list",
+			"--params", gws.ParamsJSON(params),
+		)
+		if err != nil {
+			return fmt.Errorf("seed calendar cursor: %w", err)
+		}
+
+		if resp.NextSyncToken != "" {
+			cursors.Calendar[defaultCalendarID] = resp.NextSyncToken
+			slog.Info("calendar: seeded cursor", "sync_token", resp.NextSyncToken)
+			return nil
+		}
+		if resp.NextPageToken == "" {
+			return fmt.Errorf("seed calendar cursor: no syncToken in final page")
+		}
+		pageToken = resp.NextPageToken
 	}
-	if resp.NextSyncToken == "" {
-		return fmt.Errorf("seed calendar cursor: no syncToken in response (got pageToken — too many future events)")
-	}
-	cursors.Calendar[defaultCalendarID] = resp.NextSyncToken
-	slog.Info("calendar: seeded cursor", "sync_token", resp.NextSyncToken)
-	return nil
 }

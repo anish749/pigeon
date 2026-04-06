@@ -35,38 +35,49 @@ func PollDrive(cursors *Cursors) error {
 		return seedDriveCursor(cursors)
 	}
 
-	var resp driveChangesResponse
-	err := gws.RunParsed(&resp,
-		"drive", "changes", "list",
-		"--params", gws.ParamsJSON(map[string]string{
-			"pageToken":         cursors.Drive.PageToken,
-			"includeRemoved":    "true",
-			"restrictToMyDrive": "true",
-			"fields":            "changes(fileId,removed,file(name,mimeType)),newStartPageToken,nextPageToken",
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("poll drive: %w", err)
-	}
-
-	for _, change := range resp.Changes {
-		if change.Removed {
-			slog.Info("drive: file removed", "file_id", change.FileID)
-			continue
-		}
-		slog.Info("drive: file changed",
-			"file_id", change.FileID,
-			"name", change.File.Name,
-			"mime_type", change.File.MimeType,
+	var total int
+	pageToken := cursors.Drive.PageToken
+	for {
+		var resp driveChangesResponse
+		err := gws.RunParsed(&resp,
+			"drive", "changes", "list",
+			"--params", gws.ParamsJSON(map[string]string{
+				"pageToken":         pageToken,
+				"includeRemoved":    "true",
+				"restrictToMyDrive": "true",
+				"fields":            "changes(fileId,removed,file(name,mimeType)),newStartPageToken,nextPageToken",
+			}),
 		)
+		if err != nil {
+			return fmt.Errorf("poll drive: %w", err)
+		}
+
+		for _, change := range resp.Changes {
+			total++
+			if change.Removed {
+				slog.Info("drive: file removed", "file_id", change.FileID)
+				continue
+			}
+			slog.Info("drive: file changed",
+				"file_id", change.FileID,
+				"name", change.File.Name,
+				"mime_type", change.File.MimeType,
+			)
+		}
+
+		// newStartPageToken only appears on the last page.
+		if resp.NewStartToken != "" {
+			cursors.Drive.PageToken = resp.NewStartToken
+			break
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 
-	if len(resp.Changes) > 0 {
-		slog.Info("drive: poll complete", "changes", len(resp.Changes))
-	}
-
-	if resp.NewStartToken != "" {
-		cursors.Drive.PageToken = resp.NewStartToken
+	if total > 0 {
+		slog.Info("drive: poll complete", "changes", total)
 	}
 	return nil
 }
