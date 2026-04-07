@@ -9,6 +9,7 @@ import (
 
 	"github.com/gosimple/slug"
 
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/drive"
 	"github.com/anish749/pigeon/internal/gws/drive/converter"
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
@@ -70,11 +71,14 @@ func PollDrive(accountDir string, cursors *gwsstore.Cursors) error {
 func handleDoc(accountDir string, ch drive.Change) error {
 	doc, err := drive.GetDocument(ch.FileID)
 	if err != nil {
+		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
+			slog.Warn("drive doc inaccessible, skipping", "fileId", ch.FileID, "error", err)
+			return nil
+		}
 		return fmt.Errorf("get document: %w", err)
 	}
 
-	docSlug := slug.Make(doc.Title)
-	docDir := filepath.Join(accountDir, "gdrive", docSlug)
+	docDir := filepath.Join(accountDir, "gdrive", driveSlug(doc.Title, ch.FileID))
 
 	tabs, err := doc.AllTabs()
 	if err != nil {
@@ -116,11 +120,14 @@ func handleDoc(accountDir string, ch drive.Change) error {
 func handleSheet(accountDir string, ch drive.Change) error {
 	sheetNames, err := drive.GetSheetNames(ch.FileID)
 	if err != nil {
+		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
+			slog.Warn("drive sheet inaccessible, skipping", "fileId", ch.FileID, "error", err)
+			return nil
+		}
 		return fmt.Errorf("get sheet names: %w", err)
 	}
 
-	sheetSlug := slug.Make(ch.File.Name)
-	sheetDir := filepath.Join(accountDir, "gdrive", sheetSlug)
+	sheetDir := filepath.Join(accountDir, "gdrive", driveSlug(ch.File.Name, ch.FileID))
 
 	var errs []error
 
@@ -158,6 +165,22 @@ func handleSheet(accountDir string, ch drive.Change) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// driveSlug creates a directory name for a Drive file. Uses the slugified
+// title with a short file ID suffix to prevent collisions (two docs titled
+// "Meeting Notes" get different directories). Falls back to the file ID
+// alone if the title is empty.
+func driveSlug(title, fileID string) string {
+	s := slug.Make(title)
+	suffix := fileID
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	if s == "" {
+		return suffix
+	}
+	return s + "-" + suffix
 }
 
 // storeComments fetches comments and replies for a Drive file and appends
