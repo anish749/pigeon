@@ -30,6 +30,11 @@ func dateGlobs(since time.Duration) []string {
 // threadDatePatterns generates rg -e patterns that match timestamp prefixes
 // inside thread files for dates within the since window. Each pattern is a
 // literal string like `"ts":"2026-04-07`.
+//
+// This depends on the JSONL serialization format in modelv1: the ts field
+// must be named "ts", use ISO 8601 dates starting with YYYY-MM-DD, and
+// appear as "ts":"YYYY-MM-DD in the serialized JSON. If the model changes
+// field names, timestamp format, or serialization order, this breaks.
 func threadDatePatterns(since time.Duration) []string {
 	now := time.Now().UTC()
 	cutoff := now.Add(-since).Truncate(24 * time.Hour)
