@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 )
 
@@ -36,18 +36,27 @@ Output is one file path per line, suitable for piping to other tools.`,
   pigeon glob --since=24h | xargs jq -r 'select(.type == "msg") | .sender'`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
-			since, _ := cmd.Flags().GetString("since")
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return fmt.Errorf("get platform flag: %w", err)
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return fmt.Errorf("get account flag: %w", err)
+			}
+			since, err := cmd.Flags().GetString("since")
+			if err != nil {
+				return fmt.Errorf("get since flag: %w", err)
+			}
 
-			dir := commands.SearchPath(platform, account)
+			dir := paths.SearchDir(platform, account)
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				return fmt.Errorf("no data at %s", dir)
 			}
 
 			var sinceDur time.Duration
 			if since != "" {
-				d, err := commands.ParseDuration(since)
+				d, err := read.ParseDuration(since)
 				if err != nil {
 					return fmt.Errorf("invalid --since value %q: %w", since, err)
 				}

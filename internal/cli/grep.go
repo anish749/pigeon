@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/search"
 )
@@ -56,24 +56,51 @@ JSON fields in each line:
   pigeon grep -q "deploy" | jq -r 'select(.type == "msg") | .sender + ": " + .text'`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query, _ := cmd.Flags().GetString("query")
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
-			since, _ := cmd.Flags().GetString("since")
-			context, _ := cmd.Flags().GetInt("context")
-			filesOnly, _ := cmd.Flags().GetBool("files-with-matches")
-			count, _ := cmd.Flags().GetBool("count")
-			caseInsensitive, _ := cmd.Flags().GetBool("ignore-case")
-			fixedStrings, _ := cmd.Flags().GetBool("fixed-strings")
+			query, err := cmd.Flags().GetString("query")
+			if err != nil {
+				return fmt.Errorf("get query flag: %w", err)
+			}
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return fmt.Errorf("get platform flag: %w", err)
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return fmt.Errorf("get account flag: %w", err)
+			}
+			since, err := cmd.Flags().GetString("since")
+			if err != nil {
+				return fmt.Errorf("get since flag: %w", err)
+			}
+			context, err := cmd.Flags().GetInt("context")
+			if err != nil {
+				return fmt.Errorf("get context flag: %w", err)
+			}
+			filesOnly, err := cmd.Flags().GetBool("files-with-matches")
+			if err != nil {
+				return fmt.Errorf("get files-with-matches flag: %w", err)
+			}
+			count, err := cmd.Flags().GetBool("count")
+			if err != nil {
+				return fmt.Errorf("get count flag: %w", err)
+			}
+			caseInsensitive, err := cmd.Flags().GetBool("ignore-case")
+			if err != nil {
+				return fmt.Errorf("get ignore-case flag: %w", err)
+			}
+			fixedStrings, err := cmd.Flags().GetBool("fixed-strings")
+			if err != nil {
+				return fmt.Errorf("get fixed-strings flag: %w", err)
+			}
 
-			dir := commands.SearchPath(platform, account)
+			dir := paths.SearchDir(platform, account)
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				return fmt.Errorf("no data at %s", dir)
 			}
 
 			var sinceDur time.Duration
 			if since != "" {
-				d, err := commands.ParseDuration(since)
+				d, err := read.ParseDuration(since)
 				if err != nil {
 					return fmt.Errorf("invalid --since value %q: %w", since, err)
 				}
