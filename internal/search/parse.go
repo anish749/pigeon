@@ -21,6 +21,7 @@ type Match struct {
 	Conversation string
 	Date         string // date filename (YYYY-MM-DD) or thread timestamp
 	Thread       bool   // true if match came from a thread file
+	FilePath     string // absolute path to the source file
 	Msg          modelv1.MsgLine
 }
 
@@ -89,6 +90,7 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			Conversation: conversation,
 			Date:         date,
 			Thread:       thread,
+			FilePath:     rg.Data.Path.Text,
 			Msg:          msg,
 		})
 	}
