@@ -43,8 +43,7 @@ func Status() (running bool, pid int) {
 // binary with "daemon _run". Waits up to 3 seconds for the PID file to
 // appear as confirmation.
 func Start() error {
-	if IsRunning() {
-		pid, _ := readPID()
+	if running, pid := Status(); running {
 		return fmt.Errorf("daemon is already running (pid %d)", pid)
 	}
 
