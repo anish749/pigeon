@@ -20,6 +20,10 @@ This becomes powerful when combined with other agent-facing CLIs like [linear-cl
 
 **The Outbox** holds outgoing messages from Claude for human review. `pigeon review` opens a terminal UI to approve, reject, or provide feedback before anything is sent.
 
+## Prerequisites
+
+- **[ripgrep](https://github.com/BurntSushi/ripgrep#installation)** (`rg`) — required for search, read, and file discovery. Install via `brew install ripgrep`, `apt install ripgrep`, or see the [ripgrep installation guide](https://github.com/BurntSushi/ripgrep#installation).
+
 ## Installation
 
 Download the latest release for your platform:
