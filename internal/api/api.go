@@ -135,18 +135,47 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	return err
 }
 
+// SlackTarget identifies a Slack recipient: either a user (for DMs) or a channel/group DM.
+// Exactly one of UserID or Channel must be set.
+type SlackTarget struct {
+	UserID  string `json:"user_id,omitempty"`  // Slack user ID (U-prefixed) for DMs
+	Channel string `json:"channel,omitempty"`  // #channel or @mpdm-... for channels/group DMs
+}
+
+// Validate checks that exactly one field is set and that values are well-formed.
+func (t SlackTarget) Validate() error {
+	if t.UserID == "" && t.Channel == "" {
+		return fmt.Errorf("specify user_id or channel")
+	}
+	if t.UserID != "" && t.Channel != "" {
+		return fmt.Errorf("specify user_id or channel, not both")
+	}
+	if t.UserID != "" && !strings.HasPrefix(t.UserID, "U") {
+		return fmt.Errorf("user_id must be a Slack user ID (U-prefixed), got %q", t.UserID)
+	}
+	if t.Channel != "" && strings.HasPrefix(t.Channel, "@") && !strings.HasPrefix(t.Channel, "@mpdm-") {
+		return fmt.Errorf("use user_id for DMs, not channel — run 'pigeon list' to find the user_id")
+	}
+	return nil
+}
+
+// Display returns a human-readable label for the target.
+func (t SlackTarget) Display() string {
+	if t.UserID != "" {
+		return t.UserID
+	}
+	return t.Channel
+}
+
 // SendRequest is the daemon API payload for /api/send.
 type SendRequest struct {
 	Platform string `json:"platform"`
 	Account  string `json:"account"`
 	Message  string `json:"message"`
 
-	// Target — exactly one of UserID, Channel, or Contact must be set.
-	// Slack: use UserID (U-prefixed) for DMs, Channel (#name or @mpdm-...) for channels/group DMs.
-	// WhatsApp: use Contact (name or phone number).
-	UserID  string `json:"user_id,omitempty"`
-	Channel string `json:"channel,omitempty"`
-	Contact string `json:"contact,omitempty"`
+	// Target — platform-specific, exactly one must be set.
+	Slack   *SlackTarget `json:"slack,omitempty"`
+	Contact string       `json:"contact,omitempty"` // WhatsApp contact name or phone
 
 	Thread    string `json:"thread,omitempty"`
 	Broadcast bool   `json:"broadcast,omitempty"`
@@ -160,16 +189,10 @@ type SendRequest struct {
 
 // Target returns the display name for the send target (for logging and UI).
 func (r SendRequest) Target() string {
-	switch {
-	case r.UserID != "":
-		return r.UserID
-	case r.Channel != "":
-		return r.Channel
-	case r.Contact != "":
-		return r.Contact
-	default:
-		return ""
+	if r.Slack != nil {
+		return r.Slack.Display()
 	}
+	return r.Contact
 }
 
 // SendResponse is the daemon API response for /api/send.
@@ -194,7 +217,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, SendResponse{Error: "platform, account, and message are required"})
 		return
 	}
-	if err := validateSendTarget(req); err != nil {
+	if err := validateTarget(req.Platform, req.Slack, req.Contact); err != nil {
 		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
 		return
 	}
@@ -303,32 +326,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		senderName = sender.UserName
 	}
 
-	var channelID, channelName string
-
-	switch {
-	case req.UserID != "":
-		// DM: open conversation with the specified user.
-		userName, err := sender.Resolver.UserName(ctx, req.UserID)
-		if err != nil {
-			return SendResponse{Error: fmt.Sprintf("unknown user %s: %v", req.UserID, err)}
-		}
-		channelName = "@" + userName
-
-		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{req.UserID},
-		})
-		if err != nil {
-			return SendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, req.UserID, err)}
-		}
-		channelID = ch.ID
-
-	case req.Channel != "":
-		// Channel or group DM: resolve name to ID.
-		var err error
-		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Channel)
-		if err != nil {
-			return SendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
-		}
+	channelID, channelName, err := resolveSlackTarget(ctx, sender, api, req.Slack)
+	if err != nil {
+		return SendResponse{Error: err.Error()}
 	}
 
 	if req.DryRun {
@@ -542,73 +542,54 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 	return dates[len(dates)-1], totalLines
 }
 
-// dispatchSend routes a SendRequest to the appropriate platform sender.
-func validateSendTarget(req SendRequest) error {
-	n := 0
-	if req.UserID != "" {
-		n++
+// validateTarget checks that exactly one of slack or contact is set and matches the platform.
+func validateTarget(platform string, slack *SlackTarget, contact string) error {
+	hasSlack := slack != nil
+	hasContact := contact != ""
+
+	if !hasSlack && !hasContact {
+		return fmt.Errorf("specify a target (slack or contact)")
 	}
-	if req.Channel != "" {
-		n++
-	}
-	if req.Contact != "" {
-		n++
-	}
-	if n == 0 {
-		return fmt.Errorf("specify one of user_id, channel, or contact")
-	}
-	if n > 1 {
-		return fmt.Errorf("specify exactly one of user_id, channel, or contact, got %d", n)
+	if hasSlack && hasContact {
+		return fmt.Errorf("specify slack or contact, not both")
 	}
 
-	switch req.Platform {
+	switch platform {
 	case "slack":
-		if req.Contact != "" {
-			return fmt.Errorf("use user_id or channel for Slack, not contact")
+		if !hasSlack {
+			return fmt.Errorf("use slack target (user_id or channel) for Slack, not contact")
 		}
-		if req.UserID != "" && !strings.HasPrefix(req.UserID, "U") {
-			return fmt.Errorf("user_id must be a Slack user ID (U-prefixed), got %q", req.UserID)
-		}
-		if req.Channel != "" && strings.HasPrefix(req.Channel, "@") && !strings.HasPrefix(req.Channel, "@mpdm-") {
-			return fmt.Errorf("use user_id for DMs, not channel — run 'pigeon list' to find the user_id")
-		}
+		return slack.Validate()
 	case "whatsapp":
-		if req.UserID != "" || req.Channel != "" {
-			return fmt.Errorf("use contact for WhatsApp, not user_id or channel")
+		if !hasContact {
+			return fmt.Errorf("use contact for WhatsApp, not slack target")
 		}
 	}
 	return nil
 }
 
-func validateReactTarget(req ReactRequest) error {
-	n := 0
-	if req.UserID != "" {
-		n++
-	}
-	if req.Channel != "" {
-		n++
-	}
-	if req.Contact != "" {
-		n++
-	}
-	if n == 0 {
-		return fmt.Errorf("specify one of user_id, channel, or contact")
-	}
-	if n > 1 {
-		return fmt.Errorf("specify exactly one of user_id, channel, or contact, got %d", n)
-	}
+// resolveSlackTarget resolves a SlackTarget to a channel ID and display name.
+func resolveSlackTarget(ctx context.Context, sender *SlackSender, api *goslack.Client, t *SlackTarget) (channelID, channelName string, err error) {
+	switch {
+	case t.UserID != "":
+		userName, err := sender.Resolver.UserName(ctx, t.UserID)
+		if err != nil {
+			return "", "", fmt.Errorf("unknown user %s: %v", t.UserID, err)
+		}
+		channelName = "@" + userName
 
-	switch req.Platform {
-	case "slack":
-		if req.Contact != "" {
-			return fmt.Errorf("use user_id or channel for Slack, not contact")
+		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{t.UserID},
+		})
+		if err != nil {
+			return "", "", fmt.Errorf("open DM with %s (%s): %v", channelName, t.UserID, err)
 		}
-	case "whatsapp":
-		if req.UserID != "" || req.Channel != "" {
-			return fmt.Errorf("use contact for WhatsApp, not user_id or channel")
-		}
+		return ch.ID, channelName, nil
+
+	case t.Channel != "":
+		return sender.Resolver.FindChannelID(ctx, t.Channel)
 	}
-	return nil
+	return "", "", fmt.Errorf("empty slack target")
 }
 
 func (s *Server) dispatchSend(ctx context.Context, req SendRequest) SendResponse {
@@ -639,11 +620,13 @@ func (s *Server) executeSend(ctx context.Context, payload json.RawMessage) (bool
 
 // ReactRequest is the daemon API payload for /api/react.
 type ReactRequest struct {
-	Platform  string `json:"platform"`
-	Account   string `json:"account"`
-	UserID    string `json:"user_id,omitempty"`
-	Channel   string `json:"channel,omitempty"`
-	Contact   string `json:"contact,omitempty"`
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+
+	// Target — platform-specific, exactly one must be set.
+	Slack   *SlackTarget `json:"slack,omitempty"`
+	Contact string       `json:"contact,omitempty"` // WhatsApp contact name or phone
+
 	MessageID string `json:"message_id"`
 	Emoji     string `json:"emoji"`
 	Remove    bool   `json:"remove,omitempty"`
@@ -666,7 +649,7 @@ func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: "platform, account, message_id, and emoji are required"})
 		return
 	}
-	if err := validateReactTarget(req); err != nil {
+	if err := validateTarget(req.Platform, req.Slack, req.Contact); err != nil {
 		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: err.Error()})
 		return
 	}
@@ -700,29 +683,9 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		return ReactResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
 	}
 
-	var channelID, channelName string
-	switch {
-	case req.UserID != "":
-		userName, err := sender.Resolver.UserName(ctx, req.UserID)
-		if err != nil {
-			return ReactResponse{Error: fmt.Sprintf("unknown user %s: %v", req.UserID, err)}
-		}
-		channelName = "@" + userName
-
-		ch, _, _, err := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{req.UserID},
-		})
-		if err != nil {
-			return ReactResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, req.UserID, err)}
-		}
-		channelID = ch.ID
-
-	case req.Channel != "":
-		var err error
-		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Channel)
-		if err != nil {
-			return ReactResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
-		}
+	channelID, channelName, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
+	if err != nil {
+		return ReactResponse{Error: err.Error()}
 	}
 
 	// Reactions are always sent via the bot token.
