@@ -219,7 +219,7 @@ func (m model) renderDetail(item *outbox.Item) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  To: %s\n", req.Contact))
+	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
 	b.WriteString(fmt.Sprintf("  Via: %s / %s\n", req.Platform, req.Account))
 	if req.Thread != "" {
 		b.WriteString(fmt.Sprintf("  Thread: %s\n", req.Thread))
@@ -344,5 +344,5 @@ func itemSummary(item *outbox.Item) string {
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}
-	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Contact, msg)
+	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
 }
