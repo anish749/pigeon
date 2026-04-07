@@ -580,6 +580,37 @@ func validateSendTarget(req SendRequest) error {
 	return nil
 }
 
+func validateReactTarget(req ReactRequest) error {
+	n := 0
+	if req.UserID != "" {
+		n++
+	}
+	if req.Channel != "" {
+		n++
+	}
+	if req.Contact != "" {
+		n++
+	}
+	if n == 0 {
+		return fmt.Errorf("specify one of user_id, channel, or contact")
+	}
+	if n > 1 {
+		return fmt.Errorf("specify exactly one of user_id, channel, or contact, got %d", n)
+	}
+
+	switch req.Platform {
+	case "slack":
+		if req.Contact != "" {
+			return fmt.Errorf("use user_id or channel for Slack, not contact")
+		}
+	case "whatsapp":
+		if req.UserID != "" || req.Channel != "" {
+			return fmt.Errorf("use contact for WhatsApp, not user_id or channel")
+		}
+	}
+	return nil
+}
+
 func (s *Server) dispatchSend(ctx context.Context, req SendRequest) SendResponse {
 	acct := account.New(req.Platform, req.Account)
 	switch acct.Platform {
@@ -610,7 +641,9 @@ func (s *Server) executeSend(ctx context.Context, payload json.RawMessage) (bool
 type ReactRequest struct {
 	Platform  string `json:"platform"`
 	Account   string `json:"account"`
-	Contact   string `json:"contact"`
+	UserID    string `json:"user_id,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Contact   string `json:"contact,omitempty"`
 	MessageID string `json:"message_id"`
 	Emoji     string `json:"emoji"`
 	Remove    bool   `json:"remove,omitempty"`
@@ -629,8 +662,12 @@ func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Platform == "" || req.Account == "" || req.Contact == "" || req.MessageID == "" || req.Emoji == "" {
-		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: "platform, account, contact, message_id, and emoji are required"})
+	if req.Platform == "" || req.Account == "" || req.MessageID == "" || req.Emoji == "" {
+		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: "platform, account, message_id, and emoji are required"})
+		return
+	}
+	if err := validateReactTarget(req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ReactResponse{Error: err.Error()})
 		return
 	}
 
@@ -663,21 +700,41 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		return ReactResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
 	}
 
-	// Resolve contact to a channel ID.
-	channelID, channelName, err := sender.Resolver.FindChannelID(ctx, req.Contact)
-	if err != nil {
-		return ReactResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+	var channelID, channelName string
+	switch {
+	case req.UserID != "":
+		userName, err := sender.Resolver.UserName(ctx, req.UserID)
+		if err != nil {
+			return ReactResponse{Error: fmt.Sprintf("unknown user %s: %v", req.UserID, err)}
+		}
+		channelName = "@" + userName
+
+		ch, _, _, err := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{req.UserID},
+		})
+		if err != nil {
+			return ReactResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, req.UserID, err)}
+		}
+		channelID = ch.ID
+
+	case req.Channel != "":
+		var err error
+		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Channel)
+		if err != nil {
+			return ReactResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
+		}
 	}
 
 	// Reactions are always sent via the bot token.
 	ref := goslack.NewRefToMessage(channelID, req.MessageID)
+	var reactErr error
 	if req.Remove {
-		err = sender.BotAPI.RemoveReactionContext(ctx, req.Emoji, ref)
+		reactErr = sender.BotAPI.RemoveReactionContext(ctx, req.Emoji, ref)
 	} else {
-		err = sender.BotAPI.AddReactionContext(ctx, req.Emoji, ref)
+		reactErr = sender.BotAPI.AddReactionContext(ctx, req.Emoji, ref)
 	}
-	if err != nil {
-		return ReactResponse{Error: fmt.Sprintf("react on %s: %v", channelName, err)}
+	if reactErr != nil {
+		return ReactResponse{Error: fmt.Sprintf("react on %s: %v", channelName, reactErr)}
 	}
 
 	// Store locally. Derive date file from the message timestamp.

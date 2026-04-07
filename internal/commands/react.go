@@ -13,7 +13,9 @@ import (
 type ReactParams struct {
 	Platform  string
 	Account   string
-	Contact   string
+	UserID    string // Slack DMs
+	Channel   string // Slack channels/MPDMs
+	Contact   string // WhatsApp
 	MessageID string
 	Emoji     string
 	Remove    bool
@@ -23,6 +25,8 @@ func RunReact(p ReactParams) error {
 	body, err := json.Marshal(api.ReactRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
+		UserID:    p.UserID,
+		Channel:   p.Channel,
 		Contact:   p.Contact,
 		MessageID: p.MessageID,
 		Emoji:     p.Emoji,
@@ -56,6 +60,13 @@ func RunReact(p ReactParams) error {
 	if p.Remove {
 		action = "Removed reaction"
 	}
-	fmt.Printf("%s %s on message %s in %s\n", action, p.Emoji, p.MessageID, p.Contact)
+	target := p.Contact
+	if target == "" {
+		target = p.UserID
+	}
+	if target == "" {
+		target = p.Channel
+	}
+	fmt.Printf("%s %s on message %s in %s\n", action, p.Emoji, p.MessageID, target)
 	return nil
 }
