@@ -21,41 +21,51 @@ type Match struct {
 	Conversation string
 	Date         string // date filename (YYYY-MM-DD) or thread timestamp
 	Thread       bool   // true if match came from a thread file
+	FilePath     string // absolute path to the source file
 	Msg          modelv1.MsgLine
 }
 
-// ParseGrepOutput extracts message-type events from rg/grep output.
-// Each output line has the form: /path/to/file.jsonl:{"type":"msg",...}
+// rgJSONLine represents a single line of rg --json output.
+// Only "match" and "context" types carry data we need.
+type rgJSONLine struct {
+	Type string `json:"type"`
+	Data struct {
+		Path  struct{ Text string } `json:"path"`
+		Lines struct{ Text string } `json:"lines"`
+	} `json:"data"`
+}
+
+// ParseGrepOutput extracts message-type events from rg --json output.
+// The input must be produced by rg with the --json flag, which emits
+// structured JSON with path and content as separate fields — no
+// ambiguous delimiter parsing needed.
+//
 // Only message events are returned; reactions, edits, deletes, and
-// context separator lines are skipped. Lines that fail to parse are
+// non-match/context lines are skipped. Lines that fail to parse are
 // collected into the returned error, but successfully parsed matches
 // are still returned.
 func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 	var matches []Match
 	var errs []error
 	for _, line := range bytes.Split(output, []byte("\n")) {
-		if len(line) == 0 || bytes.Equal(line, []byte("--")) {
+		if len(line) == 0 {
 			continue
 		}
 
-		// rg/grep output format:
-		//   match lines:   /path/to/file.jsonl:{"type":"msg",...}
-		//   context lines: /path/to/file.jsonl-{"type":"msg",...}
-		// Split on ":{" or "-{" — the delimiter is grep's : (match) or - (context).
-		idx := bytes.Index(line, []byte(":{"))
-		if idx < 0 {
-			idx = bytes.Index(line, []byte("-{"))
-		}
-		if idx < 0 {
+		var rg rgJSONLine
+		if err := json.Unmarshal(line, &rg); err != nil {
+			errs = append(errs, fmt.Errorf("parse rg json: %w", err))
 			continue
 		}
-		filePart := string(line[:idx])
-		jsonPart := line[idx+1:] // skip the delimiter, keep the "{"
+		if rg.Type != "match" && rg.Type != "context" {
+			continue
+		}
 
+		content := strings.TrimRight(rg.Data.Lines.Text, "\n")
 		var envelope struct {
 			Type modelv1.LineType `json:"type"`
 		}
-		if err := json.Unmarshal(jsonPart, &envelope); err != nil {
+		if err := json.Unmarshal([]byte(content), &envelope); err != nil {
 			errs = append(errs, fmt.Errorf("parse grep line: %w", err))
 			continue
 		}
@@ -64,12 +74,12 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 		}
 
 		var msg modelv1.MsgLine
-		if err := json.Unmarshal(jsonPart, &msg); err != nil {
+		if err := json.Unmarshal([]byte(content), &msg); err != nil {
 			errs = append(errs, fmt.Errorf("parse msg line: %w", err))
 			continue
 		}
 
-		platform, account, conversation, date, thread, pathErr := ParseFilePath(filePart, searchDir)
+		platform, account, conversation, date, thread, pathErr := ParseFilePath(rg.Data.Path.Text, searchDir)
 		if pathErr != nil {
 			errs = append(errs, pathErr)
 			continue
@@ -80,6 +90,7 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			Conversation: conversation,
 			Date:         date,
 			Thread:       thread,
+			FilePath:     rg.Data.Path.Text,
 			Msg:          msg,
 		})
 	}
@@ -124,9 +135,8 @@ func FilterThreadsBySince(matches []Match, since time.Duration) []Match {
 	return out
 }
 
-// ParseFilePath extracts platform/account/conversation/date from a grep
-// output file path. The path is relative to searchDir. The trailing colon
-// from grep output is stripped.
+// ParseFilePath extracts platform/account/conversation/date from a file
+// path. The path is relative to searchDir.
 //
 // Date files:   platform/account/conversation/YYYY-MM-DD.jsonl
 // Thread files:  platform/account/conversation/threads/THREAD_TS.jsonl
@@ -153,9 +163,19 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	}
 
 	dateFile := parts[len(parts)-1]
-	date = strings.TrimSuffix(dateFile, paths.FileExt)
+	// Strip known extensions (.jsonl, .md, .csv) to extract the date/name.
+	date = dateFile
+	for _, ext := range []string{paths.FileExt, ".md", ".csv"} {
+		date = strings.TrimSuffix(date, ext)
+	}
 
 	switch len(parts) {
+	case 5:
+		// GWS paths: gws/account/service/item/file
+		// e.g. gws/user/gdrive/doc-slug/Tab.md
+		//      gws/user/gcalendar/primary/2026-04-07.jsonl
+		platform, account = parts[0], parts[1]
+		conversation = parts[2] + "/" + parts[3]
 	case 4:
 		platform, account, conversation = parts[0], parts[1], parts[2]
 	case 3:

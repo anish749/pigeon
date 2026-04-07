@@ -1,0 +1,80 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/timeutil"
+)
+
+func newGlobCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "glob",
+		Short:   "Find data files by pattern and time window",
+		GroupID: groupReading,
+		Long: `Finds JSONL data files in the pigeon data directory using ripgrep.
+
+Returns absolute file paths sorted by modification time (most recent first).
+Use --since to filter to files within a time window:
+
+  Date files (YYYY-MM-DD.jsonl) are filtered by filename.
+  Thread files (threads/*.jsonl) are filtered by content — only threads
+  containing messages within the window are returned.
+
+Without --since, all data files are returned.
+
+This is the file discovery tool — use "pigeon grep" for content search.
+Output is one file path per line, suitable for piping to other tools.`,
+		Example: `  pigeon glob
+  pigeon glob --since=2h
+  pigeon glob --since=7d --platform=slack
+  pigeon glob --platform=slack --account=acme-corp
+  pigeon glob --since=24h | xargs jq -r 'select(.type == "msg") | .sender'`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return fmt.Errorf("get platform flag: %w", err)
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return fmt.Errorf("get account flag: %w", err)
+			}
+			since, err := cmd.Flags().GetString("since")
+			if err != nil {
+				return fmt.Errorf("get since flag: %w", err)
+			}
+
+			dir := paths.SearchDir(platform, account)
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				return fmt.Errorf("no data at %s", dir)
+			}
+
+			var sinceDur time.Duration
+			if since != "" {
+				d, err := timeutil.ParseDuration(since)
+				if err != nil {
+					return fmt.Errorf("invalid --since value %q: %w", since, err)
+				}
+				sinceDur = d
+			}
+
+			files, err := read.Glob(dir, sinceDur)
+			if err != nil {
+				return err
+			}
+			for _, f := range files {
+				fmt.Println(f)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringP("platform", "p", "", "filter by platform")
+	cmd.Flags().StringP("account", "a", "", "filter by account")
+	cmd.Flags().String("since", "", "only files with data from last duration (e.g. 2h, 7d)")
+	return cmd
+}

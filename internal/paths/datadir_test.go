@@ -87,6 +87,25 @@ func TestAccountDir_MaintenancePath(t *testing.T) {
 	}
 }
 
+func TestIsThreadFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/data/slack/ws/#general/threads/1742100000.jsonl", true},
+		{"/data/slack/ws/#general/2026-04-07.jsonl", false},
+		{"/data/slack/ws/#general/threads/1742100000.123456.jsonl", true},
+		{"threads/1742100000.jsonl", true},
+		{"/data/slack/ws/#threads/2026-04-07.jsonl", false}, // conversation named #threads, not a thread file
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := IsThreadFile(tt.path); got != tt.want {
+			t.Errorf("IsThreadFile(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestDefaultDataRoot_UsesEnv(t *testing.T) {
 	t.Setenv("PIGEON_DATA_DIR", "/tmp/pigeon-test")
 	got := DefaultDataRoot().AccountFor(account.New("whatsapp", "+15551234567")).Path()

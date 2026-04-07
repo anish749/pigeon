@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	gosync "sync"
 	"time"
@@ -159,6 +158,13 @@ func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
 }
 
+// EnsureMeta writes .meta.json for a conversation if it doesn't already exist.
+func (ms *MessageStore) EnsureMeta(conversation string, meta modelv1.ConvMeta) {
+	if _, err := ms.store.WriteMetaIfNotExists(ms.acct, conversation, meta); err != nil {
+		slog.Warn("write meta failed", "conversation", conversation, "error", err)
+	}
+}
+
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
 func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
 	ms.mu.Lock()
@@ -191,8 +197,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		return fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Filter out public channels the user hasn't joined and Slackbot
-	var conversations []goslack.Channel
+	// Filter out public channels the user hasn't joined and Slackbot.
+	var memberConversations []goslack.Channel
 	var skippedPublic int
 	for _, ch := range allConversations {
 		if !ch.IsIM && !ch.IsMpIM && !ch.IsPrivate && !ch.IsMember {
@@ -202,10 +208,34 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		if ch.IsIM && ch.User == "USLACKBOT" {
 			continue
 		}
-		conversations = append(conversations, ch)
+		memberConversations = append(memberConversations, ch)
 	}
 
-	// Count by type after filtering
+	// Register all channel names and membership in resolver so the real-time
+	// listener knows about them. This must happen for all member conversations,
+	// not just the ones selected for sync.
+	for _, ch := range memberConversations {
+		if err := resolver.RegisterConversation(ctx, ch); err != nil {
+			slog.WarnContext(ctx, "slack sync: failed to register conversation",
+				"channel", ch.ID, "error", err)
+		}
+		resolver.AddMember(ch.ID)
+		channelName, err := resolver.ChannelName(ctx, ch.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "slack sync: cannot resolve channel name for meta",
+				"channel_id", ch.ID, "error", err)
+			continue
+		}
+		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
+	}
+
+	// Determine which channels need syncing. Returns a sorted, filtered list:
+	// only channels with recent activity (or all channels on first sync / small workspaces).
+	// Muted channels are excluded — they still get registered in the resolver
+	// above so real-time messages work, but we don't spend sync budget on them.
+	conversations := prioritizeChannels(ctx, api, gate, ms.cursors, memberConversations)
+
+	// Count by type for progress reporting.
 	var totalDMs, totalMpIMs, totalPrivate, totalPublic int
 	for _, ch := range conversations {
 		switch channelPriority(ch) {
@@ -220,11 +250,6 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		}
 	}
 
-	// Sort: DMs first, then group IMs, then private channels, then public channels
-	sort.SliceStable(conversations, func(i, j int) bool {
-		return channelPriority(conversations[i]) < channelPriority(conversations[j])
-	})
-
 	slog.InfoContext(ctx, "slack sync: conversations",
 		"account", acct,
 		"dms", totalDMs,
@@ -232,38 +257,33 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		"private", totalPrivate,
 		"public", totalPublic,
 		"skipped_non_member", skippedPublic,
-		"total", len(conversations),
+		"total_member", len(memberConversations),
+		"to_sync", len(conversations),
 	)
-
-	// Register all channel names and membership in resolver so real-time
-	// listener knows about them and can filter non-member public channels.
-	for _, ch := range conversations {
-		resolver.RegisterConversation(ctx, ch)
-		resolver.AddMember(ch.ID)
-	}
 
 	// Track per-category progress
 	var doneDMs, doneMpIMs, donePrivate, donePublic int
-
 	var synced, totalMessages int
 	for _, ch := range conversations {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		gate.channel = resolver.ChannelName(ctx, ch.ID)
+		channelName, err := resolver.ChannelName(ctx, ch.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "slack sync: cannot resolve channel name",
+				"channel_id", ch.ID, "error", err)
+			continue
+		}
+		gate.channel = channelName
 		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
 			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
 
 		// Use cursor if resuming, otherwise go back 90 days.
-		// The first page of fetchHistory doubles as the activity check —
-		// if it comes back empty, we move on. No separate probe call.
 		oldest := defaultOldest
 		if cursor, ok := ms.Cursor(ch.ID); ok {
 			oldest = cursor
 		}
-
-		channelName := resolver.ChannelName(ctx, ch.ID)
 
 		msgs, err := fetchHistory(ctx, api, gate, ch.ID, oldest, activityCutoff)
 		if err != nil {
@@ -283,11 +303,10 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Skip bot messages (BotID set), system events like channel_join/channel_topic
-			// (SubType set, except thread_broadcast which is a real user message), and
-			// messages with empty text (can happen when the bot token lacks scopes like
-			// channels:history — Slack returns the message envelope but strips the content).
-			if msg.BotID != "" || (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+			// Skip system events (channel_join, channel_topic, etc.) and messages
+			// with empty text. Allow bot messages through — they contain valuable
+			// info (alerts, CI, integrations).
+			if msg.Text == "" || !allowedSubType(msg.SubType) {
 				slog.WarnContext(ctx, "slack sync: skipping message",
 					"channel", channelName, "ts", msg.Timestamp,
 					"botID", msg.BotID, "subType", msg.SubType,
@@ -295,15 +314,28 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 
-			userName := resolver.UserName(ctx, msg.User)
-			text := resolver.ResolveText(ctx, msg.Text)
+			userName, userID, err := resolver.SenderName(ctx, msg.User, msg.BotID, msg.Username)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve sender",
+					"channel", channelName, "ts", msg.Timestamp, "error", err)
+				continue
+			}
+			text, err := resolver.ResolveText(ctx, msg.Text)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve text",
+					"channel", channelName, "ts", msg.Timestamp, "error", err)
+				continue
+			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, msg.User, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
+			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
 			written++
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: reaction write failed", "error", err)
+			}
 		}
 
 		// Sync thread replies for messages with threads
@@ -407,7 +439,10 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 	slog.InfoContext(ctx, "slack sync: bot DMs", "account", acct, "count", len(botDMs))
 
 	for _, ch := range botDMs {
-		resolver.RegisterConversation(ctx, ch)
+		if err := resolver.RegisterConversation(ctx, ch); err != nil {
+			slog.WarnContext(ctx, "slack sync: failed to register bot DM",
+				"channel", ch.ID, "error", err)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -416,10 +451,17 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		// same directory as the user's DMs with that contact.
 		var channelName string
 		if ch.IsIM {
-			channelName = "@" + resolver.UserName(ctx, ch.User)
+			userName, err := resolver.UserName(ctx, ch.User)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping bot DM, cannot resolve user",
+					"channel", ch.ID, "user", ch.User, "error", err)
+				continue
+			}
+			channelName = "@" + userName
 		} else {
 			channelName = FormatChannelName(ch)
 		}
+		ms.EnsureMeta(channelName, resolver.ConvMeta(ch.ID, channelName))
 
 		oldest := defaultOldest
 		if c, ok := ms.Cursor(ch.ID); ok {
@@ -442,7 +484,12 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 
-			text := resolver.ResolveText(ctx, msg.Text)
+			text, err := resolver.ResolveText(ctx, msg.Text)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve text",
+					"channel", channelName, "ts", msg.Timestamp, "error", err)
+				continue
+			}
 			ts := ParseTimestamp(msg.Timestamp)
 
 			var senderName string
@@ -453,7 +500,13 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				senderID = msg.BotID
 				via = modelv1.ViaPigeonAsBot
 			} else {
-				senderName = "sent to pigeon by " + resolver.UserName(ctx, msg.User)
+				userName, err := resolver.UserName(ctx, msg.User)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve user",
+						"channel", channelName, "ts", msg.Timestamp, "error", err)
+					continue
+				}
+				senderName = "sent to pigeon by " + userName
 				senderID = msg.User
 				via = modelv1.ViaToPigeon
 			}
@@ -463,6 +516,9 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			written++
+			if err := writeReactions(ctx, ms, resolver, channelName, msg); err != nil {
+				slog.WarnContext(ctx, "slack sync: bot DM reaction write failed", "error", err)
+			}
 		}
 
 		if lastTS != "" {
@@ -600,19 +656,28 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.BotID != "" || reply.Text == "" {
+			if reply.Text == "" || !allowedSubType(reply.SubType) {
 				continue
 			}
-			// Skip subtypes except thread_broadcast
-			if reply.SubType != "" && reply.SubType != "thread_broadcast" {
+			userName, userID, err := resolver.SenderName(ctx, reply.User, reply.BotID, reply.Username)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve sender",
+					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 				continue
 			}
-			userName := resolver.UserName(ctx, reply.User)
-			text := resolver.ResolveText(ctx, reply.Text)
+			text, err := resolver.ResolveText(ctx, reply.Text)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve text",
+					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
+				continue
+			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, reply.User, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
+			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
+			}
+			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
+				slog.WarnContext(ctx, "slack sync: thread reaction write failed", "error", err)
 			}
 		}
 
@@ -632,16 +697,23 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if ctxMsg.BotID != "" || ctxMsg.Text == "" {
+					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
 						continue
 					}
-					if ctxMsg.SubType != "" && ctxMsg.SubType != "thread_broadcast" {
+					userName, userID, err := resolver.SenderName(ctx, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
+					if err != nil {
+						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve sender",
+							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 						continue
 					}
-					userName := resolver.UserName(ctx, ctxMsg.User)
-					text := resolver.ResolveText(ctx, ctxMsg.Text)
+					text, err := resolver.ResolveText(ctx, ctxMsg.Text)
+					if err != nil {
+						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve text",
+							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
+						continue
+					}
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, ctxMsg.User, text, ts, ctxMsg.Timestamp); err != nil {
+					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, userID, text, ts, ctxMsg.Timestamp); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}
@@ -683,16 +755,3 @@ func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimi
 	return all, nil
 }
 
-// channelPriority returns a sort key: DMs(0) < group IMs(1) < private channels(2) < public(3).
-func channelPriority(ch goslack.Channel) int {
-	if ch.IsIM {
-		return 0
-	}
-	if ch.IsMpIM {
-		return 1
-	}
-	if ch.IsPrivate {
-		return 2
-	}
-	return 3
-}

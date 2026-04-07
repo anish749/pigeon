@@ -7,6 +7,21 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 )
 
+// SearchDir returns the data directory scoped by optional platform and account
+// filters. With no filters, returns the data root. With platform, returns the
+// platform directory. With both, returns the account directory.
+func SearchDir(platform, accountName string) string {
+	root := DefaultDataRoot()
+	switch {
+	case platform != "" && accountName != "":
+		return root.AccountFor(account.New(platform, accountName)).Path()
+	case platform != "":
+		return root.Platform(platform).Path()
+	default:
+		return root.Path()
+	}
+}
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -92,6 +107,11 @@ func (c ConversationDir) Path() string {
 	return filepath.Join(c.account.Path(), c.name)
 }
 
+// MetaFile returns the path to the conversation's .meta.json sidecar.
+func (c ConversationDir) MetaFile() string {
+	return filepath.Join(c.Path(), ".meta.json")
+}
+
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
@@ -112,6 +132,12 @@ const (
 	// ThreadGlobFind is the -path pattern for find(1) to match thread files.
 	ThreadGlobFind = "*/" + ThreadsSubdir + "/*" + FileExt
 )
+
+// IsThreadFile reports whether the given file path is a thread file
+// (i.e. its parent directory is the threads subdirectory).
+func IsThreadFile(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == ThreadsSubdir
+}
 
 // ThreadsDir returns the path to the threads subdirectory.
 func (c ConversationDir) ThreadsDir() string {

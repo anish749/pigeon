@@ -142,6 +142,17 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	isGroup := chatJID.Server == types.GroupServer
 	convDir := l.resolver.ConvDir(ctx, chatJID)
 
+	displayName := convDir
+	if isGroup {
+		displayName = l.resolver.GroupName(ctx, chatJID)
+	} else {
+		displayName = l.resolver.ContactName(ctx, chatJID)
+	}
+	meta := l.resolver.ConvMeta(ctx, chatJID, displayName)
+	if _, err := l.store.WriteMetaIfNotExists(l.acct, convDir, meta); err != nil {
+		slog.WarnContext(ctx, "whatsapp: write meta failed", "conv", convDir, "error", err)
+	}
+
 	var written int
 	for _, hsMsg := range conv.GetMessages() {
 		wmi := hsMsg.GetMessage()

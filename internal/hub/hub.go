@@ -421,7 +421,8 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		return lastDelivered
 	}
 
-	lines := modelv1.FormatDateFile(df, time.Local, readErr)
+	convMeta, metaErr := h.store.ReadMeta(ch.acct, conversation)
+	lines := modelv1.FormatDateFileNotification(df, time.Local, convMeta, readErr, metaErr)
 
 	// Find connected session.
 	h.mu.RLock()
@@ -434,7 +435,6 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 		return lastDelivered
 	}
 
-	// Send all lines as a single message.
 	msg := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,

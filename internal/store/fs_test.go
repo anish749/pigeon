@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -393,6 +394,195 @@ func TestInterleaveThreads_MultipleThreads(t *testing.T) {
 			t.Errorf("messages[%d] = %q, want %q (order: %v)", i, id, want[i], ids)
 			break
 		}
+	}
+}
+
+// --- ReadConversation options ---
+
+// setupMultiDay populates a conversation with messages across 5 days
+// (March 12-16, 2026) with 3 messages per day (at 09:00, 12:00, 18:00 UTC).
+// Returns message IDs in chronological order.
+func setupMultiDay(t *testing.T, s *FSStore, acct account.Account) []string {
+	t.Helper()
+	var ids []string
+	for day := 12; day <= 16; day++ {
+		for _, hour := range []int{9, 12, 18} {
+			id := fmt.Sprintf("D%d-H%d", day, hour)
+			ids = append(ids, id)
+			m := msgLine(id, ts(2026, 3, day, hour, 0, 0), "Alice", "U1", fmt.Sprintf("msg day %d hour %d", day, hour))
+			if err := s.Append(acct, "#general", m); err != nil {
+				t.Fatalf("Append %s: %v", id, err)
+			}
+		}
+	}
+	return ids
+}
+
+func TestReadConversation_Last(t *testing.T) {
+	s, acct := setup(t)
+	ids := setupMultiDay(t, s, acct)
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Last: 5})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 5 {
+		t.Fatalf("messages = %d, want 5", len(df.Messages))
+	}
+	// Should be the last 5 messages chronologically
+	want := ids[len(ids)-5:]
+	for i, m := range df.Messages {
+		if m.ID != want[i] {
+			t.Errorf("messages[%d] = %q, want %q", i, m.ID, want[i])
+		}
+	}
+}
+
+func TestReadConversation_Last_MoreThanAvailable(t *testing.T) {
+	s, acct := setup(t)
+	setupMultiDay(t, s, acct) // 15 messages total
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Last: 100})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 15 {
+		t.Errorf("messages = %d, want 15 (all available)", len(df.Messages))
+	}
+}
+
+func TestReadConversation_Since(t *testing.T) {
+	s, acct := setup(t)
+	setupMultiDay(t, s, acct)
+
+	// Since 2 days: cutoff is March 14 at current time.
+	// File selection picks files >= March 14 (dates 14, 15, 16 = 9 messages).
+	// Precise filter then removes messages before the exact cutoff.
+	// Because time.Now() varies, just verify we get messages from the right date files.
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Since: 48 * time.Hour})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	// All returned messages should be within the last 48h
+	cutoff := time.Now().Add(-48 * time.Hour)
+	for _, m := range df.Messages {
+		if m.Ts.Before(cutoff) {
+			t.Errorf("message %s at %v is before cutoff %v", m.ID, m.Ts, cutoff)
+		}
+	}
+}
+
+func TestReadConversation_Since_SelectsCorrectFiles(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write messages across 3 days relative to now
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	for dayOffset := -2; dayOffset <= 0; dayOffset++ {
+		d := today.Add(time.Duration(dayOffset) * 24 * time.Hour)
+		for _, hour := range []int{9, 12, 18} {
+			t2 := d.Add(time.Duration(hour) * time.Hour)
+			id := fmt.Sprintf("D%d-H%d", dayOffset, hour)
+			m := msgLine(id, t2, "Alice", "U1", "msg")
+			if err := s.Append(acct, "#general", m); err != nil {
+				t.Fatalf("Append %s: %v", id, err)
+			}
+		}
+	}
+
+	// Since 3 days should include all files
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Since: 3 * 24 * time.Hour})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) < 6 {
+		t.Errorf("messages = %d, want at least 6", len(df.Messages))
+	}
+}
+
+func TestReadConversation_SinceAndLast(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write messages across 3 days relative to now
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	for dayOffset := -2; dayOffset <= 0; dayOffset++ {
+		d := today.Add(time.Duration(dayOffset) * 24 * time.Hour)
+		for _, hour := range []int{9, 12, 18} {
+			t2 := d.Add(time.Duration(hour) * time.Hour)
+			id := fmt.Sprintf("D%d-H%d", dayOffset, hour)
+			m := msgLine(id, t2, "Alice", "U1", "msg")
+			if err := s.Append(acct, "#general", m); err != nil {
+				t.Fatalf("Append %s: %v", id, err)
+			}
+		}
+	}
+
+	// Since 3 days gets all messages, then last 3 caps it
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Since: 3 * 24 * time.Hour, Last: 3})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(df.Messages))
+	}
+	for i := 1; i < len(df.Messages); i++ {
+		if df.Messages[i].Ts.Before(df.Messages[i-1].Ts) {
+			t.Errorf("messages not in chronological order: %v before %v", df.Messages[i].Ts, df.Messages[i-1].Ts)
+		}
+	}
+}
+
+func TestReadConversation_Default_Last25(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write 30 messages across multiple days
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 30; i++ {
+		d := today.Add(-time.Duration(29-i) * time.Hour)
+		id := fmt.Sprintf("M%02d", i)
+		m := msgLine(id, d, "Alice", "U1", "msg")
+		if err := s.Append(acct, "#general", m); err != nil {
+			t.Fatalf("Append %s: %v", id, err)
+		}
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	// Default should return last 25 messages
+	if len(df.Messages) != 25 {
+		t.Fatalf("messages = %d, want 25", len(df.Messages))
+	}
+	// First returned message should be M05 (skipped M00-M04)
+	if df.Messages[0].ID != "M05" {
+		t.Errorf("first message = %q, want M05", df.Messages[0].ID)
+	}
+	if df.Messages[24].ID != "M29" {
+		t.Errorf("last message = %q, want M29", df.Messages[24].ID)
+	}
+}
+
+func TestReadConversation_Default_LessThan25(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write only 3 messages — should return all of them
+	m1 := msgLine("A", ts(2026, 1, 10, 9, 0, 0), "Alice", "U1", "first")
+	m2 := msgLine("B", ts(2026, 1, 10, 12, 0, 0), "Bob", "U2", "second")
+	m3 := msgLine("C", ts(2026, 1, 11, 9, 0, 0), "Alice", "U1", "third")
+	s.Append(acct, "#general", m1)
+	s.Append(acct, "#general", m2)
+	s.Append(acct, "#general", m3)
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (all available)", len(df.Messages))
 	}
 }
 

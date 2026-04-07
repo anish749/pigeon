@@ -16,6 +16,10 @@ import (
 )
 
 const repo = "anish749/pigeon"
+
+func isDev(version string) bool {
+	return version == "dev" || strings.HasPrefix(version, "dev-")
+}
 const checkInterval = 24 * time.Hour
 
 // Update checks for the latest release and replaces the binary if a newer version exists.
@@ -26,7 +30,7 @@ func Update(currentVersion string) (bool, error) {
 // AutoCheck checks for updates if 24 hours have passed since the last check.
 // Runs silently in the background so it never blocks the user's command.
 func AutoCheck(currentVersion string) {
-	if currentVersion == "dev" {
+	if isDev(currentVersion) {
 		return
 	}
 
@@ -53,7 +57,7 @@ func AutoCheck(currentVersion string) {
 // if the binary was replaced. Intended for use at daemon startup before
 // listeners are started — avoids wasting work that a re-exec would redo.
 func CheckOnce(currentVersion string) (bool, error) {
-	if currentVersion == "dev" {
+	if isDev(currentVersion) {
 		return false, nil
 	}
 	return doUpdate(currentVersion, false)
@@ -75,7 +79,7 @@ const (
 //
 // onReexec is called when the daemon should re-exec itself.
 func DaemonAutoUpdate(ctx context.Context, currentVersion string, onReexec func()) {
-	if currentVersion == "dev" {
+	if isDev(currentVersion) {
 		return
 	}
 
@@ -120,7 +124,7 @@ func DaemonAutoUpdate(ctx context.Context, currentVersion string, onReexec func(
 }
 
 func doUpdate(currentVersion string, verbose bool) (bool, error) {
-	if currentVersion == "dev" {
+	if isDev(currentVersion) {
 		slog.Warn("skipping update check: running dev build")
 		return false, nil
 	}

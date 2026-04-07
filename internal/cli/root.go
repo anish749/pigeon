@@ -101,19 +101,17 @@ DATA LAYOUT
 DIRECT FILE ACCESS — rg and jq
 
   The JSONL files are designed for direct access with ripgrep and jq.
-  This is useful for queries that go beyond what pigeon search offers.
-
-  Search with rg:
+  pigeon glob and pigeon grep wrap rg with --since filtering and
+  thread awareness, but you can also use rg and jq directly:
 
     rg "deploy" ~/.local/share/pigeon/                                # all messages mentioning "deploy"
     rg "deploy" ~/.local/share/pigeon/slack/acme-corp/                # scoped to workspace
-    rg "deploy" ~/.local/share/pigeon/ --glob '*.jsonl'               # only message files
 
   Pipe to jq for structured queries:
 
-    rg "deploy" ~/.local/share/pigeon/ | cut -d: -f2- | jq 'select(.type == "msg")'
-    rg "." ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'
-    rg "." ~/.local/share/pigeon/ --glob '*.jsonl' | cut -d: -f2- | jq -s 'map(select(.type == "msg")) | group_by(.sender) | map({sender: .[0].sender, count: length}) | sort_by(-.count)'
+    pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
+    pigeon grep -q "Alice" -C 0 | cut -d: -f2- | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'
+    pigeon glob --since=7d | xargs jq -r 'select(.type == "msg") | .sender'
 
   jq on a single file (no rg needed):
 
@@ -150,7 +148,8 @@ WORKFLOW — READING MESSAGES
 
     pigeon list                             # all platforms and accounts
     pigeon list --platform=whatsapp         # accounts in a platform
-    pigeon list --platform=whatsapp --account=+14155551234   # conversations
+    pigeon list --since=2h                  # conversations with recent activity
+    pigeon glob --since=7d                  # find data files in a time window
 
   Read messages from a conversation:
 
@@ -161,11 +160,14 @@ WORKFLOW — READING MESSAGES
     Modes: --last=N (last N messages), --since=DURATION (e.g. 30m, 2h, 7d),
            --date=YYYY-MM-DD (specific day). Default: today's messages.
 
-  Search across conversations:
+  Search across conversations (requires ripgrep):
 
-    pigeon search -q "meeting" --since=24h
-    pigeon search -q "deploy" --platform=slack
-    pigeon search -q "bug" --platform=slack --account=acme-corp --since=7d
+    pigeon grep -q "meeting" --since=24h
+    pigeon grep -q "deploy" --platform=slack
+    pigeon grep -q "bug" -p slack -a acme-corp --since=7d -C 3
+    pigeon grep -q "deploy" -l              # file paths only
+    pigeon grep -q "deploy" -c              # match counts per file
+    pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
 
 ─────────────────────────────────────────────────────────
 
@@ -240,7 +242,8 @@ MAINTENANCE
 		// Reading
 		newListCmd(),
 		newReadCmd(),
-		newSearchCmd(),
+		newGlobCmd(),
+		newGrepCmd(),
 
 		// Sending
 		newSendCmd(),

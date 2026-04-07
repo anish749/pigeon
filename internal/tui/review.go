@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anish749/pigeon/internal/api"
+	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
 )
@@ -184,9 +185,9 @@ func (m model) View() string {
 		summary := itemSummary(item)
 		if i == m.cursor {
 			b.WriteString(selectedStyle.Render(fmt.Sprintf("● %s", summary)))
-			b.WriteString("  " + dimStyle.Render(formatAge(age)))
+			b.WriteString("  " + dimStyle.Render(timeutil.FormatAge(age)))
 		} else {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  %s  %s", summary, formatAge(age))))
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  %s  %s", summary, timeutil.FormatAge(age))))
 		}
 		b.WriteString("\n")
 	}
@@ -219,7 +220,7 @@ func (m model) renderDetail(item *outbox.Item) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  To: %s\n", req.Contact))
+	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
 	b.WriteString(fmt.Sprintf("  Via: %s / %s\n", req.Platform, req.Account))
 	if req.Thread != "" {
 		b.WriteString(fmt.Sprintf("  Thread: %s\n", req.Thread))
@@ -323,17 +324,6 @@ func doPost(url string, body []byte) (map[string]any, error) {
 	return result, nil
 }
 
-func formatAge(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	default:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-}
-
 // itemSummary derives a one-line display string from the outbox item's payload.
 func itemSummary(item *outbox.Item) string {
 	var req api.SendRequest
@@ -344,5 +334,5 @@ func itemSummary(item *outbox.Item) string {
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}
-	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Contact, msg)
+	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
 }

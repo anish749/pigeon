@@ -29,6 +29,51 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
+// formatMsgNotification renders a message for Claude Code channel notifications.
+// Sender and text lead (visible in truncated UI); metadata follows on an indented line.
+//
+// TODO: include attachments
+// TODO: include reactions
+func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta) []string {
+	tsStr := m.Ts.In(loc).Format("15:04:05")
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s: %s", m.Sender, m.Text))
+
+	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
+	if m.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", m.Via)
+	}
+	if m.ReplyTo != "" {
+		meta += fmt.Sprintf(" [reply_to:%s]", m.ReplyTo)
+	}
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
+	lines = append(lines, meta)
+
+	return lines
+}
+
+// FormatDateFileNotification renders a resolved conversation day for Claude Code
+// channel notifications. See formatMsgNotification for per-message format.
+// If any non-nil errors are passed, a warning line is appended at the end.
+func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMeta *ConvMeta, errs ...error) []string {
+	if f == nil {
+		return nil
+	}
+	var lines []string
+	for _, m := range f.Messages {
+		lines = append(lines, formatMsgNotification(m, loc, convMeta)...)
+	}
+	if w := formatWarning(errs...); w != "" {
+		lines = append(lines, w)
+	}
+	return lines
+}
+
 // FormatDateFile renders a resolved conversation day as display lines.
 // If any non-nil errors are passed, a warning line is appended at the end.
 func FormatDateFile(f *ResolvedDateFile, loc *time.Location, errs ...error) []string {
@@ -45,34 +90,6 @@ func FormatDateFile(f *ResolvedDateFile, loc *time.Location, errs ...error) []st
 	return lines
 }
 
-// FormatThreadFile renders a resolved thread as display lines.
-// If any non-nil errors are passed, a warning line is appended at the end.
-func FormatThreadFile(f *ResolvedThreadFile, loc *time.Location, errs ...error) []string {
-	if f == nil {
-		return nil
-	}
-	var lines []string
-
-	for _, c := range f.Before {
-		lines = append(lines, FormatMsg(c, loc)...)
-	}
-
-	lines = append(lines, FormatMsg(f.Parent, loc)...)
-
-	for _, r := range f.Replies {
-		lines = append(lines, FormatMsg(r, loc)...)
-	}
-
-	for _, c := range f.After {
-		lines = append(lines, FormatMsg(c, loc)...)
-	}
-
-	if w := formatWarning(errs...); w != "" {
-		lines = append(lines, w)
-	}
-	return lines
-}
-
 // formatWarning joins non-nil errors into a single warning line.
 // Returns empty string if all errors are nil.
 func formatWarning(errs ...error) string {
@@ -81,6 +98,31 @@ func formatWarning(errs ...error) string {
 		return ""
 	}
 	return "\u26a0 " + joined.Error()
+}
+
+// FormatConvMeta renders conversation metadata as a bracketed tag line.
+// Returns empty string if there are no IDs to show.
+func FormatConvMeta(meta *ConvMeta) string {
+	var parts []string
+	if meta.Type != "" {
+		parts = append(parts, fmt.Sprintf("[type:%s]", meta.Type))
+	}
+	if meta.ChannelID != "" {
+		parts = append(parts, fmt.Sprintf("[channel_id:%s]", meta.ChannelID))
+	}
+	if meta.UserID != "" {
+		parts = append(parts, fmt.Sprintf("[user_id:%s]", meta.UserID))
+	}
+	if meta.JID != "" {
+		parts = append(parts, fmt.Sprintf("[jid:%s]", meta.JID))
+	}
+	if meta.LID != "" {
+		parts = append(parts, fmt.Sprintf("[lid:%s]", meta.LID))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
 }
 
 // formatReactions renders a list of reactions as a single display line.

@@ -7,8 +7,9 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 type ReadParams struct {
@@ -35,7 +36,7 @@ func RunRead(p ReadParams) error {
 		Last: p.Last,
 	}
 	if p.Since != "" {
-		d, err := parseDuration(p.Since)
+		d, err := timeutil.ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -54,23 +55,21 @@ func RunRead(p ReadParams) error {
 	lines := modelv1.FormatDateFile(df, time.Local, readErr)
 
 	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
-	fmt.Printf("--- %s/%s ---\n", acct.Display(), conv.displayName)
+	header := fmt.Sprintf("--- %s/%s", acct.Display(), conv.displayName)
+	if meta, err := s.ReadMeta(acct, conv.dirName); err != nil {
+		return fmt.Errorf("read metadata for %s: %w", conv.dirName, err)
+	} else if meta != nil {
+		if ids := modelv1.FormatConvMeta(meta); ids != "" {
+			header += " " + ids
+		}
+	}
+	header += " ---"
+	fmt.Println(header)
 	fmt.Printf("    %s\n", convDir.Path())
 	fmt.Println(strings.Join(lines, "\n"))
 	return nil
 }
 
-// parseDuration handles Go durations plus "d" for days.
-func parseDuration(s string) (time.Duration, error) {
-	if rest, ok := strings.CutSuffix(s, "d"); ok {
-		var days int
-		if _, err := fmt.Sscanf(rest, "%d", &days); err != nil {
-			return 0, err
-		}
-		return time.Duration(days) * 24 * time.Hour, nil
-	}
-	return time.ParseDuration(s)
-}
 
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {

@@ -29,6 +29,9 @@ const (
 )
 
 // MsgLine represents a message event.
+//
+// The "ts" field name and ISO 8601 format are depended on by read.threadDatePatterns,
+// which uses rg -l to find thread files by matching "ts":"YYYY-MM-DD in serialized JSONL.
 type MsgLine struct {
 	ID          string       `json:"id"`                // platform message ID
 	Ts          time.Time    `json:"ts"`                // message timestamp
@@ -204,10 +207,12 @@ type DateFile struct {
 }
 
 // ThreadFile holds all parsed events from a single thread file.
+// Context messages are stored so that grep and search commands that read
+// thread files directly can surface surrounding channel messages.
 type ThreadFile struct {
 	Parent    MsgLine
 	Replies   []MsgLine
-	Context   []MsgLine // channel context messages (before + after parent)
+	Context   []MsgLine // channel messages around the parent, searchable via grep/rg
 	Reactions []ReactLine
 	Edits     []EditLine
 	Deletes   []DeleteLine
