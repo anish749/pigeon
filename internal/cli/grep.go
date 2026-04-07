@@ -110,37 +110,10 @@ JSON fields in each line:
 				sinceDur = d
 			}
 
-			out, err := read.Grep(dir, read.GrepOpts{
-				Query:           query,
-				Since:           sinceDur,
-				Context:         context,
-				FilesOnly:       filesOnly,
-				Count:           count,
-				CaseInsensitive: caseInsensitive,
-				FixedStrings:    fixedStrings,
-			})
-			if err != nil {
-				return err
-			}
-
-			if len(out) == 0 {
-				fmt.Println("No matches found.")
-				return nil
-			}
-
-			// Raw rg output — when piped to jq, the caller gets
-			// structured JSONL. When -l or -c, output is already
-			// file paths or counts.
-			if filesOnly || count {
-				os.Stdout.Write(out)
-				return nil
-			}
-
-			// For content output, print the parsed summary if stdout
-			// is a terminal. This requires a second rg call with --json
-			// for reliable parsing (no delimiter ambiguity).
-			if isTerminal() {
-				jsonOut, err := read.Grep(dir, read.GrepOpts{
+			// Terminal: use rg --json for structured parsing.
+			// Pipe: use raw rg output for jq compatibility.
+			if isTerminal() && !filesOnly && !count {
+				out, err := read.Grep(dir, read.GrepOpts{
 					Query:           query,
 					Since:           sinceDur,
 					Context:         context,
@@ -151,7 +124,7 @@ JSON fields in each line:
 				if err != nil {
 					return err
 				}
-				matches, parseErr := search.ParseGrepOutput(jsonOut, dir)
+				matches, parseErr := search.ParseGrepOutput(out, dir)
 				if parseErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
 				}
@@ -168,6 +141,22 @@ JSON fields in each line:
 				return nil
 			}
 
+			out, err := read.Grep(dir, read.GrepOpts{
+				Query:           query,
+				Since:           sinceDur,
+				Context:         context,
+				FilesOnly:       filesOnly,
+				Count:           count,
+				CaseInsensitive: caseInsensitive,
+				FixedStrings:    fixedStrings,
+			})
+			if err != nil {
+				return err
+			}
+			if len(out) == 0 {
+				fmt.Println("No matches found.")
+				return nil
+			}
 			os.Stdout.Write(out)
 			return nil
 		},
