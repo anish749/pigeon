@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -304,11 +305,7 @@ func (s *FSStore) listConversationsSince(opts ListOpts) ([]ConversationInfo, err
 	var results []ConversationInfo
 	for k, dateName := range seen {
 		convDir := s.root.Platform(k.platform).AccountFromSlug(k.account).Conversation(k.conversation)
-		// Parse the date from the most recent filename for sorting.
-		var lastMod time.Time
-		if t, err := time.Parse("2006-01-02", strings.TrimSuffix(dateName, paths.FileExt)); err == nil {
-			lastMod = t
-		}
+		lastMod := parseDateOrThreadFilename(dateName)
 		results = append(results, ConversationInfo{
 			Platform:     k.platform,
 			Account:      k.account,
@@ -324,11 +321,28 @@ func (s *FSStore) listConversationsSince(opts ListOpts) ([]ConversationInfo, err
 	return results, nil
 }
 
+// parseDateOrThreadFilename extracts a time from a data filename.
+// Date files: "2026-04-07.jsonl" → 2026-04-07 00:00 UTC.
+// Thread files: "1742100000.jsonl" → Unix timestamp.
+func parseDateOrThreadFilename(name string) time.Time {
+	stem := strings.TrimSuffix(name, paths.FileExt)
+	if t, err := time.Parse("2006-01-02", stem); err == nil {
+		return t
+	}
+	if secs, err := strconv.ParseInt(strings.Split(stem, ".")[0], 10, 64); err == nil {
+		return time.Unix(secs, 0)
+	}
+	return time.Time{}
+}
+
 // parseDataFilePath extracts platform/account/conversation/filename from an
 // absolute data file path. Handles both date files and thread files:
 //
 //	<root>/platform/account/conversation/YYYY-MM-DD.jsonl
 //	<root>/platform/account/conversation/threads/TS.jsonl
+//
+// Assumes the standard 4-level layout (after stripping "threads").
+// Files at unexpected depths are returned as errors; the caller skips them.
 func parseDataFilePath(path, root string) (platform, account, conversation, dateName string, err error) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {

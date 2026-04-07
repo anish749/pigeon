@@ -19,7 +19,10 @@ import (
 //
 // Uses rg --files for fast filesystem traversal.
 func FindFiles(dir string, since time.Duration) ([]string, error) {
-	globs := fileGlobs(dir, since)
+	globs, err := fileGlobs(dir, since)
+	if err != nil {
+		return nil, err
+	}
 
 	rgPath, err := exec.LookPath("rg")
 	if err != nil {
@@ -53,7 +56,10 @@ func FindFiles(dir string, since time.Duration) ([]string, error) {
 // Grep runs a content search over data files under dir within the since
 // window. Returns raw rg/grep output. Uses rg with a grep fallback.
 func Grep(query, dir string, since time.Duration, context int) ([]byte, error) {
-	globs := fileGlobs(dir, since)
+	globs, err := fileGlobs(dir, since)
+	if err != nil {
+		return nil, err
+	}
 
 	if rgPath, err := exec.LookPath("rg"); err == nil {
 		return captureRg(rgPath, query, dir, globs, context)
@@ -64,9 +70,9 @@ func Grep(query, dir string, since time.Duration, context int) ([]byte, error) {
 // fileGlobs returns rg --glob patterns that select data files within the
 // since window. Date files are matched by filename; thread files are always
 // included.
-func fileGlobs(dir string, since time.Duration) []string {
+func fileGlobs(dir string, since time.Duration) ([]string, error) {
 	if since == 0 {
-		return []string{"*" + paths.FileExt}
+		return []string{"*" + paths.FileExt}, nil
 	}
 
 	cutoff := time.Now().Add(-since).Truncate(24 * time.Hour)
@@ -74,8 +80,13 @@ func fileGlobs(dir string, since time.Duration) []string {
 	// Scan for date filenames in the tree. We need the set of unique
 	// date filenames (e.g. "2026-04-07.jsonl") that fall within the window.
 	seen := make(map[string]bool)
+	var walkErr error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			walkErr = err
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		name := d.Name()
@@ -92,6 +103,9 @@ func fileGlobs(dir string, since time.Duration) []string {
 		}
 		return nil
 	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	}
 
 	var globs []string
 	for name := range seen {
@@ -99,7 +113,7 @@ func fileGlobs(dir string, since time.Duration) []string {
 	}
 	// Always include thread files — can't date-filter by filename.
 	globs = append(globs, paths.ThreadGlobRg)
-	return globs
+	return globs, nil
 }
 
 
@@ -208,8 +222,13 @@ func findFilesFallback(dir string, globs []string) ([]string, error) {
 	}
 
 	var files []string
+	var walkErr error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			walkErr = err
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		name := d.Name()
@@ -225,13 +244,21 @@ func findFilesFallback(dir string, globs []string) ([]string, error) {
 		}
 		return nil
 	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	}
 	return files, nil
 }
 
 func findAllFiles(dir string) ([]string, error) {
 	var files []string
+	var walkErr error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			walkErr = err
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), paths.FileExt) {
@@ -239,5 +266,8 @@ func findAllFiles(dir string) ([]string, error) {
 		}
 		return nil
 	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	}
 	return files, nil
 }

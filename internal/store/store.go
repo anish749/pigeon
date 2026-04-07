@@ -56,7 +56,8 @@ type Store interface {
 	ThreadExists(acct account.Account, conversation, threadTS string) bool
 
 	// ListConversations walks the data tree and returns all conversations
-	// matching the given filters. Results are sorted by LastModified descending.
+	// matching the given filters. When Since is set, results are sorted by
+	// LastModified descending. Without Since, order is unspecified.
 	ListConversations(opts ListOpts) ([]ConversationInfo, error)
 
 	// WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
