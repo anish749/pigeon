@@ -1,4 +1,4 @@
-package commands
+package search
 
 import (
 	"os"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/search"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -77,8 +76,7 @@ func TestGrepFallback_NoColorFlag(t *testing.T) {
 		testMsg("M1", testTs(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
 	})
 
-	// Use GrepWithGrep to force the grep fallback path, even when rg is available.
-	output, err := search.GrepWithGrep("deploy", dir, 0, 0)
+	output, err := GrepWithGrep("deploy", dir, 0, 0)
 	if err != nil {
 		t.Fatalf("GrepWithGrep returned error: %v", err)
 	}
@@ -95,7 +93,7 @@ func TestGrep_ThreadGlob(t *testing.T) {
 
 	dir := setupThreadFixture(t)
 
-	output, err := search.Grep("reply in thread", dir, 30*24*time.Hour, 0)
+	output, err := Grep("reply in thread", dir, 30*24*time.Hour, 0)
 	if err != nil {
 		t.Fatalf("Grep: %v", err)
 	}
@@ -104,11 +102,28 @@ func TestGrep_ThreadGlob(t *testing.T) {
 	}
 }
 
+// TestGrepFallback_ThreadGlob verifies that the grep fallback finds thread files.
+func TestGrepFallback_ThreadGlob(t *testing.T) {
+	if _, err := exec.LookPath("grep"); err != nil {
+		t.Skip("grep not available")
+	}
+
+	dir := setupThreadFixture(t)
+
+	output, err := GrepWithGrep("reply in thread", dir, 30*24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("GrepWithGrep: %v", err)
+	}
+	if len(output) == 0 {
+		t.Error("GrepWithGrep returned no output for a query that only matches in a thread file")
+	}
+}
+
 // TestFindFiles_IncludesThreads verifies that FindFiles returns thread files.
 func TestFindFiles_IncludesThreads(t *testing.T) {
 	dir := setupThreadFixture(t)
 
-	files, err := search.FindFiles(dir, 30*24*time.Hour)
+	files, err := FindFiles(dir, 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("FindFiles: %v", err)
 	}
@@ -129,12 +144,49 @@ func TestFindFiles_IncludesThreads(t *testing.T) {
 func TestFindFiles_NoSince(t *testing.T) {
 	dir := setupThreadFixture(t)
 
-	files, err := search.FindFiles(dir, 0)
+	files, err := FindFiles(dir, 0)
 	if err != nil {
 		t.Fatalf("FindFiles: %v", err)
 	}
-	// Should have both the date file and the thread file.
 	if len(files) < 2 {
 		t.Errorf("FindFiles returned %d files, want at least 2", len(files))
+	}
+}
+
+// TestFindFiles_SinceFiltersOldDates verifies that old date files are excluded.
+func TestFindFiles_SinceFiltersOldDates(t *testing.T) {
+	dir := t.TempDir()
+
+	today := time.Now().UTC()
+	todayStr := today.Format("2006-01-02")
+	oldStr := today.AddDate(0, 0, -30).Format("2006-01-02")
+
+	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#general", todayStr+".jsonl"), []modelv1.Line{
+		testMsg("M1", today, "Alice", "U1", "recent"),
+	})
+	writeTestJSONL(t, filepath.Join(dir, "slack", "acme", "#archive", oldStr+".jsonl"), []modelv1.Line{
+		testMsg("M2", today.AddDate(0, 0, -30), "Bob", "U2", "old"),
+	})
+
+	files, err := FindFiles(dir, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("FindFiles: %v", err)
+	}
+
+	for _, f := range files {
+		if filepath.Base(f) == oldStr+".jsonl" {
+			t.Errorf("FindFiles returned old date file %s that should have been filtered", f)
+		}
+	}
+	if len(files) == 0 {
+		t.Error("FindFiles returned no files, expected at least today's file")
+	}
+}
+
+// TestFindFiles_MissingDir returns error for nonexistent directory.
+func TestFindFiles_MissingDir(t *testing.T) {
+	_, err := FindFiles("/nonexistent/path", 7*24*time.Hour)
+	if err == nil {
+		t.Error("FindFiles on missing dir should return error")
 	}
 }
