@@ -142,14 +142,26 @@ type sheetValuesResponse struct {
 
 // ReadSheetValues fetches cell values for a specific sheet range.
 func ReadSheetValues(spreadsheetID, sheetName string) ([][]string, error) {
+	return readSheetRange(spreadsheetID, sheetName, "FORMATTED_VALUE")
+}
+
+// ReadSheetFormulas fetches formulas for a specific sheet range.
+// Cells with formulas return the formula string (e.g. "=SUM(A1:A10)");
+// cells without formulas return the computed value.
+func ReadSheetFormulas(spreadsheetID, sheetName string) ([][]string, error) {
+	return readSheetRange(spreadsheetID, sheetName, "FORMULA")
+}
+
+func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, error) {
 	params := gws.ParamsJSON(map[string]string{
-		"spreadsheetId": spreadsheetID,
-		"range":         sheetName,
+		"spreadsheetId":     spreadsheetID,
+		"range":             sheetName,
+		"valueRenderOption": renderOption,
 	})
 
 	var resp sheetValuesResponse
 	if err := gws.RunParsed(&resp, "sheets", "spreadsheets", "values", "get", "--params", params); err != nil {
-		return nil, fmt.Errorf("read sheet values %s/%s: %w", spreadsheetID, sheetName, err)
+		return nil, fmt.Errorf("read sheet %s %s/%s: %w", renderOption, spreadsheetID, sheetName, err)
 	}
 	return resp.Values, nil
 }

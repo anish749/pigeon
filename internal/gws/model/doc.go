@@ -14,10 +14,11 @@ type Document struct {
 
 // Tab is the flattened representation of a document tab with its content.
 type Tab struct {
-	Title string
-	TabID string
-	Body  Body
-	Lists map[string]List
+	Title         string
+	TabID         string
+	Body          Body
+	Lists         map[string]List
+	InlineObjects map[string]InlineObject
 }
 
 // RawTab mirrors the API response structure (tabs have nested documentTab + tabProperties).
@@ -35,8 +36,16 @@ type TabProperties struct {
 
 // DocumentTab holds the content of a document tab.
 type DocumentTab struct {
-	Body  Body            `json:"body"`
-	Lists json.RawMessage `json:"lists"`
+	Body          Body                       `json:"body"`
+	Lists         json.RawMessage            `json:"lists"`
+	InlineObjects map[string]json.RawMessage `json:"inlineObjects"`
+}
+
+// InlineObject represents an embedded image or other inline object.
+type InlineObject struct {
+	ObjectID string
+	ImageURI string // contentUri from imageProperties
+	Title    string
 }
 
 // Body holds the structural content blocks of a document.
@@ -156,11 +165,16 @@ func flattenTab(raw RawTab) ([]Tab, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse lists for tab %s: %w", raw.TabProperties.Title, err)
 	}
+	inlineObjects, err := parseInlineObjects(raw.DocumentTab.InlineObjects)
+	if err != nil {
+		return nil, fmt.Errorf("parse inline objects for tab %s: %w", raw.TabProperties.Title, err)
+	}
 	tab := Tab{
-		Title: raw.TabProperties.Title,
-		TabID: raw.TabProperties.TabID,
-		Body:  raw.DocumentTab.Body,
-		Lists: lists,
+		Title:         raw.TabProperties.Title,
+		TabID:         raw.TabProperties.TabID,
+		Body:          raw.DocumentTab.Body,
+		Lists:         lists,
+		InlineObjects: inlineObjects,
 	}
 	result := []Tab{tab}
 	for _, child := range raw.ChildTabs {
@@ -169,6 +183,39 @@ func flattenTab(raw RawTab) ([]Tab, error) {
 			return nil, err
 		}
 		result = append(result, flattened...)
+	}
+	return result, nil
+}
+
+// rawInlineObject mirrors the nested API JSON for an inline object.
+type rawInlineObject struct {
+	InlineObjectProperties struct {
+		EmbeddedObject struct {
+			Title           string `json:"title"`
+			Description     string `json:"description"`
+			ImageProperties struct {
+				ContentURI string `json:"contentUri"`
+			} `json:"imageProperties"`
+		} `json:"embeddedObject"`
+	} `json:"inlineObjectProperties"`
+}
+
+func parseInlineObjects(raw map[string]json.RawMessage) (map[string]InlineObject, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]InlineObject, len(raw))
+	for id, data := range raw {
+		var obj rawInlineObject
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return nil, fmt.Errorf("unmarshal inline object %s: %w", id, err)
+		}
+		eo := obj.InlineObjectProperties.EmbeddedObject
+		result[id] = InlineObject{
+			ObjectID: id,
+			ImageURI: eo.ImageProperties.ContentURI,
+			Title:    eo.Title,
+		}
 	}
 	return result, nil
 }

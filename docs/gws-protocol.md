@@ -57,6 +57,8 @@ Gmail), the poller clears the cursor and re-seeds on the next cycle.
     │   ├── gdrive/
     │   │   ├── {doc-title-slug}/               # Google Doc
     │   │   │   ├── {TabName}.md                # one markdown file per tab
+    │   │   │   ├── attachments/                # inline images
+    │   │   │   │   └── img-{objectId}.png      # downloaded image file
     │   │   │   ├── comments.jsonl              # comment threads
     │   │   │   └── meta.json                   # sync metadata
     │   │   └── {sheet-title-slug}/             # Google Sheet
@@ -255,12 +257,14 @@ appended). Directly greppable — plain markdown, not JSONL.
 
 The markdown export preserves:
 - Headings, bold, italic, links, lists, tables.
-- Inline images as markdown image references.
+- Inline images as `![alt](attachments/img-{objectId}.png)` references.
+  The image files are downloaded to the `attachments/` subdirectory.
 
 It does **not** preserve:
 - Comments (stored separately in `comments.jsonl`).
 - Suggestions/tracked changes.
 - Drawing objects.
+- Smart chips, person mentions.
 
 ### Comment Line Types
 

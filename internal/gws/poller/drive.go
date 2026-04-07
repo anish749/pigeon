@@ -3,7 +3,10 @@ package poller
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -90,12 +93,19 @@ func handleDoc(accountDir string, ch drive.Change) error {
 	var errs []error
 
 	for _, tab := range tabs {
-		content := md.Convert(tab)
+		result := md.ConvertWithImages(tab)
 		tabFile := filepath.Join(docDir, tab.Title+".md")
-		if err := gwsstore.WriteContent(tabFile, []byte(content)); err != nil {
+		if err := gwsstore.WriteContent(tabFile, []byte(result.Markdown)); err != nil {
 			errs = append(errs, fmt.Errorf("write tab %s: %w", tab.Title, err))
 		}
 		tabMetas = append(tabMetas, model.TabMeta{ID: tab.TabID, Title: tab.Title})
+
+		// Download inline images.
+		for _, img := range result.Images {
+			if err := downloadImage(filepath.Join(docDir, "attachments", img.Filename), img.ImageURI); err != nil {
+				errs = append(errs, fmt.Errorf("download image %s: %w", img.ObjectID, err))
+			}
+		}
 	}
 
 	if err := storeComments(docDir, ch.FileID); err != nil {
@@ -132,9 +142,10 @@ func handleSheet(accountDir string, ch drive.Change) error {
 	var errs []error
 
 	for _, name := range sheetNames {
+		// Values.
 		values, err := drive.ReadSheetValues(ch.FileID, name)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("read sheet %s: %w", name, err))
+			errs = append(errs, fmt.Errorf("read sheet %s values: %w", name, err))
 			continue
 		}
 		csvData, err := converter.ToCSV(values)
@@ -142,9 +153,23 @@ func handleSheet(accountDir string, ch drive.Change) error {
 			errs = append(errs, fmt.Errorf("convert sheet %s to csv: %w", name, err))
 			continue
 		}
-		csvFile := filepath.Join(sheetDir, name+".csv")
-		if err := gwsstore.WriteContent(csvFile, csvData); err != nil {
-			errs = append(errs, fmt.Errorf("write sheet %s: %w", name, err))
+		if err := gwsstore.WriteContent(filepath.Join(sheetDir, name+".csv"), csvData); err != nil {
+			errs = append(errs, fmt.Errorf("write sheet %s csv: %w", name, err))
+		}
+
+		// Formulas.
+		formulas, err := drive.ReadSheetFormulas(ch.FileID, name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read sheet %s formulas: %w", name, err))
+			continue
+		}
+		formulaCSV, err := converter.ToCSV(formulas)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("convert sheet %s formulas to csv: %w", name, err))
+			continue
+		}
+		if err := gwsstore.WriteContent(filepath.Join(sheetDir, name+".formulas.csv"), formulaCSV); err != nil {
+			errs = append(errs, fmt.Errorf("write sheet %s formulas csv: %w", name, err))
 		}
 	}
 
@@ -165,6 +190,39 @@ func handleSheet(accountDir string, ch drive.Change) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// downloadImage fetches an image from a URL and writes it to path.
+// Creates parent directories if needed. Skips if the file already exists.
+func downloadImage(path, uri string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil // already downloaded
+	}
+
+	resp, err := http.Get(uri)
+	if err != nil {
+		return fmt.Errorf("fetch %s: %w", uri, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("fetch %s: HTTP %d", uri, resp.StatusCode)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create dir for %s: %w", path, err)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // driveSlug creates a directory name for a Drive file. Uses the slugified
