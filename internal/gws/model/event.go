@@ -16,7 +16,8 @@ type EventLine struct {
 	Location    string   `json:"location,omitempty"`    // event location
 	Organizer   string   `json:"organizer,omitempty"`   // organizer email
 	Attendees   []string `json:"attendees,omitempty"`   // attendee emails
-	MeetLink    string   `json:"meetLink,omitempty"`    // Google Meet link
-	EventType   string   `json:"eventType"`             // default, focusTime, etc.
-	Recurring   bool     `json:"recurring,omitempty"`   // recurring event instance
+	MeetLink          string   `json:"meetLink,omitempty"`          // Google Meet link
+	EventType         string   `json:"eventType"`                   // default, focusTime, etc.
+	Recurring         bool     `json:"recurring,omitempty"`         // recurring event instance
+	OriginalStartTime string   `json:"originalStartTime,omitempty"` // original start for cancelled recurring instances
 }
