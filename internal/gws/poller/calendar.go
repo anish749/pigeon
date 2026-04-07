@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/calendar"
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/gws/model"
@@ -37,6 +38,11 @@ func PollCalendar(accountDir string, cursors *gwsstore.Cursors) error {
 
 	events, newToken, err := calendar.ListEvents(calID, syncToken)
 	if err != nil {
+		if gws.IsCursorExpired(err) {
+			slog.Warn("calendar sync token expired, will re-seed", "calendar", calID)
+			cursors.Calendar[calID] = ""
+			return nil
+		}
 		return fmt.Errorf("poll calendar %s: %w", calID, err)
 	}
 
@@ -65,9 +71,7 @@ func eventDateFile(accountDir, calID string, ev model.EventLine) string {
 }
 
 // eventDate extracts the date string (YYYY-MM-DD) from an event.
-// Timed events: parse date from Start (RFC 3339 datetime).
-// All-day events: use StartDate directly.
-// Cancelled events with no start info: parse date from Updated.
+// Priority: Start > StartDate > OriginalStartTime > Updated > "unknown".
 func eventDate(ev model.EventLine) string {
 	if ev.Start != "" {
 		if d := parseDateFromDateTime(ev.Start); d != "" {
@@ -77,7 +81,16 @@ func eventDate(ev model.EventLine) string {
 	if ev.StartDate != "" {
 		return ev.StartDate
 	}
-	// Cancelled events may lack start info; fall back to Updated timestamp.
+	// Cancelled recurring instances carry the original start instead of start/end.
+	if ev.OriginalStartTime != "" {
+		if d := parseDateFromDateTime(ev.OriginalStartTime); d != "" {
+			return d
+		}
+		// OriginalStartTime may be a bare date (YYYY-MM-DD) for all-day events.
+		if len(ev.OriginalStartTime) == 10 {
+			return ev.OriginalStartTime
+		}
+	}
 	if ev.Updated != "" {
 		if d := parseDateFromDateTime(ev.Updated); d != "" {
 			return d
