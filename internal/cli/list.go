@@ -14,6 +14,7 @@ func newListCmd() *cobra.Command {
 		Example: `  pigeon list
   pigeon list --platform=slack
   pigeon list --platform=slack --account=acme-corp
+  pigeon list --platform=whatsapp --account=+14155551234
   pigeon list --since=2h
   pigeon list --platform=slack --since=7d`,
 		PreRunE: ensureDaemon,

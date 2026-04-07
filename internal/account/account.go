@@ -49,3 +49,9 @@ func (a Account) Display() string {
 func (a Account) NameSlug() string {
 	return slug.Make(a.Name)
 }
+
+// SlugPath returns the platform/slug form: "slack/coding-with-anish".
+// Suitable for config lookups and display-name mappings.
+func (a Account) SlugPath() string {
+	return a.Platform + "/" + slug.Make(a.Name)
+}

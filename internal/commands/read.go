@@ -7,8 +7,9 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 type ReadParams struct {
@@ -35,7 +36,7 @@ func RunRead(p ReadParams) error {
 		Last: p.Last,
 	}
 	if p.Since != "" {
-		d, err := parseDuration(p.Since)
+		d, err := timeutil.ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -69,18 +70,6 @@ func RunRead(p ReadParams) error {
 	return nil
 }
 
-
-// parseDuration handles Go durations plus "d" for days.
-func parseDuration(s string) (time.Duration, error) {
-	if rest, ok := strings.CutSuffix(s, "d"); ok {
-		var days int
-		if _, err := fmt.Sscanf(rest, "%d", &days); err != nil {
-			return 0, err
-		}
-		return time.Duration(days) * 24 * time.Hour, nil
-	}
-	return time.ParseDuration(s)
-}
 
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {

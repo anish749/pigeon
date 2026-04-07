@@ -10,6 +10,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/search"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 type SearchParams struct {
@@ -33,7 +34,7 @@ func RunSearch(p SearchParams) error {
 
 	var sinceDur time.Duration
 	if p.Since != "" {
-		d, err := parseDuration(p.Since)
+		d, err := timeutil.ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -92,7 +93,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 		return []string{"*" + paths.FileExt}, nil
 	}
 
-	dur, err := parseDuration(since)
+	dur, err := timeutil.ParseDuration(since)
 	if err != nil {
 		return nil, fmt.Errorf("invalid --since value %q: %w", since, err)
 	}

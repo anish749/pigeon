@@ -9,6 +9,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 type ListParams struct {
@@ -25,7 +26,7 @@ func RunList(p ListParams) error {
 		Account:  p.Account,
 	}
 	if p.Since != "" {
-		dur, err := parseDuration(p.Since)
+		dur, err := timeutil.ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -68,7 +69,7 @@ func printGroupedList(s *store.FSStore, convs []store.ConversationInfo, canonica
 
 	for _, k := range order {
 		acctDisplay := k.account
-		if name, ok := canonical[k.platform+"/"+k.account]; ok {
+		if name, ok := canonical[account.NewFromSlug(k.platform, k.account).SlugPath()]; ok {
 			acctDisplay = name
 		}
 		fmt.Printf("%s/%s:\n", k.platform, acctDisplay)
@@ -93,30 +94,12 @@ func printActivityList(convs []store.ConversationInfo, canonical map[string]stri
 	now := time.Now()
 	for _, c := range convs {
 		acctDisplay := c.Account
-		if name, ok := canonical[c.Platform+"/"+c.Account]; ok {
+		if name, ok := canonical[account.NewFromSlug(c.Platform, c.Account).SlugPath()]; ok {
 			acctDisplay = name
 		}
 		age := now.Sub(c.LastModified)
-		fmt.Printf("%s/%s/%s  last: %s ago\n", c.Platform, acctDisplay, c.Conversation, formatAge(age))
+		fmt.Printf("%s/%s/%s  last: %s ago\n", c.Platform, acctDisplay, c.Conversation, timeutil.FormatAge(age))
 		fmt.Printf("  %s\n", c.Dir)
-	}
-}
-
-func formatAge(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		m := int(d.Minutes()) % 60
-		if m == 0 {
-			return fmt.Sprintf("%dh", h)
-		}
-		return fmt.Sprintf("%dh%dm", h, m)
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours())/24)
 	}
 }
 
@@ -130,11 +113,11 @@ func canonicalAccountNames() map[string]string {
 	m := make(map[string]string)
 	for _, sl := range cfg.Slack {
 		acct := account.New("slack", sl.Workspace)
-		m["slack/"+acct.NameSlug()] = sl.Workspace
+		m[acct.SlugPath()] = sl.Workspace
 	}
 	for _, wa := range cfg.WhatsApp {
 		acct := account.New("whatsapp", wa.Account)
-		m["whatsapp/"+acct.NameSlug()] = wa.Account
+		m[acct.SlugPath()] = wa.Account
 	}
 	return m
 }
