@@ -30,8 +30,9 @@ thread files containing messages within the window.
 Flags -l, -c, -i, -F, and -C are passed through to rg. See
 rg --help for full documentation of pattern syntax and behavior.
 
-Output is raw rg format: filepath:matching_line. Pipe to jq for
-structured queries on the JSON content.
+Output is raw rg format: filepath:matching_line. To pipe to jq,
+use -C 0 (disable context lines) and cut -d: -f2- (strip the
+filepath prefix) so jq receives valid JSON.
 
 JSON fields in each line:
   type      event type: "msg", "react", "unreact", "edit", "delete", "separator"
