@@ -207,10 +207,12 @@ type DateFile struct {
 }
 
 // ThreadFile holds all parsed events from a single thread file.
+// Context messages are stored so that grep and search commands that read
+// thread files directly can surface surrounding channel messages.
 type ThreadFile struct {
 	Parent    MsgLine
 	Replies   []MsgLine
-	Context   []MsgLine // channel context messages (before + after parent)
+	Context   []MsgLine // channel messages around the parent, searchable via grep/rg
 	Reactions []ReactLine
 	Edits     []EditLine
 	Deletes   []DeleteLine
