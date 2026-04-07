@@ -3,6 +3,7 @@ package drive
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,8 +28,9 @@ type Change struct {
 
 // File holds metadata for a changed file.
 type File struct {
-	Name     string `json:"name"`
-	MimeType string `json:"mimeType"`
+	Name         string `json:"name"`
+	MimeType     string `json:"mimeType"`
+	ModifiedTime string `json:"modifiedTime"`
 }
 
 // ListChanges fetches all changes since pageToken. Paginates through all pages.
@@ -41,7 +43,7 @@ func ListChanges(pageToken string) ([]Change, string, error) {
 	for {
 		params := gws.ParamsJSON(map[string]string{
 			"pageToken": currentToken,
-			"fields":    "changes(fileId,removed,file(name,mimeType)),newStartPageToken,nextPageToken",
+			"fields":    "changes(fileId,removed,file(name,mimeType,modifiedTime)),newStartPageToken,nextPageToken",
 		})
 
 		var resp changesResponse
@@ -204,14 +206,26 @@ func ListComments(fileID string) ([]model.CommentLine, []model.ReplyLine, error)
 			return nil, nil, fmt.Errorf("list comments for %s: %w", fileID, err)
 		}
 
+		var errs []error
 		for _, dc := range resp.Comments {
-			cl := toCommentLine(dc)
+			cl, err := toCommentLine(dc)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
 			comments = append(comments, cl)
 
 			for _, dr := range dc.Replies {
-				rl := toReplyLine(dc.ID, dr)
+				rl, err := toReplyLine(dc.ID, dr)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
 				replies = append(replies, rl)
 			}
+		}
+		if err := errors.Join(errs...); err != nil {
+			return comments, replies, err
 		}
 
 		if resp.NextPageToken != "" {
@@ -224,8 +238,11 @@ func ListComments(fileID string) ([]model.CommentLine, []model.ReplyLine, error)
 	return comments, replies, nil
 }
 
-func toCommentLine(dc driveComment) model.CommentLine {
-	ts, _ := time.Parse(time.RFC3339, dc.CreatedTime)
+func toCommentLine(dc driveComment) (model.CommentLine, error) {
+	ts, err := time.Parse(time.RFC3339, dc.CreatedTime)
+	if err != nil {
+		return model.CommentLine{}, fmt.Errorf("parse comment %s time %q: %w", dc.ID, dc.CreatedTime, err)
+	}
 	var anchor string
 	if dc.QuotedFileContent != nil {
 		anchor = dc.QuotedFileContent.Value
@@ -238,11 +255,14 @@ func toCommentLine(dc driveComment) model.CommentLine {
 		Content:  dc.Content,
 		Anchor:   anchor,
 		Resolved: dc.Resolved,
-	}
+	}, nil
 }
 
-func toReplyLine(commentID string, dr driveReply) model.ReplyLine {
-	ts, _ := time.Parse(time.RFC3339, dr.CreatedTime)
+func toReplyLine(commentID string, dr driveReply) (model.ReplyLine, error) {
+	ts, err := time.Parse(time.RFC3339, dr.CreatedTime)
+	if err != nil {
+		return model.ReplyLine{}, fmt.Errorf("parse reply %s time %q: %w", dr.ID, dr.CreatedTime, err)
+	}
 	return model.ReplyLine{
 		Type:      "reply",
 		ID:        dr.ID,
@@ -251,5 +271,5 @@ func toReplyLine(commentID string, dr driveReply) model.ReplyLine {
 		Author:    dr.Author.DisplayName,
 		Content:   dr.Content,
 		Action:    dr.Action,
-	}
+	}, nil
 }

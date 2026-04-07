@@ -21,8 +21,7 @@ const (
 )
 
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
-func PollDrive(dataDir string, cursors *gwsstore.Cursors) error {
-	// Seed the page token if we don't have one yet.
+func PollDrive(accountDir string, cursors *gwsstore.Cursors) error {
 	if cursors.Drive.PageToken == "" {
 		slog.Info("seeding drive page token")
 		token, err := drive.SeedPageToken()
@@ -48,11 +47,11 @@ func PollDrive(dataDir string, cursors *gwsstore.Cursors) error {
 
 		switch ch.File.MimeType {
 		case mimeDoc:
-			if err := handleDoc(dataDir, ch); err != nil {
+			if err := handleDoc(accountDir, ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle doc %s: %w", ch.FileID, err))
 			}
 		case mimeSheet:
-			if err := handleSheet(dataDir, ch); err != nil {
+			if err := handleSheet(accountDir, ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle sheet %s: %w", ch.FileID, err))
 			}
 		default:
@@ -68,18 +67,21 @@ func PollDrive(dataDir string, cursors *gwsstore.Cursors) error {
 	return errors.Join(errs...)
 }
 
-func handleDoc(dataDir string, ch drive.Change) error {
+func handleDoc(accountDir string, ch drive.Change) error {
 	doc, err := drive.GetDocument(ch.FileID)
 	if err != nil {
 		return fmt.Errorf("get document: %w", err)
 	}
 
 	docSlug := slug.Make(doc.Title)
-	docDir := filepath.Join(dataDir, "gdrive", docSlug)
+	docDir := filepath.Join(accountDir, "gdrive", docSlug)
 
-	tabs := doc.AllTabs()
+	tabs, err := doc.AllTabs()
+	if err != nil {
+		return fmt.Errorf("flatten tabs: %w", err)
+	}
+
 	md := converter.NewMarkdownConverter()
-
 	var tabMetas []model.TabMeta
 	var errs []error
 
@@ -92,51 +94,33 @@ func handleDoc(dataDir string, ch drive.Change) error {
 		tabMetas = append(tabMetas, model.TabMeta{ID: tab.TabID, Title: tab.Title})
 	}
 
-	// Fetch and store comments.
-	comments, replies, err := drive.ListComments(ch.FileID)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("list comments: %w", err))
-	} else {
-		commentsPath := filepath.Join(docDir, "comments.jsonl")
-		for _, c := range comments {
-			line := model.Line{Type: "comment", Comment: &c}
-			if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-				errs = append(errs, fmt.Errorf("append comment %s: %w", c.ID, err))
-			}
-		}
-		for _, r := range replies {
-			line := model.Line{Type: "reply", Reply: &r}
-			if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-				errs = append(errs, fmt.Errorf("append reply %s: %w", r.ID, err))
-			}
-		}
+	if err := storeComments(docDir, ch.FileID); err != nil {
+		errs = append(errs, err)
 	}
 
-	// Save metadata.
 	meta := &model.DocMeta{
 		FileID:       ch.FileID,
 		MimeType:     ch.File.MimeType,
 		Title:        doc.Title,
-		ModifiedTime: time.Now().UTC().Format(time.RFC3339),
+		ModifiedTime: ch.File.ModifiedTime,
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Tabs:         tabMetas,
 	}
-	metaPath := filepath.Join(docDir, "meta.json")
-	if err := gwsstore.SaveMeta(metaPath, meta); err != nil {
+	if err := gwsstore.SaveMeta(filepath.Join(docDir, "meta.json"), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
 	return errors.Join(errs...)
 }
 
-func handleSheet(dataDir string, ch drive.Change) error {
+func handleSheet(accountDir string, ch drive.Change) error {
 	sheetNames, err := drive.GetSheetNames(ch.FileID)
 	if err != nil {
 		return fmt.Errorf("get sheet names: %w", err)
 	}
 
 	sheetSlug := slug.Make(ch.File.Name)
-	sheetDir := filepath.Join(dataDir, "gdrive", sheetSlug)
+	sheetDir := filepath.Join(accountDir, "gdrive", sheetSlug)
 
 	var errs []error
 
@@ -157,39 +141,46 @@ func handleSheet(dataDir string, ch drive.Change) error {
 		}
 	}
 
-	// Fetch and store comments.
-	comments, replies, err := drive.ListComments(ch.FileID)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("list comments: %w", err))
-	} else {
-		commentsPath := filepath.Join(sheetDir, "comments.jsonl")
-		for _, c := range comments {
-			line := model.Line{Type: "comment", Comment: &c}
-			if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-				errs = append(errs, fmt.Errorf("append comment %s: %w", c.ID, err))
-			}
-		}
-		for _, r := range replies {
-			line := model.Line{Type: "reply", Reply: &r}
-			if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-				errs = append(errs, fmt.Errorf("append reply %s: %w", r.ID, err))
-			}
-		}
+	if err := storeComments(sheetDir, ch.FileID); err != nil {
+		errs = append(errs, err)
 	}
 
-	// Save metadata.
 	meta := &model.DocMeta{
 		FileID:       ch.FileID,
 		MimeType:     ch.File.MimeType,
 		Title:        ch.File.Name,
-		ModifiedTime: time.Now().UTC().Format(time.RFC3339),
+		ModifiedTime: ch.File.ModifiedTime,
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Sheets:       sheetNames,
 	}
-	metaPath := filepath.Join(sheetDir, "meta.json")
-	if err := gwsstore.SaveMeta(metaPath, meta); err != nil {
+	if err := gwsstore.SaveMeta(filepath.Join(sheetDir, "meta.json"), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
+	return errors.Join(errs...)
+}
+
+// storeComments fetches comments and replies for a Drive file and appends
+// them to comments.jsonl in the given directory.
+func storeComments(dir, fileID string) error {
+	comments, replies, err := drive.ListComments(fileID)
+	if err != nil {
+		return fmt.Errorf("list comments for %s: %w", fileID, err)
+	}
+
+	commentsPath := filepath.Join(dir, "comments.jsonl")
+	var errs []error
+	for _, c := range comments {
+		line := model.Line{Type: "comment", Comment: &c}
+		if err := gwsstore.AppendLine(commentsPath, line); err != nil {
+			errs = append(errs, fmt.Errorf("append comment %s: %w", c.ID, err))
+		}
+	}
+	for _, r := range replies {
+		line := model.Line{Type: "reply", Reply: &r}
+		if err := gwsstore.AppendLine(commentsPath, line); err != nil {
+			errs = append(errs, fmt.Errorf("append reply %s: %w", r.ID, err))
+		}
+	}
 	return errors.Join(errs...)
 }
