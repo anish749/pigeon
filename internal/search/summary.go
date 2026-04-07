@@ -109,6 +109,18 @@ func PrintGroupedResults(matches []Match) {
 			label = k.platform + "/" + label
 		}
 		fmt.Printf("%s (%s, %d matches)\n", label, dateStr, g.matches)
+
+		// Show unique file paths for this conversation.
+		filePaths := make(map[string]bool)
+		for _, m := range g.msgs {
+			if m.FilePath != "" {
+				filePaths[m.FilePath] = true
+			}
+		}
+		for _, fp := range sortedKeys(filePaths) {
+			fmt.Printf("  %s\n", fp)
+		}
+
 		for _, m := range g.msgs {
 			resolved := modelv1.ResolvedMsg{MsgLine: m.Msg}
 			for _, s := range modelv1.FormatMsg(resolved, time.Local) {
