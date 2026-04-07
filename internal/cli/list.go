@@ -101,8 +101,7 @@ type activeConv struct {
 // tracking the most recent date file per conversation for age display.
 func extractConversations(files []string, root string) []activeConv {
 	type entry struct {
-		info  activeConv
-		index int
+		info activeConv
 	}
 	seen := make(map[string]*entry)
 	var order []string
@@ -131,7 +130,6 @@ func extractConversations(files []string, root string) []activeConv {
 					Display: strings.Join(parts[:3], "/"),
 					Dir:     convDir,
 				},
-				index: len(order),
 			}
 			seen[convDir] = e
 			order = append(order, convDir)
