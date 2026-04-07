@@ -100,11 +100,15 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 	cutoff := time.Now().Add(-dur).Truncate(24 * time.Hour)
 	seen := make(map[string]bool)
 
-	filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	if err := filepath.WalkDir(searchDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: walk %s: %v\n", path, err)
 			return nil
 		}
-		name := info.Name()
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
 		if len(name) != len("YYYY-MM-DD"+paths.FileExt) {
 			return nil
 		}
@@ -117,7 +121,9 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 			seen[name] = true
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("walk %s: %w", searchDir, err)
+	}
 
 	var includes []string
 	for name := range seen {
