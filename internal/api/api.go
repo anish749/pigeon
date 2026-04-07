@@ -355,6 +355,13 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		slog.ErrorContext(ctx, "slack send failed",
 			"channel_id", channelID, "channel_name", channelName,
 			"as_user", req.AsUser, "error", err)
+		if err.Error() == "channel_not_found" && !req.AsUser {
+			return SendResponse{Error: fmt.Sprintf(
+				"send to %s failed: %v — the bot may not be a member of this channel. "+
+					"For private channels, ask someone to invite the bot. "+
+					"For Slack Connect channels, ensure the bot is added to the shared channel.",
+				channelName, err)}
+		}
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
 
