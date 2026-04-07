@@ -174,10 +174,13 @@ func (r SendRequest) Target() string {
 
 // SendResponse is the daemon API response for /api/send.
 type SendResponse struct {
-	OK        bool   `json:"ok"`
-	Timestamp string `json:"timestamp,omitempty"`
-	Error     string `json:"error,omitempty"`
-	OutboxID  string `json:"outbox_id,omitempty"`
+	OK          bool   `json:"ok"`
+	Timestamp   string `json:"timestamp,omitempty"`
+	Error       string `json:"error,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`   // resolved channel ID (dry-run)
+	ChannelName string `json:"channel_name,omitempty"` // resolved channel name (dry-run)
+	SendAs      string `json:"send_as,omitempty"`      // sender identity
+	OutboxID    string `json:"outbox_id,omitempty"`
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +332,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	}
 
 	if req.DryRun {
-		return SendResponse{OK: true}
+		return SendResponse{
+			OK:          true,
+			ChannelID:   channelID,
+			ChannelName: channelName,
+			SendAs:      senderName,
+		}
 	}
 
 	// Build message options.
@@ -344,6 +352,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	// Send the message.
 	_, ts, err := api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
+		slog.ErrorContext(ctx, "slack send failed",
+			"channel_id", channelID, "channel_name", channelName,
+			"as_user", req.AsUser, "error", err)
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
 
@@ -385,7 +396,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	}
 
-	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
+	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339), SendAs: senderName}
 }
 
 // StatusResponse is the daemon API response for GET /api/status.

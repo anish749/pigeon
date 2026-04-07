@@ -68,9 +68,9 @@ func RunSend(p SendParams) error {
 	}
 
 	if p.DryRun {
-		fmt.Println("Dry run OK")
+		fmt.Printf("Dry run — would send to %s (%s) as %s\n", result.ChannelName, result.ChannelID, result.SendAs)
 	} else {
-		fmt.Printf("Sent at %s\n", result.Timestamp)
+		fmt.Printf("Sent at %s as %s\n", result.Timestamp, result.SendAs)
 	}
 	return nil
 }
