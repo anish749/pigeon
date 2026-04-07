@@ -110,35 +110,20 @@ JSON fields in each line:
 				sinceDur = d
 			}
 
-			out, err := read.Grep(dir, read.GrepOpts{
-				Query:           query,
-				Since:           sinceDur,
-				Context:         context,
-				FilesOnly:       filesOnly,
-				Count:           count,
-				CaseInsensitive: caseInsensitive,
-				FixedStrings:    fixedStrings,
-			})
-			if err != nil {
-				return err
-			}
-
-			if len(out) == 0 {
-				fmt.Println("No matches found.")
-				return nil
-			}
-
-			// Raw rg output — when piped to jq, the caller gets
-			// structured JSONL. When -l or -c, output is already
-			// file paths or counts.
-			if filesOnly || count {
-				os.Stdout.Write(out)
-				return nil
-			}
-
-			// For content output, also print the parsed summary if
-			// stdout is a terminal (not piped).
-			if isTerminal() {
+			// Terminal: use rg --json for structured parsing.
+			// Pipe: use raw rg output for jq compatibility.
+			if isTerminal() && !filesOnly && !count {
+				out, err := read.Grep(dir, read.GrepOpts{
+					Query:           query,
+					Since:           sinceDur,
+					Context:         context,
+					CaseInsensitive: caseInsensitive,
+					FixedStrings:    fixedStrings,
+					JSON:            true,
+				})
+				if err != nil {
+					return err
+				}
 				matches, parseErr := search.ParseGrepOutput(out, dir)
 				if parseErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
@@ -156,6 +141,22 @@ JSON fields in each line:
 				return nil
 			}
 
+			out, err := read.Grep(dir, read.GrepOpts{
+				Query:           query,
+				Since:           sinceDur,
+				Context:         context,
+				FilesOnly:       filesOnly,
+				Count:           count,
+				CaseInsensitive: caseInsensitive,
+				FixedStrings:    fixedStrings,
+			})
+			if err != nil {
+				return err
+			}
+			if len(out) == 0 {
+				fmt.Println("No matches found.")
+				return nil
+			}
 			os.Stdout.Write(out)
 			return nil
 		},

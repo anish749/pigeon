@@ -1,7 +1,6 @@
 package search
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +11,8 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// These tests write real JSONL files, run actual rg/grep against them,
-// and parse the real output — testing the full pipeline, not assumptions
-// about what rg/grep produce.
+// These tests write real JSONL files, run actual rg --json against them,
+// and parse the real output — testing the full pipeline.
 
 func writeJSONL(t *testing.T, path string, lines []modelv1.Line) {
 	t.Helper()
@@ -54,35 +52,23 @@ func react(t time.Time, msgID, sender, senderID, emoji string) modelv1.Line {
 	}
 }
 
-func requireRg(t *testing.T) string {
+func requireRg(t *testing.T) {
 	t.Helper()
-	p, err := exec.LookPath("rg")
-	if err != nil {
+	if _, err := exec.LookPath("rg"); err != nil {
 		t.Skip("rg not available")
 	}
-	return p
 }
 
-func runRg(t *testing.T, rgPath, query, dir string) []byte {
+func runRgJSON(t *testing.T, query, dir string, extraArgs ...string) []byte {
 	t.Helper()
-	out, err := exec.Command(rgPath, "--color=never", query, dir).Output()
+	args := append([]string{"--json"}, extraArgs...)
+	args = append(args, query, dir)
+	out, err := exec.Command("rg", args...).Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return nil
 		}
-		t.Fatalf("rg: %v", err)
-	}
-	return out
-}
-
-func runRgContext(t *testing.T, rgPath, query, dir string, context int) []byte {
-	t.Helper()
-	out, err := exec.Command(rgPath, "--color=never", fmt.Sprintf("-C%d", context), query, dir).Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil
-		}
-		t.Fatalf("rg -C: %v", err)
+		t.Fatalf("rg --json: %v", err)
 	}
 	return out
 }
@@ -90,7 +76,7 @@ func runRgContext(t *testing.T, rgPath, query, dir string, context int) []byte {
 // --- Integration tests ---
 
 func TestIntegration_RgBasicSearch(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
@@ -99,7 +85,7 @@ func TestIntegration_RgBasicSearch(t *testing.T) {
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Alice", "U1", "deploy the hotfix too"),
 	})
 
-	output := runRg(t, rgPath, "deploy", dir)
+	output := runRgJSON(t, "deploy", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -125,7 +111,7 @@ func TestIntegration_RgBasicSearch(t *testing.T) {
 }
 
 func TestIntegration_RgSkipsNonMessageEvents(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
@@ -133,22 +119,18 @@ func TestIntegration_RgSkipsNonMessageEvents(t *testing.T) {
 		react(ts(2026, 3, 16, 9, 1, 0), "M1", "Bob", "U2", "thumbsup"),
 	})
 
-	// "hello" matches msg, "thumbsup" matches react — but ParseGrepOutput only returns msgs
-	output := runRg(t, rgPath, "hello\\|thumbsup", dir)
-	// rg doesn't support \| — use a different approach
-	output = runRg(t, rgPath, ".", dir) // match all lines
+	output := runRgJSON(t, ".", dir) // match all lines
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
 	}
-	// Only the message should be in matches, not the reaction
 	if len(matches) != 1 {
 		t.Errorf("matches = %d, want 1 (only msg events)", len(matches))
 	}
 }
 
 func TestIntegration_RgMultipleConversations(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
@@ -161,7 +143,7 @@ func TestIntegration_RgMultipleConversations(t *testing.T) {
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "C1", "deploy whatsapp"),
 	})
 
-	output := runRg(t, rgPath, "deploy", dir)
+	output := runRgJSON(t, "deploy", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -180,7 +162,7 @@ func TestIntegration_RgMultipleConversations(t *testing.T) {
 }
 
 func TestIntegration_RgThreadFiles(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "threads", "1711568940.789012.jsonl"), []modelv1.Line{
@@ -188,7 +170,7 @@ func TestIntegration_RgThreadFiles(t *testing.T) {
 		msg("R1", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "deploy reply"),
 	})
 
-	output := runRg(t, rgPath, "deploy", dir)
+	output := runRgJSON(t, "deploy", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -196,14 +178,13 @@ func TestIntegration_RgThreadFiles(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("matches = %d, want 2", len(matches))
 	}
-	// Thread files should still resolve to the conversation, not "threads"
 	if matches[0].Conversation != "#general" {
 		t.Errorf("match[0].Conversation = %q, want #general", matches[0].Conversation)
 	}
 }
 
 func TestIntegration_RgWithContext(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
@@ -212,27 +193,25 @@ func TestIntegration_RgWithContext(t *testing.T) {
 		msg("M3", ts(2026, 3, 16, 9, 2, 0), "Charlie", "U3", "after"),
 	})
 
-	output := runRgContext(t, rgPath, "deploy", dir, 1)
+	output := runRgJSON(t, "deploy", dir, "-C1")
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
 	}
-	// With -C 1, rg returns the match plus 1 line before and after
-	// All three are message events, so all should parse
 	if len(matches) != 3 {
 		t.Errorf("matches = %d, want 3 (match + context)", len(matches))
 	}
 }
 
 func TestIntegration_RgTextWithBraces(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "meeting at {office} tomorrow"),
 	})
 
-	output := runRg(t, rgPath, "office", dir)
+	output := runRgJSON(t, "office", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -246,14 +225,14 @@ func TestIntegration_RgTextWithBraces(t *testing.T) {
 }
 
 func TestIntegration_RgTextWithNewlines(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "line one\nline two\nline three"),
 	})
 
-	output := runRg(t, rgPath, "line one", dir)
+	output := runRgJSON(t, "line one", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -267,7 +246,7 @@ func TestIntegration_RgTextWithNewlines(t *testing.T) {
 }
 
 func TestIntegration_RgPreservesAllFields(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	m := modelv1.Line{
@@ -282,7 +261,7 @@ func TestIntegration_RgPreservesAllFields(t *testing.T) {
 	}
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{m})
 
-	output := runRg(t, rgPath, "searchable", dir)
+	output := runRgJSON(t, "searchable", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -307,14 +286,14 @@ func TestIntegration_RgPreservesAllFields(t *testing.T) {
 }
 
 func TestIntegration_RgNoMatches(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello world"),
 	})
 
-	output := runRg(t, rgPath, "nonexistent", dir)
+	output := runRgJSON(t, "nonexistent", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -325,15 +304,14 @@ func TestIntegration_RgNoMatches(t *testing.T) {
 }
 
 func TestIntegration_RgSenderWithSpecialChars(t *testing.T) {
-	rgPath := requireRg(t)
+	requireRg(t)
 	dir := t.TempDir()
 
-	// Colons in sender names — the old bracket format couldn't handle this
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
 		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Dr. Smith: Cardiologist", "U1", "searchme"),
 	})
 
-	output := runRg(t, rgPath, "searchme", dir)
+	output := runRgJSON(t, "searchme", dir)
 	matches, err := ParseGrepOutput(output, dir)
 	if err != nil {
 		t.Fatalf("ParseGrepOutput: %v", err)
@@ -346,61 +324,22 @@ func TestIntegration_RgSenderWithSpecialChars(t *testing.T) {
 	}
 }
 
-func TestIntegration_RgOutputIsValidJSON(t *testing.T) {
-	rgPath := requireRg(t)
+func TestIntegration_RgEmbeddedJSON(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 
+	// This was the original bug — embedded JSON in message text caused
+	// the old :{ delimiter split to fail.
 	writeJSONL(t, filepath.Join(dir, "slack", "acme", "#general", "2026-03-16.jsonl"), []modelv1.Line{
-		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "test message"),
+		msg("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", fmt.Sprintf(`query: {"field":"value","nested":{"a":1}}`)),
 	})
 
-	output := runRg(t, rgPath, "test", dir)
-	// Verify that the JSON portion of rg output is valid
-	for _, line := range splitLines(output) {
-		idx := indexOf(line, ":{")
-		if idx < 0 {
-			continue
-		}
-		jsonPart := line[idx+1:]
-		var raw json.RawMessage
-		if err := json.Unmarshal([]byte(jsonPart), &raw); err != nil {
-			t.Errorf("rg output line is not valid JSON: %s", jsonPart)
-		}
+	output := runRgJSON(t, "query", dir)
+	matches, err := ParseGrepOutput(output, dir)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
-}
-
-// helpers for the integration test
-func splitLines(data []byte) []string {
-	var lines []string
-	for _, line := range filepath.SplitList(string(data)) {
-		lines = append(lines, line)
+	if len(matches) != 1 {
+		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	// Actually just split on newline
-	s := string(data)
-	if s == "" {
-		return nil
-	}
-	result := make([]string, 0)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			if i > start {
-				result = append(result, s[start:i])
-			}
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		result = append(result, s[start:])
-	}
-	return result
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
