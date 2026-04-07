@@ -34,7 +34,6 @@ Output is one file path per line, suitable for piping to other tools.`,
   pigeon glob --since=7d --platform=slack
   pigeon glob --platform=slack --account=acme-corp
   pigeon glob --since=24h | xargs jq -r 'select(.type == "msg") | .sender'`,
-		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			platform, err := cmd.Flags().GetString("platform")
 			if err != nil {
