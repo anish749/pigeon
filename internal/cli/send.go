@@ -13,17 +13,22 @@ func newSendCmd() *cobra.Command {
 		GroupID: groupSending,
 		Long: `Send a message through the daemon's connected clients.
 
+Target flags are platform-specific:
+  Slack:    --user-id (DMs) or --channel (channels, group DMs)
+  WhatsApp: --contact (name or phone number)
+
 By default, Slack messages are sent as the bot. Use --as-user to send as yourself.
 Use --thread to reply to a thread, and --broadcast to also post the reply to the channel.
+Run 'pigeon list' to find user IDs and channel names.`,
+		Example: `  # Slack
+  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY -m "hey"
+  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY --as-user -m "sent as me"
+  pigeon send -p slack -a acme-corp --channel '#engineering' -m "deploying now"
+  pigeon send -p slack -a acme-corp --channel '#engineering' --thread 1711568938.123456 -m "fixed!"
+  pigeon send -p slack -a acme-corp --channel '@mpdm-alice--bob-1' -m "hey all"
 
-If your Slack app was installed before bot sending was added, re-run 'pigeon setup-slack'
-to update scopes.`,
-		Example: `  pigeon send -p whatsapp -a +14155551234 -c Alice -m "hey, are you free?"
-  pigeon send -p slack -a acme-corp -c #engineering -m "deploying now"
-  pigeon send -p slack -a acme-corp -c @alice -m "quick question"
-  pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 -m "fixed!"
-  pigeon send -p slack -a acme-corp -c #engineering --thread 1711568938.123456 --broadcast -m "resolved"
-  pigeon send -p slack -a acme-corp -c @alice --as-user -m "sent as me, not the bot"`,
+  # WhatsApp
+  pigeon send -p whatsapp -a +14155551234 --contact Alice -m "hey, are you free?"`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			platform, err := cmd.Flags().GetString("platform")
@@ -31,6 +36,14 @@ to update scopes.`,
 				return err
 			}
 			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return err
+			}
+			userID, err := cmd.Flags().GetString("user-id")
+			if err != nil {
+				return err
+			}
+			channel, err := cmd.Flags().GetString("channel")
 			if err != nil {
 				return err
 			}
@@ -58,9 +71,12 @@ to update scopes.`,
 			if err != nil {
 				return err
 			}
+
 			return commands.RunSend(commands.SendParams{
 				Platform:  platform,
 				Account:   account,
+				UserID:    userID,
+				Channel:   channel,
 				Contact:   contact,
 				Message:   message,
 				Thread:    thread,
@@ -70,17 +86,26 @@ to update scopes.`,
 			})
 		},
 	}
+
 	cmd.Flags().StringP("platform", "p", "", "platform name")
 	cmd.Flags().StringP("account", "a", "", "account name")
-	cmd.Flags().StringP("contact", "c", "", "contact name, phone, or channel")
 	cmd.Flags().StringP("message", "m", "", "message text")
-	cmd.Flags().String("thread", "", "thread timestamp to reply to")
-	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
-	cmd.Flags().Bool("as-user", false, "send as yourself instead of the bot")
-	cmd.Flags().Bool("dry-run", false, "resolve contact and validate without sending")
 	cmd.MarkFlagRequired("platform")
 	cmd.MarkFlagRequired("account")
-	cmd.MarkFlagRequired("contact")
 	cmd.MarkFlagRequired("message")
+
+	// Target flags — mutually exclusive.
+	cmd.Flags().String("user-id", "", "Slack user ID for DMs (U-prefixed, from 'pigeon list')")
+	cmd.Flags().String("channel", "", "Slack channel (#name) or group DM (@mpdm-...)")
+	cmd.Flags().StringP("contact", "c", "", "WhatsApp contact name or phone number")
+	cmd.MarkFlagsMutuallyExclusive("user-id", "channel", "contact")
+	cmd.MarkFlagsOneRequired("user-id", "channel", "contact")
+
+	// Slack-specific flags.
+	cmd.Flags().String("thread", "", "thread timestamp to reply to")
+	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
+	cmd.Flags().Bool("as-user", false, "send as yourself instead of the bot (Slack only)")
+	cmd.Flags().Bool("dry-run", false, "validate without sending")
+
 	return cmd
 }

@@ -137,10 +137,17 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 
 // SendRequest is the daemon API payload for /api/send.
 type SendRequest struct {
-	Platform  string `json:"platform"`
-	Account   string `json:"account"`
-	Contact   string `json:"contact"`
-	Message   string `json:"message"`
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+	Message  string `json:"message"`
+
+	// Target — exactly one of UserID, Channel, or Contact must be set.
+	// Slack: use UserID (U-prefixed) for DMs, Channel (#name or @mpdm-...) for channels/group DMs.
+	// WhatsApp: use Contact (name or phone number).
+	UserID  string `json:"user_id,omitempty"`
+	Channel string `json:"channel,omitempty"`
+	Contact string `json:"contact,omitempty"`
+
 	Thread    string `json:"thread,omitempty"`
 	Broadcast bool   `json:"broadcast,omitempty"`
 	AsUser    bool   `json:"as_user,omitempty"`
@@ -151,15 +158,28 @@ type SendRequest struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
+// Target returns the display name for the send target (for logging and UI).
+func (r SendRequest) Target() string {
+	switch {
+	case r.UserID != "":
+		return r.UserID
+	case r.Channel != "":
+		return r.Channel
+	case r.Contact != "":
+		return r.Contact
+	default:
+		return ""
+	}
+}
+
 // SendResponse is the daemon API response for /api/send.
 type SendResponse struct {
 	OK          bool   `json:"ok"`
 	Timestamp   string `json:"timestamp,omitempty"`
 	Error       string `json:"error,omitempty"`
-	ChannelID   string `json:"channel_id,omitempty"`
-	ChannelName string `json:"channel_name,omitempty"`
-	SendAs      string `json:"send_as,omitempty"`
-	Email       string `json:"email,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`   // resolved channel ID (dry-run)
+	ChannelName string `json:"channel_name,omitempty"` // resolved channel name (dry-run)
+	SendAs      string `json:"send_as,omitempty"`      // sender identity
 	OutboxID    string `json:"outbox_id,omitempty"`
 }
 
@@ -170,8 +190,12 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Platform == "" || req.Account == "" || req.Contact == "" || req.Message == "" {
-		writeJSON(w, http.StatusBadRequest, SendResponse{Error: "platform, account, contact, and message are required"})
+	if req.Platform == "" || req.Account == "" || req.Message == "" {
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: "platform, account, and message are required"})
+		return
+	}
+	if err := validateSendTarget(req); err != nil {
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
 		return
 	}
 
@@ -279,101 +303,41 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		senderName = sender.UserName
 	}
 
-	// Resolve contact to a channel ID.
-	// Try as user ID, then email, then channel name.
 	var channelID, channelName string
-	var resolvedUserID string
 
-	if userID, userName, err := sender.Resolver.FindUserID(req.Contact); err == nil && userID == req.Contact {
-		resolvedUserID = userID
-		channelName = "@" + userName
-	} else if looksLikeEmail(req.Contact) {
-		if user, err := sender.UserAPI.GetUserByEmailContext(ctx, req.Contact); err == nil {
-			resolvedUserID = user.ID
-			name := user.Profile.DisplayName
-			if name == "" {
-				name = user.RealName
-			}
-			channelName = "@" + name
+	switch {
+	case req.UserID != "":
+		// DM: open conversation with the specified user.
+		userName, err := sender.Resolver.UserName(ctx, req.UserID)
+		if err != nil {
+			return SendResponse{Error: fmt.Sprintf("unknown user %s: %v", req.UserID, err)}
 		}
-	}
+		channelName = "@" + userName
 
-	if resolvedUserID != "" {
-		// Open DM with the appropriate token.
-		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{resolvedUserID},
+		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{req.UserID},
 		})
-		if openErr != nil {
-			return SendResponse{Error: fmt.Sprintf(
-				"open DM with %s (%s) failed: %v — for Slack Connect users, the bot must be a member of at least one shared channel with the recipient",
-				channelName, resolvedUserID, openErr)}
+		if err != nil {
+			return SendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", channelName, req.UserID, err)}
 		}
 		channelID = ch.ID
-		if !req.AsUser {
-			senderName = "sent by pigeon"
-		}
-	} else {
+
+	case req.Channel != "":
+		// Channel or group DM: resolve name to ID.
 		var err error
-		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Contact)
+		channelID, channelName, err = sender.Resolver.FindChannelID(ctx, req.Channel)
 		if err != nil {
 			return SendResponse{Error: fmt.Sprintf("resolve channel: %v", err)}
 		}
 	}
 
-	// For bot sends to DMs/group DMs resolved via channel name (not user ID/email),
-	// the cached channel ID is from the user token and isn't accessible to the bot.
-	// Open the bot's own conversation.
-	if resolvedUserID == "" && !req.AsUser && strings.HasPrefix(channelName, "@") {
-		var userIDs []string
-
-		if strings.HasPrefix(channelName, "@mpdm-") {
-			// Group DM: look up members via user token, then open with bot token.
-			members, _, err := sender.UserAPI.GetUsersInConversationContext(ctx, &goslack.GetUsersInConversationParameters{
-				ChannelID: channelID,
-			})
-			if err != nil {
-				return SendResponse{Error: fmt.Sprintf("get members of %s: %v", channelName, err)}
-			}
-			userIDs = members
-		} else {
-			// 1:1 DM: find the target user ID.
-			userID, _, userErr := sender.Resolver.FindUserID(channelName)
-			if userErr != nil {
-				var ambErr *slacklistener.AmbiguousUserError
-				if errors.As(userErr, &ambErr) {
-					return SendResponse{Error: formatAmbiguousUsers(ctx, ambErr, sender)}
-				}
-				return SendResponse{Error: fmt.Sprintf("resolve user %s: %v", channelName, userErr)}
-			}
-			userIDs = []string{userID}
-		}
-
-		ch, _, _, openErr := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: userIDs,
-		})
-		if openErr != nil {
-			return SendResponse{Error: fmt.Sprintf("open conversation with %s: %v", channelName, openErr)}
-		}
-		channelID = ch.ID
-		senderName = "sent by pigeon"
-	}
-
 	if req.DryRun {
-		resp := SendResponse{
+		return SendResponse{
 			OK:          true,
 			ChannelID:   channelID,
 			ChannelName: channelName,
 			SendAs:      senderName,
 		}
-		// For DMs, enrich with user email.
-		if strings.HasPrefix(channelName, "@") && !strings.HasPrefix(channelName, "@mpdm-") {
-			if userID, _, err := sender.Resolver.FindUserID(channelName); err == nil {
-				if user, err := sender.UserAPI.GetUserInfoContext(ctx, userID); err == nil && user.Profile.Email != "" {
-					resp.Email = user.Profile.Email
-				}
-			}
-		}
-		return resp
 	}
 
 	// Build message options.
@@ -393,8 +357,10 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 			"as_user", req.AsUser, "error", err)
 		if err.Error() == "channel_not_found" && !req.AsUser {
 			return SendResponse{Error: fmt.Sprintf(
-				"send to %s failed: %v — bot cannot access this channel. For Slack Connect users, ensure the bot is a member of at least one shared channel with the recipient. For private channels, ask the user to invite the bot to %s.",
-				channelName, err, channelName)}
+				"send to %s failed: %v — the bot may not be a member of this channel. "+
+					"For private channels, ask someone to invite the bot. "+
+					"For Slack Connect channels, ensure the bot is added to the shared channel.",
+				channelName, err)}
 		}
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
 	}
@@ -437,7 +403,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	}
 
-	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339)}
+	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339), SendAs: senderName}
 }
 
 // StatusResponse is the daemon API response for GET /api/status.
@@ -508,47 +474,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// formatAmbiguousUsers builds a disambiguation message for Slack users,
-// enriched with conversation activity from the Slack API.
-func formatAmbiguousUsers(ctx context.Context, err *slacklistener.AmbiguousUserError, sender *SlackSender) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "multiple users match %q:\n", err.Query)
-	for _, m := range err.Matches {
-		fmt.Fprintf(&b, "  %s  %s", m.ID, m.DisplayName)
-		if m.RealName != "" && m.RealName != m.DisplayName {
-			fmt.Fprintf(&b, "  (%s)", m.RealName)
-		}
-		if m.Email != "" {
-			fmt.Fprintf(&b, "  <%s>", m.Email)
-		}
-
-		// Check actual Slack conversation history for this specific user ID.
-		ch, _, _, openErr := sender.UserAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{m.ID},
-		})
-		if openErr != nil {
-			fmt.Fprintf(&b, "  [cannot open DM: %v]", openErr)
-		} else {
-			hist, histErr := sender.UserAPI.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
-				ChannelID: ch.ID,
-				Limit:     1,
-			})
-			if histErr != nil {
-				fmt.Fprintf(&b, "  [cannot read history: %v]", histErr)
-			} else if len(hist.Messages) > 0 {
-				lastTS := slacklistener.ParseTimestamp(hist.Messages[0].Timestamp)
-				fmt.Fprintf(&b, "  [last msg: %s]", lastTS.Format("2006-01-02"))
-			} else {
-				b.WriteString("  [no conversation history]")
-			}
-		}
-
-		b.WriteString("\n")
-	}
-	b.WriteString("ask the user to confirm which person to send to, then use their user ID")
-	return b.String()
-}
-
 // formatAmbiguousContacts builds a disambiguation message enriched with
 // conversation activity (last message date, total messages) from the file store.
 func formatAmbiguousContacts(err *walistener.AmbiguousContactError, acct account.Account) string {
@@ -611,6 +536,43 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 }
 
 // dispatchSend routes a SendRequest to the appropriate platform sender.
+func validateSendTarget(req SendRequest) error {
+	n := 0
+	if req.UserID != "" {
+		n++
+	}
+	if req.Channel != "" {
+		n++
+	}
+	if req.Contact != "" {
+		n++
+	}
+	if n == 0 {
+		return fmt.Errorf("specify one of user_id, channel, or contact")
+	}
+	if n > 1 {
+		return fmt.Errorf("specify exactly one of user_id, channel, or contact, got %d", n)
+	}
+
+	switch req.Platform {
+	case "slack":
+		if req.Contact != "" {
+			return fmt.Errorf("use user_id or channel for Slack, not contact")
+		}
+		if req.UserID != "" && !strings.HasPrefix(req.UserID, "U") {
+			return fmt.Errorf("user_id must be a Slack user ID (U-prefixed), got %q", req.UserID)
+		}
+		if req.Channel != "" && strings.HasPrefix(req.Channel, "@") && !strings.HasPrefix(req.Channel, "@mpdm-") {
+			return fmt.Errorf("use user_id for DMs, not channel — run 'pigeon list' to find the user_id")
+		}
+	case "whatsapp":
+		if req.UserID != "" || req.Channel != "" {
+			return fmt.Errorf("use contact for WhatsApp, not user_id or channel")
+		}
+	}
+	return nil
+}
+
 func (s *Server) dispatchSend(ctx context.Context, req SendRequest) SendResponse {
 	acct := account.New(req.Platform, req.Account)
 	switch acct.Platform {

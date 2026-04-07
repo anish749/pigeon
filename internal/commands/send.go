@@ -14,7 +14,9 @@ import (
 type SendParams struct {
 	Platform  string
 	Account   string
-	Contact   string
+	UserID    string // Slack DMs
+	Channel   string // Slack channels/MPDMs
+	Contact   string // WhatsApp
 	Message   string
 	Thread    string
 	Broadcast bool
@@ -23,9 +25,11 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
-	body, err := json.Marshal(api.SendRequest{
+	req := api.SendRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
+		UserID:    p.UserID,
+		Channel:   p.Channel,
 		Contact:   p.Contact,
 		Message:   p.Message,
 		Thread:    p.Thread,
@@ -33,7 +37,8 @@ func RunSend(p SendParams) error {
 		AsUser:    p.AsUser,
 		DryRun:    p.DryRun,
 		SessionID: os.Getenv("PIGEON_SESSION_ID"),
-	})
+	}
+	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
@@ -64,14 +69,9 @@ func RunSend(p SendParams) error {
 	}
 
 	if p.DryRun {
-		fmt.Printf("Dry run — would send to %s (%s) as %s", result.ChannelName, result.ChannelID, result.SendAs)
-		if result.Email != "" {
-			fmt.Printf(" <%s>", result.Email)
-		}
-		fmt.Println()
-		return nil
+		fmt.Printf("Dry run — would send to %s (%s) as %s\n", result.ChannelName, result.ChannelID, result.SendAs)
+	} else {
+		fmt.Printf("Sent to %s at %s\n", req.Target(), result.Timestamp)
 	}
-
-	fmt.Printf("Sent to %s at %s\n", p.Contact, result.Timestamp)
 	return nil
 }
