@@ -9,6 +9,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 func newGlobCmd() *cobra.Command {
@@ -55,7 +56,7 @@ Output is one file path per line, suitable for piping to other tools.`,
 
 			var sinceDur time.Duration
 			if since != "" {
-				d, err := read.ParseDuration(since)
+				d, err := timeutil.ParseDuration(since)
 				if err != nil {
 					return fmt.Errorf("invalid --since value %q: %w", since, err)
 				}

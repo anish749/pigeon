@@ -10,6 +10,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/search"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 func newGrepCmd() *cobra.Command {
@@ -102,7 +103,7 @@ JSON fields in each line:
 
 			var sinceDur time.Duration
 			if since != "" {
-				d, err := read.ParseDuration(since)
+				d, err := timeutil.ParseDuration(since)
 				if err != nil {
 					return fmt.Errorf("invalid --since value %q: %w", since, err)
 				}
