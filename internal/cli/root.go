@@ -106,7 +106,11 @@ DIRECT FILE ACCESS — rg and jq
 
     rg "deploy" ~/.local/share/pigeon/                                # all messages mentioning "deploy"
     rg "deploy" ~/.local/share/pigeon/slack/acme-corp/                # scoped to workspace
+
+  Pipe to jq for structured queries:
+
     pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
+    pigeon grep -q "Alice" -C 0 | cut -d: -f2- | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'
     pigeon glob --since=7d | xargs jq -r 'select(.type == "msg") | .sender'
 
   jq on a single file (no rg needed):
