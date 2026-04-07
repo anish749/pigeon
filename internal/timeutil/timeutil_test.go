@@ -65,3 +65,34 @@ func TestFormatAge(t *testing.T) {
 		}
 	}
 }
+
+// TestRoundTrip verifies that FormatAge output can be parsed back by
+// ParseDuration to a value equal to the original (for durations where
+// FormatAge doesn't truncate).
+func TestRoundTrip(t *testing.T) {
+	tests := []time.Duration{
+		0,
+		30 * time.Second,
+		time.Minute,
+		5 * time.Minute,
+		59 * time.Minute,
+		time.Hour,
+		2 * time.Hour,
+		time.Hour + 30*time.Minute,
+		5*time.Hour + 45*time.Minute,
+		24 * time.Hour,
+		7 * 24 * time.Hour,
+		30 * 24 * time.Hour,
+	}
+	for _, d := range tests {
+		formatted := FormatAge(d)
+		parsed, err := ParseDuration(formatted)
+		if err != nil {
+			t.Errorf("round-trip failed: FormatAge(%v) = %q, ParseDuration error: %v", d, formatted, err)
+			continue
+		}
+		if parsed != d {
+			t.Errorf("round-trip mismatch: FormatAge(%v) = %q, ParseDuration(%q) = %v", d, formatted, formatted, parsed)
+		}
+	}
+}
