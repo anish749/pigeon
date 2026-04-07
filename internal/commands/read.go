@@ -91,12 +91,16 @@ type conversation struct {
 // findConversation searches for a conversation matching the query by directory name,
 // display name, or alias. Returns the first match. Case-insensitive.
 func findConversation(s store.Store, acct account.Account, query string, aliases map[string][]string) (*conversation, error) {
-	convs, err := s.ListConversations(acct)
+	convs, err := s.ListConversations(store.ListOpts{
+		Platform: acct.Platform,
+		Account:  acct.Name,
+	})
 	if err != nil {
 		return nil, err
 	}
 	q := strings.ToLower(query)
-	for _, dirName := range convs {
+	for _, c := range convs {
+		dirName := c.Conversation
 		displayName := parseDisplayName(dirName)
 		if strings.Contains(strings.ToLower(dirName), q) ||
 			strings.Contains(strings.ToLower(displayName), q) {

@@ -397,14 +397,17 @@ func (h *Hub) sendHello(ch *channel) {
 }
 
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
-	convs, err := h.store.ListConversations(ch.acct)
+	convs, err := h.store.ListConversations(store.ListOpts{
+		Platform: ch.acct.Platform,
+		Account:  ch.acct.Name,
+	})
 	if err != nil {
 		slog.Error("failed to list conversations for drain",
 			"account", ch.acct, "error", err)
 		return lastDelivered
 	}
 	for _, c := range convs {
-		lastDelivered = h.drainConversation(ch, c, lastDelivered)
+		lastDelivered = h.drainConversation(ch, c.Conversation, lastDelivered)
 	}
 	return lastDelivered
 }

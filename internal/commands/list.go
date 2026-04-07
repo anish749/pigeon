@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
@@ -10,110 +11,130 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-func RunList(platform, accountName string) error {
+type ListParams struct {
+	Platform string
+	Account  string
+	Since    string
+}
+
+func RunList(p ListParams) error {
 	s := store.NewFSStore(paths.DefaultDataRoot())
 
-	// Level 3: list conversations for a specific account
-	if platform != "" && accountName != "" {
-		acct := account.New(platform, accountName)
-		convs, err := s.ListConversations(acct)
+	opts := store.ListOpts{
+		Platform: p.Platform,
+		Account:  p.Account,
+	}
+	if p.Since != "" {
+		dur, err := parseDuration(p.Since)
 		if err != nil {
-			return err
+			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
-		if len(convs) == 0 {
-			fmt.Println("No conversations found.")
-			return nil
-		}
-		fmt.Printf("Conversations in %s:\n\n", acct.Display())
-		for _, c := range convs {
-			meta, err := s.ReadMeta(acct, c)
-			if err != nil {
-				return fmt.Errorf("read metadata for %s: %w", c, err)
-			}
-			if meta != nil {
-				if ids := modelv1.FormatConvMeta(meta); ids != "" {
-					fmt.Printf("  %s  %s\n", c, ids)
-					continue
-				}
-			}
-			fmt.Printf("  %s\n", c)
-		}
-		return nil
+		opts.Since = dur
 	}
 
-	// Level 2: list accounts for a specific platform
-	if platform != "" {
-		accounts, err := s.ListAccounts(platform)
-		if err != nil {
-			return err
-		}
-		if len(accounts) == 0 {
-			fmt.Println("No accounts found.")
-			return nil
-		}
-		accounts = canonicalAccountNames(platform, accounts)
-		fmt.Printf("Accounts in %s:\n\n", platform)
-		for _, a := range accounts {
-			fmt.Printf("  %s\n", a)
-		}
-		return nil
-	}
-
-	// Level 1: list all platforms and their accounts
-	platforms, err := s.ListPlatforms()
+	convs, err := s.ListConversations(opts)
 	if err != nil {
-		return fmt.Errorf("cannot read data directory %s: %w", paths.DataDir(), err)
+		return err
 	}
-	if len(platforms) == 0 {
-		fmt.Printf("No platforms found in %s\n", paths.DataDir())
+	if len(convs) == 0 {
+		fmt.Println("No conversations found.")
 		return nil
 	}
-	for _, p := range platforms {
-		accounts, err := s.ListAccounts(p)
-		if err != nil {
-			continue
-		}
-		accounts = canonicalAccountNames(p, accounts)
-		fmt.Printf("%s:\n", p)
-		for _, a := range accounts {
-			fmt.Printf("  %s\n", a)
-		}
-		fmt.Println()
+
+	// Build slug → display name mapping from config.
+	canonical := canonicalAccountNames()
+
+	if opts.Since > 0 {
+		printActivityList(convs, canonical)
+	} else {
+		printGroupedList(s, convs, canonical)
 	}
 	return nil
 }
 
-// canonicalAccountNames replaces filesystem directory names (slugs) with
-// display names from config.
-func canonicalAccountNames(platform string, dirNames []string) []string {
+// printGroupedList prints conversations grouped by platform/account, like the
+// original list command.
+func printGroupedList(s *store.FSStore, convs []store.ConversationInfo, canonical map[string]string) {
+	type groupKey struct{ platform, account string }
+	var order []groupKey
+	groups := make(map[groupKey][]store.ConversationInfo)
+	for _, c := range convs {
+		k := groupKey{c.Platform, c.Account}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], c)
+	}
+
+	for _, k := range order {
+		acctDisplay := k.account
+		if name, ok := canonical[k.platform+"/"+k.account]; ok {
+			acctDisplay = name
+		}
+		fmt.Printf("%s/%s:\n", k.platform, acctDisplay)
+		for _, c := range groups[k] {
+			acct := account.NewFromSlug(c.Platform, c.Account)
+			meta, err := s.ReadMeta(acct, c.Conversation)
+			if err == nil && meta != nil {
+				if ids := modelv1.FormatConvMeta(meta); ids != "" {
+					fmt.Printf("  %s  %s\n", c.Conversation, ids)
+					continue
+				}
+			}
+			fmt.Printf("  %s\n", c.Conversation)
+		}
+		fmt.Println()
+	}
+}
+
+// printActivityList prints conversations sorted by last activity with relative
+// timestamps and file paths for direct access.
+func printActivityList(convs []store.ConversationInfo, canonical map[string]string) {
+	now := time.Now()
+	for _, c := range convs {
+		acctDisplay := c.Account
+		if name, ok := canonical[c.Platform+"/"+c.Account]; ok {
+			acctDisplay = name
+		}
+		age := now.Sub(c.LastModified)
+		fmt.Printf("%s/%s/%s  last: %s ago\n", c.Platform, acctDisplay, c.Conversation, formatAge(age))
+		fmt.Printf("  %s\n", c.Dir)
+	}
+}
+
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
+}
+
+// canonicalAccountNames builds a mapping from "platform/slug" → display name
+// using the config file.
+func canonicalAccountNames() map[string]string {
 	cfg, err := config.Load()
 	if err != nil {
-		return dirNames
+		return nil
 	}
-
-	canonical := make(map[string]string) // slug → display name
-	switch platform {
-	case "slack":
-		for _, sl := range cfg.Slack {
-			acct := account.New("slack", sl.Workspace)
-			canonical[acct.NameSlug()] = sl.Workspace
-		}
-	case "whatsapp":
-		for _, wa := range cfg.WhatsApp {
-			acct := account.New("whatsapp", wa.Account)
-			canonical[acct.NameSlug()] = wa.Account
-		}
-	default:
-		return dirNames
+	m := make(map[string]string)
+	for _, sl := range cfg.Slack {
+		acct := account.New("slack", sl.Workspace)
+		m["slack/"+acct.NameSlug()] = sl.Workspace
 	}
-
-	result := make([]string, len(dirNames))
-	for i, dir := range dirNames {
-		if name, ok := canonical[dir]; ok {
-			result[i] = name
-		} else {
-			result[i] = dir
-		}
+	for _, wa := range cfg.WhatsApp {
+		acct := account.New("whatsapp", wa.Account)
+		m["whatsapp/"+acct.NameSlug()] = wa.Account
 	}
-	return result
+	return m
 }

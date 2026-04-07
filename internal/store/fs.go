@@ -210,33 +210,87 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 	return &modelv1.ResolvedDateFile{Messages: result}, errors.Join(errs...)
 }
 
-// ListPlatforms returns all platform directories.
-func (s *FSStore) ListPlatforms() ([]string, error) {
-	return listSubdirs(s.root.Path())
+// ListConversations walks the data tree and returns all conversations
+// matching the given filters. Results are sorted by LastModified descending.
+func (s *FSStore) ListConversations(opts ListOpts) ([]ConversationInfo, error) {
+	platforms, err := listSubdirs(s.root.Path())
+	if err != nil {
+		return nil, fmt.Errorf("list platforms: %w", err)
+	}
+
+	var cutoff time.Time
+	if opts.Since > 0 {
+		cutoff = time.Now().Add(-opts.Since)
+	}
+
+	var results []ConversationInfo
+	for _, platform := range platforms {
+		if opts.Platform != "" && !strings.EqualFold(platform, opts.Platform) {
+			continue
+		}
+		accounts, err := listSubdirs(s.root.Platform(platform).Path())
+		if err != nil {
+			return nil, fmt.Errorf("list accounts for %s: %w", platform, err)
+		}
+		for _, acctSlug := range accounts {
+			if opts.Account != "" {
+				acct := account.New(opts.Platform, opts.Account)
+				if acctSlug != acct.NameSlug() {
+					continue
+				}
+			}
+			acctDir := s.root.Platform(platform).AccountFromSlug(acctSlug)
+			convEntries, err := os.ReadDir(acctDir.Path())
+			if err != nil {
+				return nil, fmt.Errorf("list conversations for %s/%s: %w", platform, acctSlug, err)
+			}
+			for _, e := range convEntries {
+				if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+					continue
+				}
+				convDir := acctDir.Conversation(e.Name())
+				mtime := latestDateFileMtime(convDir.Path())
+				if !cutoff.IsZero() && mtime.Before(cutoff) {
+					continue
+				}
+				results = append(results, ConversationInfo{
+					Platform:     platform,
+					Account:      acctSlug,
+					Conversation: e.Name(),
+					Dir:          convDir.Path(),
+					LastModified: mtime,
+				})
+			}
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].LastModified.After(results[j].LastModified)
+	})
+	return results, nil
 }
 
-// ListAccounts returns all account directories for a platform.
-func (s *FSStore) ListAccounts(platform string) ([]string, error) {
-	return listSubdirs(s.root.Platform(platform).Path())
-}
-
-// ListConversations returns all conversation directories for an account.
-func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
-	dir := s.root.AccountFor(acct).Path()
+// latestDateFileMtime returns the most recent mtime among date files in dir.
+// Returns zero time if no date files exist.
+func latestDateFileMtime(dir string) time.Time {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+		return time.Time{}
 	}
-	var convs []string
+	var latest time.Time
 	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			convs = append(convs, e.Name())
+		if e.IsDir() || !dateFilePattern.MatchString(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
 		}
 	}
-	return convs, nil
+	return latest
 }
 
 // Maintain runs the maintenance pass for an account.

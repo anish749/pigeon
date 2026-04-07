@@ -158,35 +158,104 @@ func TestReadThread_NotFound(t *testing.T) {
 
 // --- List ---
 
-func TestListPlatformsAndAccounts(t *testing.T) {
+func TestListConversations(t *testing.T) {
 	s, acct := setup(t)
 
-	// Create a conversation to populate the directory structure
 	m := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
 	s.Append(acct, "#general", m)
 
-	platforms, err := s.ListPlatforms()
-	if err != nil {
-		t.Fatalf("ListPlatforms: %v", err)
-	}
-	if len(platforms) != 1 || platforms[0] != "slack" {
-		t.Errorf("platforms = %v, want [slack]", platforms)
-	}
-
-	accounts, err := s.ListAccounts("slack")
-	if err != nil {
-		t.Fatalf("ListAccounts: %v", err)
-	}
-	if len(accounts) != 1 || accounts[0] != "acme-corp" {
-		t.Errorf("accounts = %v, want [acme-corp]", accounts)
-	}
-
-	convs, err := s.ListConversations(acct)
+	// No filters — returns all conversations.
+	convs, err := s.ListConversations(ListOpts{})
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
-	if len(convs) != 1 || convs[0] != "#general" {
-		t.Errorf("conversations = %v, want [#general]", convs)
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	if convs[0].Platform != "slack" {
+		t.Errorf("platform = %q, want slack", convs[0].Platform)
+	}
+	if convs[0].Account != "acme-corp" {
+		t.Errorf("account = %q, want acme-corp", convs[0].Account)
+	}
+	if convs[0].Conversation != "#general" {
+		t.Errorf("conversation = %q, want #general", convs[0].Conversation)
+	}
+	if convs[0].Dir == "" {
+		t.Error("Dir is empty")
+	}
+	if convs[0].LastModified.IsZero() {
+		t.Error("LastModified is zero")
+	}
+}
+
+func TestListConversationsFilterPlatform(t *testing.T) {
+	s, acct := setup(t)
+
+	m := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	s.Append(acct, "#general", m)
+
+	// Filter by wrong platform — no results.
+	convs, err := s.ListConversations(ListOpts{Platform: "whatsapp"})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 0 {
+		t.Errorf("got %d conversations, want 0", len(convs))
+	}
+
+	// Filter by correct platform.
+	convs, err = s.ListConversations(ListOpts{Platform: "slack"})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 1 || convs[0].Conversation != "#general" {
+		t.Errorf("got %v, want [#general]", convs)
+	}
+}
+
+func TestListConversationsSince(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write a message — file mtime will be ~now.
+	m := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	s.Append(acct, "#general", m)
+
+	// Since 1h — should include the conversation (file was just written).
+	convs, err := s.ListConversations(ListOpts{Since: 1 * time.Hour})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 1 {
+		t.Errorf("got %d conversations, want 1", len(convs))
+	}
+
+	// Since 1ns — should exclude (file mtime is at least a few µs ago).
+	convs, err = s.ListConversations(ListOpts{Since: 1 * time.Nanosecond})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 0 {
+		t.Errorf("got %d conversations, want 0", len(convs))
+	}
+}
+
+func TestListConversationsSortOrder(t *testing.T) {
+	s, acct := setup(t)
+
+	// Write to #alpha first, then #beta — #beta should appear first (most recent).
+	s.Append(acct, "#alpha", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"))
+	s.Append(acct, "#beta", msgLine("M2", ts(2026, 3, 16, 10, 0, 0), "Bob", "U2", "world"))
+
+	convs, err := s.ListConversations(ListOpts{})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2", len(convs))
+	}
+	if convs[0].Conversation != "#beta" {
+		t.Errorf("first conversation = %q, want #beta (most recent)", convs[0].Conversation)
 	}
 }
 

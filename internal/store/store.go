@@ -19,6 +19,23 @@ type ReadOpts struct {
 	Last  int           // last N messages
 }
 
+// ListOpts controls which conversations are returned by ListConversations.
+// All fields are optional filters; zero values mean "no filter".
+type ListOpts struct {
+	Platform string        // filter to a single platform
+	Account  string        // filter to a single account (requires Platform)
+	Since    time.Duration // only conversations with file activity within this window
+}
+
+// ConversationInfo describes a conversation discovered by ListConversations.
+type ConversationInfo struct {
+	Platform     string
+	Account      string
+	Conversation string
+	Dir          string    // absolute path to conversation directory
+	LastModified time.Time // mtime of most recent date file
+}
+
 // Store provides structured read/write access to pigeon's message storage.
 type Store interface {
 	// Append writes a single event line to the appropriate date file for
@@ -38,14 +55,9 @@ type Store interface {
 	// ThreadExists checks if a thread file exists for the given thread timestamp.
 	ThreadExists(acct account.Account, conversation, threadTS string) bool
 
-	// ListPlatforms returns all platform directories (e.g. "slack", "whatsapp").
-	ListPlatforms() ([]string, error)
-
-	// ListAccounts returns all account directories for a platform.
-	ListAccounts(platform string) ([]string, error)
-
-	// ListConversations returns all conversation directories for an account.
-	ListConversations(acct account.Account) ([]string, error)
+	// ListConversations walks the data tree and returns all conversations
+	// matching the given filters. Results are sorted by LastModified descending.
+	ListConversations(opts ListOpts) ([]ConversationInfo, error)
 
 	// WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
 	// Returns true if written, false if already present.
