@@ -31,38 +31,45 @@ type gmailBody struct {
 
 // ExtractBody walks the MIME tree to find the best text content.
 // Prefers text/plain, falls back to text/html (with tags stripped).
-func ExtractBody(payload gmailPayload) string {
-	if plain := findBody(payload, "text/plain"); plain != "" {
-		return plain
+func ExtractBody(payload gmailPayload) (string, error) {
+	plain, err := findBody(payload, "text/plain")
+	if err != nil {
+		return "", fmt.Errorf("extract text/plain body: %w", err)
 	}
-	if html := findBody(payload, "text/html"); html != "" {
-		return stripHTMLTags(html)
+	if plain != "" {
+		return plain, nil
 	}
-	return ""
+
+	html, err := findBody(payload, "text/html")
+	if err != nil {
+		return "", fmt.Errorf("extract text/html body: %w", err)
+	}
+	if html != "" {
+		return stripHTMLTags(html), nil
+	}
+	return "", nil
 }
 
 // findBody searches the MIME tree depth-first for a part matching mimeType
 // and returns its decoded body content.
-func findBody(payload gmailPayload, mimeType string) string {
+func findBody(payload gmailPayload, mimeType string) (string, error) {
 	if len(payload.Parts) == 0 {
-		// Leaf node.
 		if strings.EqualFold(payload.MimeType, mimeType) && payload.Body.Data != "" {
-			decoded, err := decodeBase64URL(payload.Body.Data)
-			if err != nil {
-				return ""
-			}
-			return decoded
+			return decodeBase64URL(payload.Body.Data)
 		}
-		return ""
+		return "", nil
 	}
 
-	// Recurse into parts.
 	for _, part := range payload.Parts {
-		if body := findBody(part, mimeType); body != "" {
-			return body
+		body, err := findBody(part, mimeType)
+		if err != nil {
+			return "", err
+		}
+		if body != "" {
+			return body, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // ExtractAttachments collects attachment metadata from the MIME tree.

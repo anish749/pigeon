@@ -9,7 +9,10 @@ func TestExtractBody_SimplePlainText(t *testing.T) {
 		MimeType: "text/plain",
 		Body:     gmailBody{Data: "SGVsbG8gd29ybGQ"}, // "Hello world"
 	}
-	got := ExtractBody(payload)
+	got, err := ExtractBody(payload)
+	if err != nil {
+		t.Fatalf("ExtractBody error: %v", err)
+	}
 	if got != "Hello world" {
 		t.Errorf("ExtractBody = %q, want %q", got, "Hello world")
 	}
@@ -29,7 +32,10 @@ func TestExtractBody_MultipartAlternative(t *testing.T) {
 			},
 		},
 	}
-	got := ExtractBody(payload)
+	got, err := ExtractBody(payload)
+	if err != nil {
+		t.Fatalf("ExtractBody error: %v", err)
+	}
 	if got != "Plain text body" {
 		t.Errorf("ExtractBody = %q, want %q", got, "Plain text body")
 	}
@@ -40,7 +46,10 @@ func TestExtractBody_HTMLOnly(t *testing.T) {
 		MimeType: "text/html",
 		Body:     gmailBody{Data: "PHA-SGVsbG8gPGI-d29ybGQ8L2I-PC9wPg"}, // "<p>Hello <b>world</b></p>"
 	}
-	got := ExtractBody(payload)
+	got, err := ExtractBody(payload)
+	if err != nil {
+		t.Fatalf("ExtractBody error: %v", err)
+	}
 	if got != "Hello world" {
 		t.Errorf("ExtractBody = %q, want %q", got, "Hello world")
 	}
@@ -70,7 +79,10 @@ func TestExtractBody_NestedMultipart(t *testing.T) {
 			},
 		},
 	}
-	got := ExtractBody(payload)
+	got, err := ExtractBody(payload)
+	if err != nil {
+		t.Fatalf("ExtractBody error: %v", err)
+	}
 	if got != "Nested plain text" {
 		t.Errorf("ExtractBody = %q, want %q", got, "Nested plain text")
 	}
