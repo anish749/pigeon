@@ -448,7 +448,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	exePath, _ := os.Executable()
+	exePath, err := os.Executable()
+	if err != nil {
+		slog.Error("resolve executable path", "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, StatusResponse{
 		Version:                 s.version,
