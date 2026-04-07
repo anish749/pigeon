@@ -474,8 +474,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-
-
 // formatAmbiguousContacts builds a disambiguation message enriched with
 // conversation activity (last message date, total messages) from the file store.
 func formatAmbiguousContacts(err *walistener.AmbiguousContactError, acct account.Account) string {
