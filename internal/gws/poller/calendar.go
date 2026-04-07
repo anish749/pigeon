@@ -14,7 +14,7 @@ import (
 )
 
 // PollCalendar polls for calendar changes and stores events as JSONL.
-func PollCalendar(dataDir string, cursors *gwsstore.Cursors) error {
+func PollCalendar(accountDir string, cursors *gwsstore.Cursors) error {
 	const calID = "primary"
 
 	if cursors.Calendar == nil {
@@ -42,7 +42,7 @@ func PollCalendar(dataDir string, cursors *gwsstore.Cursors) error {
 
 	var errs []error
 	for _, ev := range events {
-		datePath := eventDateFile(dataDir, calID, ev)
+		datePath := eventDateFile(accountDir, calID, ev)
 		line := model.Line{Type: "event", Event: &ev}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append event %s: %w", ev.ID, err))
@@ -58,10 +58,10 @@ func PollCalendar(dataDir string, cursors *gwsstore.Cursors) error {
 }
 
 // eventDateFile returns the JSONL file path for an event based on its start date.
-// Path: {dataDir}/gcalendar/{calID}/{YYYY-MM-DD}.jsonl
-func eventDateFile(dataDir, calID string, ev model.EventLine) string {
+// Path: {accountDir}/gcalendar/{calID}/{YYYY-MM-DD}.jsonl
+func eventDateFile(accountDir, calID string, ev model.EventLine) string {
 	date := eventDate(ev)
-	return filepath.Join(dataDir, "gcalendar", calID, date+".jsonl")
+	return filepath.Join(accountDir, "gcalendar", calID, date+".jsonl")
 }
 
 // eventDate extracts the date string (YYYY-MM-DD) from an event.
@@ -83,6 +83,8 @@ func eventDate(ev model.EventLine) string {
 			return d
 		}
 	}
+	slog.Warn("calendar event has no parseable date, filing under unknown",
+		"event_id", ev.ID, "status", ev.Status)
 	return "unknown"
 }
 
