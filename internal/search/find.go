@@ -2,6 +2,7 @@ package search
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os/exec"
@@ -67,6 +68,16 @@ func Grep(query, dir string, since time.Duration, context int) ([]byte, error) {
 	return captureGrepFallback(query, dir, globs, context)
 }
 
+// GrepWithGrep is like Grep but always uses the grep fallback, even when rg
+// is available. Exported for testing the fallback path.
+func GrepWithGrep(query, dir string, since time.Duration, context int) ([]byte, error) {
+	globs, err := fileGlobs(dir, since)
+	if err != nil {
+		return nil, err
+	}
+	return captureGrepFallback(query, dir, globs, context)
+}
+
 // fileGlobs returns rg --glob patterns that select data files within the
 // since window. Date files are matched by filename; thread files are always
 // included.
@@ -80,10 +91,10 @@ func fileGlobs(dir string, since time.Duration) ([]string, error) {
 	// Scan for date filenames in the tree. We need the set of unique
 	// date filenames (e.g. "2026-04-07.jsonl") that fall within the window.
 	seen := make(map[string]bool)
-	var walkErr error
+	var errs []error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			walkErr = err
+			errs = append(errs, err)
 			return nil
 		}
 		if d.IsDir() {
@@ -103,8 +114,12 @@ func fileGlobs(dir string, since time.Duration) ([]string, error) {
 		}
 		return nil
 	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("walk %s: %w", dir, errors.Join(errs...))
+	}
+
+	if len(seen) == 0 {
+		return nil, fmt.Errorf("no date files within --since window")
 	}
 
 	var globs []string
@@ -222,10 +237,10 @@ func findFilesFallback(dir string, globs []string) ([]string, error) {
 	}
 
 	var files []string
-	var walkErr error
+	var errs []error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			walkErr = err
+			errs = append(errs, err)
 			return nil
 		}
 		if d.IsDir() {
@@ -244,18 +259,18 @@ func findFilesFallback(dir string, globs []string) ([]string, error) {
 		}
 		return nil
 	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("walk %s: %w", dir, errors.Join(errs...))
 	}
 	return files, nil
 }
 
 func findAllFiles(dir string) ([]string, error) {
 	var files []string
-	var walkErr error
+	var errs []error
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			walkErr = err
+			errs = append(errs, err)
 			return nil
 		}
 		if d.IsDir() {
@@ -266,8 +281,8 @@ func findAllFiles(dir string) ([]string, error) {
 		}
 		return nil
 	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("walk %s: %w", dir, walkErr)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("walk %s: %w", dir, errors.Join(errs...))
 	}
 	return files, nil
 }

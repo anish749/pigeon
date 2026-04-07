@@ -77,12 +77,13 @@ func TestGrepFallback_NoColorFlag(t *testing.T) {
 		testMsg("M1", testTs(2026, 3, 16, 9, 0, 0), "Alice", "U1", "deploy is done"),
 	})
 
-	output, err := search.Grep("deploy", dir, 0, 0)
+	// Use GrepWithGrep to force the grep fallback path, even when rg is available.
+	output, err := search.GrepWithGrep("deploy", dir, 0, 0)
 	if err != nil {
-		t.Fatalf("Grep returned error: %v", err)
+		t.Fatalf("GrepWithGrep returned error: %v", err)
 	}
 	if len(output) == 0 {
-		t.Error("Grep returned empty output, expected a match")
+		t.Error("GrepWithGrep returned empty output, expected a match")
 	}
 }
 
