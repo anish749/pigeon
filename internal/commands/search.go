@@ -21,7 +21,7 @@ type SearchParams struct {
 }
 
 func RunSearch(p SearchParams) error {
-	searchDir := searchPath(p.Platform, p.Account)
+	searchDir := SearchPath(p.Platform, p.Account)
 	if _, err := os.Stat(searchDir); os.IsNotExist(err) {
 		return fmt.Errorf("no data at %s", searchDir)
 	}
@@ -33,7 +33,7 @@ func RunSearch(p SearchParams) error {
 
 	var sinceDur time.Duration
 	if p.Since != "" {
-		d, err := parseDuration(p.Since)
+		d, err := ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -70,8 +70,8 @@ func RunSearch(p SearchParams) error {
 	return nil
 }
 
-// searchPath returns the directory to search based on platform/account filters.
-func searchPath(platform, acctName string) string {
+// SearchPath returns the directory to search based on platform/account filters.
+func SearchPath(platform, acctName string) string {
 	root := paths.DefaultDataRoot()
 	switch {
 	case platform != "" && acctName != "":
@@ -92,7 +92,7 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 		return []string{"*" + paths.FileExt}, nil
 	}
 
-	dur, err := parseDuration(since)
+	dur, err := ParseDuration(since)
 	if err != nil {
 		return nil, fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
