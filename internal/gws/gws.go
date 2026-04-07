@@ -89,7 +89,8 @@ func RunParsed(dst any, args ...string) error {
 }
 
 // ParamsJSON marshals a map to a JSON string for --params flags.
+// json.Marshal cannot fail for map[string]string — all values are valid JSON strings.
 func ParamsJSON(m map[string]string) string {
-	b, _ := json.Marshal(m)
+	b, _ := json.Marshal(m) //nolint:errcheck // map[string]string always marshals
 	return string(b)
 }

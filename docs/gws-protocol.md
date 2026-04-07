@@ -497,15 +497,15 @@ protocol). Maintenance removes cancelled events and any prior versions.
 
 ### Recurring Events
 
-The Calendar API with `singleEvents=true` expands recurring events
-into individual instances. Each instance has a unique `id` (the
-recurrence ID) and is stored as a separate event line. The `recurring`
-field is set to `true`.
+The poller uses `syncToken`-based incremental sync, which defaults to
+`singleEvents=false`. This means the API returns recurring event
+templates (with recurrence rules) and individual instance exceptions
+(modified or cancelled occurrences). The `recurring` field is set to
+`true` when `recurringEventId` is present in the API response.
 
-If `singleEvents=false` (the default for sync), the API returns the
-recurring event template. Instance exceptions (modified or cancelled
-occurrences) are returned separately. The poller uses the sync token
-which returns individual instance changes.
+Cancelled recurring instances carry `originalStartTime` instead of
+`start`/`end`. The `eventDate` function uses this field for date
+filing.
 
 ---
 
@@ -573,7 +573,7 @@ included in search globs alongside `.jsonl` date files.
 
 ### Google Docs
 
-1. Read `content.md` and display as-is (markdown).
+1. Read `{TabName}.md` files and display as markdown.
 2. Parse `comments.jsonl`, deduplicate by `id` (keep last occurrence).
 3. Display comments grouped by anchor text, with replies nested.
 4. Resolved comments can be shown or hidden based on user preference.
@@ -601,7 +601,7 @@ timestamp, rewrite.
 
 ### Google Docs / Sheets
 
-- `content.md` and `*.csv` are replaced on each sync — no maintenance
+- `*.md` and `*.csv` are replaced on each sync — no maintenance
   needed for content files.
 - `comments.jsonl`: deduplicate comments by `id` (keep last), deduplicate
   replies by `id` (keep last), sort by timestamp, rewrite.
