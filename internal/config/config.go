@@ -17,9 +17,8 @@ type Config struct {
 
 // GWSConfig holds configuration for a single Google Workspace account.
 type GWSConfig struct {
-	Account  string   `yaml:"account"`             // display name for this account
-	Email    string   `yaml:"email"`               // Google account email (used for account slug)
-	Services []string `yaml:"services,omitempty"`   // which services to poll: "gmail", "gdrive", "gcalendar"
+	Account string `yaml:"account"` // display name for this account
+	Email   string `yaml:"email"`   // Google account email (used for account slug)
 }
 
 type WhatsAppConfig struct {

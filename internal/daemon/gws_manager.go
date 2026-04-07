@@ -70,15 +70,14 @@ func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) 
 
 func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	accountSlug := slug.Make(g.Email)
-	dataDir := paths.DefaultDataRoot().Path()
-	cursorsPath := filepath.Join(dataDir, "gws-cursors", accountSlug+".yaml")
+	accountDir := filepath.Join(paths.DefaultDataRoot().Path(), "gws", accountSlug)
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
-	p := poller.New(gwsPollInterval, cursorsPath, dataDir)
+	p := poller.New(gwsPollInterval, accountDir)
 	go func() {
-		slog.Info("gws poller started", "email", g.Email, "account", g.Account)
+		slog.Info("gws poller started", "email", g.Email, "account_dir", accountDir)
 		if err := p.Run(child); err != nil && child.Err() == nil {
 			slog.Error("gws poller exited", "email", g.Email, "error", err)
 		}

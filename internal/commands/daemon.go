@@ -110,7 +110,7 @@ func DaemonRun(version string) error {
 	}
 
 	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 && len(cfg.GWS) == 0 {
-		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", paths.ConfigPath())
+		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp', 'pigeon setup-slack', or add a gws account first", paths.ConfigPath())
 	}
 
 	// Check for updates before starting listeners. If an update is available,

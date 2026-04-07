@@ -122,19 +122,19 @@ func fileIncludes(searchDir, since string) ([]string, error) {
 		return nil
 	})
 
+	var dateFiles int
 	var includes []string
 	for name := range seen {
 		includes = append(includes, name)
+		dateFiles++
 	}
 	// Always include thread files — can't date-filter by filename.
-	// **/threads/*.jsonl matches nested paths like #general/threads/1742100000.jsonl.
 	includes = append(includes, paths.ThreadGlobRg)
 
 	// Always include non-date-named content files (GWS docs, sheets, comments).
 	includes = append(includes, "*.md", "*.csv", "comments.jsonl")
 
-	if len(includes) == 4 {
-		// Only the always-included globs, no date files matched.
+	if dateFiles == 0 {
 		return nil, fmt.Errorf("no date files within --%s window", since)
 	}
 	return includes, nil
