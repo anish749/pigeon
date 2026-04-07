@@ -34,12 +34,18 @@ Output is raw rg format: filepath:matching_line. Pipe to jq for
 structured queries on the JSON content.
 
 JSON fields in each line:
-  type      "msg", "react", "unreact", "edit", "delete"
-  ts        ISO 8601 timestamp
-  id        message ID
+  type      event type: "msg", "react", "unreact", "edit", "delete", "separator"
+  ts        timestamp (ISO 8601, e.g. "2026-03-16T09:15:02Z")
+  id        message ID (on msg events)
+  msg       target message ID (on react/edit/delete events)
   sender    display name
-  from      platform user ID
-  text      message body`,
+  from      platform user ID (stable identity)
+  text      message body (on msg/edit events)
+  via       message pathway: "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
+  emoji     reaction emoji (on react/unreact events)
+  attach    attachments array, each with "id" and "type" (MIME)
+  reply     true if thread reply (on msg events)
+  replyTo   quoted message ID (on msg events, WhatsApp quote-reply)`,
 		Example: `  pigeon grep -q "deploy"
   pigeon grep -q "deploy" --since=7d
   pigeon grep -q "deploy" -l                        # file paths only
