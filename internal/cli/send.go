@@ -99,6 +99,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 	cmd.Flags().String("channel", "", "Slack channel (#name) or group DM (@mpdm-...)")
 	cmd.Flags().StringP("contact", "c", "", "WhatsApp contact name or phone number")
 	cmd.MarkFlagsMutuallyExclusive("user-id", "channel", "contact")
+	cmd.MarkFlagsOneRequired("user-id", "channel", "contact")
 
 	// Slack-specific flags.
 	cmd.Flags().String("thread", "", "thread timestamp to reply to")
