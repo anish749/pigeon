@@ -544,7 +544,7 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 
 // validateTarget checks that exactly one of slack or contact is set and matches the platform.
 func validateTarget(platform string, slack *SlackTarget, contact string) error {
-	hasSlack := slack != nil && (slack.UserID != "" || slack.Channel != "")
+	hasSlack := slack != nil
 	hasContact := contact != ""
 
 	if !hasSlack && !hasContact {

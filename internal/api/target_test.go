@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSlackTargetValidate(t *testing.T) {
 	tests := []struct {
@@ -71,6 +74,7 @@ func TestValidateTarget(t *testing.T) {
 		{name: "slack with contact only", platform: "slack", contact: "Alice", wantErr: "use slack target"},
 		{name: "whatsapp with slack target", platform: "whatsapp", slack: &SlackTarget{UserID: "U123"}, wantErr: "use contact for WhatsApp"},
 		{name: "slack validates inner", platform: "slack", slack: &SlackTarget{UserID: "C123"}, wantErr: "U-prefixed"},
+		{name: "slack empty struct", platform: "slack", slack: &SlackTarget{}, wantErr: "specify user_id or channel"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,14 +116,5 @@ func TestSendRequestTarget(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchStr(s, substr)
-}
-
-func searchStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }
