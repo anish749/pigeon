@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/gmail"
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/gws/model"
@@ -28,6 +29,11 @@ func PollGmail(accountDir string, cursors *gwsstore.Cursors) error {
 
 	added, deleted, newHistoryID, err := gmail.ListHistory(cursors.Gmail.HistoryID)
 	if err != nil {
+		if gws.IsCursorExpired(err) {
+			slog.Warn("gmail history ID expired, will re-seed")
+			cursors.Gmail.HistoryID = ""
+			return nil
+		}
 		return fmt.Errorf("poll gmail history: %w", err)
 	}
 
@@ -37,6 +43,11 @@ func PollGmail(accountDir string, cursors *gwsstore.Cursors) error {
 	for _, msgID := range added {
 		email, err := gmail.GetMessage(msgID)
 		if err != nil {
+			// Message may have been deleted between ListHistory and GetMessage.
+			if gws.IsNotFound(err) {
+				slog.Debug("gmail message deleted before fetch, skipping", "message_id", msgID)
+				continue
+			}
 			errs = append(errs, fmt.Errorf("get message %s: %w", msgID, err))
 			continue
 		}
@@ -55,7 +66,6 @@ func PollGmail(accountDir string, cursors *gwsstore.Cursors) error {
 			ID:   msgID,
 			Ts:   now,
 		}
-		// We don't know the original date, so store in today's file.
 		datePath := gmailDateFile(accountDir, now)
 		line := model.Line{Type: "email-delete", EmailDelete: del}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
@@ -72,7 +82,6 @@ func PollGmail(accountDir string, cursors *gwsstore.Cursors) error {
 }
 
 // gmailDateFile returns the JSONL file path for a Gmail message based on its timestamp.
-// Path: {accountDir}/gmail/{YYYY-MM-DD}.jsonl
 func gmailDateFile(accountDir string, ts time.Time) string {
 	date := ts.Format("2006-01-02")
 	return filepath.Join(accountDir, "gmail", date+".jsonl")
