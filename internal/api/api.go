@@ -307,7 +307,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		// DM: open conversation with the specified user.
 		userName, err := sender.Resolver.UserName(ctx, req.UserID)
 		if err != nil {
-			userName = req.UserID
+			return SendResponse{Error: fmt.Sprintf("unknown user %s: %v", req.UserID, err)}
 		}
 		channelName = "@" + userName
 
