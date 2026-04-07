@@ -25,8 +25,7 @@ func RunReact(p ReactParams) error {
 	body, err := json.Marshal(api.ReactRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
-		UserID:    p.UserID,
-		Channel:   p.Channel,
+		Slack:     slackTarget(p.UserID, p.Channel),
 		Contact:   p.Contact,
 		MessageID: p.MessageID,
 		Emoji:     p.Emoji,

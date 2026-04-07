@@ -11,6 +11,14 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 )
 
+// slackTarget returns a *SlackTarget if either field is set, or nil.
+func slackTarget(userID, channel string) *api.SlackTarget {
+	if userID == "" && channel == "" {
+		return nil
+	}
+	return &api.SlackTarget{UserID: userID, Channel: channel}
+}
+
 type SendParams struct {
 	Platform  string
 	Account   string
@@ -28,8 +36,7 @@ func RunSend(p SendParams) error {
 	req := api.SendRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
-		UserID:    p.UserID,
-		Channel:   p.Channel,
+		Slack:     slackTarget(p.UserID, p.Channel),
 		Contact:   p.Contact,
 		Message:   p.Message,
 		Thread:    p.Thread,
