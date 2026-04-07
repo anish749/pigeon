@@ -1,6 +1,7 @@
 package read
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +11,8 @@ import (
 
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("rg"); err != nil {
-		// rg is required for all tests in this package.
-		os.Exit(0)
+		fmt.Fprintln(os.Stderr, "rg (ripgrep) is required but not found on PATH")
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
