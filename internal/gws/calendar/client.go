@@ -18,21 +18,22 @@ type calendarEventsResponse struct {
 
 // calendarEvent is the raw API response for a single event.
 type calendarEvent struct {
-	ID               string           `json:"id"`
-	Status           string           `json:"status"`
-	Summary          string           `json:"summary"`
-	Description      string           `json:"description"`
-	Start            calendarTimeRef  `json:"start"`
-	End              calendarTimeRef  `json:"end"`
-	Location         string           `json:"location"`
-	Created          string           `json:"created"`
-	Updated          string           `json:"updated"`
-	Creator          calendarPerson   `json:"creator"`
-	Organizer        calendarPerson   `json:"organizer"`
-	Attendees        []calendarPerson `json:"attendees"`
-	HangoutLink      string           `json:"hangoutLink"`
-	EventType        string           `json:"eventType"`
-	RecurringEventId string           `json:"recurringEventId"`
+	ID                string           `json:"id"`
+	Status            string           `json:"status"`
+	Summary           string           `json:"summary"`
+	Description       string           `json:"description"`
+	Start             calendarTimeRef  `json:"start"`
+	End               calendarTimeRef  `json:"end"`
+	Location          string           `json:"location"`
+	Created           string           `json:"created"`
+	Updated           string           `json:"updated"`
+	Creator           calendarPerson   `json:"creator"`
+	Organizer         calendarPerson   `json:"organizer"`
+	Attendees         []calendarPerson `json:"attendees"`
+	HangoutLink       string           `json:"hangoutLink"`
+	EventType         string           `json:"eventType"`
+	RecurringEventId  string           `json:"recurringEventId"`
+	OriginalStartTime calendarTimeRef  `json:"originalStartTime"`
 }
 
 // calendarTimeRef holds either a dateTime or a date (all-day events).
@@ -81,6 +82,13 @@ func (e calendarEvent) ToEventLine() model.EventLine {
 		ev.EndDate = e.End.Date
 	}
 
+	// Cancelled recurring instances carry the original start time instead of start/end.
+	if e.OriginalStartTime.DateTime != "" {
+		ev.OriginalStartTime = e.OriginalStartTime.DateTime
+	} else if e.OriginalStartTime.Date != "" {
+		ev.OriginalStartTime = e.OriginalStartTime.Date
+	}
+
 	return ev
 }
 
@@ -98,7 +106,7 @@ func ListEvents(calendarID, syncToken string) ([]model.EventLine, string, error)
 	for {
 		var resp calendarEventsResponse
 		if err := gws.RunParsed(&resp, "calendar", "events", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, "", fmt.Errorf("list calendar events: %w", err)
+			return nil, "", err
 		}
 
 		for _, item := range resp.Items {
