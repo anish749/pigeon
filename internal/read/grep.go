@@ -10,13 +10,14 @@ import (
 
 // GrepOpts controls content search behavior.
 type GrepOpts struct {
-	Query          string
-	Since          time.Duration
-	Context        int  // -C lines of context
-	FilesOnly      bool // -l: return file paths only
-	Count          bool // -c: return match counts per file
+	Query           string
+	Since           time.Duration
+	Context         int  // -C lines of context
+	FilesOnly       bool // -l: return file paths only
+	Count           bool // -c: return match counts per file
 	CaseInsensitive bool // -i
-	FixedStrings   bool // -F: literal match, no regex
+	FixedStrings    bool // -F: literal match, no regex
+	JSON            bool // --json: structured JSON output (for machine parsing)
 }
 
 // Grep runs a content search over data files under dir. Returns raw rg
@@ -24,7 +25,12 @@ type GrepOpts struct {
 // globs as Glob, and thread files are included unfiltered (the caller
 // should post-filter thread results by message timestamp if needed).
 func Grep(dir string, opts GrepOpts) ([]byte, error) {
-	args := []string{"--color=never"}
+	var args []string
+	if opts.JSON {
+		args = append(args, "--json")
+	} else {
+		args = append(args, "--color=never")
+	}
 
 	if opts.FilesOnly {
 		args = append(args, "-l")

@@ -136,10 +136,22 @@ JSON fields in each line:
 				return nil
 			}
 
-			// For content output, also print the parsed summary if
-			// stdout is a terminal (not piped).
+			// For content output, print the parsed summary if stdout
+			// is a terminal. This requires a second rg call with --json
+			// for reliable parsing (no delimiter ambiguity).
 			if isTerminal() {
-				matches, parseErr := search.ParseGrepOutput(out, dir)
+				jsonOut, err := read.Grep(dir, read.GrepOpts{
+					Query:           query,
+					Since:           sinceDur,
+					Context:         context,
+					CaseInsensitive: caseInsensitive,
+					FixedStrings:    fixedStrings,
+					JSON:            true,
+				})
+				if err != nil {
+					return err
+				}
+				matches, parseErr := search.ParseGrepOutput(jsonOut, dir)
 				if parseErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
 				}

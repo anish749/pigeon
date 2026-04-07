@@ -24,41 +24,47 @@ type Match struct {
 	Msg          modelv1.MsgLine
 }
 
-// ParseGrepOutput extracts message-type events from rg/grep output.
-// Each output line has the form: /path/to/file.jsonl:{"type":"msg",...}
+// rgJSONLine represents a single line of rg --json output.
+// Only "match" and "context" types carry data we need.
+type rgJSONLine struct {
+	Type string `json:"type"`
+	Data struct {
+		Path  struct{ Text string } `json:"path"`
+		Lines struct{ Text string } `json:"lines"`
+	} `json:"data"`
+}
+
+// ParseGrepOutput extracts message-type events from rg --json output.
+// The input must be produced by rg with the --json flag, which emits
+// structured JSON with path and content as separate fields — no
+// ambiguous delimiter parsing needed.
+//
 // Only message events are returned; reactions, edits, deletes, and
-// context separator lines are skipped. Lines that fail to parse are
+// non-match/context lines are skipped. Lines that fail to parse are
 // collected into the returned error, but successfully parsed matches
 // are still returned.
 func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 	var matches []Match
 	var errs []error
 	for _, line := range bytes.Split(output, []byte("\n")) {
-		if len(line) == 0 || bytes.Equal(line, []byte("--")) {
+		if len(line) == 0 {
 			continue
 		}
 
-		// rg/grep output format:
-		//   match lines:   /path/to/file.jsonl:{"type":"msg",...}
-		//   context lines: /path/to/file.jsonl-{"type":"msg",...}
-		// Split on ".jsonl:" or ".jsonl-" — the file extension is unambiguous,
-		// unlike ":{" or "-{" which can appear inside message text.
-		ext := []byte(paths.FileExt)
-		idx := bytes.Index(line, append(ext, ':'))
-		if idx < 0 {
-			idx = bytes.Index(line, append(ext, '-'))
-		}
-		if idx < 0 {
+		var rg rgJSONLine
+		if err := json.Unmarshal(line, &rg); err != nil {
+			errs = append(errs, fmt.Errorf("parse rg json: %w", err))
 			continue
 		}
-		splitAt := idx + len(ext) // position of the : or - delimiter
-		filePart := string(line[:splitAt])
-		jsonPart := line[splitAt+1:] // skip the delimiter
+		if rg.Type != "match" && rg.Type != "context" {
+			continue
+		}
 
+		content := strings.TrimRight(rg.Data.Lines.Text, "\n")
 		var envelope struct {
 			Type modelv1.LineType `json:"type"`
 		}
-		if err := json.Unmarshal(jsonPart, &envelope); err != nil {
+		if err := json.Unmarshal([]byte(content), &envelope); err != nil {
 			errs = append(errs, fmt.Errorf("parse grep line: %w", err))
 			continue
 		}
@@ -67,12 +73,12 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 		}
 
 		var msg modelv1.MsgLine
-		if err := json.Unmarshal(jsonPart, &msg); err != nil {
+		if err := json.Unmarshal([]byte(content), &msg); err != nil {
 			errs = append(errs, fmt.Errorf("parse msg line: %w", err))
 			continue
 		}
 
-		platform, account, conversation, date, thread, pathErr := ParseFilePath(filePart, searchDir)
+		platform, account, conversation, date, thread, pathErr := ParseFilePath(rg.Data.Path.Text, searchDir)
 		if pathErr != nil {
 			errs = append(errs, pathErr)
 			continue
@@ -127,9 +133,8 @@ func FilterThreadsBySince(matches []Match, since time.Duration) []Match {
 	return out
 }
 
-// ParseFilePath extracts platform/account/conversation/date from a grep
-// output file path. The path is relative to searchDir. The trailing colon
-// from grep output is stripped.
+// ParseFilePath extracts platform/account/conversation/date from a file
+// path. The path is relative to searchDir.
 //
 // Date files:   platform/account/conversation/YYYY-MM-DD.jsonl
 // Thread files:  platform/account/conversation/threads/THREAD_TS.jsonl
