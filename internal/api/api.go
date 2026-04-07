@@ -410,6 +410,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 type StatusResponse struct {
 	Version                 string              `json:"version"`
 	PID                     int                 `json:"pid"`
+	Executable              string              `json:"executable"`
 	StartedAt               time.Time           `json:"started_at"`
 	LogFile                 string              `json:"log_file"`
 	Listeners               map[string][]string `json:"listeners"`
@@ -447,9 +448,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
+	exePath, _ := os.Executable()
+
 	writeJSON(w, http.StatusOK, StatusResponse{
 		Version:                 s.version,
 		PID:                     os.Getpid(),
+		Executable:              exePath,
 		StartedAt:               s.startedAt,
 		LogFile:                 paths.DaemonLogPath(),
 		Listeners:               listeners,

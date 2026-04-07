@@ -44,7 +44,8 @@ func Status() (running bool, pid int) {
 // appear as confirmation.
 func Start() error {
 	if IsRunning() {
-		return fmt.Errorf("daemon is already running")
+		pid, _ := readPID()
+		return fmt.Errorf("daemon is already running (pid %d)", pid)
 	}
 
 	// Clean stale files.
