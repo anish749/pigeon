@@ -58,15 +58,6 @@ in Go. One rg call, returns only matching file paths.
 For Grep with `--since`, thread files are included via the `**/threads/*.jsonl`
 glob. The caller (CLI layer) post-filters thread results by message timestamp.
 
-## Implementation
-
-| File | Contents |
-|------|----------|
-| `rg.go` | Shared rg invocation helpers, date glob generation, thread pattern generation |
-| `glob.go` | `Glob(dir, since)` — file discovery |
-| `grep.go` | `Grep(dir, GrepOpts)` — content search |
-| `duration.go` | `ParseDuration(s)` — duration parsing with "d" (days) support |
-
 ## Data layout
 
 ```
