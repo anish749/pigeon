@@ -49,45 +49,37 @@ Gmail), the poller clears the cursor and re-seeds on the next cycle.
 
 ```
 ~/.local/share/pigeon/
-├── gmail/
-│   ├── {account-slug}/                     # e.g. user-at-company-com
-│   │   ├── .sync-cursors.yaml              # historyId
-│   │   └── YYYY-MM-DD.jsonl               # email messages
-│   └── {another-account-slug}/             # multiple accounts supported
-│       ├── .sync-cursors.yaml
-│       └── YYYY-MM-DD.jsonl
-├── gdrive/
-│   ├── {account-slug}/
-│   │   ├── .sync-cursors.yaml              # Drive pageToken
-│   │   ├── {doc-title-slug}/               # Google Doc
-│   │   │   ├── {TabName}.md                # one markdown file per tab
-│   │   │   ├── comments.jsonl              # comment threads
-│   │   │   └── .meta.json                  # sync metadata
-│   │   └── {sheet-title-slug}/             # Google Sheet
-│   │       ├── {SheetName}.csv             # cell values per sheet
-│   │       ├── {SheetName}.formulas.csv    # formulas per sheet (optional)
-│   │       ├── comments.jsonl              # comment threads
-│   │       └── .meta.json                  # sync metadata
-│   └── {another-account-slug}/
-│       └── ...
-└── gcalendar/
-    ├── {account-slug}/
-    │   ├── .sync-cursors.yaml              # per-calendar syncTokens
-    │   └── {calendar-slug}/                # "primary", etc.
-    │       └── YYYY-MM-DD.jsonl            # events by start date
+└── gws/                                        # platform
+    ├── {account-slug}/                         # e.g. user-at-company-com
+    │   ├── .sync-cursors.yaml                  # all cursors (gmail, drive, calendar)
+    │   ├── gmail/
+    │   │   └── YYYY-MM-DD.jsonl                # email messages
+    │   ├── gdrive/
+    │   │   ├── {doc-title-slug}/               # Google Doc
+    │   │   │   ├── {TabName}.md                # one markdown file per tab
+    │   │   │   ├── comments.jsonl              # comment threads
+    │   │   │   └── meta.json                   # sync metadata
+    │   │   └── {sheet-title-slug}/             # Google Sheet
+    │   │       ├── {SheetName}.csv             # cell values per sheet
+    │   │       ├── {SheetName}.formulas.csv    # formulas per sheet (optional)
+    │   │       ├── comments.jsonl              # comment threads
+    │   │       └── meta.json                   # sync metadata
+    │   └── gcalendar/
+    │       └── {calendar-slug}/                # "primary", etc.
+    │           └── YYYY-MM-DD.jsonl            # events by start date
     └── {another-account-slug}/
         └── ...
 ```
 
 ### Multiple Accounts
 
-Each platform supports multiple Google accounts. Each account gets its
-own directory with independent cursors. The poller iterates over all
-configured accounts on each cycle.
+Each Google account is scoped under `gws/{account-slug}/` with
+independent cursors. All services (Gmail, Drive, Calendar) for one
+account share a single directory and cursor file. The poller iterates
+over all configured accounts on each cycle.
 
 A single user might have:
-- `gmail/personal-at-email-com/` and `gmail/work-at-company-com/`
-- `gdrive/personal-at-email-com/` and `gdrive/work-at-company-com/`
+- `gws/personal-at-email-com/` and `gws/work-at-company-com/`
 
 Each account authenticates independently via gws. Account configuration
 lives in pigeon's config file alongside Slack and WhatsApp accounts.
@@ -101,18 +93,16 @@ the same `gosimple/slug` rules as other platforms. Example:
 ### Cursor File
 
 All three services share a single `.sync-cursors.yaml` per account
-within their platform directory:
+at `gws/{account-slug}/.sync-cursors.yaml`:
 
 ```yaml
-# gmail/{account}/.sync-cursors.yaml
-history_id: "12975259"
-
-# gdrive/{account}/.sync-cursors.yaml
-page_token: "1339021"
-
-# gcalendar/{account}/.sync-cursors.yaml
-primary: "CP_frMzs2JMDEP_frMzs2JMDGAUg..."
-work: "CJ2abc..."
+gmail:
+  history_id: "12975259"
+drive:
+  page_token: "1339021"
+calendar:
+  primary: "CP_frMzs2JMDEP_frMzs2JMDGAUg..."
+  work: "CJ2abc..."
 ```
 
 ---
@@ -174,7 +164,7 @@ Appended when `history.list` reports a message was deleted (trashed/removed).
 
 ### Date File
 
-Path: `gmail/{account}/YYYY-MM-DD.jsonl`
+Path: `gws/{account}/gmail/YYYY-MM-DD.jsonl`
 
 Messages are filed by their `internalDate` (when Gmail received them).
 One file per day. Append-only.
@@ -258,7 +248,7 @@ each tab independently via `docs documents.get` with
 
 ### Content Files
 
-Path: `gdrive/{account}/{doc-slug}/{TabName}.md`
+Path: `gws/{account}/gdrive/{doc-slug}/{TabName}.md`
 
 Each tab's body exported as markdown. **Replaced** on each sync (not
 appended). Directly greppable — plain markdown, not JSONL.
@@ -321,7 +311,7 @@ the last occurrence (latest state wins).
 
 ### Metadata File
 
-Path: `gdrive/{account}/{doc-slug}/.meta.json`
+Path: `gws/{account}/gdrive/{doc-slug}/.meta.json`
 
 ```json
 {
@@ -379,7 +369,7 @@ title. The directory contains:
 
 ### Value Files
 
-Path: `gdrive/{account}/{sheet-slug}/{SheetName}.csv`
+Path: `gws/{account}/gdrive/{sheet-slug}/{SheetName}.csv`
 
 Standard CSV format. **Replaced** on each sync. Directly greppable.
 
@@ -389,7 +379,7 @@ pads rows to uniform width.
 
 ### Formula Files
 
-Path: `gdrive/{account}/{sheet-slug}/{SheetName}.formulas.csv`
+Path: `gws/{account}/gdrive/{sheet-slug}/{SheetName}.formulas.csv`
 
 Same format as value files, but cells that contain formulas show the
 formula (e.g. `=SUM(A1:A10)`) instead of the computed value. Cells
@@ -475,7 +465,7 @@ slugified).
 
 ### Date File
 
-Path: `gcalendar/{account}/{calendar-slug}/YYYY-MM-DD.jsonl`
+Path: `gws/{account}/gcalendar/{calendar-slug}/YYYY-MM-DD.jsonl`
 
 Events are filed by their **start date**. Timed events use the local
 date from the `start.dateTime` field. All-day events use `start.date`.
@@ -522,23 +512,23 @@ which returns individual instance changes.
 Standard text tools work directly:
 
 ```bash
-# Find emails from Alice
-grep '"from":"alice@' ~/.local/share/pigeon/gmail/
+# Find emails from alice
+grep '"from":"alice@' ~/.local/share/pigeon/gws/*/gmail/
 
 # Find all calendar events mentioning "planning"
-grep -i 'planning' ~/.local/share/pigeon/gcalendar/
+grep -ri 'planning' ~/.local/share/pigeon/gws/*/gcalendar/
 
 # Find resolved comments
-grep '"resolved":true' ~/.local/share/pigeon/gdrive/*/comments.jsonl
+grep '"resolved":true' ~/.local/share/pigeon/gws/*/gdrive/*/comments.jsonl
 
 # Find replies that resolved a comment thread
-grep '"action":"resolve"' ~/.local/share/pigeon/gdrive/*/comments.jsonl
+grep '"action":"resolve"' ~/.local/share/pigeon/gws/*/gdrive/*/comments.jsonl
 
 # Find emails with PDF attachments
-grep 'application/pdf' ~/.local/share/pigeon/gmail/
+grep 'application/pdf' ~/.local/share/pigeon/gws/*/gmail/
 
 # Count emails per day
-wc -l ~/.local/share/pigeon/gmail/account/2026-04-*.jsonl
+wc -l ~/.local/share/pigeon/gws/*/gmail/2026-04-*.jsonl
 ```
 
 ### Content Files (Docs as Markdown, Sheets as CSV)
@@ -547,29 +537,23 @@ Plain text — directly greppable without any JSONL parsing:
 
 ```bash
 # Search across all Google Docs
-grep -r 'algorithm' ~/.local/share/pigeon/gdrive/*/content.md
+grep -r 'algorithm' ~/.local/share/pigeon/gws/*/gdrive/*/*.md
 
 # Search across all Sheet data
-grep -r 'revenue' ~/.local/share/pigeon/gdrive/*/*.csv
+grep -r 'revenue' ~/.local/share/pigeon/gws/*/gdrive/*/*.csv
 
 # Search formulas
-grep '=SUM' ~/.local/share/pigeon/gdrive/*/*.formulas.csv
+grep '=SUM' ~/.local/share/pigeon/gws/*/gdrive/*/*.formulas.csv
 
 # Search everything (docs, sheets, comments, emails, events)
-rg 'quarterly' ~/.local/share/pigeon/
+rg 'quarterly' ~/.local/share/pigeon/gws/
 ```
 
 ### Pigeon Search Integration
 
-The existing `pigeon search` command uses ripgrep on `*.txt` files
-and parses JSONL output. To support GWS data:
-
-1. Extend search to include `*.jsonl`, `*.md`, and `*.csv` files.
-2. For JSONL files (`*.jsonl`), parse by `type` field to format results
-   (email, event, comment, reply — in addition to existing msg, react,
-   edit, delete).
-3. For content files (`*.md`, `*.csv`), return raw text matches with
-   file path context (platform/account/document).
+The `pigeon grep` command uses ripgrep with `--json` for structured
+parsing. GWS content files (`.md`, `.csv`, `comments.jsonl`) are
+included in search globs alongside `.jsonl` date files.
 
 ---
 
