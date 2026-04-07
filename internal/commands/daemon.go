@@ -25,6 +25,10 @@ import (
 )
 
 func DaemonStart() error {
+	if daemon.IsRunning() {
+		_ = DaemonStatus()
+		return fmt.Errorf("daemon is already running, stop it first with 'pigeon daemon stop'")
+	}
 	if err := daemon.Start(); err != nil {
 		return err
 	}
@@ -67,7 +71,9 @@ func DaemonStatus() error {
 	}
 
 	uptime := time.Since(status.StartedAt).Truncate(time.Second)
-	fmt.Printf("Running (pid=%d, version=%s, uptime=%s, log=%s)\n", status.PID, status.Version, uptime, status.LogFile)
+	fmt.Printf("Running (pid=%d, version=%s, uptime=%s)\n", status.PID, status.Version, uptime)
+	fmt.Printf("  binary: %s\n", status.Executable)
+	fmt.Printf("  log: %s\n", status.LogFile)
 	for platform, accounts := range status.Listeners {
 		if len(accounts) > 0 {
 			fmt.Printf("  %s: %s\n", platform, strings.Join(accounts, ", "))
