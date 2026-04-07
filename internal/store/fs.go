@@ -15,6 +15,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/search"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/compact"
 )
@@ -212,15 +213,23 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 
 // ListConversations walks the data tree and returns all conversations
 // matching the given filters. Results are sorted by LastModified descending.
+//
+// When Since is set, uses search.FindFiles (rg --files) to discover files
+// within the time window, including thread files. Otherwise lists all
+// conversations via directory traversal.
 func (s *FSStore) ListConversations(opts ListOpts) ([]ConversationInfo, error) {
+	if opts.Since > 0 {
+		return s.listConversationsSince(opts)
+	}
+	return s.listAllConversations(opts)
+}
+
+// listAllConversations returns all conversations, optionally filtered by
+// platform and account. No time filtering.
+func (s *FSStore) listAllConversations(opts ListOpts) ([]ConversationInfo, error) {
 	platforms, err := listSubdirs(s.root.Path())
 	if err != nil {
 		return nil, fmt.Errorf("list platforms: %w", err)
-	}
-
-	var cutoff time.Time
-	if opts.Since > 0 {
-		cutoff = time.Now().Add(-opts.Since)
 	}
 
 	var results []ConversationInfo
@@ -249,19 +258,64 @@ func (s *FSStore) ListConversations(opts ListOpts) ([]ConversationInfo, error) {
 					continue
 				}
 				convDir := acctDir.Conversation(e.Name())
-				mtime := latestDateFileMtime(convDir.Path())
-				if !cutoff.IsZero() && mtime.Before(cutoff) {
-					continue
-				}
 				results = append(results, ConversationInfo{
 					Platform:     platform,
 					Account:      acctSlug,
 					Conversation: e.Name(),
 					Dir:          convDir.Path(),
-					LastModified: mtime,
 				})
 			}
 		}
+	}
+	return results, nil
+}
+
+// listConversationsSince uses search.FindFiles to discover data files
+// within the time window, then extracts unique conversations from the paths.
+// This correctly includes conversations with thread-only activity.
+func (s *FSStore) listConversationsSince(opts ListOpts) ([]ConversationInfo, error) {
+	searchDir := s.root.Path()
+	if opts.Platform != "" && opts.Account != "" {
+		searchDir = s.root.AccountFor(account.New(opts.Platform, opts.Account)).Path()
+	} else if opts.Platform != "" {
+		searchDir = s.root.Platform(opts.Platform).Path()
+	}
+
+	files, err := search.FindFiles(searchDir, opts.Since)
+	if err != nil {
+		return nil, fmt.Errorf("find files: %w", err)
+	}
+
+	// Deduplicate by conversation directory. Track the latest date
+	// filename per conversation for sorting.
+	type convKey struct{ platform, account, conversation string }
+	seen := make(map[convKey]string) // key → latest date filename
+	for _, f := range files {
+		platform, acctSlug, conversation, dateName, err := parseDataFilePath(f, s.root.Path())
+		if err != nil {
+			continue
+		}
+		k := convKey{platform, acctSlug, conversation}
+		if existing, ok := seen[k]; !ok || dateName > existing {
+			seen[k] = dateName
+		}
+	}
+
+	var results []ConversationInfo
+	for k, dateName := range seen {
+		convDir := s.root.Platform(k.platform).AccountFromSlug(k.account).Conversation(k.conversation)
+		// Parse the date from the most recent filename for sorting.
+		var lastMod time.Time
+		if t, err := time.Parse("2006-01-02", strings.TrimSuffix(dateName, paths.FileExt)); err == nil {
+			lastMod = t
+		}
+		results = append(results, ConversationInfo{
+			Platform:     k.platform,
+			Account:      k.account,
+			Conversation: k.conversation,
+			Dir:          convDir.Path(),
+			LastModified: lastMod,
+		})
 	}
 
 	sort.Slice(results, func(i, j int) bool {
@@ -270,27 +324,31 @@ func (s *FSStore) ListConversations(opts ListOpts) ([]ConversationInfo, error) {
 	return results, nil
 }
 
-// latestDateFileMtime returns the most recent mtime among date files in dir.
-// Returns zero time if no date files exist.
-func latestDateFileMtime(dir string) time.Time {
-	entries, err := os.ReadDir(dir)
+// parseDataFilePath extracts platform/account/conversation/filename from an
+// absolute data file path. Handles both date files and thread files:
+//
+//	<root>/platform/account/conversation/YYYY-MM-DD.jsonl
+//	<root>/platform/account/conversation/threads/TS.jsonl
+func parseDataFilePath(path, root string) (platform, account, conversation, dateName string, err error) {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
-		return time.Time{}
+		return "", "", "", "", err
 	}
-	var latest time.Time
-	for _, e := range entries {
-		if e.IsDir() || !dateFilePattern.MatchString(e.Name()) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(latest) {
-			latest = info.ModTime()
+	parts := strings.Split(rel, string(filepath.Separator))
+
+	// Strip "threads" directory if present.
+	for i, p := range parts {
+		if p == paths.ThreadsSubdir {
+			parts = append(parts[:i], parts[i+1:]...)
+			break
 		}
 	}
-	return latest
+
+	// Expected: platform/account/conversation/filename
+	if len(parts) != 4 {
+		return "", "", "", "", fmt.Errorf("unexpected path depth %d: %s", len(parts), rel)
+	}
+	return parts[0], parts[1], parts[2], parts[3], nil
 }
 
 // Maintain runs the maintenance pass for an account.

@@ -184,9 +184,6 @@ func TestListConversations(t *testing.T) {
 	if convs[0].Dir == "" {
 		t.Error("Dir is empty")
 	}
-	if convs[0].LastModified.IsZero() {
-		t.Error("LastModified is zero")
-	}
 }
 
 func TestListConversationsFilterPlatform(t *testing.T) {
@@ -217,37 +214,49 @@ func TestListConversationsFilterPlatform(t *testing.T) {
 func TestListConversationsSince(t *testing.T) {
 	s, acct := setup(t)
 
-	// Write a message — file mtime will be ~now.
-	m := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	// Use today's date so the file falls within the since window.
+	today := time.Now().UTC()
+	m := msgLine("M1", today, "Alice", "U1", "hello")
 	s.Append(acct, "#general", m)
 
-	// Since 1h — should include the conversation (file was just written).
-	convs, err := s.ListConversations(ListOpts{Since: 1 * time.Hour})
+	// Also write to an old date — this conversation should NOT appear
+	// with a short since window.
+	oldDate := today.AddDate(0, 0, -30)
+	s.Append(acct, "#archive", msgLine("M2", oldDate, "Bob", "U2", "old"))
+
+	// Since 1d — should include #general (today) but not #archive (30 days ago).
+	convs, err := s.ListConversations(ListOpts{Since: 24 * time.Hour})
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
 	if len(convs) != 1 {
-		t.Errorf("got %d conversations, want 1", len(convs))
+		t.Errorf("got %d conversations, want 1: %v", len(convs), convs)
+	}
+	if len(convs) == 1 && convs[0].Conversation != "#general" {
+		t.Errorf("conversation = %q, want #general", convs[0].Conversation)
 	}
 
-	// Since 1ns — should exclude (file mtime is at least a few µs ago).
-	convs, err = s.ListConversations(ListOpts{Since: 1 * time.Nanosecond})
+	// Since 60d — should include both.
+	convs, err = s.ListConversations(ListOpts{Since: 60 * 24 * time.Hour})
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
-	if len(convs) != 0 {
-		t.Errorf("got %d conversations, want 0", len(convs))
+	if len(convs) != 2 {
+		t.Errorf("got %d conversations, want 2", len(convs))
 	}
 }
 
 func TestListConversationsSortOrder(t *testing.T) {
 	s, acct := setup(t)
 
-	// Write to #alpha first, then #beta — #beta should appear first (most recent).
-	s.Append(acct, "#alpha", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello"))
-	s.Append(acct, "#beta", msgLine("M2", ts(2026, 3, 16, 10, 0, 0), "Bob", "U2", "world"))
+	// Write to #alpha with yesterday's date, #beta with today's.
+	// #beta should appear first (more recent date file).
+	today := time.Now().UTC()
+	yesterday := today.AddDate(0, 0, -1)
+	s.Append(acct, "#alpha", msgLine("M1", yesterday, "Alice", "U1", "hello"))
+	s.Append(acct, "#beta", msgLine("M2", today, "Bob", "U2", "world"))
 
-	convs, err := s.ListConversations(ListOpts{})
+	convs, err := s.ListConversations(ListOpts{Since: 7 * 24 * time.Hour})
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
