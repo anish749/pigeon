@@ -80,7 +80,7 @@ func ListHistory(startHistoryId string) (added []string, deleted []string, newHi
 
 		var resp gmailHistoryResponse
 		if err := gws.RunParsed(&resp, "gmail", "users", "history", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, nil, "", fmt.Errorf("list gmail history: %w", err)
+			return nil, nil, "", err
 		}
 
 		for _, rec := range resp.History {
