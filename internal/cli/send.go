@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/commands"
@@ -70,6 +72,17 @@ Run 'pigeon list' to find user IDs and channel names.`,
 			dryRun, err := cmd.Flags().GetBool("dry-run")
 			if err != nil {
 				return err
+			}
+
+			switch platform {
+			case "slack":
+				if contact != "" {
+					return fmt.Errorf("use --user-id or --channel for Slack, not --contact")
+				}
+			case "whatsapp":
+				if userID != "" || channel != "" {
+					return fmt.Errorf("use --contact for WhatsApp, not --user-id or --channel")
+				}
 			}
 
 			return commands.RunSend(commands.SendParams{
