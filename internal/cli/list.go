@@ -69,15 +69,42 @@ func runListSince(platform, account, since string) error {
 		return nil
 	}
 
-	// Extract unique conversations from file paths, tracking the most
-	// recent date file per conversation for the "last" label.
 	root := paths.DefaultDataRoot().Path()
-	type convInfo struct {
-		display    string // platform/account/conversation
-		dir        string // absolute conversation directory
-		latestDate string // most recent YYYY-MM-DD from filenames
+	convs := extractConversations(files, root)
+	if len(convs) == 0 {
+		fmt.Println("No conversations found.")
+		return nil
 	}
-	seen := make(map[string]*convInfo) // dir → info
+
+	now := time.Now()
+	for _, c := range convs {
+		switch {
+		case c.LatestDate != "":
+			t, _ := time.Parse("2006-01-02", c.LatestDate)
+			fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(t)))
+		default:
+			fmt.Printf("%s  active\n", c.Display)
+		}
+		fmt.Printf("  %s\n", c.Dir)
+	}
+	return nil
+}
+
+// activeConv represents a conversation discovered from file paths.
+type activeConv struct {
+	Display    string // platform/account/conversation
+	Dir        string // absolute conversation directory
+	LatestDate string // most recent YYYY-MM-DD from date filenames, empty for thread-only
+}
+
+// extractConversations deduplicates file paths into unique conversations,
+// tracking the most recent date file per conversation for age display.
+func extractConversations(files []string, root string) []activeConv {
+	type entry struct {
+		info  activeConv
+		index int
+	}
+	seen := make(map[string]*entry)
 	var order []string
 	for _, f := range files {
 		rel, err := filepath.Rel(root, f)
@@ -85,44 +112,41 @@ func runListSince(platform, account, since string) error {
 			continue
 		}
 		parts := strings.Split(rel, string(filepath.Separator))
-		// Strip "threads" dir if present.
+		isThread := paths.IsThreadFile(f)
 		for i, p := range parts {
 			if p == paths.ThreadsSubdir {
 				parts = append(parts[:i], parts[i+1:]...)
 				break
 			}
 		}
-		// Need at least platform/account/conversation/file.
 		if len(parts) < 4 {
 			continue
 		}
 		convDir := filepath.Join(root, parts[0], parts[1], parts[2])
-		dateStr := strings.TrimSuffix(parts[3], paths.FileExt)
 
-		info, ok := seen[convDir]
+		e, ok := seen[convDir]
 		if !ok {
-			info = &convInfo{
-				display: strings.Join(parts[:3], "/"),
-				dir:     convDir,
+			e = &entry{
+				info: activeConv{
+					Display: strings.Join(parts[:3], "/"),
+					Dir:     convDir,
+				},
+				index: len(order),
 			}
-			seen[convDir] = info
+			seen[convDir] = e
 			order = append(order, convDir)
 		}
-		// Track the most recent date filename (lexically largest = most recent).
-		if dateStr > info.latestDate {
-			info.latestDate = dateStr
+		if !isThread {
+			dateStr := strings.TrimSuffix(parts[3], paths.FileExt)
+			if dateStr > e.info.LatestDate {
+				e.info.LatestDate = dateStr
+			}
 		}
 	}
 
-	now := time.Now()
-	for _, key := range order {
-		info := seen[key]
-		if t, err := time.Parse("2006-01-02", info.latestDate); err == nil {
-			fmt.Printf("%s  last: %s ago\n", info.display, timeutil.FormatAge(now.Sub(t)))
-		} else {
-			fmt.Println(info.display)
-		}
-		fmt.Printf("  %s\n", info.dir)
+	result := make([]activeConv, len(order))
+	for i, key := range order {
+		result[i] = seen[key].info
 	}
-	return nil
+	return result
 }

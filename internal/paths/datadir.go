@@ -133,6 +133,12 @@ const (
 	ThreadGlobFind = "*/" + ThreadsSubdir + "/*" + FileExt
 )
 
+// IsThreadFile reports whether the given file path is a thread file
+// (i.e. its parent directory is the threads subdirectory).
+func IsThreadFile(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == ThreadsSubdir
+}
+
 // ThreadsDir returns the path to the threads subdirectory.
 func (c ConversationDir) ThreadsDir() string {
 	return filepath.Join(c.Path(), ThreadsSubdir)
