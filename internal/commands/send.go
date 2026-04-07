@@ -67,6 +67,10 @@ func RunSend(p SendParams) error {
 		return nil
 	}
 
-	fmt.Printf("Sent at %s\n", result.Timestamp)
+	if p.DryRun {
+		fmt.Println("Dry run OK")
+	} else {
+		fmt.Printf("Sent at %s\n", result.Timestamp)
+	}
 	return nil
 }

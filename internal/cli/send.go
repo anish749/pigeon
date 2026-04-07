@@ -31,16 +31,46 @@ Run 'pigeon list' to find user IDs and channel names.`,
   pigeon send -p whatsapp -a +14155551234 --contact Alice -m "hey, are you free?"`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
-			userID, _ := cmd.Flags().GetString("user-id")
-			channel, _ := cmd.Flags().GetString("channel")
-			contact, _ := cmd.Flags().GetString("contact")
-			message, _ := cmd.Flags().GetString("message")
-			thread, _ := cmd.Flags().GetString("thread")
-			broadcast, _ := cmd.Flags().GetBool("broadcast")
-			asUser, _ := cmd.Flags().GetBool("as-user")
-			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return err
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return err
+			}
+			userID, err := cmd.Flags().GetString("user-id")
+			if err != nil {
+				return err
+			}
+			channel, err := cmd.Flags().GetString("channel")
+			if err != nil {
+				return err
+			}
+			contact, err := cmd.Flags().GetString("contact")
+			if err != nil {
+				return err
+			}
+			message, err := cmd.Flags().GetString("message")
+			if err != nil {
+				return err
+			}
+			thread, err := cmd.Flags().GetString("thread")
+			if err != nil {
+				return err
+			}
+			broadcast, err := cmd.Flags().GetBool("broadcast")
+			if err != nil {
+				return err
+			}
+			asUser, err := cmd.Flags().GetBool("as-user")
+			if err != nil {
+				return err
+			}
+			dryRun, err := cmd.Flags().GetBool("dry-run")
+			if err != nil {
+				return err
+			}
 
 			return commands.RunSend(commands.SendParams{
 				Platform:  platform,

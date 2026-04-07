@@ -328,6 +328,10 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	}
 
+	if req.DryRun {
+		return SendResponse{OK: true}
+	}
+
 	// Build message options.
 	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
 	if req.Thread != "" {
