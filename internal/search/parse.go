@@ -41,16 +41,19 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 		// rg/grep output format:
 		//   match lines:   /path/to/file.jsonl:{"type":"msg",...}
 		//   context lines: /path/to/file.jsonl-{"type":"msg",...}
-		// Split on ":{" or "-{" — the delimiter is grep's : (match) or - (context).
-		idx := bytes.Index(line, []byte(":{"))
+		// Split on ".jsonl:" or ".jsonl-" — the file extension is unambiguous,
+		// unlike ":{" or "-{" which can appear inside message text.
+		ext := []byte(paths.FileExt)
+		idx := bytes.Index(line, append(ext, ':'))
 		if idx < 0 {
-			idx = bytes.Index(line, []byte("-{"))
+			idx = bytes.Index(line, append(ext, '-'))
 		}
 		if idx < 0 {
 			continue
 		}
-		filePart := string(line[:idx])
-		jsonPart := line[idx+1:] // skip the delimiter, keep the "{"
+		splitAt := idx + len(ext) // position of the : or - delimiter
+		filePart := string(line[:splitAt])
+		jsonPart := line[splitAt+1:] // skip the delimiter
 
 		var envelope struct {
 			Type modelv1.LineType `json:"type"`
