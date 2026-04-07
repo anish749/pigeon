@@ -53,7 +53,8 @@ JSON fields in each line:
   pigeon grep -q "deploy" -i                        # case insensitive
   pigeon grep -q "Alice" -F                         # literal match, no regex
   pigeon grep -q "bug" -p slack -a acme-corp -C 3
-  pigeon grep -q "deploy" | jq -r 'select(.type == "msg") | .sender + ": " + .text'`,
+  pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
+  pigeon grep -q "Alice" -C 0 | cut -d: -f2- | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query, err := cmd.Flags().GetString("query")
