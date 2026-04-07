@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/lmittmann/tint"
@@ -210,12 +212,16 @@ MAINTENANCE
   Deletes all synced message data and sync cursors for a workspace/account.
   The next daemon start will re-sync from scratch.`,
 		Version: version,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
 				Level:      slog.LevelInfo,
 				TimeFormat: time.Kitchen,
 			})))
 			selfupdate.AutoCheck(version)
+			if _, err := exec.LookPath("rg"); err != nil {
+				return fmt.Errorf("ripgrep (rg) is required but not found on PATH — install it: https://github.com/BurntSushi/ripgrep#installation")
+			}
+			return nil
 		},
 	}
 
