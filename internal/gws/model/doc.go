@@ -1,6 +1,9 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Document represents a Google Docs document response.
 type Document struct {
@@ -136,16 +139,23 @@ type NestingLevel struct {
 }
 
 // AllTabs flattens the tab tree (including child tabs) into an ordered slice.
-func (d *Document) AllTabs() []Tab {
+func (d *Document) AllTabs() ([]Tab, error) {
 	var tabs []Tab
 	for _, raw := range d.Tabs {
-		tabs = append(tabs, flattenTab(raw)...)
+		flattened, err := flattenTab(raw)
+		if err != nil {
+			return nil, err
+		}
+		tabs = append(tabs, flattened...)
 	}
-	return tabs
+	return tabs, nil
 }
 
-func flattenTab(raw RawTab) []Tab {
-	lists := parseLists(raw.DocumentTab.Lists)
+func flattenTab(raw RawTab) ([]Tab, error) {
+	lists, err := parseLists(raw.DocumentTab.Lists)
+	if err != nil {
+		return nil, fmt.Errorf("parse lists for tab %s: %w", raw.TabProperties.Title, err)
+	}
 	tab := Tab{
 		Title: raw.TabProperties.Title,
 		TabID: raw.TabProperties.TabID,
@@ -154,18 +164,22 @@ func flattenTab(raw RawTab) []Tab {
 	}
 	result := []Tab{tab}
 	for _, child := range raw.ChildTabs {
-		result = append(result, flattenTab(child)...)
+		flattened, err := flattenTab(child)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, flattened...)
 	}
-	return result
+	return result, nil
 }
 
-func parseLists(raw json.RawMessage) map[string]List {
+func parseLists(raw json.RawMessage) (map[string]List, error) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 	var lists map[string]List
 	if err := json.Unmarshal(raw, &lists); err != nil {
-		return nil
+		return nil, fmt.Errorf("unmarshal lists: %w", err)
 	}
-	return lists
+	return lists, nil
 }
