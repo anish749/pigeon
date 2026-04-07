@@ -240,7 +240,8 @@ MAINTENANCE
 		// Reading
 		newListCmd(),
 		newReadCmd(),
-		newSearchCmd(),
+		newGlobCmd(),
+		newGrepCmd(),
 
 		// Sending
 		newSendCmd(),

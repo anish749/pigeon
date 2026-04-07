@@ -35,7 +35,7 @@ func RunRead(p ReadParams) error {
 		Last: p.Last,
 	}
 	if p.Since != "" {
-		d, err := parseDuration(p.Since)
+		d, err := ParseDuration(p.Since)
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", p.Since, err)
 		}
@@ -70,8 +70,8 @@ func RunRead(p ReadParams) error {
 }
 
 
-// parseDuration handles Go durations plus "d" for days.
-func parseDuration(s string) (time.Duration, error) {
+// ParseDuration handles Go durations plus "d" for days.
+func ParseDuration(s string) (time.Duration, error) {
 	if rest, ok := strings.CutSuffix(s, "d"); ok {
 		var days int
 		if _, err := fmt.Sscanf(rest, "%d", &days); err != nil {

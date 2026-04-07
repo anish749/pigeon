@@ -7,6 +7,21 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 )
 
+// SearchDir returns the data directory scoped by optional platform and account
+// filters. With no filters, returns the data root. With platform, returns the
+// platform directory. With both, returns the account directory.
+func SearchDir(platform, accountName string) string {
+	root := DefaultDataRoot()
+	switch {
+	case platform != "" && accountName != "":
+		return root.AccountFor(account.New(platform, accountName)).Path()
+	case platform != "":
+		return root.Platform(platform).Path()
+	default:
+		return root.Path()
+	}
+}
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir

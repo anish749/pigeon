@@ -29,6 +29,9 @@ const (
 )
 
 // MsgLine represents a message event.
+//
+// The "ts" field name and ISO 8601 format are depended on by read.threadDatePatterns,
+// which uses rg -l to find thread files by matching "ts":"YYYY-MM-DD in serialized JSONL.
 type MsgLine struct {
 	ID          string       `json:"id"`                // platform message ID
 	Ts          time.Time    `json:"ts"`                // message timestamp
