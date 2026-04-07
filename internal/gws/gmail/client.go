@@ -138,7 +138,10 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 	to := parseAddressList(headers["to"])
 	cc := parseAddressList(headers["cc"])
 
-	body := ExtractBody(msg.Payload)
+	body, err := ExtractBody(msg.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("extract body for %s: %w", messageID, err)
+	}
 	attachments := ExtractAttachments(msg.Payload)
 
 	return &model.EmailLine{
