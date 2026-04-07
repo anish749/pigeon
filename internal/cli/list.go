@@ -100,10 +100,7 @@ type activeConv struct {
 // extractConversations deduplicates file paths into unique conversations,
 // tracking the most recent date file per conversation for age display.
 func extractConversations(files []string, root string) []activeConv {
-	type entry struct {
-		info activeConv
-	}
-	seen := make(map[string]*entry)
+	seen := make(map[string]*activeConv)
 	var order []string
 	for _, f := range files {
 		rel, err := filepath.Rel(root, f)
@@ -123,28 +120,26 @@ func extractConversations(files []string, root string) []activeConv {
 		}
 		convDir := filepath.Join(root, parts[0], parts[1], parts[2])
 
-		e, ok := seen[convDir]
+		c, ok := seen[convDir]
 		if !ok {
-			e = &entry{
-				info: activeConv{
-					Display: strings.Join(parts[:3], "/"),
-					Dir:     convDir,
-				},
+			c = &activeConv{
+				Display: strings.Join(parts[:3], "/"),
+				Dir:     convDir,
 			}
-			seen[convDir] = e
+			seen[convDir] = c
 			order = append(order, convDir)
 		}
 		if !isThread {
 			dateStr := strings.TrimSuffix(parts[3], paths.FileExt)
-			if dateStr > e.info.LatestDate {
-				e.info.LatestDate = dateStr
+			if dateStr > c.LatestDate {
+				c.LatestDate = dateStr
 			}
 		}
 	}
 
 	result := make([]activeConv, len(order))
 	for i, key := range order {
-		result[i] = seen[key].info
+		result[i] = *seen[key]
 	}
 	return result
 }
