@@ -60,6 +60,65 @@ func TestAppendAndReadLines(t *testing.T) {
 	}
 }
 
+func TestWriteLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "write.jsonl")
+
+	// Write initial lines.
+	initial := []model.Line{emailLine("a"), emailLine("b")}
+	if err := WriteLines(paths.DateFile(path), initial); err != nil {
+		t.Fatalf("WriteLines: %v", err)
+	}
+
+	lines, err := ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+
+	// Overwrite with fewer lines — verifies replacement, not append.
+	replacement := []model.Line{emailLine("c")}
+	if err := WriteLines(paths.DateFile(path), replacement); err != nil {
+		t.Fatalf("WriteLines overwrite: %v", err)
+	}
+
+	lines, err = ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines after overwrite: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines after overwrite, want 1", len(lines))
+	}
+	if lines[0].Email.ID != "c" {
+		t.Errorf("lines[0].ID = %q, want %q", lines[0].Email.ID, "c")
+	}
+}
+
+func TestWriteLinesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.jsonl")
+
+	// Write initial content.
+	if err := WriteLines(paths.DateFile(path), []model.Line{emailLine("a")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Overwrite with empty — file should exist but be empty.
+	if err := WriteLines(paths.DateFile(path), nil); err != nil {
+		t.Fatalf("WriteLines empty: %v", err)
+	}
+
+	lines, err := ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("got %d lines, want 0", len(lines))
+	}
+}
+
 func TestDedupKeepsLast(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dup.jsonl")

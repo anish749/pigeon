@@ -82,6 +82,60 @@ func SeedPageToken() (string, error) {
 	return resp.StartPageToken, nil
 }
 
+// ListFiles enumerates Docs and Sheets modified after timeMin. Returns them
+// as Change structs so callers can use the same handleDoc/handleSheet pipeline.
+// Results are ordered by modifiedTime descending (most recent first).
+func ListFiles(timeMin string) ([]Change, error) {
+	q := fmt.Sprintf(
+		"modifiedTime > '%s' and (mimeType = 'application/vnd.google-apps.document' or mimeType = 'application/vnd.google-apps.spreadsheet') and trashed = false",
+		timeMin,
+	)
+	params := map[string]string{
+		"q":       q,
+		"orderBy": "modifiedTime desc",
+		"fields":  "files(id,name,mimeType,modifiedTime),nextPageToken",
+	}
+
+	var allChanges []Change
+	for {
+		var resp filesListResponse
+		if err := gws.RunParsed(&resp, "drive", "files", "list", "--params", gws.ParamsJSON(params)); err != nil {
+			return nil, fmt.Errorf("list drive files: %w", err)
+		}
+
+		for _, f := range resp.Files {
+			allChanges = append(allChanges, Change{
+				FileID: f.ID,
+				File: File{
+					Name:         f.Name,
+					MimeType:     f.MimeType,
+					ModifiedTime: f.ModifiedTime,
+				},
+			})
+		}
+
+		if resp.NextPageToken != "" {
+			params["pageToken"] = resp.NextPageToken
+			continue
+		}
+		break
+	}
+
+	return allChanges, nil
+}
+
+type filesListResponse struct {
+	Files         []filesListFile `json:"files"`
+	NextPageToken string          `json:"nextPageToken"`
+}
+
+type filesListFile struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	MimeType     string `json:"mimeType"`
+	ModifiedTime string `json:"modifiedTime"`
+}
+
 // --- Docs API ---
 
 // GetDocument fetches a Google Doc with all tab content.
