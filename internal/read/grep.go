@@ -61,14 +61,6 @@ func Grep(dir string, opts GrepOpts) ([]byte, error) {
 		args = append(args, "--glob", "*"+paths.FileExt)
 	}
 
-	// Always include GWS content files (Docs as .md, Sheets as .csv,
-	// Drive comments as comments.jsonl). These aren't date-named so
-	// they can't be filtered by --since, but they should always be
-	// searchable.
-	for _, g := range gwsContentGlobs {
-		args = append(args, "--glob", g)
-	}
-
 	args = append(args, opts.Query, dir)
 
 	out, err := exec.Command("rg", args...).Output()

@@ -12,11 +12,6 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// gwsContentGlobs are glob patterns for GWS content files that should
-// always be included in search. These are not date-named and can't be
-// filtered by --since.
-var gwsContentGlobs = []string{"*.md", "*.csv", "**/comments.jsonl"}
-
 // dateGlobs generates filename glob patterns for all UTC dates from
 // (now - since) through today. Each pattern matches a date file like
 // "2026-04-07.jsonl".

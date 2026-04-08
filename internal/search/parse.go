@@ -163,19 +163,9 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	}
 
 	dateFile := parts[len(parts)-1]
-	// Strip known extensions (.jsonl, .md, .csv) to extract the date/name.
-	date = dateFile
-	for _, ext := range []string{paths.FileExt, ".md", ".csv"} {
-		date = strings.TrimSuffix(date, ext)
-	}
+	date = strings.TrimSuffix(dateFile, paths.FileExt)
 
 	switch len(parts) {
-	case 5:
-		// GWS paths: gws/account/service/item/file
-		// e.g. gws/user/gdrive/doc-slug/Tab.md
-		//      gws/user/gcalendar/primary/2026-04-07.jsonl
-		platform, account = parts[0], parts[1]
-		conversation = parts[2] + "/" + parts[3]
 	case 4:
 		platform, account, conversation = parts[0], parts[1], parts[2]
 	case 3:
