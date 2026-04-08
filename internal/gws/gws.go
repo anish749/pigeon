@@ -12,6 +12,10 @@ import (
 // Used across all three services (Gmail, Calendar, Drive) for backfill windows.
 const BackfillDays = 90
 
+// ExpansionThresholdDays is how close expanded_until must be to now before
+// we re-expand recurring events into the future.
+const ExpansionThresholdDays = 30
+
 // APIError represents a structured error from a Google Workspace API call.
 // The gws CLI returns these as JSON on stderr: {"error":{"code":404,"message":"...","reason":"..."}}.
 type APIError struct {

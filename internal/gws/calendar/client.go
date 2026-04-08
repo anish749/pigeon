@@ -33,6 +33,7 @@ type calendarEvent struct {
 	HangoutLink       string           `json:"hangoutLink"`
 	EventType         string           `json:"eventType"`
 	RecurringEventId  string           `json:"recurringEventId"`
+	Recurrence        []string         `json:"recurrence"`
 	OriginalStartTime calendarTimeRef  `json:"originalStartTime"`
 }
 
@@ -45,6 +46,16 @@ type calendarTimeRef struct {
 // calendarPerson holds an email address for a creator, organizer, or attendee.
 type calendarPerson struct {
 	Email string `json:"email"`
+}
+
+// EventsResult holds the categorized output from a calendar list or seed call.
+type EventsResult struct {
+	// Events contains one-off events and recurring instances, ready to write to disk.
+	Events []model.EventLine
+	// RecurringIDs contains IDs of parent recurring events that need instance expansion.
+	RecurringIDs []string
+	// SyncToken is the new sync token for the next incremental call.
+	SyncToken string
 }
 
 // ToEventLine converts a raw API event to the storage model.
@@ -92,66 +103,76 @@ func (e calendarEvent) ToEventLine() model.EventLine {
 	return ev
 }
 
-// ListEvents fetches changed events for a calendar using a syncToken.
-// Paginates through all pages. Returns events and the new syncToken.
-func ListEvents(calendarID, syncToken string) ([]model.EventLine, string, error) {
-	var allEvents []model.EventLine
-	var newSyncToken string
+// isRecurringParent reports whether the event is a parent recurring event
+// (has a recurrence rule, as opposed to an instance which has recurringEventId).
+func (e calendarEvent) isRecurringParent() bool {
+	return len(e.Recurrence) > 0
+}
 
+// classify separates raw API events into writable events and recurring parent IDs.
+func classify(items []calendarEvent) (events []model.EventLine, recurringIDs []string) {
+	for _, item := range items {
+		if item.isRecurringParent() {
+			recurringIDs = append(recurringIDs, item.ID)
+			continue
+		}
+		events = append(events, item.ToEventLine())
+	}
+	return
+}
+
+// ListEvents fetches changed events for a calendar using a syncToken.
+// Paginates through all pages. Returns categorized events and the new syncToken.
+func ListEvents(calendarID, syncToken string) (*EventsResult, error) {
+	result := &EventsResult{}
 	params := map[string]string{
-		"calendarId":   calendarID,
-		"singleEvents": "true",
-		"syncToken":    syncToken,
+		"calendarId": calendarID,
+		"syncToken":  syncToken,
 	}
 
 	for {
 		var resp calendarEventsResponse
 		if err := gws.RunParsed(&resp, "calendar", "events", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, "", err
+			return nil, err
 		}
 
-		for _, item := range resp.Items {
-			allEvents = append(allEvents, item.ToEventLine())
-		}
+		events, recurringIDs := classify(resp.Items)
+		result.Events = append(result.Events, events...)
+		result.RecurringIDs = append(result.RecurringIDs, recurringIDs...)
 
 		if resp.NextPageToken != "" {
 			params["pageToken"] = resp.NextPageToken
 			continue
 		}
 
-		newSyncToken = resp.NextSyncToken
+		result.SyncToken = resp.NextSyncToken
 		break
 	}
 
-	return allEvents, newSyncToken, nil
+	return result, nil
 }
 
-// SeedSyncToken fetches a syncToken for a calendar by listing events in a
-// ±BackfillDays window around now. Returns the events found during seeding
-// alongside the sync token, so the caller can store them as a backfill.
-// Uses singleEvents=true to expand recurring events into individual instances.
-// The timeMax bound is required because singleEvents=true would otherwise
-// expand recurring events infinitely into the future.
-func SeedSyncToken(calendarID string) ([]model.EventLine, string, error) {
+// SeedSyncToken fetches a syncToken for a calendar by listing events from
+// BackfillDays ago onward (singleEvents=false, so recurring events come as
+// parents with RRULEs — no infinite expansion). Returns categorized events
+// and the sync token for subsequent incremental calls.
+func SeedSyncToken(calendarID string) (*EventsResult, error) {
 	now := time.Now().UTC()
+	result := &EventsResult{}
 	params := map[string]string{
-		"calendarId":   calendarID,
-		"maxResults":   "2500",
-		"singleEvents": "true",
-		"timeMin":      now.AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339),
-		"timeMax":      now.AddDate(0, 0, gws.BackfillDays).Format(time.RFC3339),
+		"calendarId": calendarID,
+		"timeMin":    now.AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339),
 	}
 
-	var allEvents []model.EventLine
 	for {
 		var resp calendarEventsResponse
 		if err := gws.RunParsed(&resp, "calendar", "events", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, "", fmt.Errorf("seed calendar sync token: %w", err)
+			return nil, fmt.Errorf("seed calendar sync token: %w", err)
 		}
 
-		for _, item := range resp.Items {
-			allEvents = append(allEvents, item.ToEventLine())
-		}
+		events, recurringIDs := classify(resp.Items)
+		result.Events = append(result.Events, events...)
+		result.RecurringIDs = append(result.RecurringIDs, recurringIDs...)
 
 		if resp.NextPageToken != "" {
 			params["pageToken"] = resp.NextPageToken
@@ -159,8 +180,39 @@ func SeedSyncToken(calendarID string) ([]model.EventLine, string, error) {
 		}
 
 		if resp.NextSyncToken == "" {
-			return nil, "", fmt.Errorf("seed calendar sync token: no sync token in response")
+			return nil, fmt.Errorf("seed calendar sync token: no sync token in response")
 		}
-		return allEvents, resp.NextSyncToken, nil
+		result.SyncToken = resp.NextSyncToken
+		return result, nil
 	}
+}
+
+// ListInstances fetches expanded instances of a recurring event within a time window.
+func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]model.EventLine, error) {
+	params := map[string]string{
+		"calendarId": calendarID,
+		"eventId":    eventID,
+		"timeMin":    timeMin,
+		"timeMax":    timeMax,
+	}
+
+	var allEvents []model.EventLine
+	for {
+		var resp calendarEventsResponse
+		if err := gws.RunParsed(&resp, "calendar", "events", "instances", "--params", gws.ParamsJSON(params)); err != nil {
+			return nil, fmt.Errorf("list instances %s: %w", eventID, err)
+		}
+
+		for _, item := range resp.Items {
+			allEvents = append(allEvents, item.ToEventLine())
+		}
+
+		if resp.NextPageToken != "" {
+			params["pageToken"] = resp.NextPageToken
+			continue
+		}
+		break
+	}
+
+	return allEvents, nil
 }

@@ -51,9 +51,11 @@ func TestCalendarCursorResetOnExpiry(t *testing.T) {
 		t.Fatal("expected IsCursorExpired to be true for Calendar 400/invalid")
 	}
 
-	cursors := &gwsstore.Cursors{Calendar: gwsstore.CalendarCursors{"primary": "old-token"}}
-	cursors.Calendar["primary"] = ""
-	if cursors.Calendar["primary"] != "" {
-		t.Fatal("expected syncToken to be cleared")
+	cursors := &gwsstore.Cursors{Calendar: gwsstore.CalendarCursors{
+		"primary": {SyncToken: "old-token"},
+	}}
+	cursors.Calendar["primary"] = nil
+	if cursors.Calendar["primary"] != nil {
+		t.Fatal("expected calendar cursor to be cleared")
 	}
 }

@@ -26,8 +26,15 @@ type DriveCursors struct {
 	PageToken string `yaml:"page_token,omitempty"`
 }
 
-// CalendarCursors maps calendar ID to sync token.
-type CalendarCursors map[string]string
+// CalendarCursor holds the sync state for a single calendar.
+type CalendarCursor struct {
+	SyncToken       string   `yaml:"sync_token,omitempty"`
+	ExpandedUntil   string   `yaml:"expanded_until,omitempty"`
+	RecurringEvents []string `yaml:"recurring_events,omitempty"`
+}
+
+// CalendarCursors maps calendar ID to its cursor.
+type CalendarCursors map[string]*CalendarCursor
 
 // LoadCursors reads cursors from a YAML file.
 // Returns an empty Cursors if the file doesn't exist.

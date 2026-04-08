@@ -13,8 +13,14 @@ func TestCursorsRoundTrip(t *testing.T) {
 		Gmail: GmailCursors{HistoryID: "12345"},
 		Drive: DriveCursors{PageToken: "tok-abc"},
 		Calendar: CalendarCursors{
-			"primary":       "sync-1",
-			"work@test.com": "sync-2",
+			"primary": {
+				SyncToken:       "sync-1",
+				ExpandedUntil:   "2026-07-07T00:00:00Z",
+				RecurringEvents: []string{"evt-a", "evt-b"},
+			},
+			"work@test.com": {
+				SyncToken: "sync-2",
+			},
 		},
 	}
 
@@ -36,8 +42,18 @@ func TestCursorsRoundTrip(t *testing.T) {
 	if len(got.Calendar) != 2 {
 		t.Fatalf("Calendar has %d entries, want 2", len(got.Calendar))
 	}
-	if got.Calendar["primary"] != "sync-1" {
-		t.Errorf("Calendar[primary] = %q, want %q", got.Calendar["primary"], "sync-1")
+	primary := got.Calendar["primary"]
+	if primary == nil {
+		t.Fatal("Calendar[primary] is nil")
+	}
+	if primary.SyncToken != "sync-1" {
+		t.Errorf("Calendar[primary].SyncToken = %q, want %q", primary.SyncToken, "sync-1")
+	}
+	if primary.ExpandedUntil != "2026-07-07T00:00:00Z" {
+		t.Errorf("Calendar[primary].ExpandedUntil = %q, want %q", primary.ExpandedUntil, "2026-07-07T00:00:00Z")
+	}
+	if len(primary.RecurringEvents) != 2 {
+		t.Fatalf("Calendar[primary].RecurringEvents has %d entries, want 2", len(primary.RecurringEvents))
 	}
 }
 
