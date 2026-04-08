@@ -226,19 +226,14 @@ func downloadImage(path, uri string) error {
 }
 
 // driveSlug creates a directory name for a Drive file. Uses the slugified
-// title with a short file ID suffix to prevent collisions (two docs titled
-// "Meeting Notes" get different directories). Falls back to the file ID
-// alone if the title is empty.
+// title with the full file ID to prevent collisions. Falls back to the
+// file ID alone if the title is empty.
 func driveSlug(title, fileID string) string {
 	s := slug.Make(title)
-	suffix := fileID
-	if len(suffix) > 8 {
-		suffix = suffix[:8]
-	}
 	if s == "" {
-		return suffix
+		return fileID
 	}
-	return s + "-" + suffix
+	return s + "-" + fileID
 }
 
 // storeComments fetches comments and replies for a Drive file and appends
