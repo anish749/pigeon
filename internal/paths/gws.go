@@ -104,21 +104,21 @@ func (f DriveFileDir) CommentsFile() CommentsFile {
 }
 
 // TabFile returns the path to a document tab's markdown content.
-func (f DriveFileDir) TabFile(tabTitle string) string {
-	return filepath.Join(f.Path(), tabTitle+markdownExt)
+func (f DriveFileDir) TabFile(tabTitle string) TabFile {
+	return TabFile(filepath.Join(f.Path(), tabTitle+markdownExt))
 }
 
 // SheetFile returns the path to a sheet's CSV export.
-func (f DriveFileDir) SheetFile(sheetName string) string {
-	return filepath.Join(f.Path(), sheetName+csvExt)
+func (f DriveFileDir) SheetFile(sheetName string) SheetFile {
+	return SheetFile(filepath.Join(f.Path(), sheetName+csvExt))
 }
 
 // FormulaFile returns the path to a sheet's formulas CSV export.
-func (f DriveFileDir) FormulaFile(sheetName string) string {
-	return filepath.Join(f.Path(), sheetName+formulaCSVSuffix)
+func (f DriveFileDir) FormulaFile(sheetName string) FormulaFile {
+	return FormulaFile(filepath.Join(f.Path(), sheetName+formulaCSVSuffix))
 }
 
 // AttachmentFile returns the path to an inline image or attachment.
-func (f DriveFileDir) AttachmentFile(filename string) string {
-	return filepath.Join(f.Path(), attachSubdir, filename)
+func (f DriveFileDir) AttachmentFile(filename string) AttachmentFile {
+	return AttachmentFile(filepath.Join(f.Path(), attachSubdir, filename))
 }

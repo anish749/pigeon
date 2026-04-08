@@ -37,10 +37,11 @@ func AppendLine(df paths.DataFile, line model.Line) error {
 	return nil
 }
 
-// ReadLines reads all JSONL lines from a file. Returns nil, nil if the
+// ReadLines reads all JSONL lines from a data file. Returns nil, nil if the
 // file doesn't exist. Unparseable lines are collected into the error
 // but successfully parsed lines are still returned.
-func ReadLines(path string) ([]model.Line, error) {
+func ReadLines(df paths.DataFile) ([]model.Line, error) {
+	path := df.Path()
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
