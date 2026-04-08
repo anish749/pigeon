@@ -3,6 +3,8 @@ package gmail
 
 import (
 	"fmt"
+	"log/slog"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -183,53 +185,31 @@ func headerMap(headers []gmailHeader) map[string]string {
 	return m
 }
 
-// parseFrom extracts display name and email from a From header value.
-// Handles "Display Name <email@example.com>" and bare "email@example.com".
+// parseFrom extracts display name and email from a From header value
+// using net/mail.ParseAddress.
 func parseFrom(from string) (name, email string) {
-	from = strings.TrimSpace(from)
-	if from == "" {
-		return "", ""
+	addr, err := mail.ParseAddress(from)
+	if err != nil {
+		slog.Error("parse From header failed, using raw value", "from", from, "error", err)
+		return "", strings.TrimSpace(from)
 	}
-
-	if idx := strings.LastIndex(from, "<"); idx >= 0 {
-		name = strings.TrimSpace(from[:idx])
-		// Strip surrounding quotes from display name.
-		name = strings.Trim(name, "\"")
-		end := strings.Index(from[idx:], ">")
-		if end >= 0 {
-			email = from[idx+1 : idx+end]
-		} else {
-			email = from[idx+1:]
-		}
-		return name, email
-	}
-
-	// Bare email address.
-	return "", from
+	return addr.Name, addr.Address
 }
 
-// parseAddressList extracts email addresses from a comma-separated header value.
-// Handles "Name <email>" and bare "email" formats.
+// parseAddressList extracts email addresses from a header value
+// using net/mail.ParseAddressList.
 func parseAddressList(value string) []string {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-
-	parts := strings.Split(value, ",")
-	var emails []string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if idx := strings.LastIndex(part, "<"); idx >= 0 {
-			end := strings.Index(part[idx:], ">")
-			if end >= 0 {
-				emails = append(emails, part[idx+1:idx+end])
-			}
-		} else {
-			emails = append(emails, part)
-		}
+	addrs, err := mail.ParseAddressList(value)
+	if err != nil {
+		slog.Error("parse address list failed, using raw value", "value", value, "error", err)
+		return []string{strings.TrimSpace(value)}
+	}
+	emails := make([]string, len(addrs))
+	for i, a := range addrs {
+		emails[i] = a.Address
 	}
 	return emails
 }

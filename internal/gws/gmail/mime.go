@@ -3,8 +3,10 @@ package gmail
 import (
 	"encoding/base64"
 	"fmt"
-	"regexp"
+	"io"
 	"strings"
+
+	"golang.org/x/net/html"
 
 	"github.com/anish749/pigeon/internal/gws/model"
 )
@@ -105,15 +107,37 @@ func decodeBase64URL(data string) (string, error) {
 	return string(b), nil
 }
 
-// htmlTagRe matches HTML tags including self-closing tags.
-var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
-
-// stripHTMLTags removes HTML tags from a string, keeping text content.
-// This is a simple best-effort implementation, not a full HTML parser.
-func stripHTMLTags(html string) string {
-	// Replace tags with a space so adjacent text nodes don't merge.
-	text := htmlTagRe.ReplaceAllString(html, " ")
-	// Collapse runs of whitespace into a single space.
-	text = strings.Join(strings.Fields(text), " ")
-	return strings.TrimSpace(text)
+// stripHTMLTags extracts text content from HTML using golang.org/x/net/html
+// tokenizer. Skips script and style elements.
+func stripHTMLTags(s string) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(s))
+	var sb strings.Builder
+	skip := false
+	for {
+		tt := tokenizer.Next()
+		switch tt {
+		case html.ErrorToken:
+			if tokenizer.Err() == io.EOF {
+				return strings.TrimSpace(strings.Join(strings.Fields(sb.String()), " "))
+			}
+			return strings.TrimSpace(strings.Join(strings.Fields(sb.String()), " "))
+		case html.StartTagToken:
+			tn, _ := tokenizer.TagName()
+			tag := string(tn)
+			if tag == "script" || tag == "style" {
+				skip = true
+			}
+		case html.EndTagToken:
+			tn, _ := tokenizer.TagName()
+			tag := string(tn)
+			if tag == "script" || tag == "style" {
+				skip = false
+			}
+		case html.TextToken:
+			if !skip {
+				sb.WriteString(tokenizer.Token().Data)
+				sb.WriteByte(' ')
+			}
+		}
+	}
 }
