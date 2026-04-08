@@ -5,30 +5,29 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // Poller runs periodic polls against GWS services.
 type Poller struct {
-	interval   time.Duration
-	accountDir string // root dir for one account, e.g. ~/.local/share/pigeon/gws/user-at-gmail-com/
+	interval time.Duration
+	account  paths.AccountDir
 }
 
 // New creates a Poller with the given interval and account directory.
-// Cursors are stored at {accountDir}/.sync-cursors.yaml.
-func New(interval time.Duration, accountDir string) *Poller {
+func New(interval time.Duration, account paths.AccountDir) *Poller {
 	return &Poller{
-		interval:   interval,
-		accountDir: accountDir,
+		interval: interval,
+		account:  account,
 	}
 }
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) error {
-	cursorsPath := filepath.Join(p.accountDir, ".sync-cursors.yaml")
+	cursorsPath := p.account.SyncCursorsPath()
 	cursors, err := gwsstore.LoadCursors(cursorsPath)
 	if err != nil {
 		return fmt.Errorf("load cursors: %w", err)
@@ -60,13 +59,13 @@ func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
 	if ctx.Err() != nil {
 		return
 	}
-	if err := PollGmail(p.accountDir, cursors); err != nil {
+	if err := PollGmail(p.account, cursors); err != nil {
 		slog.Error("poll gmail", "err", err)
 	}
-	if err := PollCalendar(p.accountDir, cursors); err != nil {
+	if err := PollCalendar(p.account, cursors); err != nil {
 		slog.Error("poll calendar", "err", err)
 	}
-	if err := PollDrive(p.accountDir, cursors); err != nil {
+	if err := PollDrive(p.account, cursors); err != nil {
 		slog.Error("poll drive", "err", err)
 	}
 }

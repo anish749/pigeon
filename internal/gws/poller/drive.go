@@ -17,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/gws/drive/converter"
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 )
 
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
-func PollDrive(accountDir string, cursors *gwsstore.Cursors) error {
+func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	if cursors.Drive.PageToken == "" {
 		slog.Info("seeding drive page token")
 		token, err := drive.SeedPageToken()
@@ -51,11 +52,11 @@ func PollDrive(accountDir string, cursors *gwsstore.Cursors) error {
 
 		switch ch.File.MimeType {
 		case mimeDoc:
-			if err := handleDoc(accountDir, ch); err != nil {
+			if err := handleDoc(account, ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle doc %s: %w", ch.FileID, err))
 			}
 		case mimeSheet:
-			if err := handleSheet(accountDir, ch); err != nil {
+			if err := handleSheet(account, ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle sheet %s: %w", ch.FileID, err))
 			}
 		default:
@@ -71,7 +72,7 @@ func PollDrive(accountDir string, cursors *gwsstore.Cursors) error {
 	return errors.Join(errs...)
 }
 
-func handleDoc(accountDir string, ch drive.Change) error {
+func handleDoc(account paths.AccountDir, ch drive.Change) error {
 	doc, err := drive.GetDocument(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
@@ -81,7 +82,7 @@ func handleDoc(accountDir string, ch drive.Change) error {
 		return fmt.Errorf("get document: %w", err)
 	}
 
-	docDir := filepath.Join(accountDir, "gdrive", driveSlug(doc.Title, ch.FileID))
+	fileDir := account.Drive().File(driveSlug(doc.Title, ch.FileID))
 
 	tabs, err := doc.AllTabs()
 	if err != nil {
@@ -94,21 +95,20 @@ func handleDoc(accountDir string, ch drive.Change) error {
 
 	for _, tab := range tabs {
 		result := md.ConvertWithImages(tab)
-		tabFile := filepath.Join(docDir, tab.Title+".md")
-		if err := gwsstore.WriteContent(tabFile, []byte(result.Markdown)); err != nil {
+		if err := gwsstore.WriteContent(fileDir.TabFile(tab.Title), []byte(result.Markdown)); err != nil {
 			errs = append(errs, fmt.Errorf("write tab %s: %w", tab.Title, err))
 		}
 		tabMetas = append(tabMetas, model.TabMeta{ID: tab.TabID, Title: tab.Title})
 
 		// Download inline images.
 		for _, img := range result.Images {
-			if err := downloadImage(filepath.Join(docDir, "attachments", img.Filename), img.ImageURI); err != nil {
+			if err := downloadImage(fileDir.AttachmentFile(img.Filename), img.ImageURI); err != nil {
 				errs = append(errs, fmt.Errorf("download image %s: %w", img.ObjectID, err))
 			}
 		}
 	}
 
-	if err := storeComments(docDir, ch.FileID); err != nil {
+	if err := storeComments(fileDir, ch.FileID); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -120,14 +120,14 @@ func handleDoc(accountDir string, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Tabs:         tabMetas,
 	}
-	if err := gwsstore.SaveMeta(filepath.Join(docDir, "meta.json"), meta); err != nil {
+	if err := gwsstore.SaveMeta(fileDir.MetaFile(), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
 	return errors.Join(errs...)
 }
 
-func handleSheet(accountDir string, ch drive.Change) error {
+func handleSheet(account paths.AccountDir, ch drive.Change) error {
 	sheetNames, err := drive.GetSheetNames(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
@@ -137,7 +137,7 @@ func handleSheet(accountDir string, ch drive.Change) error {
 		return fmt.Errorf("get sheet names: %w", err)
 	}
 
-	sheetDir := filepath.Join(accountDir, "gdrive", driveSlug(ch.File.Name, ch.FileID))
+	fileDir := account.Drive().File(driveSlug(ch.File.Name, ch.FileID))
 
 	var errs []error
 
@@ -153,7 +153,7 @@ func handleSheet(accountDir string, ch drive.Change) error {
 			errs = append(errs, fmt.Errorf("convert sheet %s to csv: %w", name, err))
 			continue
 		}
-		if err := gwsstore.WriteContent(filepath.Join(sheetDir, name+".csv"), csvData); err != nil {
+		if err := gwsstore.WriteContent(fileDir.SheetFile(name), csvData); err != nil {
 			errs = append(errs, fmt.Errorf("write sheet %s csv: %w", name, err))
 		}
 
@@ -168,12 +168,12 @@ func handleSheet(accountDir string, ch drive.Change) error {
 			errs = append(errs, fmt.Errorf("convert sheet %s formulas to csv: %w", name, err))
 			continue
 		}
-		if err := gwsstore.WriteContent(filepath.Join(sheetDir, name+".formulas.csv"), formulaCSV); err != nil {
+		if err := gwsstore.WriteContent(fileDir.FormulaFile(name), formulaCSV); err != nil {
 			errs = append(errs, fmt.Errorf("write sheet %s formulas csv: %w", name, err))
 		}
 	}
 
-	if err := storeComments(sheetDir, ch.FileID); err != nil {
+	if err := storeComments(fileDir, ch.FileID); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -185,7 +185,7 @@ func handleSheet(accountDir string, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Sheets:       sheetNames,
 	}
-	if err := gwsstore.SaveMeta(filepath.Join(sheetDir, "meta.json"), meta); err != nil {
+	if err := gwsstore.SaveMeta(fileDir.MetaFile(), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
@@ -238,13 +238,13 @@ func driveSlug(title, fileID string) string {
 
 // storeComments fetches comments and replies for a Drive file and appends
 // them to comments.jsonl in the given directory.
-func storeComments(dir, fileID string) error {
+func storeComments(fileDir paths.DriveFileDir, fileID string) error {
 	comments, replies, err := drive.ListComments(fileID)
 	if err != nil {
 		return fmt.Errorf("list comments for %s: %w", fileID, err)
 	}
 
-	commentsPath := filepath.Join(dir, "comments.jsonl")
+	commentsPath := fileDir.CommentsFile()
 	var errs []error
 	for _, c := range comments {
 		line := model.Line{Type: "comment", Comment: &c}

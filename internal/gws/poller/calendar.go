@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,10 +11,11 @@ import (
 	"github.com/anish749/pigeon/internal/gws/calendar"
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // PollCalendar polls for calendar changes and stores events as JSONL.
-func PollCalendar(accountDir string, cursors *gwsstore.Cursors) error {
+func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	const calID = "primary"
 
 	if cursors.Calendar == nil {
@@ -48,7 +48,7 @@ func PollCalendar(accountDir string, cursors *gwsstore.Cursors) error {
 
 	var errs []error
 	for _, ev := range events {
-		datePath := eventDateFile(accountDir, calID, ev)
+		datePath := account.Calendar(calID).DateFile(eventDate(ev))
 		line := model.Line{Type: "event", Event: &ev}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append event %s: %w", ev.ID, err))
@@ -61,13 +61,6 @@ func PollCalendar(accountDir string, cursors *gwsstore.Cursors) error {
 
 	cursors.Calendar[calID] = newToken
 	return errors.Join(errs...)
-}
-
-// eventDateFile returns the JSONL file path for an event based on its start date.
-// Path: {accountDir}/gcalendar/{calID}/{YYYY-MM-DD}.jsonl
-func eventDateFile(accountDir, calID string, ev model.EventLine) string {
-	date := eventDate(ev)
-	return filepath.Join(accountDir, "gcalendar", calID, date+".jsonl")
 }
 
 // eventDate extracts the date string (YYYY-MM-DD) from an event.

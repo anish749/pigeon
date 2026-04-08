@@ -3,11 +3,9 @@ package daemon
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
 	"time"
 
-	"github.com/gosimple/slug"
-
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
@@ -69,15 +67,14 @@ func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) 
 }
 
 func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
-	accountSlug := slug.Make(g.Email)
-	accountDir := filepath.Join(paths.DefaultDataRoot().Path(), "gws", accountSlug)
+	acctDir := paths.DefaultDataRoot().AccountFor(account.New("gws", g.Email))
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
-	p := poller.New(gwsPollInterval, accountDir)
+	p := poller.New(gwsPollInterval, acctDir)
 	go func() {
-		slog.Info("gws poller started", "email", g.Email, "account_dir", accountDir)
+		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
 		if err := p.Run(child); err != nil && child.Err() == nil {
 			slog.Error("gws poller exited", "email", g.Email, "error", err)
 		}
