@@ -8,6 +8,10 @@ import (
 	"os/exec"
 )
 
+// BackfillDays is the number of days of historical data to fetch on first sync.
+// Used across all three services (Gmail, Calendar, Drive) for backfill windows.
+const BackfillDays = 90
+
 // APIError represents a structured error from a Google Workspace API call.
 // The gws CLI returns these as JSON on stderr: {"error":{"code":404,"message":"...","reason":"..."}}.
 type APIError struct {

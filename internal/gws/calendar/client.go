@@ -125,19 +125,27 @@ func ListEvents(calendarID, syncToken string) ([]model.EventLine, string, error)
 	return allEvents, newSyncToken, nil
 }
 
-// SeedSyncToken fetches a syncToken for a calendar by listing future events.
-// Paginates until the last page returns a syncToken.
-func SeedSyncToken(calendarID string) (string, error) {
+// SeedSyncToken fetches a syncToken for a calendar by listing events in a
+// ±90-day window around now. Returns the events found during seeding alongside
+// the sync token, so the caller can store them as a backfill.
+func SeedSyncToken(calendarID string) ([]model.EventLine, string, error) {
+	now := time.Now().UTC()
 	params := map[string]string{
 		"calendarId": calendarID,
 		"maxResults": "2500",
-		"timeMin":    time.Now().UTC().Format(time.RFC3339),
+		"timeMin":    now.AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339),
+		"timeMax":    now.AddDate(0, 0, gws.BackfillDays).Format(time.RFC3339),
 	}
 
+	var allEvents []model.EventLine
 	for {
 		var resp calendarEventsResponse
 		if err := gws.RunParsed(&resp, "calendar", "events", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return "", fmt.Errorf("seed calendar sync token: %w", err)
+			return nil, "", fmt.Errorf("seed calendar sync token: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			allEvents = append(allEvents, item.ToEventLine())
 		}
 
 		if resp.NextPageToken != "" {
@@ -146,8 +154,8 @@ func SeedSyncToken(calendarID string) (string, error) {
 		}
 
 		if resp.NextSyncToken == "" {
-			return "", fmt.Errorf("seed calendar sync token: no sync token in response")
+			return nil, "", fmt.Errorf("seed calendar sync token: no sync token in response")
 		}
-		return resp.NextSyncToken, nil
+		return allEvents, resp.NextSyncToken, nil
 	}
 }

@@ -25,15 +25,26 @@ func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	syncToken := cursors.Calendar[calID]
 
 	// Seed the sync token if we don't have one yet.
+	// Seeding fetches events in a ±90-day window as a backfill.
 	if syncToken == "" {
 		slog.Info("seeding calendar sync token", "calendar", calID)
-		token, err := calendar.SeedSyncToken(calID)
+		events, token, err := calendar.SeedSyncToken(calID)
 		if err != nil {
 			return fmt.Errorf("seed calendar %s: %w", calID, err)
 		}
+
+		var errs []error
+		for _, ev := range events {
+			datePath := account.Calendar(calID).DateFile(eventDate(ev))
+			line := model.Line{Type: "event", Event: &ev}
+			if err := gwsstore.AppendLine(datePath, line); err != nil {
+				errs = append(errs, fmt.Errorf("append event %s: %w", ev.ID, err))
+			}
+		}
+
 		cursors.Calendar[calID] = token
-		slog.Info("seeded calendar sync token", "calendar", calID)
-		return nil
+		slog.Info("seeded calendar with backfill", "calendar", calID, "events", len(events))
+		return errors.Join(errs...)
 	}
 
 	events, newToken, err := calendar.ListEvents(calID, syncToken)
