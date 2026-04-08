@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	t.Logf("recurring_events: %d", len(cur.RecurringEvents))
 
 	// Verify the recurring event ID is tracked.
-	if !containsID(cur.RecurringEvents, recurID) {
+	if !slices.Contains(cur.RecurringEvents, recurID) {
 		t.Errorf("recurring_events does not contain %s", recurID)
 	}
 
@@ -222,11 +223,3 @@ func eventsWithPrefix(events []model.EventLine, prefix string) []model.EventLine
 	return matched
 }
 
-func containsID(ids []string, target string) bool {
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
-}
