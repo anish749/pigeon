@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 
 	"github.com/jhillyerd/enmime"
 
@@ -69,7 +70,8 @@ type parsedMessage struct {
 func parseAddress(header string) (name, email string) {
 	list, err := enmime.ParseAddressList(header)
 	if err != nil || len(list) == 0 {
-		return "", header
+		slog.Error("parse From header failed", "header", header, "error", err)
+		return "", ""
 	}
 	return list[0].Name, list[0].Address
 }
@@ -80,6 +82,7 @@ func parseAddresses(values []string) []string {
 	for _, v := range values {
 		list, err := enmime.ParseAddressList(v)
 		if err != nil {
+			slog.Error("parse address list failed", "value", v, "error", err)
 			continue
 		}
 		for _, a := range list {
