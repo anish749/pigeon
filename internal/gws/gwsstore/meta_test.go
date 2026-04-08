@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestMetaRoundTrip(t *testing.T) {
@@ -24,11 +25,11 @@ func TestMetaRoundTrip(t *testing.T) {
 		Sheets: []string{"Sheet1", "Sheet2"},
 	}
 
-	if err := SaveMeta(path, orig); err != nil {
+	if err := SaveMeta(paths.MetaFile(path), orig); err != nil {
 		t.Fatalf("SaveMeta: %v", err)
 	}
 
-	got, err := LoadMeta(path)
+	got, err := LoadMeta(paths.MetaFile(path))
 	if err != nil {
 		t.Fatalf("LoadMeta: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestMetaRoundTrip(t *testing.T) {
 
 func TestLoadMetaNonExistent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nope.json")
-	_, err := LoadMeta(path)
+	_, err := LoadMeta(paths.MetaFile(path))
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
 	}

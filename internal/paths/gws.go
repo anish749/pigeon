@@ -47,8 +47,8 @@ func (g GmailDir) Path() string {
 }
 
 // DateFile returns the path to a daily email file.
-func (g GmailDir) DateFile(date string) string {
-	return filepath.Join(g.Path(), date+FileExt)
+func (g GmailDir) DateFile(date string) DateFile {
+	return DateFile(filepath.Join(g.Path(), date+FileExt))
 }
 
 // CalendarDir represents a calendar directory: <account>/gcalendar/<calID>/
@@ -63,8 +63,8 @@ func (c CalendarDir) Path() string {
 }
 
 // DateFile returns the path to a daily events file.
-func (c CalendarDir) DateFile(date string) string {
-	return filepath.Join(c.Path(), date+FileExt)
+func (c CalendarDir) DateFile(date string) DateFile {
+	return DateFile(filepath.Join(c.Path(), date+FileExt))
 }
 
 // DriveDir represents the gdrive directory: <account>/gdrive/
@@ -94,13 +94,13 @@ func (f DriveFileDir) Path() string {
 }
 
 // MetaFile returns the path to the file's metadata.
-func (f DriveFileDir) MetaFile() string {
-	return filepath.Join(f.Path(), metaFile)
+func (f DriveFileDir) MetaFile() MetaFile {
+	return MetaFile(filepath.Join(f.Path(), metaFile))
 }
 
 // CommentsFile returns the path to the file's comments JSONL.
-func (f DriveFileDir) CommentsFile() string {
-	return filepath.Join(f.Path(), commentsFile+FileExt)
+func (f DriveFileDir) CommentsFile() CommentsFile {
+	return CommentsFile(filepath.Join(f.Path(), commentsFile+FileExt))
 }
 
 // TabFile returns the path to a document tab's markdown content.
