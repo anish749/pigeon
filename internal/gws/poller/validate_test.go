@@ -45,10 +45,10 @@ func TestLiveSmoke(t *testing.T) {
 	if err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("calendar seed: %v", err)
 	}
-	if cursors.Calendar["primary"] == "" {
+	if cursors.Calendar["primary"] == nil || cursors.Calendar["primary"].SyncToken == "" {
 		t.Fatal("calendar syncToken not seeded")
 	}
-	t.Logf("calendar syncToken: %.20s...", cursors.Calendar["primary"])
+	t.Logf("calendar syncToken: %.20s...", cursors.Calendar["primary"].SyncToken)
 
 	t.Log("=== Seeding Drive ===")
 	if err := poller.PollDrive(account, cursors); err != nil {
