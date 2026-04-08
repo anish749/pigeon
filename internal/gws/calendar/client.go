@@ -99,8 +99,9 @@ func ListEvents(calendarID, syncToken string) ([]model.EventLine, string, error)
 	var newSyncToken string
 
 	params := map[string]string{
-		"calendarId": calendarID,
-		"syncToken":  syncToken,
+		"calendarId":   calendarID,
+		"singleEvents": "true",
+		"syncToken":    syncToken,
 	}
 
 	for {
@@ -126,15 +127,19 @@ func ListEvents(calendarID, syncToken string) ([]model.EventLine, string, error)
 }
 
 // SeedSyncToken fetches a syncToken for a calendar by listing events in a
-// ±90-day window around now. Returns the events found during seeding alongside
-// the sync token, so the caller can store them as a backfill.
+// ±BackfillDays window around now. Returns the events found during seeding
+// alongside the sync token, so the caller can store them as a backfill.
+// Uses singleEvents=true to expand recurring events into individual instances.
+// The timeMax bound is required because singleEvents=true would otherwise
+// expand recurring events infinitely into the future.
 func SeedSyncToken(calendarID string) ([]model.EventLine, string, error) {
 	now := time.Now().UTC()
 	params := map[string]string{
-		"calendarId": calendarID,
-		"maxResults": "2500",
-		"timeMin":    now.AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339),
-		"timeMax":    now.AddDate(0, 0, gws.BackfillDays).Format(time.RFC3339),
+		"calendarId":   calendarID,
+		"maxResults":   "2500",
+		"singleEvents": "true",
+		"timeMin":      now.AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339),
+		"timeMax":      now.AddDate(0, 0, gws.BackfillDays).Format(time.RFC3339),
 	}
 
 	var allEvents []model.EventLine
