@@ -22,6 +22,9 @@ func SearchDir(platform, accountName string) string {
 	}
 }
 
+// FileExt is the file extension for all message data files.
+const FileExt = ".jsonl"
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -111,9 +114,6 @@ func (c ConversationDir) Path() string {
 func (c ConversationDir) MetaFile() MetaFile {
 	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
 }
-
-// FileExt is the file extension for all message data files.
-const FileExt = ".jsonl"
 
 // DateFile returns the path to a daily message file.
 func (c ConversationDir) DateFile(date string) DateFile {
