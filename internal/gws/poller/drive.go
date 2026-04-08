@@ -194,6 +194,12 @@ func handleSheet(account paths.AccountDir, ch drive.Change) error {
 
 // downloadImage fetches an image from a URL and writes it to path.
 // Creates parent directories if needed. Skips if the file already exists.
+//
+// The Docs API contentUri is a signed lh7-rt.googleusercontent.com URL
+// with a ?key= parameter — publicly accessible without auth headers.
+// Validated against a real doc: unauthenticated http.Get returns the
+// image bytes (PNG, 90KB) with HTTP 200. The URI is short-lived but
+// we download immediately during the poll cycle.
 func downloadImage(path, uri string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil // already downloaded
