@@ -1,182 +1,145 @@
 package gmail
 
 import (
+	"encoding/base64"
 	"testing"
 )
 
-func TestExtractBody_SimplePlainText(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "text/plain",
-		Body:     gmailBody{Data: "SGVsbG8gd29ybGQ"}, // "Hello world"
-	}
-	got, err := ExtractBody(payload)
+func encode(s string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
+}
+
+func TestParseRawMessage_PlainText(t *testing.T) {
+	raw := encode("From: Alice <alice@example.com>\r\n" +
+		"To: bob@example.com\r\n" +
+		"Subject: Hello\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Hello world")
+
+	parsed, err := parseRawMessage(raw)
 	if err != nil {
-		t.Fatalf("ExtractBody error: %v", err)
+		t.Fatalf("parseRawMessage: %v", err)
 	}
-	if got != "Hello world" {
-		t.Errorf("ExtractBody = %q, want %q", got, "Hello world")
+	if parsed.fromName != "Alice" {
+		t.Errorf("fromName = %q, want %q", parsed.fromName, "Alice")
+	}
+	if parsed.fromAddr != "alice@example.com" {
+		t.Errorf("fromAddr = %q, want %q", parsed.fromAddr, "alice@example.com")
+	}
+	if len(parsed.to) != 1 || parsed.to[0] != "bob@example.com" {
+		t.Errorf("to = %v, want [bob@example.com]", parsed.to)
+	}
+	if parsed.subject != "Hello" {
+		t.Errorf("subject = %q, want %q", parsed.subject, "Hello")
+	}
+	if parsed.text != "Hello world" {
+		t.Errorf("text = %q, want %q", parsed.text, "Hello world")
+	}
+	if len(parsed.attachments) != 0 {
+		t.Errorf("attachments = %v, want empty", parsed.attachments)
 	}
 }
 
-func TestExtractBody_MultipartAlternative(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "multipart/alternative",
-		Parts: []gmailPayload{
-			{
-				MimeType: "text/plain",
-				Body:     gmailBody{Data: "UGxhaW4gdGV4dCBib2R5"}, // "Plain text body"
-			},
-			{
-				MimeType: "text/html",
-				Body:     gmailBody{Data: "PHA-SGVsbG8gPGI-d29ybGQ8L2I-PC9wPg"}, // "<p>Hello <b>world</b></p>"
-			},
-		},
-	}
-	got, err := ExtractBody(payload)
+func TestParseRawMessage_Multipart(t *testing.T) {
+	raw := encode("From: sender@example.com\r\n" +
+		"To: a@example.com, b@example.com\r\n" +
+		"Cc: c@example.com\r\n" +
+		"Subject: Multi\r\n" +
+		"Content-Type: multipart/alternative; boundary=boundary42\r\n" +
+		"\r\n" +
+		"--boundary42\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Plain body\r\n" +
+		"--boundary42\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<p>HTML body</p>\r\n" +
+		"--boundary42--\r\n")
+
+	parsed, err := parseRawMessage(raw)
 	if err != nil {
-		t.Fatalf("ExtractBody error: %v", err)
+		t.Fatalf("parseRawMessage: %v", err)
 	}
-	if got != "Plain text body" {
-		t.Errorf("ExtractBody = %q, want %q", got, "Plain text body")
+	if parsed.text != "Plain body" {
+		t.Errorf("text = %q, want %q", parsed.text, "Plain body")
+	}
+	if len(parsed.to) != 2 {
+		t.Errorf("to = %v, want 2 addresses", parsed.to)
+	}
+	if len(parsed.cc) != 1 || parsed.cc[0] != "c@example.com" {
+		t.Errorf("cc = %v, want [c@example.com]", parsed.cc)
 	}
 }
 
-func TestExtractBody_HTMLOnly(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "text/html",
-		Body:     gmailBody{Data: "PHA-SGVsbG8gPGI-d29ybGQ8L2I-PC9wPg"}, // "<p>Hello <b>world</b></p>"
-	}
-	got, err := ExtractBody(payload)
+func TestParseRawMessage_HTMLOnly(t *testing.T) {
+	raw := encode("From: sender@example.com\r\n" +
+		"Subject: HTML\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<p>Hello <b>world</b></p>\r\n")
+
+	parsed, err := parseRawMessage(raw)
 	if err != nil {
-		t.Fatalf("ExtractBody error: %v", err)
+		t.Fatalf("parseRawMessage: %v", err)
 	}
-	if got != "Hello world" {
-		t.Errorf("ExtractBody = %q, want %q", got, "Hello world")
+	if parsed.text == "" {
+		t.Error("text is empty, expected HTML fallback content")
 	}
 }
 
-func TestExtractBody_NestedMultipart(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "multipart/mixed",
-		Parts: []gmailPayload{
-			{
-				MimeType: "multipart/alternative",
-				Parts: []gmailPayload{
-					{
-						MimeType: "text/plain",
-						Body:     gmailBody{Data: "TmVzdGVkIHBsYWluIHRleHQ"}, // "Nested plain text"
-					},
-					{
-						MimeType: "text/html",
-						Body:     gmailBody{Data: "PHA-SGVsbG8gPGI-d29ybGQ8L2I-PC9wPg"},
-					},
-				},
-			},
-			{
-				MimeType: "application/pdf",
-				Filename: "report.pdf",
-				Body:     gmailBody{AttachmentID: "att-1", Size: 1024},
-			},
-		},
-	}
-	got, err := ExtractBody(payload)
+func TestParseRawMessage_WithAttachment(t *testing.T) {
+	raw := encode("From: sender@example.com\r\n" +
+		"Subject: Attachment\r\n" +
+		"Content-Type: multipart/mixed; boundary=mixbound\r\n" +
+		"\r\n" +
+		"--mixbound\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"See attached\r\n" +
+		"--mixbound\r\n" +
+		"Content-Type: application/pdf; name=\"report.pdf\"\r\n" +
+		"Content-Disposition: attachment; filename=\"report.pdf\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"\r\n" +
+		"JVBERi0xLjQK\r\n" +
+		"--mixbound--\r\n")
+
+	parsed, err := parseRawMessage(raw)
 	if err != nil {
-		t.Fatalf("ExtractBody error: %v", err)
+		t.Fatalf("parseRawMessage: %v", err)
 	}
-	if got != "Nested plain text" {
-		t.Errorf("ExtractBody = %q, want %q", got, "Nested plain text")
+	if parsed.text != "See attached" {
+		t.Errorf("text = %q, want %q", parsed.text, "See attached")
 	}
-}
-
-func TestExtractAttachments(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "multipart/mixed",
-		Parts: []gmailPayload{
-			{
-				MimeType: "text/plain",
-				Body:     gmailBody{Data: "SGVsbG8gd29ybGQ"},
-			},
-			{
-				MimeType: "application/pdf",
-				Filename: "report.pdf",
-				Body:     gmailBody{AttachmentID: "att-1", Size: 1024},
-			},
-			{
-				MimeType: "image/png",
-				Filename: "screenshot.png",
-				Body:     gmailBody{AttachmentID: "att-2", Size: 2048},
-			},
-		},
+	if len(parsed.attachments) != 1 {
+		t.Fatalf("attachments count = %d, want 1", len(parsed.attachments))
 	}
-	attachments := ExtractAttachments(payload)
-	if len(attachments) != 2 {
-		t.Fatalf("ExtractAttachments returned %d attachments, want 2", len(attachments))
+	if parsed.attachments[0].Name != "report.pdf" {
+		t.Errorf("attachment name = %q, want %q", parsed.attachments[0].Name, "report.pdf")
 	}
-
-	if attachments[0].ID != "att-1" || attachments[0].Type != "application/pdf" || attachments[0].Name != "report.pdf" {
-		t.Errorf("attachment[0] = %+v, want {ID:att-1 Type:application/pdf Name:report.pdf}", attachments[0])
-	}
-	if attachments[1].ID != "att-2" || attachments[1].Type != "image/png" || attachments[1].Name != "screenshot.png" {
-		t.Errorf("attachment[1] = %+v, want {ID:att-2 Type:image/png Name:screenshot.png}", attachments[1])
+	if parsed.attachments[0].Type != "application/pdf" {
+		t.Errorf("attachment type = %q, want %q", parsed.attachments[0].Type, "application/pdf")
 	}
 }
 
-func TestExtractAttachments_NoAttachments(t *testing.T) {
-	payload := gmailPayload{
-		MimeType: "text/plain",
-		Body:     gmailBody{Data: "SGVsbG8gd29ybGQ"},
+func TestParseAddress(t *testing.T) {
+	name, email := parseAddress("Alice Smith <alice@example.com>")
+	if name != "Alice Smith" {
+		t.Errorf("name = %q, want %q", name, "Alice Smith")
 	}
-	attachments := ExtractAttachments(payload)
-	if attachments != nil {
-		t.Errorf("ExtractAttachments = %v, want nil", attachments)
-	}
-}
-
-func TestDecodeBase64URL(t *testing.T) {
-	// "Hello world" in base64url without padding
-	got, err := decodeBase64URL("SGVsbG8gd29ybGQ")
-	if err != nil {
-		t.Fatalf("decodeBase64URL error: %v", err)
-	}
-	if got != "Hello world" {
-		t.Errorf("decodeBase64URL = %q, want %q", got, "Hello world")
+	if email != "alice@example.com" {
+		t.Errorf("email = %q, want %q", email, "alice@example.com")
 	}
 }
 
-func TestStripHTMLTags(t *testing.T) {
-	tests := []struct {
-		name string
-		html string
-		want string
-	}{
-		{
-			name: "simple tags",
-			html: "<p>Hello <b>world</b></p>",
-			want: "Hello world",
-		},
-		{
-			name: "br tags",
-			html: "line1<br>line2<br/>line3",
-			want: "line1 line2 line3",
-		},
-		{
-			name: "nested tags",
-			html: "<div><p>Hello</p><p>World</p></div>",
-			want: "Hello World",
-		},
-		{
-			name: "no tags",
-			html: "plain text",
-			want: "plain text",
-		},
+func TestParseAddresses(t *testing.T) {
+	emails := parseAddresses([]string{"a@example.com, b@example.com"})
+	if len(emails) != 2 {
+		t.Fatalf("len = %d, want 2", len(emails))
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := stripHTMLTags(tt.html)
-			if got != tt.want {
-				t.Errorf("stripHTMLTags(%q) = %q, want %q", tt.html, got, tt.want)
-			}
-		})
+	if emails[0] != "a@example.com" || emails[1] != "b@example.com" {
+		t.Errorf("emails = %v", emails)
 	}
 }

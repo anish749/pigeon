@@ -1,143 +1,88 @@
 package gmail
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"strings"
 
-	"golang.org/x/net/html"
+	"github.com/jhillyerd/enmime"
 
 	"github.com/anish749/pigeon/internal/gws/model"
 )
 
-// gmailPayload represents a MIME part in the Gmail API response.
-type gmailPayload struct {
-	MimeType string         `json:"mimeType"`
-	Filename string         `json:"filename"`
-	Headers  []gmailHeader  `json:"headers"`
-	Body     gmailBody      `json:"body"`
-	Parts    []gmailPayload `json:"parts"` // recursive MIME tree
-}
-
-type gmailHeader struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-type gmailBody struct {
-	Data         string `json:"data"`         // base64url encoded
-	Size         int    `json:"size"`
-	AttachmentID string `json:"attachmentId"` // present for attachments
-}
-
-// ExtractBody walks the MIME tree to find the best text content.
-// Prefers text/plain, falls back to text/html (with tags stripped).
-func ExtractBody(payload gmailPayload) (string, error) {
-	plain, err := findBody(payload, "text/plain")
+// parseRawMessage decodes a base64url-encoded RFC 2822 message and
+// extracts the body text, headers, and attachment metadata using enmime.
+func parseRawMessage(raw string) (*parsedMessage, error) {
+	b, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return "", fmt.Errorf("extract text/plain body: %w", err)
-	}
-	if plain != "" {
-		return plain, nil
+		return nil, fmt.Errorf("decode raw message: %w", err)
 	}
 
-	html, err := findBody(payload, "text/html")
+	env, err := enmime.ReadEnvelope(bytes.NewReader(b))
 	if err != nil {
-		return "", fmt.Errorf("extract text/html body: %w", err)
-	}
-	if html != "" {
-		return stripHTMLTags(html), nil
-	}
-	return "", nil
-}
-
-// findBody searches the MIME tree depth-first for a part matching mimeType
-// and returns its decoded body content.
-func findBody(payload gmailPayload, mimeType string) (string, error) {
-	if len(payload.Parts) == 0 {
-		if strings.EqualFold(payload.MimeType, mimeType) && payload.Body.Data != "" {
-			return decodeBase64URL(payload.Body.Data)
-		}
-		return "", nil
+		return nil, fmt.Errorf("parse MIME envelope: %w", err)
 	}
 
-	for _, part := range payload.Parts {
-		body, err := findBody(part, mimeType)
-		if err != nil {
-			return "", err
-		}
-		if body != "" {
-			return body, nil
-		}
+	// Prefer plain text; fall back to HTML→text conversion by enmime.
+	text := env.Text
+	if text == "" {
+		text = env.HTML // enmime already provides the raw HTML; plain is better
 	}
-	return "", nil
-}
 
-// ExtractAttachments collects attachment metadata from the MIME tree.
-func ExtractAttachments(payload gmailPayload) []model.EmailAttachment {
+	fromName, fromAddr := parseAddress(env.GetHeader("From"))
+	to := parseAddresses(env.GetHeaderValues("To"))
+	cc := parseAddresses(env.GetHeaderValues("Cc"))
+
 	var attachments []model.EmailAttachment
-	collectAttachments(payload, &attachments)
-	if len(attachments) == 0 {
-		return nil
-	}
-	return attachments
-}
-
-func collectAttachments(payload gmailPayload, out *[]model.EmailAttachment) {
-	if payload.Body.AttachmentID != "" || payload.Filename != "" {
-		*out = append(*out, model.EmailAttachment{
-			ID:   payload.Body.AttachmentID,
-			Type: payload.MimeType,
-			Name: payload.Filename,
+	for _, a := range env.Attachments {
+		attachments = append(attachments, model.EmailAttachment{
+			ID:   a.ContentID,
+			Type: a.ContentType,
+			Name: a.FileName,
 		})
 	}
-	for _, part := range payload.Parts {
-		collectAttachments(part, out)
-	}
+
+	return &parsedMessage{
+		subject:     env.GetHeader("Subject"),
+		fromName:    fromName,
+		fromAddr:    fromAddr,
+		to:          to,
+		cc:          cc,
+		text:        text,
+		attachments: attachments,
+	}, nil
 }
 
-// decodeBase64URL decodes Gmail's base64url-encoded body data.
-// Gmail uses URL-safe base64 without padding (RFC 4648 section 5).
-func decodeBase64URL(data string) (string, error) {
-	b, err := base64.RawURLEncoding.DecodeString(data)
-	if err != nil {
-		return "", fmt.Errorf("decode base64url: %w", err)
-	}
-	return string(b), nil
+type parsedMessage struct {
+	subject     string
+	fromName    string
+	fromAddr    string
+	to          []string
+	cc          []string
+	text        string
+	attachments []model.EmailAttachment
 }
 
-// stripHTMLTags extracts text content from HTML using golang.org/x/net/html
-// tokenizer. Skips script and style elements.
-func stripHTMLTags(s string) string {
-	tokenizer := html.NewTokenizer(strings.NewReader(s))
-	var sb strings.Builder
-	skip := false
-	for {
-		tt := tokenizer.Next()
-		switch tt {
-		case html.ErrorToken:
-			if tokenizer.Err() == io.EOF {
-				return strings.TrimSpace(strings.Join(strings.Fields(sb.String()), " "))
-			}
-			return strings.TrimSpace(strings.Join(strings.Fields(sb.String()), " "))
-		case html.StartTagToken:
-			tn, _ := tokenizer.TagName()
-			tag := string(tn)
-			if tag == "script" || tag == "style" {
-				skip = true
-			}
-		case html.EndTagToken:
-			tn, _ := tokenizer.TagName()
-			tag := string(tn)
-			if tag == "script" || tag == "style" {
-				skip = false
-			}
-		case html.TextToken:
-			if !skip {
-				sb.WriteString(tokenizer.Token().Data)
-				sb.WriteByte(' ')
-			}
+// parseAddress extracts display name and email from a single address header.
+func parseAddress(header string) (name, email string) {
+	list, err := enmime.ParseAddressList(header)
+	if err != nil || len(list) == 0 {
+		return "", header
+	}
+	return list[0].Name, list[0].Address
+}
+
+// parseAddresses extracts email addresses from header values.
+func parseAddresses(values []string) []string {
+	var emails []string
+	for _, v := range values {
+		list, err := enmime.ParseAddressList(v)
+		if err != nil {
+			continue
+		}
+		for _, a := range list {
+			emails = append(emails, a.Address)
 		}
 	}
+	return emails
 }

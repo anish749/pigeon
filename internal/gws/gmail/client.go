@@ -3,10 +3,7 @@ package gmail
 
 import (
 	"fmt"
-	"log/slog"
-	"net/mail"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws"
@@ -40,14 +37,14 @@ type gmailMessageRef struct {
 	LabelIDs []string `json:"labelIds"`
 }
 
-// gmailMessage is the full message response from users.messages.get.
-type gmailMessage struct {
-	ID           string       `json:"id"`
-	ThreadID     string       `json:"threadId"`
-	InternalDate string       `json:"internalDate"` // unix millis as string
-	LabelIDs     []string     `json:"labelIds"`
-	Snippet      string       `json:"snippet"`
-	Payload      gmailPayload `json:"payload"`
+// gmailRawMessage is the response from users.messages.get with format=raw.
+type gmailRawMessage struct {
+	ID           string   `json:"id"`
+	ThreadID     string   `json:"threadId"`
+	InternalDate string   `json:"internalDate"` // unix millis as string
+	LabelIDs     []string `json:"labelIds"`
+	Snippet      string   `json:"snippet"`
+	Raw          string   `json:"raw"` // base64url-encoded RFC 2822
 }
 
 // GetHistoryID fetches the current historyId from the user's profile.
@@ -117,15 +114,15 @@ func ListHistory(startHistoryId string) (added []string, deleted []string, newHi
 	return added, deleted, newHistoryId, nil
 }
 
-// GetMessage fetches a full message by ID and converts it to an EmailLine.
+// GetMessage fetches a raw message by ID and parses it with enmime.
 func GetMessage(messageID string) (*model.EmailLine, error) {
 	params := gws.ParamsJSON(map[string]string{
 		"userId": "me",
 		"id":     messageID,
-		"format": "full",
+		"format": "raw",
 	})
 
-	var msg gmailMessage
+	var msg gmailRawMessage
 	if err := gws.RunParsed(&msg, "gmail", "users", "messages", "get", "--params", params); err != nil {
 		return nil, fmt.Errorf("get gmail message %s: %w", messageID, err)
 	}
@@ -135,31 +132,25 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 		return nil, fmt.Errorf("parse date for message %s: %w", messageID, err)
 	}
 
-	headers := headerMap(msg.Payload.Headers)
-	fromName, fromEmail := parseFrom(headers["from"])
-	to := parseAddressList(headers["to"])
-	cc := parseAddressList(headers["cc"])
-
-	body, err := ExtractBody(msg.Payload)
+	parsed, err := parseRawMessage(msg.Raw)
 	if err != nil {
-		return nil, fmt.Errorf("extract body for %s: %w", messageID, err)
+		return nil, fmt.Errorf("parse message %s: %w", messageID, err)
 	}
-	attachments := ExtractAttachments(msg.Payload)
 
 	return &model.EmailLine{
 		Type:     "email",
 		ID:       msg.ID,
 		ThreadID: msg.ThreadID,
 		Ts:       ts,
-		From:     fromEmail,
-		FromName: fromName,
-		To:       to,
-		CC:       cc,
-		Subject:  headers["subject"],
+		From:     parsed.fromAddr,
+		FromName: parsed.fromName,
+		To:       parsed.to,
+		CC:       parsed.cc,
+		Subject:  parsed.subject,
 		Labels:   msg.LabelIDs,
 		Snippet:  msg.Snippet,
-		Text:     body,
-		Attach:   attachments,
+		Text:     parsed.text,
+		Attach:   parsed.attachments,
 	}, nil
 }
 
@@ -170,46 +161,4 @@ func parseInternalDate(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("parse internalDate %q: %w", s, err)
 	}
 	return time.UnixMilli(millis), nil
-}
-
-// headerMap builds a case-insensitive lookup from Gmail headers.
-// Duplicate headers: first occurrence wins.
-func headerMap(headers []gmailHeader) map[string]string {
-	m := make(map[string]string, len(headers))
-	for _, h := range headers {
-		key := strings.ToLower(h.Name)
-		if _, exists := m[key]; !exists {
-			m[key] = h.Value
-		}
-	}
-	return m
-}
-
-// parseFrom extracts display name and email from a From header value
-// using net/mail.ParseAddress.
-func parseFrom(from string) (name, email string) {
-	addr, err := mail.ParseAddress(from)
-	if err != nil {
-		slog.Error("parse From header failed, using raw value", "from", from, "error", err)
-		return "", strings.TrimSpace(from)
-	}
-	return addr.Name, addr.Address
-}
-
-// parseAddressList extracts email addresses from a header value
-// using net/mail.ParseAddressList.
-func parseAddressList(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	addrs, err := mail.ParseAddressList(value)
-	if err != nil {
-		slog.Error("parse address list failed, using raw value", "value", value, "error", err)
-		return []string{strings.TrimSpace(value)}
-	}
-	emails := make([]string, len(addrs))
-	for i, a := range addrs {
-		emails[i] = a.Address
-	}
-	return emails
 }
