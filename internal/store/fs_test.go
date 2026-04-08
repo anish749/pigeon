@@ -217,7 +217,7 @@ func TestMaintain(t *testing.T) {
 
 	// Read the raw file to verify it was compacted
 	conv := s.convDir(acct, "#general")
-	data, err := os.ReadFile(conv.DateFile("2026-03-16"))
+	data, err := os.ReadFile(conv.DateFile("2026-03-16").Path())
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestMaintain(t *testing.T) {
 
 	// Verify maintenance state file exists
 	stateFile := s.root.AccountFor(acct).MaintenancePath()
-	if !fileExists(stateFile) {
+	if _, err := os.Stat(stateFile); err != nil {
 		t.Error("maintenance state file not created")
 	}
 }
@@ -246,12 +246,12 @@ func TestMaintain_SkipsUnchangedFiles(t *testing.T) {
 
 	// Get mtime of file after first maintenance
 	dateFile := s.convDir(acct, "#general").DateFile("2026-03-16")
-	info1, _ := os.Stat(dateFile)
+	info1, _ := os.Stat(dateFile.Path())
 
 	// Second maintenance (no changes) should not rewrite
 	s.Maintain(acct)
 
-	info2, _ := os.Stat(dateFile)
+	info2, _ := os.Stat(dateFile.Path())
 	if !info1.ModTime().Equal(info2.ModTime()) {
 		t.Error("maintenance rewrote file that hadn't changed")
 	}
@@ -340,7 +340,7 @@ func TestInterleaveThreads_CorruptThreadFile(t *testing.T) {
 	// Create a corrupt thread file
 	conv := s.convDir(acct, "#general")
 	os.MkdirAll(conv.ThreadsDir(), 0755)
-	os.WriteFile(conv.ThreadFile("CORRUPT"), []byte("not valid jsonl\n"), 0644)
+	os.WriteFile(conv.ThreadFile("CORRUPT").Path(), []byte("not valid jsonl\n"), 0644)
 
 	// Should return messages (partial data). Corrupt thread file parses with
 	// skipped lines but has no valid parent, so it's not interleaved.

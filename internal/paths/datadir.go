@@ -108,16 +108,16 @@ func (c ConversationDir) Path() string {
 }
 
 // MetaFile returns the path to the conversation's .meta.json sidecar.
-func (c ConversationDir) MetaFile() string {
-	return filepath.Join(c.Path(), ".meta.json")
+func (c ConversationDir) MetaFile() MetaFile {
+	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
 }
 
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
 // DateFile returns the path to a daily message file.
-func (c ConversationDir) DateFile(date string) string {
-	return filepath.Join(c.Path(), date+FileExt)
+func (c ConversationDir) DateFile(date string) DateFile {
+	return DateFile(filepath.Join(c.Path(), date+FileExt))
 }
 
 // Thread directory and file glob patterns for search tools.
@@ -145,6 +145,6 @@ func (c ConversationDir) ThreadsDir() string {
 }
 
 // ThreadFile returns the path to a specific thread file.
-func (c ConversationDir) ThreadFile(threadTS string) string {
-	return filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt)
+func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
+	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
 }

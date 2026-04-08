@@ -81,7 +81,7 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	case opts.Date != "":
 		target := conv.DateFile(opts.Date)
 		if fileExists(target) {
-			selected = []string{target}
+			selected = []string{target.Path()}
 		}
 	case opts.Since > 0:
 		cutoffDate := time.Now().Add(-opts.Since).Truncate(24 * time.Hour).Format("2006-01-02")
@@ -146,7 +146,7 @@ func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS stri
 
 // ReadThread loads a thread file, applying compaction and resolution.
 func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
-	data, err := os.ReadFile(s.convDir(acct, conversation).ThreadFile(threadTS))
+	data, err := os.ReadFile(s.convDir(acct, conversation).ThreadFile(threadTS).Path())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -298,14 +298,14 @@ func (s *FSStore) writeMeta(acct account.Account, conversation string, meta mode
 	if err != nil {
 		return fmt.Errorf("marshal meta: %w", err)
 	}
-	return os.WriteFile(conv.MetaFile(), data, 0644)
+	return os.WriteFile(conv.MetaFile().Path(), data, 0644)
 }
 
 // WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
 // Returns true if written, false if already present.
 func (s *FSStore) WriteMetaIfNotExists(acct account.Account, conversation string, meta modelv1.ConvMeta) (bool, error) {
-	path := s.convDir(acct, conversation).MetaFile()
-	if fileExists(path) {
+	mf := s.convDir(acct, conversation).MetaFile()
+	if fileExists(mf) {
 		return false, nil
 	}
 	return true, s.writeMeta(acct, conversation, meta)
@@ -314,7 +314,7 @@ func (s *FSStore) WriteMetaIfNotExists(acct account.Account, conversation string
 // ReadMeta reads the .meta.json sidecar for a conversation.
 // Returns nil, nil if the file does not exist.
 func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.ConvMeta, error) {
-	data, err := os.ReadFile(s.convDir(acct, conversation).MetaFile())
+	data, err := os.ReadFile(s.convDir(acct, conversation).MetaFile().Path())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -330,7 +330,8 @@ func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.
 
 // --- internal helpers ---
 
-func (s *FSStore) appendLine(filename string, line modelv1.Line) error {
+func (s *FSStore) appendLine(df paths.DataFile, line modelv1.Line) error {
+	filename := df.Path()
 	mu := s.fileMu(filename)
 	mu.Lock()
 	defer mu.Unlock()
@@ -437,8 +438,8 @@ func listSubdirs(dir string) ([]string, error) {
 }
 
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
+func fileExists(df paths.DataFile) bool {
+	_, err := os.Stat(df.Path())
 	return err == nil
 }
 
