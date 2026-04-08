@@ -20,8 +20,6 @@ var (
 	_ LogFile =DateFile("")
 	_ LogFile =ThreadFile("")
 	_ LogFile =CommentsFile("")
-	_ LogFile =MetaFile("")
-
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
 	_ ContentFile = FormulaFile("")
@@ -53,7 +51,6 @@ type MetaFile string
 
 // Path returns the file path as a string.
 func (m MetaFile) Path() string { return string(m) }
-func (MetaFile) logFile()      {}
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

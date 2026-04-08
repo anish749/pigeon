@@ -305,7 +305,7 @@ func (s *FSStore) writeMeta(acct account.Account, conversation string, meta mode
 // Returns true if written, false if already present.
 func (s *FSStore) WriteMetaIfNotExists(acct account.Account, conversation string, meta modelv1.ConvMeta) (bool, error) {
 	mf := s.convDir(acct, conversation).MetaFile()
-	if fileExists(mf) {
+	if _, err := os.Stat(mf.Path()); err == nil {
 		return false, nil
 	}
 	return true, s.writeMeta(acct, conversation, meta)
