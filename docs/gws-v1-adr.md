@@ -14,19 +14,19 @@ across messaging and GWS data.
 ```
 internal/gws/
 ├── gws.go                          # CLI wrapper, APIError, IsCursorExpired
-├── gws_test.go                     # 5 tests for error helpers
+├── gws_test.go
 ├── model/
 │   ├── email.go                    # EmailLine, EmailDeleteLine, EmailAttachment
 │   ├── comment.go                  # CommentLine, ReplyLine
 │   ├── event.go                    # EventLine (includes OriginalStartTime)
 │   ├── meta.go                     # DocMeta, TabMeta
 │   ├── doc.go                      # Document, Tab, Body, Paragraph, TextRun, etc.
-│   ├── doc_test.go                 # AllTabs flattening, InlineObjects, Lists parsing
+│   ├── doc_test.go
 │   ├── line.go                     # Line union type, Marshal, Parse
-│   └── line_test.go                # Round-trip for all 5 line types
+│   └── line_test.go
 ├── gwsstore/
 │   ├── jsonl.go                    # AppendLine, ReadLines, Dedup (keep last by ID)
-│   ├── jsonl_test.go               # Dedup, delete semantics, corrupt line handling
+│   ├── jsonl_test.go
 │   ├── content.go                  # WriteContent (replace-on-sync for .md/.csv)
 │   ├── content_test.go
 │   ├── cursors.go                  # Cursors (Gmail historyId, Drive pageToken, Calendar syncTokens)
@@ -36,25 +36,25 @@ internal/gws/
 ├── gmail/
 │   ├── client.go                   # GetHistoryID, ListHistory, GetMessage (format=raw)
 │   ├── mime.go                     # parseRawMessage via enmime, parseAddress, parseAddresses
-│   └── mime_test.go                # 8 tests: plain, multipart, HTML-only, attachments, RFC 2047
+│   └── mime_test.go
 ├── calendar/
 │   ├── client.go                   # ListEvents, SeedSyncToken, ToEventLine
-│   └── client_test.go             # 3 tests: timed, all-day, recurring
+│   └── client_test.go
 ├── drive/
 │   ├── client.go                   # ListChanges, SeedPageToken, GetDocument, GetSheetNames,
 │   │                               #   ReadSheetValues, ReadSheetFormulas, ListComments
 │   └── converter/
 │       ├── markdown.go             # MarkdownConverter.Convert → ConvertResult (markdown + images)
-│       ├── markdown_test.go        # 5 tests: headings, formatting, lists, tables, links
+│       ├── markdown_test.go
 │       ├── csv.go                  # ToCSV with row padding
-│       └── csv_test.go             # 4 tests: uniform, ragged, empty, nil
+│       └── csv_test.go
 ├── poller/
 │   ├── poller.go                   # Poller (ticker loop, polls all 3 services)
 │   ├── gmail.go                    # PollGmail (history → fetch → store JSONL)
 │   ├── calendar.go                 # PollCalendar (syncToken → store JSONL)
 │   ├── drive.go                    # PollDrive (changes → handleDoc/handleSheet)
-│   ├── cursor_reset_test.go        # 2 tests for IsCursorExpired detection
-│   ├── drive_test.go               # driveSlug test
+│   ├── cursor_reset_test.go
+│   ├── drive_test.go
 │   └── validate_test.go           # Live smoke test (GWS_LIVE_TEST=1)
 
 internal/daemon/gws_manager.go      # GWSManager lifecycle (start/stop/reconcile)
@@ -94,11 +94,10 @@ docs/gws-protocol.md                # Full protocol spec
 ### Single `gws` platform, not three
 
 Gmail, Drive, and Calendar are scoped under one `gws/{account-slug}/`
-directory instead of three separate platform directories (`gmail/`,
-`gdrive/`, `gcalendar/`). One account = one directory. Cursors are
-shared. Deleting an account cleans up one place. This was chosen after
-a multi-account collision bug was found — the pollers originally wrote
-to unscoped root paths, so two accounts would overwrite each other.
+directory instead of three separate platform directories. One account =
+one directory. Cursors are shared. Deleting an account cleans up one
+place. This also prevents multi-account data collision — each account's
+data is fully isolated under its own slug directory.
 
 ### Keep-last dedup, not keep-first
 
@@ -142,17 +141,16 @@ while preserving the raw HTML for future rendering.
 The Docs API `contentUri` for inline images is a signed
 `lh7-rt.googleusercontent.com` URL with a `?key=` parameter. It is
 publicly accessible without auth headers. This was validated against a
-real document — unauthenticated `http.Get` returned a 90KB PNG with
-HTTP 200. The URI is short-lived but the download happens immediately
+real document — unauthenticated `http.Get` returned a PNG with HTTP
+200. The URI is short-lived but the download happens immediately
 during the poll cycle.
 
 ### Full file ID in drive slugs, no truncation
 
-Drive directory names use `{title-slug}-{full-fileID}` (e.g.
-`project-roadmap-1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms`).
-An earlier implementation truncated to 8 characters, which created
-collision risk. The full 44-character file ID is used because
-uniqueness matters more than directory name length.
+Drive directory names use `{title-slug}-{full-fileID}`. Truncating
+the file ID was considered and rejected due to collision risk. The
+full ~44-character file ID ensures uniqueness even when multiple
+documents share the same title.
 
 ### Cursor expiry handling
 
@@ -162,94 +160,124 @@ corrupted tokens. `gws.IsCursorExpired(err)` checks all three cases.
 When detected, the pollers clear the cursor and return nil — the next
 poll cycle re-seeds automatically.
 
-### 20-second poll interval
+## Rate limits and scaling
 
-All three services poll every 20 seconds. Rate limit analysis showed
-this uses less than 1% of per-user quota for all three APIs. Gmail
-(15,000 units/min, 2 units per `history.list`), Drive (12,000
-queries/min), Calendar (~600 queries/min).
+### Per-user quotas
 
-## Rework history
+| API | Budget | Cost per poll call | Headroom at 20s interval |
+|-----|--------|--------------------|--------------------------|
+| Gmail `history.list` | 15,000 units/min | 2 units | 0.2% of budget |
+| Gmail `messages.get` | 15,000 units/min | 5 units | ~25 units/min typical |
+| Drive `changes.list` | 12,000 queries/min | 1 query | 0.03% of budget |
+| Drive `files.export` | 12,000 queries/min | 1 query per changed file | burst on change |
+| Drive `comments.list` | 12,000 queries/min | 1 query per changed file | burst on change |
+| Calendar `events.list` | ~600 queries/min | 1 query | 0.17% of budget |
 
-### Multi-account data collision (critical)
+### Per-project daily quotas
 
-The pollers originally wrote to unscoped paths like
-`gmail/YYYY-MM-DD.jsonl`. Two GWS accounts would silently overwrite
-each other. Fixed by scoping all data under `gws/{account-slug}/`.
-The Poller struct was changed from `accountDir string` to
-`account paths.AccountDir`.
+| API | Daily limit | Polling cost/day (1 user, 20s) |
+|-----|-------------|-------------------------------|
+| Gmail | ~1,000,000,000 units | ~8,640 units (history.list only) |
+| Drive | 1,000,000,000 queries | ~4,320 queries |
+| Calendar | 1,000,000 queries | ~4,320 queries |
 
-### Fixes applied to wrong branch
+Calendar's daily limit is the binding constraint at scale. Polling
+once per minute for 500 users = 720,000/day (within limit). Polling
+every 20 seconds for 500 users = 2,160,000/day (over limit). Single
+user at 20 seconds is negligible for all three services.
 
-All review fixes (error propagation, storeComments helper, accountDir
-scoping) were initially committed to `gws/integration` (the last PR in
-the stack). They belonged to earlier branches (`gws/calendar`,
-`gws/gmail`, `gws/drive`). The fix commits were reverted from
-`gws/integration`, then applied to the correct branches, and the
-entire stack was rebased. This required resolving merge conflicts at
-every rebase step.
+### Polling interval choice
 
-### Swallowed errors (multiple instances)
+20 seconds was chosen because:
+- All three services stay under 1% of per-user rate limits.
+- Drive and Calendar changes are infrequent enough that faster polling
+  has diminishing returns.
+- Gmail `history.list` is cheap (2 units). The expensive call is
+  `messages.get` (5 units per message), which only fires when new
+  messages arrive.
+- Each poll cycle spawns 3 short-lived `gws` CLI processes (~30MB
+  each, ~1 second lifetime). At 20-second intervals, the machine is
+  idle 95% of the time.
 
-- `toCommentLine` / `toReplyLine` in `drive/client.go` used
-  `ts, _ := time.Parse(...)`. Fixed to return `(T, error)`.
-- `findBody` in `gmail/mime.go` returned `""` on base64 decode failure.
-  Fixed to return `(string, error)` and propagate through `ExtractBody`.
-- `parseLists` in `model/doc.go` returned `nil` on unmarshal failure.
-  Fixed to return `(map, error)` and propagate through `AllTabs`.
+### Backfill cost estimates (90 days, not yet implemented)
 
-### Dead code shipped
+| Service | Items | API calls | Time | Storage |
+|---------|-------|-----------|------|---------|
+| Gmail | 5K-18K messages | 5K-18K `messages.get` | 2-6 min | 20-90MB |
+| Calendar | 1K-3K events | 1-2 paginated calls | seconds | 0.5-1.5MB |
+| Drive | 20-100 files | 50-300 calls | 30-60s | 1-20MB |
 
-- `GWSConfig.Services []string` field was defined but never read by any
-  code. Removed.
-- `Convert(tab) string` wrapper on `MarkdownConverter` existed
-  alongside `ConvertWithImages(tab) ConvertResult`. Only the tests
-  called `Convert`. Removed the wrapper, renamed `ConvertWithImages`
-  to `Convert`, updated tests to use `.Markdown` field.
-- `Converter` interface was defined but never used as an interface
-  (only `MarkdownConverter` existed, always used concretely). Removed.
+Gmail backfill is the heaviest — limited to 3,000 `messages.get`/min
+by the 15,000 units/min per-user cap (5 units each). A heavy inbox
+(18K messages) would take ~6 minutes.
 
-### Hand-rolled code replaced with libraries
+Calendar backfill is nearly free — changing `SeedSyncToken` from
+`timeMin=now` to `timeMin=now-90d` and `timeMax=now+90d` fetches all
+events in the window AND returns the syncToken. One paginated call.
 
-- Email address parsing (`parseFrom`, `parseAddressList`) was
-  hand-rolled with string splitting. Replaced with `net/mail`, then
-  replaced again with `enmime.ParseAddressList`.
-- HTML tag stripping was a regex `<[^>]*>`. Replaced with
-  `golang.org/x/net/html` tokenizer, then replaced again when enmime
-  was adopted (enmime handles HTML→text internally).
-- The entire Gmail MIME parsing pipeline (tree walking, base64url
-  decoding, header extraction, attachment collection) was hand-rolled.
-  Replaced with `enmime.ReadEnvelope` using `format=raw`.
+Drive backfill uses `files.list` with `modifiedTime > cutoff` to
+enumerate recently modified docs/sheets, then the same per-file
+export pipeline as incremental polling.
 
-### Search magic number
+### Push notification alternative (researched, not used)
 
-`fileIncludes` in `commands/search.go` used `len(includes) == 4` to
-detect "no date files matched." Adding a glob would break the check.
-Fixed to use a `dateFiles` counter.
+| Service | Push mechanism | Works locally? |
+|---------|---------------|----------------|
+| Gmail | Pub/Sub via `gws gmail +watch` | Yes (Pub/Sub pull) |
+| Drive | Workspace Events API via `gws events +subscribe` | Yes (Pub/Sub pull) |
+| Calendar | Webhook only (POST to public URL) | No |
 
-### ModifiedTime was time.Now()
+Push was considered but polling was chosen for V1 because:
+- Calendar has no Pub/Sub support, requiring polling regardless.
+- Polling uses one pattern for all three services.
+- No GCP project or Pub/Sub setup required.
+- Gmail's Pub/Sub watch expires every 7 days and needs renewal.
+- Drive's Workspace Events subscription expires in 7 days (without
+  resource data) or 4 hours (with resource data).
 
-`DocMeta.ModifiedTime` was set to the local clock instead of the
-actual Drive file modification time. Fixed to use
-`ch.File.ModifiedTime` from the Drive changes API response (also
-required adding `modifiedTime` to the `fields` query parameter).
+## Rework areas
 
-### Error logs hidden as debug
+### Multi-account data isolation
 
-`parseFrom` and `parseAddressList` fallbacks initially logged at
-`slog.Debug`. Corrected to `slog.Error` — parse failures are real
-errors that should be visible.
+Data paths were carefully scoped under `gws/{account-slug}/` to ensure
+multiple Google accounts don't collide. The Poller struct accepts a
+typed `paths.AccountDir` (not a raw string) to enforce this at the
+type level. All path construction goes through the centralized
+`internal/paths/gws.go` type hierarchy.
 
-### eventDate silent fallback
+### Error propagation
 
-Cancelled events with no parseable start date were filed to
-`unknown.jsonl` with no log output. Added `slog.Warn` with event ID
-and status.
+Multiple instances of swallowed errors were identified and fixed during
+review:
+- `time.Parse` errors in `drive/client.go` comment/reply conversion
+- Base64 decode errors in Gmail body extraction
+- JSON unmarshal errors in `model/doc.go` list parsing
+- Parse failures for malformed email From/To/CC headers
 
-### Duplicate comment storage blocks
+The pattern enforced: errors are always propagated or logged at
+`slog.Error` level. `slog.Debug` is not used for real error cases.
+Fallback values (empty string, nil) are returned alongside the error
+log so the caller can distinguish "empty data" from "fetch failed."
 
-`handleDoc` and `handleSheet` had ~15 identical lines for fetching and
-appending comments. Extracted to `storeComments(fileDir, fileID)`.
+### Library adoption over hand-rolled code
+
+Three rounds of replacement occurred for Gmail MIME handling:
+1. Initial: hand-rolled MIME tree walker, base64url decoder, regex
+   HTML stripper, string-splitting address parser.
+2. Intermediate: `net/mail.ParseAddress` for addresses,
+   `golang.org/x/net/html` tokenizer for HTML stripping.
+3. Final: `enmime.ReadEnvelope` replaced the entire pipeline.
+   Gmail switched from `format=full` to `format=raw`.
+
+The policy: prefer well-tested libraries over hand-rolled code for
+solved problems (MIME parsing, HTML processing, email address parsing).
+
+### Dead code removal
+
+Code that was defined but never used in production was removed:
+- Config fields not read by any code path
+- Interface types with only one concrete implementation used directly
+- Wrapper methods that only existed as test convenience
 
 ## Open items
 
@@ -268,10 +296,6 @@ Documented in `bugs.md` and `features.md`:
 - `github.com/jhillyerd/enmime` v1.3.0 — MIME parsing for Gmail
   `format=raw` messages. Handles charset conversion, RFC 2047, nested
   multipart, attachments.
-- `golang.org/x/net/html` — moved from indirect to direct dependency
-  (was already in go.mod via other deps). Used briefly for HTML
-  stripping before enmime adoption; no longer directly imported but
-  remains as transitive dependency.
 
 ## Test coverage
 
