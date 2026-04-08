@@ -15,8 +15,9 @@ type EmailLine struct {
 	Subject  string            `json:"subject"`          // email subject
 	Labels   []string          `json:"labels"`           // Gmail labels
 	Snippet  string            `json:"snippet"`          // text preview
-	Text     string            `json:"text"`             // plain text body
-	Attach   []EmailAttachment `json:"attach,omitempty"` // attachments
+	Text     string            `json:"text"`              // plain text body (from text/plain part)
+	HTML     string            `json:"html,omitempty"`    // raw HTML body (only when no text/plain part)
+	Attach   []EmailAttachment `json:"attach,omitempty"`  // attachments
 }
 
 // EmailAttachment represents a file attached to an email.

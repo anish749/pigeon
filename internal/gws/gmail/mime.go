@@ -23,12 +23,6 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		return nil, fmt.Errorf("parse MIME envelope: %w", err)
 	}
 
-	// Prefer plain text; fall back to HTML→text conversion by enmime.
-	text := env.Text
-	if text == "" {
-		text = env.HTML // enmime already provides the raw HTML; plain is better
-	}
-
 	fromName, fromAddr := parseAddress(env.GetHeader("From"))
 	to := parseAddresses(env.GetHeaderValues("To"))
 	cc := parseAddresses(env.GetHeaderValues("Cc"))
@@ -42,13 +36,20 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		})
 	}
 
+	// env.Text is always populated — either from the text/plain part
+	// or from enmime's HTML→text conversion. env.HTML is only populated
+	// when a multipart message has an explicit text/html part.
+	//
+	// We store text always (greppable). We store html when present so
+	// the protocol carries enough info to render rich content later.
 	return &parsedMessage{
 		subject:     env.GetHeader("Subject"),
 		fromName:    fromName,
 		fromAddr:    fromAddr,
 		to:          to,
 		cc:          cc,
-		text:        text,
+		text:        env.Text,
+		html:        env.HTML,
 		attachments: attachments,
 	}, nil
 }
@@ -60,6 +61,7 @@ type parsedMessage struct {
 	to          []string
 	cc          []string
 	text        string
+	html        string
 	attachments []model.EmailAttachment
 }
 

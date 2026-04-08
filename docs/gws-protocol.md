@@ -153,7 +153,8 @@ simultaneously).
 | `subject` | string | Email subject line |
 | `labels` | []string | Gmail label IDs (`INBOX`, `SENT`, `IMPORTANT`, etc.) |
 | `snippet` | string | Gmail's text preview (HTML-decoded) |
-| `text` | string | Plain text body (`text/plain` part) |
+| `text` | string | Plain text body (from `text/plain` part, or enmime's HTML→text conversion) |
+| `html` | string | Raw HTML body (only present for multipart emails with a `text/html` part; omitted otherwise) |
 | `attach` | []object | Attachments: `{id, type, name}` |
 
 #### Email Delete Line
@@ -173,15 +174,16 @@ One file per day. Append-only.
 
 ### Body Extraction
 
-The Gmail API returns a MIME tree. The body is extracted by walking the
-tree depth-first:
+Messages are fetched with `format=raw`, returning the full RFC 2822
+bytes (base64url-encoded). The `enmime` library parses the MIME
+envelope, handling charset conversion, RFC 2047 encoded headers,
+and nested multipart structures.
 
-1. Find the first `text/plain` part → `text` field.
-2. If no `text/plain`, find the first `text/html` part and strip tags.
-3. Body data is base64url-encoded in the API response — decode before
-   storing.
-4. Parts with `attachmentId` (instead of `data`) are attachment
-   references, not inline content.
+- `text` is always populated: either from the `text/plain` part, or
+  from enmime's automatic HTML→text conversion for HTML-only emails.
+- `html` is populated only when the message has an explicit
+  `text/html` part in a multipart message. For single-part HTML
+  emails, enmime converts to text and `html` is omitted.
 
 ### Attachments
 
@@ -629,7 +631,8 @@ type EmailLine struct {
     Subject   string       `json:"subject"`             // email subject
     Labels    []string     `json:"labels"`              // Gmail labels
     Snippet   string       `json:"snippet"`             // text preview
-    Text      string       `json:"text"`                // plain text body
+    Text      string       `json:"text"`                // plain text body (always populated)
+    HTML      string       `json:"html,omitempty"`      // raw HTML (multipart emails only)
     Attach    []EmailAttachment `json:"attach,omitempty"` // attachments
 }
 
@@ -710,8 +713,10 @@ type EventLine struct {
 - **Attachment content is not downloaded.** Only metadata (name, type,
   part ID) is stored. Fetching the actual file requires an additional
   API call with the stored IDs.
-- **HTML-only emails lose formatting.** If an email has no `text/plain`
-  part, the HTML is stripped to plain text. Rich formatting is lost.
+- **HTML-only emails get converted text.** enmime auto-converts HTML
+  to plain text. The `text` field is always searchable, but for
+  single-part HTML emails the raw HTML is not preserved (only the
+  converted text). Multipart emails preserve both `text` and `html`.
 - **Draft and label changes are not tracked.** The history API reports
   `labelAdded`/`labelRemoved` events, but V1 only tracks
   `messageAdded`/`messageDeleted`.

@@ -150,6 +150,7 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 		Labels:   msg.LabelIDs,
 		Snippet:  msg.Snippet,
 		Text:     parsed.text,
+		HTML:     parsed.html,
 		Attach:   parsed.attachments,
 	}, nil
 }

@@ -65,6 +65,9 @@ func TestParseRawMessage_Multipart(t *testing.T) {
 	if parsed.text != "Plain body" {
 		t.Errorf("text = %q, want %q", parsed.text, "Plain body")
 	}
+	if parsed.html == "" {
+		t.Error("html is empty, expected raw HTML from multipart/alternative")
+	}
 	if len(parsed.to) != 2 {
 		t.Errorf("to = %v, want 2 addresses", parsed.to)
 	}
@@ -84,9 +87,12 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRawMessage: %v", err)
 	}
+	// enmime converts HTML→text automatically, so text is populated.
 	if parsed.text == "" {
-		t.Error("text is empty, expected HTML fallback content")
+		t.Error("text is empty, expected enmime HTML→text conversion")
 	}
+	// Single-part text/html: enmime doesn't populate HTML separately.
+	// HTML is only set for multipart messages with an explicit text/html part.
 }
 
 func TestParseRawMessage_WithAttachment(t *testing.T) {
