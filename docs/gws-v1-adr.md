@@ -237,14 +237,6 @@ Push was considered but polling was chosen for V1 because:
 
 ## Rework areas
 
-### Multi-account data isolation
-
-Data paths were carefully scoped under `gws/{account-slug}/` to ensure
-multiple Google accounts don't collide. The Poller struct accepts a
-typed `paths.AccountDir` (not a raw string) to enforce this at the
-type level. All path construction goes through the centralized
-`internal/paths/gws.go` type hierarchy.
-
 ### Error propagation
 
 Multiple instances of swallowed errors were identified and fixed during
