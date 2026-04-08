@@ -71,7 +71,7 @@ func TestDriveFileDir_CommentsFile(t *testing.T) {
 }
 
 func TestDriveFileDir_TabFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").TabFile("Introduction")
+	got := acctDir().Drive().File("doc-abc").TabFile("Introduction").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/Introduction.md"
 	if got != want {
 		t.Errorf("TabFile() = %q, want %q", got, want)
@@ -79,7 +79,7 @@ func TestDriveFileDir_TabFile(t *testing.T) {
 }
 
 func TestDriveFileDir_SheetFile(t *testing.T) {
-	got := acctDir().Drive().File("sheet-xyz").SheetFile("Revenue")
+	got := acctDir().Drive().File("sheet-xyz").SheetFile("Revenue").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/sheet-xyz/Revenue.csv"
 	if got != want {
 		t.Errorf("SheetFile() = %q, want %q", got, want)
@@ -87,7 +87,7 @@ func TestDriveFileDir_SheetFile(t *testing.T) {
 }
 
 func TestDriveFileDir_FormulaFile(t *testing.T) {
-	got := acctDir().Drive().File("sheet-xyz").FormulaFile("Revenue")
+	got := acctDir().Drive().File("sheet-xyz").FormulaFile("Revenue").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/sheet-xyz/Revenue.formulas.csv"
 	if got != want {
 		t.Errorf("FormulaFile() = %q, want %q", got, want)
@@ -95,7 +95,7 @@ func TestDriveFileDir_FormulaFile(t *testing.T) {
 }
 
 func TestDriveFileDir_AttachmentFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").AttachmentFile("image.png")
+	got := acctDir().Drive().File("doc-abc").AttachmentFile("image.png").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/attachments/image.png"
 	if got != want {
 		t.Errorf("AttachmentFile() = %q, want %q", got, want)

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestWriteContentCreatesFile(t *testing.T) {
@@ -11,7 +13,7 @@ func TestWriteContentCreatesFile(t *testing.T) {
 	path := filepath.Join(dir, "output.md")
 
 	content := []byte("# Hello\nWorld\n")
-	if err := WriteContent(path, content); err != nil {
+	if err := WriteContent(paths.TabFile(path), content); err != nil {
 		t.Fatalf("WriteContent: %v", err)
 	}
 
@@ -28,12 +30,12 @@ func TestWriteContentReplacesExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "output.md")
 
-	if err := WriteContent(path, []byte("old content")); err != nil {
+	if err := WriteContent(paths.TabFile(path), []byte("old content")); err != nil {
 		t.Fatal(err)
 	}
 
 	newContent := []byte("new content")
-	if err := WriteContent(path, newContent); err != nil {
+	if err := WriteContent(paths.TabFile(path), newContent); err != nil {
 		t.Fatalf("WriteContent (replace): %v", err)
 	}
 
@@ -51,7 +53,7 @@ func TestWriteContentCreatesParentDirs(t *testing.T) {
 	path := filepath.Join(dir, "a", "b", "c", "output.csv")
 
 	content := []byte("col1,col2\n1,2\n")
-	if err := WriteContent(path, content); err != nil {
+	if err := WriteContent(paths.TabFile(path), content); err != nil {
 		t.Fatalf("WriteContent: %v", err)
 	}
 

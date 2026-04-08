@@ -46,7 +46,7 @@ func TestAppendAndReadLines(t *testing.T) {
 		}
 	}
 
-	lines, err := ReadLines(path)
+	lines, err := ReadLines(paths.DateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDedupKeepsLast(t *testing.T) {
 		}
 	}
 
-	lines, err := ReadLines(path)
+	lines, err := ReadLines(paths.DateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestDedupDeleteSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines, err := ReadLines(path)
+	lines, err := ReadLines(paths.DateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestDedupDeleteSemantics(t *testing.T) {
 }
 
 func TestReadLinesNonExistent(t *testing.T) {
-	lines, err := ReadLines(filepath.Join(t.TempDir(), "nope.jsonl"))
+	lines, err := ReadLines(paths.DateFile(filepath.Join(t.TempDir(), "nope.jsonl")))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestReadLinesCorruptLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines, err := ReadLines(path)
+	lines, err := ReadLines(paths.DateFile(path))
 	if err == nil {
 		t.Fatal("expected error for corrupt line")
 	}
