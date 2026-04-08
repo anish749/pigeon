@@ -9,9 +9,6 @@ The read-path (search, display, `pigeon list/grep`) was deliberately
 excluded; it will be designed separately as a unified abstraction
 across messaging and GWS data.
 
-3,871 lines of Go across `internal/gws/`, plus daemon integration,
-config, path types, and a protocol spec.
-
 ## File inventory
 
 ```
@@ -139,14 +136,6 @@ is populated only when a multipart message has an explicit `text/html`
 part. For single-part HTML emails, enmime converts to text and HTML is
 omitted. This avoids blind spots (every email is greppable via `text`)
 while preserving the raw HTML for future rendering.
-
-### Docs markdown converter from gws_utils
-
-The markdown converter was copied from `cb/gws_utils` (a separate repo
-at `/Users/anish/cb/gws_utils`). It walks the Google Docs API JSON
-response (StructuralElement → Paragraph → TextRun) and produces
-markdown. It handles headings, bold, italic, strikethrough, links,
-ordered/unordered lists, tables, and inline images.
 
 ### Inline image download via http.Get
 
@@ -286,7 +275,7 @@ Documented in `bugs.md` and `features.md`:
 
 ## Test coverage
 
-51 test functions across 14 test files. All pass on `go test ./...`.
+All tests pass on `go test ./...`.
 
 The live smoke test (`TestLiveSmoke` in `poller/validate_test.go`)
 requires `GWS_LIVE_TEST=1` and authenticated `gws` CLI. It seeds all
