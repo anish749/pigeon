@@ -2,6 +2,19 @@ package paths
 
 import "path/filepath"
 
+// GWS directory and file naming constants.
+const (
+	gmailSubdir      = "gmail"
+	gcalendarSubdir  = "gcalendar"
+	gdriveSubdir     = "gdrive"
+	attachSubdir     = "attachments"
+	commentsFile     = "comments"
+	metaFile         = "meta.json"
+	markdownExt      = ".md"
+	csvExt           = ".csv"
+	formulaCSVSuffix = ".formulas.csv"
+)
+
 // GWS path types extend AccountDir for Google Workspace services.
 //
 //	AccountDir → GmailDir
@@ -30,7 +43,7 @@ type GmailDir struct {
 
 // Path returns the gmail directory path.
 func (g GmailDir) Path() string {
-	return filepath.Join(g.account.Path(), "gmail")
+	return filepath.Join(g.account.Path(), gmailSubdir)
 }
 
 // DateFile returns the path to a daily email file.
@@ -46,7 +59,7 @@ type CalendarDir struct {
 
 // Path returns the calendar directory path.
 func (c CalendarDir) Path() string {
-	return filepath.Join(c.account.Path(), "gcalendar", c.calID)
+	return filepath.Join(c.account.Path(), gcalendarSubdir, c.calID)
 }
 
 // DateFile returns the path to a daily events file.
@@ -61,7 +74,7 @@ type DriveDir struct {
 
 // Path returns the gdrive directory path.
 func (d DriveDir) Path() string {
-	return filepath.Join(d.account.Path(), "gdrive")
+	return filepath.Join(d.account.Path(), gdriveSubdir)
 }
 
 // File returns a DriveFileDir for the given slug.
@@ -82,30 +95,30 @@ func (f DriveFileDir) Path() string {
 
 // MetaFile returns the path to the file's metadata.
 func (f DriveFileDir) MetaFile() string {
-	return filepath.Join(f.Path(), "meta.json")
+	return filepath.Join(f.Path(), metaFile)
 }
 
 // CommentsFile returns the path to the file's comments JSONL.
 func (f DriveFileDir) CommentsFile() string {
-	return filepath.Join(f.Path(), "comments"+FileExt)
+	return filepath.Join(f.Path(), commentsFile+FileExt)
 }
 
 // TabFile returns the path to a document tab's markdown content.
 func (f DriveFileDir) TabFile(tabTitle string) string {
-	return filepath.Join(f.Path(), tabTitle+".md")
+	return filepath.Join(f.Path(), tabTitle+markdownExt)
 }
 
 // SheetFile returns the path to a sheet's CSV export.
 func (f DriveFileDir) SheetFile(sheetName string) string {
-	return filepath.Join(f.Path(), sheetName+".csv")
+	return filepath.Join(f.Path(), sheetName+csvExt)
 }
 
 // FormulaFile returns the path to a sheet's formulas CSV export.
 func (f DriveFileDir) FormulaFile(sheetName string) string {
-	return filepath.Join(f.Path(), sheetName+".formulas.csv")
+	return filepath.Join(f.Path(), sheetName+formulaCSVSuffix)
 }
 
 // AttachmentFile returns the path to an inline image or attachment.
 func (f DriveFileDir) AttachmentFile(filename string) string {
-	return filepath.Join(f.Path(), "attachments", filename)
+	return filepath.Join(f.Path(), attachSubdir, filename)
 }
