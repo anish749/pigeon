@@ -140,6 +140,28 @@ func TestParseAddress(t *testing.T) {
 	}
 }
 
+func TestParseAddress_RFC2047(t *testing.T) {
+	// =?UTF-8?B?QWxpY2UgU21pdGg=?= is base64 for "Alice Smith"
+	name, email := parseAddress("=?UTF-8?B?QWxpY2UgU21pdGg=?= <alice@example.com>")
+	if name != "Alice Smith" {
+		t.Errorf("name = %q, want %q", name, "Alice Smith")
+	}
+	if email != "alice@example.com" {
+		t.Errorf("email = %q, want %q", email, "alice@example.com")
+	}
+}
+
+func TestParseAddress_RFC2047_QEncoding(t *testing.T) {
+	// =?UTF-8?Q?M=C3=BCller?= is Q-encoded "Müller"
+	name, email := parseAddress("=?UTF-8?Q?M=C3=BCller?= <muller@example.com>")
+	if name != "Müller" {
+		t.Errorf("name = %q, want %q", name, "Müller")
+	}
+	if email != "muller@example.com" {
+		t.Errorf("email = %q, want %q", email, "muller@example.com")
+	}
+}
+
 func TestParseAddresses(t *testing.T) {
 	emails := parseAddresses([]string{"a@example.com, b@example.com"})
 	if len(emails) != 2 {
