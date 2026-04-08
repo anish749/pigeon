@@ -109,8 +109,9 @@ func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID 
 		errs = append(errs, writeEvents(account, calID, instances)...)
 	}
 
-	// Track any newly discovered recurring events.
+	// Track newly discovered recurring events and remove deleted ones.
 	cur.RecurringEvents = mergeRecurringIDs(cur.RecurringEvents, result.RecurringIDs)
+	cur.RecurringEvents = removeRecurringIDs(cur.RecurringEvents, result.CancelledRecurringIDs)
 	cur.SyncToken = result.SyncToken
 
 	if len(result.Events) > 0 || len(result.RecurringIDs) > 0 {
@@ -175,19 +176,37 @@ func writeEvents(account paths.AccountDir, calID string, events []model.EventLin
 }
 
 // mergeRecurringIDs adds new IDs to the existing list, deduplicating.
-func mergeRecurringIDs(existing, new []string) []string {
+func mergeRecurringIDs(existing, additions []string) []string {
 	seen := make(map[string]bool, len(existing))
 	for _, id := range existing {
 		seen[id] = true
 	}
 	merged := existing
-	for _, id := range new {
+	for _, id := range additions {
 		if !seen[id] {
 			merged = append(merged, id)
 			seen[id] = true
 		}
 	}
 	return merged
+}
+
+// removeRecurringIDs removes cancelled IDs from the tracked list.
+func removeRecurringIDs(existing, removals []string) []string {
+	if len(removals) == 0 {
+		return existing
+	}
+	remove := make(map[string]bool, len(removals))
+	for _, id := range removals {
+		remove[id] = true
+	}
+	var kept []string
+	for _, id := range existing {
+		if !remove[id] {
+			kept = append(kept, id)
+		}
+	}
+	return kept
 }
 
 // eventDate extracts the date string (YYYY-MM-DD) from an event.

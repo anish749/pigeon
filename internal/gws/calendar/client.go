@@ -52,8 +52,10 @@ type calendarPerson struct {
 type EventsResult struct {
 	// Events contains one-off events and recurring instances, ready to write to disk.
 	Events []model.EventLine
-	// RecurringIDs contains IDs of parent recurring events that need instance expansion.
+	// RecurringIDs contains IDs of active parent recurring events that need instance expansion.
 	RecurringIDs []string
+	// CancelledRecurringIDs contains IDs of deleted recurring events to remove from tracking.
+	CancelledRecurringIDs []string
 	// SyncToken is the new sync token for the next incremental call.
 	SyncToken string
 }
@@ -109,11 +111,16 @@ func (e calendarEvent) isRecurringParent() bool {
 	return len(e.Recurrence) > 0
 }
 
-// classify separates raw API events into writable events and recurring parent IDs.
-func classify(items []calendarEvent) (events []model.EventLine, recurringIDs []string) {
+// classify separates raw API events into writable events, active recurring
+// parent IDs (for expansion), and cancelled recurring parent IDs (for removal).
+func classify(items []calendarEvent) (events []model.EventLine, recurringIDs, cancelledRecurringIDs []string) {
 	for _, item := range items {
 		if item.isRecurringParent() {
-			recurringIDs = append(recurringIDs, item.ID)
+			if item.Status == "cancelled" {
+				cancelledRecurringIDs = append(cancelledRecurringIDs, item.ID)
+			} else {
+				recurringIDs = append(recurringIDs, item.ID)
+			}
 			continue
 		}
 		events = append(events, item.ToEventLine())
@@ -133,12 +140,13 @@ func ListEvents(calendarID, syncToken string) (*EventsResult, error) {
 	for {
 		var resp calendarEventsResponse
 		if err := gws.RunParsed(&resp, "calendar", "events", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list events %s: %w", calendarID, err)
 		}
 
-		events, recurringIDs := classify(resp.Items)
+		events, recurringIDs, cancelledIDs := classify(resp.Items)
 		result.Events = append(result.Events, events...)
 		result.RecurringIDs = append(result.RecurringIDs, recurringIDs...)
+		result.CancelledRecurringIDs = append(result.CancelledRecurringIDs, cancelledIDs...)
 
 		if resp.NextPageToken != "" {
 			params["pageToken"] = resp.NextPageToken
@@ -170,9 +178,10 @@ func SeedSyncToken(calendarID string) (*EventsResult, error) {
 			return nil, fmt.Errorf("seed calendar sync token: %w", err)
 		}
 
-		events, recurringIDs := classify(resp.Items)
+		events, recurringIDs, cancelledIDs := classify(resp.Items)
 		result.Events = append(result.Events, events...)
 		result.RecurringIDs = append(result.RecurringIDs, recurringIDs...)
+		result.CancelledRecurringIDs = append(result.CancelledRecurringIDs, cancelledIDs...)
 
 		if resp.NextPageToken != "" {
 			params["pageToken"] = resp.NextPageToken
