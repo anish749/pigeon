@@ -115,8 +115,8 @@ func DaemonRun(version string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 {
-		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp' or 'pigeon setup-slack' first", paths.ConfigPath())
+	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 && len(cfg.GWS) == 0 {
+		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp', 'pigeon setup-slack', or add a gws account first", paths.ConfigPath())
 	}
 
 	// Check for updates before starting listeners. If an update is available,
@@ -147,6 +147,9 @@ func DaemonRun(version string) error {
 	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route)
 	go slackMgr.Run(ctx, cfg.Slack)
 
+	gwsMgr := daemon.NewGWSManager()
+	go gwsMgr.Run(ctx, cfg.GWS)
+
 	go apiServer.Start(ctx, paths.SocketPath())
 
 	// Periodic update check — re-execs the daemon when a new version is installed.
@@ -161,7 +164,8 @@ func DaemonRun(version string) error {
 	slog.Info("daemon started",
 		"version", version,
 		"whatsapp_accounts", len(cfg.WhatsApp),
-		"slack_workspaces", len(cfg.Slack))
+		"slack_workspaces", len(cfg.Slack),
+		"gws_accounts", len(cfg.GWS))
 
 	select {
 	case <-ctx.Done():
