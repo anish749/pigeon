@@ -21,7 +21,7 @@ func TestHeadingParagraph(t *testing.T) {
 	}
 
 	c := NewMarkdownConverter()
-	got := c.Convert(tab)
+	got := c.Convert(tab).Markdown
 	want := "# Title\n\n"
 	if got != want {
 		t.Errorf("heading: got %q, want %q", got, want)
@@ -46,7 +46,7 @@ func TestBoldItalicTextRun(t *testing.T) {
 	}
 
 	c := NewMarkdownConverter()
-	got := c.Convert(tab)
+	got := c.Convert(tab).Markdown
 	want := "_**text**_\n\n"
 	if got != want {
 		t.Errorf("bold+italic: got %q, want %q", got, want)
@@ -68,7 +68,7 @@ func TestBulletList(t *testing.T) {
 	}
 
 	c := NewMarkdownConverter()
-	got := c.Convert(tab)
+	got := c.Convert(tab).Markdown
 	want := "- item\n"
 	if got != want {
 		t.Errorf("bullet: got %q, want %q", got, want)
@@ -106,7 +106,7 @@ func TestTable(t *testing.T) {
 	}
 
 	c := NewMarkdownConverter()
-	got := c.Convert(tab)
+	got := c.Convert(tab).Markdown
 	want := "| A | B |\n| --- | --- |\n| C | D |\n\n"
 	if got != want {
 		t.Errorf("table: got %q, want %q", got, want)
@@ -131,7 +131,7 @@ func TestLink(t *testing.T) {
 	}
 
 	c := NewMarkdownConverter()
-	got := c.Convert(tab)
+	got := c.Convert(tab).Markdown
 	want := "[click here](https://example.com)\n\n"
 	if got != want {
 		t.Errorf("link: got %q, want %q", got, want)

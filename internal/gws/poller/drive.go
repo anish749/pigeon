@@ -94,7 +94,7 @@ func handleDoc(account paths.AccountDir, ch drive.Change) error {
 	var errs []error
 
 	for _, tab := range tabs {
-		result := md.ConvertWithImages(tab)
+		result := md.Convert(tab)
 		if err := gwsstore.WriteContent(fileDir.TabFile(tab.Title), []byte(result.Markdown)); err != nil {
 			errs = append(errs, fmt.Errorf("write tab %s: %w", tab.Title, err))
 		}

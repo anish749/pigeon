@@ -7,11 +7,6 @@ import (
 	"github.com/anish749/pigeon/internal/gws/model"
 )
 
-// Converter converts a document tab to a target format.
-type Converter interface {
-	Convert(tab model.Tab) string
-}
-
 // MarkdownConverter converts Google Docs tab content to markdown.
 type MarkdownConverter struct{}
 
@@ -33,16 +28,9 @@ type ConvertResult struct {
 	Images   []ImageRef
 }
 
-// Convert renders a tab as markdown. Inline images are rendered as
-// ![alt](attachments/filename) references. The caller should download
-// the images using the returned ConvertResult.Images.
-func (c *MarkdownConverter) Convert(tab model.Tab) string {
-	r := c.ConvertWithImages(tab)
-	return r.Markdown
-}
-
-// ConvertWithImages renders a tab as markdown and collects image references.
-func (c *MarkdownConverter) ConvertWithImages(tab model.Tab) ConvertResult {
+// Convert renders a tab as markdown and collects inline image references.
+// The caller is responsible for downloading images listed in Images.
+func (c *MarkdownConverter) Convert(tab model.Tab) ConvertResult {
 	ctx := &convertContext{
 		lists:         tab.Lists,
 		inlineObjects: tab.InlineObjects,
