@@ -95,7 +95,7 @@ func wcLines(t *testing.T, file string) int {
 }
 
 func dateFilePath(s *FSStore, acct account.Account) string {
-	return s.convDir(acct, "#general").DateFile("2026-03-16")
+	return s.convDir(acct, "#general").DateFile("2026-03-16").Path()
 }
 
 func TestGrep_FindMessagesByName(t *testing.T) {
@@ -215,7 +215,7 @@ func TestGrep_NoNewlinesInMessages(t *testing.T) {
 	}
 	s.Append(acct, "#general", m)
 
-	file := s.convDir(acct, "#general").DateFile("2026-03-16")
+	file := s.convDir(acct, "#general").DateFile("2026-03-16").Path()
 	count := wcLines(t, file)
 	if count != 1 {
 		t.Errorf("wc -l = %d, want 1 (multiline message should be one line)", count)
@@ -239,7 +239,7 @@ func TestGrep_SortOnTimestampWorks(t *testing.T) {
 	s.Append(acct, "#general", msgLine("M2", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "second"))
 	s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "first"))
 
-	file := s.convDir(acct, "#general").DateFile("2026-03-16")
+	file := s.convDir(acct, "#general").DateFile("2026-03-16").Path()
 
 	// sort on the file should produce chronological order
 	// (JSON with "ts" field in ISO 8601 sorts lexicographically)

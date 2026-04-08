@@ -18,6 +18,7 @@ type ContentFile interface {
 // Compile-time interface guards.
 var (
 	_ DataFile = DateFile("")
+	_ DataFile = ThreadFile("")
 	_ DataFile = CommentsFile("")
 	_ DataFile = MetaFile("")
 
@@ -32,6 +33,13 @@ type DateFile string
 // Path returns the file path as a string.
 func (d DateFile) Path() string { return string(d) }
 func (DateFile) dataFile()      {}
+
+// ThreadFile is a path to a thread's JSONL file.
+type ThreadFile string
+
+// Path returns the file path as a string.
+func (t ThreadFile) Path() string { return string(t) }
+func (ThreadFile) dataFile()      {}
 
 // CommentsFile is a path to a Drive file's comments JSONL.
 type CommentsFile string
