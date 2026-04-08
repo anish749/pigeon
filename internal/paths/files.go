@@ -1,10 +1,10 @@
 package paths
 
-// DataFile is a sealed interface for typed file paths that hold JSONL data.
+// LogFile is a sealed interface for typed file paths that hold JSONL log data.
 // The unexported method restricts implementations to this package.
-type DataFile interface {
+type LogFile interface {
 	Path() string
-	dataFile()
+	logFile()
 }
 
 // ContentFile is a sealed interface for typed file paths that hold
@@ -17,10 +17,10 @@ type ContentFile interface {
 
 // Compile-time interface guards.
 var (
-	_ DataFile = DateFile("")
-	_ DataFile = ThreadFile("")
-	_ DataFile = CommentsFile("")
-	_ DataFile = MetaFile("")
+	_ LogFile =DateFile("")
+	_ LogFile =ThreadFile("")
+	_ LogFile =CommentsFile("")
+	_ LogFile =MetaFile("")
 
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
@@ -32,28 +32,28 @@ type DateFile string
 
 // Path returns the file path as a string.
 func (d DateFile) Path() string { return string(d) }
-func (DateFile) dataFile()      {}
+func (DateFile) logFile()      {}
 
 // ThreadFile is a path to a thread's JSONL file.
 type ThreadFile string
 
 // Path returns the file path as a string.
 func (t ThreadFile) Path() string { return string(t) }
-func (ThreadFile) dataFile()      {}
+func (ThreadFile) logFile()      {}
 
 // CommentsFile is a path to a Drive file's comments JSONL.
 type CommentsFile string
 
 // Path returns the file path as a string.
 func (c CommentsFile) Path() string { return string(c) }
-func (CommentsFile) dataFile()      {}
+func (CommentsFile) logFile()      {}
 
 // MetaFile is a path to a document's metadata JSON file.
 type MetaFile string
 
 // Path returns the file path as a string.
 func (m MetaFile) Path() string { return string(m) }
-func (MetaFile) dataFile()      {}
+func (MetaFile) logFile()      {}
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

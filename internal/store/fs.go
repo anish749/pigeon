@@ -330,7 +330,7 @@ func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.
 
 // --- internal helpers ---
 
-func (s *FSStore) appendLine(df paths.DataFile, line modelv1.Line) error {
+func (s *FSStore) appendLine(df paths.LogFile, line modelv1.Line) error {
 	filename := df.Path()
 	mu := s.fileMu(filename)
 	mu.Lock()
@@ -438,7 +438,7 @@ func listSubdirs(dir string) ([]string, error) {
 }
 
 
-func fileExists(df paths.DataFile) bool {
+func fileExists(df paths.LogFile) bool {
 	_, err := os.Stat(df.Path())
 	return err == nil
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// AppendLine appends a single JSONL line to a data file. Creates the file and
+// AppendLine appends a single JSONL line to a log file. Creates the file and
 // parent directories if they don't exist. Appends a newline after the JSON.
-func AppendLine(df paths.DataFile, line model.Line) error {
+func AppendLine(df paths.LogFile, line model.Line) error {
 	path := df.Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)
@@ -37,10 +37,10 @@ func AppendLine(df paths.DataFile, line model.Line) error {
 	return nil
 }
 
-// ReadLines reads all JSONL lines from a data file. Returns nil, nil if the
+// ReadLines reads all JSONL lines from a log file. Returns nil, nil if the
 // file doesn't exist. Unparseable lines are collected into the error
 // but successfully parsed lines are still returned.
-func ReadLines(df paths.DataFile) ([]model.Line, error) {
+func ReadLines(df paths.LogFile) ([]model.Line, error) {
 	path := df.Path()
 	f, err := os.Open(path)
 	if err != nil {
