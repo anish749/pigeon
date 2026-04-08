@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func emailLine(id string) model.Line {
@@ -40,7 +41,7 @@ func TestAppendAndReadLines(t *testing.T) {
 	path := filepath.Join(dir, "test.jsonl")
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := AppendLine(path, emailLine(id)); err != nil {
+		if err := AppendLine(paths.DateFile(path), emailLine(id)); err != nil {
 			t.Fatalf("AppendLine(%q): %v", id, err)
 		}
 	}
@@ -67,7 +68,7 @@ func TestDedupKeepsLast(t *testing.T) {
 	for i := range 3 {
 		l := emailLine("same")
 		l.Email.Subject = "version-" + string(rune('0'+i))
-		if err := AppendLine(path, l); err != nil {
+		if err := AppendLine(paths.DateFile(path), l); err != nil {
 			t.Fatalf("AppendLine: %v", err)
 		}
 	}
@@ -93,10 +94,10 @@ func TestDedupDeleteSemantics(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "del.jsonl")
 
-	if err := AppendLine(path, emailLine("target")); err != nil {
+	if err := AppendLine(paths.DateFile(path), emailLine("target")); err != nil {
 		t.Fatal(err)
 	}
-	if err := AppendLine(path, emailDeleteLine("target")); err != nil {
+	if err := AppendLine(paths.DateFile(path), emailDeleteLine("target")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +130,7 @@ func TestReadLinesCorruptLines(t *testing.T) {
 	path := filepath.Join(dir, "corrupt.jsonl")
 
 	// Write a valid line, a corrupt line, then another valid line.
-	if err := AppendLine(path, emailLine("good1")); err != nil {
+	if err := AppendLine(paths.DateFile(path), emailLine("good1")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +143,7 @@ func TestReadLinesCorruptLines(t *testing.T) {
 	}
 	f.Close()
 
-	if err := AppendLine(path, emailLine("good2")); err != nil {
+	if err := AppendLine(paths.DateFile(path), emailLine("good2")); err != nil {
 		t.Fatal(err)
 	}
 

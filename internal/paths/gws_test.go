@@ -15,7 +15,7 @@ func TestGmailDir_Path(t *testing.T) {
 }
 
 func TestGmailDir_DateFile(t *testing.T) {
-	got := acctDir().Gmail().DateFile("2024-01-15")
+	got := acctDir().Gmail().DateFile("2024-01-15").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gmail/2024-01-15.jsonl"
 	if got != want {
 		t.Errorf("Gmail().DateFile() = %q, want %q", got, want)
@@ -31,7 +31,7 @@ func TestCalendarDir_Path(t *testing.T) {
 }
 
 func TestCalendarDir_DateFile(t *testing.T) {
-	got := acctDir().Calendar("primary").DateFile("2024-03-20")
+	got := acctDir().Calendar("primary").DateFile("2024-03-20").Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gcalendar/primary/2024-03-20.jsonl"
 	if got != want {
 		t.Errorf("Calendar().DateFile() = %q, want %q", got, want)
@@ -55,7 +55,7 @@ func TestDriveFileDir_Path(t *testing.T) {
 }
 
 func TestDriveFileDir_MetaFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").MetaFile()
+	got := acctDir().Drive().File("doc-abc").MetaFile().Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/meta.json"
 	if got != want {
 		t.Errorf("MetaFile() = %q, want %q", got, want)
@@ -63,7 +63,7 @@ func TestDriveFileDir_MetaFile(t *testing.T) {
 }
 
 func TestDriveFileDir_CommentsFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").CommentsFile()
+	got := acctDir().Drive().File("doc-abc").CommentsFile().Path()
 	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/comments.jsonl"
 	if got != want {
 		t.Errorf("CommentsFile() = %q, want %q", got, want)
