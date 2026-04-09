@@ -14,8 +14,9 @@ import (
 )
 
 // PollCalendar runs the calendar sync cycle: seed, incremental sync, and
-// window expansion for recurring events.
-func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) error {
+// window expansion for recurring events. Returns the number of changes
+// observed (events + recurring events changed) plus any error.
+func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
 	const calID = "primary"
 
 	if cursors.Calendar == nil {
@@ -30,29 +31,36 @@ func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	}
 
 	// Phase 2: Incremental sync.
-	if err := syncCalendar(account, cur, calID); err != nil {
+	changes, err := syncCalendar(account, cur, calID)
+	if err != nil {
 		if gws.IsCursorExpired(err) {
 			slog.Warn("calendar sync token expired, will re-seed", "calendar", calID)
 			cursors.Calendar[calID] = nil
-			return nil
+			return 0, nil
 		}
-		return err
+		return changes, err
 	}
 
 	// Phase 3: Window expansion — extend recurring event instances if
-	// expanded_until is within ExpansionThresholdDays of now.
-	return maybeExpandWindow(account, cur, calID)
+	// expanded_until is within ExpansionThresholdDays of now. Window
+	// expansion writes events to disk but is not an observed "change"
+	// from Google's perspective, so we don't add it to the changes count.
+	if err := maybeExpandWindow(account, cur, calID); err != nil {
+		return changes, err
+	}
+	return changes, nil
 }
 
 // seedCalendar performs the initial calendar sync: fetches all events from
 // BackfillDays ago onward, expands recurring events within ±BackfillDays,
-// and writes everything to disk.
-func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID string) error {
+// and writes everything to disk. Returns the number of seeded events
+// (one-off + instances) plus any error.
+func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID string) (int, error) {
 	slog.Info("seeding calendar", "calendar", calID)
 
 	result, err := calendar.SeedSyncToken(calID)
 	if err != nil {
-		return fmt.Errorf("seed calendar %s: %w", calID, err)
+		return 0, fmt.Errorf("seed calendar %s: %w", calID, err)
 	}
 
 	// Write one-off events and exception instances to disk.
@@ -82,15 +90,16 @@ func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID str
 		"events", len(result.Events),
 		"recurring", len(result.RecurringIDs))
 
-	return errors.Join(errs...)
+	return len(result.Events) + len(result.RecurringIDs), errors.Join(errs...)
 }
 
 // syncCalendar performs an incremental sync: fetches changes since the last
 // sync token, writes events to disk, and re-expands any changed recurring parents.
-func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID string) error {
+// Returns the number of changed events (one-off + recurring parents) plus any error.
+func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID string) (int, error) {
 	result, err := calendar.ListEvents(calID, cur.SyncToken)
 	if err != nil {
-		return fmt.Errorf("poll calendar %s: %w", calID, err)
+		return 0, fmt.Errorf("poll calendar %s: %w", calID, err)
 	}
 
 	// Write one-off events and changed instances to disk.
@@ -113,14 +122,15 @@ func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID 
 	cur.RecurringEvents = removeRecurringIDs(cur.RecurringEvents, result.CancelledRecurringIDs)
 	cur.SyncToken = result.SyncToken
 
-	if len(result.Events) > 0 || len(result.RecurringIDs) > 0 {
+	changes := len(result.Events) + len(result.RecurringIDs)
+	if changes > 0 {
 		slog.Info("polled calendar",
 			"calendar", calID,
 			"events", len(result.Events),
 			"recurring_changed", len(result.RecurringIDs))
 	}
 
-	return errors.Join(errs...)
+	return changes, errors.Join(errs...)
 }
 
 // maybeExpandWindow checks if the expansion window needs extending and, if so,

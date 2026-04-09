@@ -33,7 +33,7 @@ func TestLiveSmoke(t *testing.T) {
 
 	// --- Seed all three services ---
 	t.Log("=== Seeding Gmail ===")
-	if err := poller.PollGmail(account, cursors); err != nil {
+	if _, err := poller.PollGmail(account, cursors); err != nil {
 		t.Fatalf("gmail seed: %v", err)
 	}
 	if cursors.Gmail.HistoryID == "" {
@@ -42,7 +42,7 @@ func TestLiveSmoke(t *testing.T) {
 	t.Logf("gmail historyId: %s", cursors.Gmail.HistoryID)
 
 	t.Log("=== Seeding Calendar ===")
-	if err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("calendar seed: %v", err)
 	}
 	if cursors.Calendar["primary"] == nil || cursors.Calendar["primary"].SyncToken == "" {
@@ -51,7 +51,7 @@ func TestLiveSmoke(t *testing.T) {
 	t.Logf("calendar syncToken: %.20s...", cursors.Calendar["primary"].SyncToken)
 
 	t.Log("=== Seeding Drive ===")
-	if err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(account, cursors); err != nil {
 		t.Fatalf("drive seed: %v", err)
 	}
 	if cursors.Drive.PageToken == "" {
@@ -94,7 +94,7 @@ func TestLiveSmoke(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	t.Log("=== Polling Drive ===")
-	if err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(account, cursors); err != nil {
 		t.Fatalf("drive poll: %v", err)
 	}
 	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
@@ -152,13 +152,13 @@ func TestLiveSmoke(t *testing.T) {
 
 	// --- Second poll (should be quiet) ---
 	t.Log("=== Second poll (expect no changes) ===")
-	if err := poller.PollGmail(account, cursors); err != nil {
+	if _, err := poller.PollGmail(account, cursors); err != nil {
 		t.Errorf("gmail poll 2: %v", err)
 	}
-	if err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Errorf("calendar poll 2: %v", err)
 	}
-	if err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(account, cursors); err != nil {
 		t.Errorf("drive poll 2: %v", err)
 	}
 }

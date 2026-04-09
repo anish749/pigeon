@@ -99,6 +99,13 @@ func (a AccountDir) MaintenancePath() string {
 	return filepath.Join(a.Path(), ".maintenance.json")
 }
 
+// PollMetricsPath returns the path to the poll metrics JSONL file for this
+// account. One line is appended per service per poll cycle — used to analyze
+// poll hit-rate and latency for debouncer / adaptive-interval decisions.
+func (a AccountDir) PollMetricsPath() string {
+	return filepath.Join(a.Path(), ".poll-metrics.jsonl")
+}
+
 // ConversationDir represents a conversation directory: <base>/<platform>/<account-slug>/<conversation>/
 type ConversationDir struct {
 	account AccountDir

@@ -59,13 +59,35 @@ func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
 	if ctx.Err() != nil {
 		return
 	}
-	if err := PollGmail(p.account, cursors); err != nil {
-		slog.Error("poll gmail", "err", err)
+	p.runAndRecord("gmail", func() (int, error) {
+		return PollGmail(p.account, cursors)
+	})
+	p.runAndRecord("calendar", func() (int, error) {
+		return PollCalendar(p.account, cursors)
+	})
+	p.runAndRecord("drive", func() (int, error) {
+		return PollDrive(p.account, cursors)
+	})
+}
+
+// runAndRecord times a single service poll, logs any error, and appends a
+// PollMetric record to the account's poll metrics file. Metric write
+// failures are logged but never propagated — telemetry should not break
+// the poll loop.
+func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
+	start := time.Now()
+	n, err := fn()
+	m := PollMetric{
+		Ts:         start.UTC(),
+		Service:    service,
+		DurationMs: time.Since(start).Milliseconds(),
+		Changes:    n,
 	}
-	if err := PollCalendar(p.account, cursors); err != nil {
-		slog.Error("poll calendar", "err", err)
+	if err != nil {
+		m.Err = err.Error()
+		slog.Error("poll "+service, "err", err)
 	}
-	if err := PollDrive(p.account, cursors); err != nil {
-		slog.Error("poll drive", "err", err)
+	if writeErr := appendMetric(p.account.PollMetricsPath(), m); writeErr != nil {
+		slog.Error("append poll metric", "service", service, "err", writeErr)
 	}
 }
