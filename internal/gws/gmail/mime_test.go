@@ -96,6 +96,36 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 	// HTML is only set for multipart messages with an explicit text/html part.
 }
 
+func TestParseRawMessage_PaddedBase64URL(t *testing.T) {
+	// Regression: Gmail's API returns the `raw` field as padded base64url.
+	// parseRawMessage previously used RawURLEncoding, which rejects `=`
+	// padding and fails with "decode raw message: illegal base64 data ...".
+	// The error byte offset points at the first `=` of the trailing padding.
+	msg := "From: sender@example.com\r\n" +
+		"To: recipient@example.com\r\n" +
+		"Subject: Padded\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Body!"
+
+	// base64.URLEncoding pads to a multiple of 4; this fixture ends in `==`.
+	raw := base64.URLEncoding.EncodeToString([]byte(msg))
+	if got := raw[len(raw)-2:]; got != "==" {
+		t.Fatalf("fixture should end in ==, got %q (full: %q)", got, raw)
+	}
+
+	parsed, err := parseRawMessage(raw)
+	if err != nil {
+		t.Fatalf("parseRawMessage rejected padded base64url: %v", err)
+	}
+	if parsed.subject != "Padded" {
+		t.Errorf("subject = %q, want %q", parsed.subject, "Padded")
+	}
+	if parsed.text != "Body!" {
+		t.Errorf("text = %q, want %q", parsed.text, "Body!")
+	}
+}
+
 func TestParseRawMessage_WithAttachment(t *testing.T) {
 	raw := encode("From: sender@example.com\r\n" +
 		"Subject: Attachment\r\n" +

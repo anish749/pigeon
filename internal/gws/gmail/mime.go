@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jhillyerd/enmime"
 
@@ -13,8 +14,14 @@ import (
 
 // parseRawMessage decodes a base64url-encoded RFC 2822 message and
 // extracts the body text, headers, and attachment metadata using enmime.
+//
+// The Gmail API returns the `raw` field as base64url with `=` padding.
+// RFC 4648 allows padding to be omitted, and Go's encoding/base64 splits
+// these into two strict variants (URLEncoding requires padding,
+// RawURLEncoding rejects it), so we strip padding and use RawURLEncoding
+// to accept either form.
 func parseRawMessage(raw string) (*parsedMessage, error) {
-	b, err := base64.RawURLEncoding.DecodeString(raw)
+	b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "="))
 	if err != nil {
 		return nil, fmt.Errorf("decode raw message: %w", err)
 	}
