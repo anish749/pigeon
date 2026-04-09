@@ -264,12 +264,12 @@ func TestExpandDriveMetaMatches(t *testing.T) {
 	// Non-content file that should be ignored.
 	writeFile(t, filepath.Join(driveFile.Path(), "ignore.txt"), "ignored")
 
-	meta, ok, err := paths.NewDriveMetaFile(driveFile.MetaFile(today).Path())
+	meta, ok, err := paths.ParseDriveMetaPath(driveFile.MetaFile(today).Path())
 	if err != nil {
-		t.Fatalf("NewDriveMetaFile: %v", err)
+		t.Fatalf("ParseDriveMetaPath: %v", err)
 	}
 	if !ok {
-		t.Fatal("NewDriveMetaFile: ok=false, want true")
+		t.Fatal("ParseDriveMetaPath: ok=false, want true")
 	}
 	content, err := expandDriveMetaMatches([]paths.DriveMetaFile{meta})
 	if err != nil {

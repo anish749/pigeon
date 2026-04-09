@@ -1,6 +1,8 @@
 package paths
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,9 +77,9 @@ func TestDriveFileDir_MetaFile(t *testing.T) {
 	}
 }
 
-func TestNewDriveMetaFile_Valid(t *testing.T) {
+func TestParseDriveMetaPath_Valid(t *testing.T) {
 	path := "/tmp/test/gws/user/gdrive/doc-abc/drive-meta-2026-04-07.json"
-	meta, ok, err := NewDriveMetaFile(path)
+	meta, ok, err := ParseDriveMetaPath(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestNewDriveMetaFile_Valid(t *testing.T) {
 	}
 }
 
-func TestNewDriveMetaFile_NotAMetaFile(t *testing.T) {
+func TestParseDriveMetaPath_NotAMetaFile(t *testing.T) {
 	cases := []string{
 		"/tmp/test/gws/user/gmail/2026-04-07.jsonl",        // wrong subdir
 		"/tmp/test/gws/user/gdrive/doc-abc/Tab1.md",        // content file
@@ -100,7 +102,7 @@ func TestNewDriveMetaFile_NotAMetaFile(t *testing.T) {
 		"/tmp/test/random/file.txt",                         // unrelated
 	}
 	for _, path := range cases {
-		meta, ok, err := NewDriveMetaFile(path)
+		meta, ok, err := ParseDriveMetaPath(path)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", path, err)
 		}
@@ -113,7 +115,7 @@ func TestNewDriveMetaFile_NotAMetaFile(t *testing.T) {
 	}
 }
 
-func TestNewDriveMetaFile_MalformedDate(t *testing.T) {
+func TestParseDriveMetaPath_MalformedDate(t *testing.T) {
 	// Filename has the right prefix/extension but an unparseable date.
 	cases := []string{
 		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-not-a-date.json",
@@ -121,7 +123,7 @@ func TestNewDriveMetaFile_MalformedDate(t *testing.T) {
 		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-.json",
 	}
 	for _, path := range cases {
-		_, ok, err := NewDriveMetaFile(path)
+		_, ok, err := ParseDriveMetaPath(path)
 		if err == nil {
 			t.Errorf("%s: expected error for malformed date", path)
 		}
@@ -148,11 +150,36 @@ func TestDriveMetaFileGlobsSince(t *testing.T) {
 	}
 }
 
-func TestDriveFileDirFromMeta(t *testing.T) {
-	meta := acctDir().Drive().File("doc-abc").MetaFile("2026-04-07")
-	driveDir := DriveFileDirFromMeta(meta)
-	if driveDir.Path() != meta.Dir() {
-		t.Errorf("DriveFileDirFromMeta.Path() = %q, want %q", driveDir.Path(), meta.Dir())
+func TestDriveMetaFile_ContentFiles(t *testing.T) {
+	// Use a temp dir because ContentFiles does a real os.ReadDir.
+	dir := t.TempDir()
+	root := NewDataRoot(dir)
+	driveFile := root.Platform("gws").AccountFromSlug("user").Drive().File("doc-abc")
+	meta := driveFile.MetaFile("2026-04-07")
+
+	// Create the meta file and sibling content files.
+	if err := os.MkdirAll(driveFile.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(meta.Path(), `{}`)
+	write(driveFile.TabFile("Tab1").Path(), "content")
+	write(driveFile.SheetFile("Sheet1").Path(), "a,b,c")
+	write(driveFile.CommentsFile().Path(), `{}`)
+	// Non-content file that should be ignored.
+	write(filepath.Join(driveFile.Path(), "ignore.txt"), "ignored")
+
+	content, err := meta.ContentFiles()
+	if err != nil {
+		t.Fatalf("ContentFiles: %v", err)
+	}
+	if len(content) != 3 {
+		t.Errorf("got %d content files, want 3: %v", len(content), content)
 	}
 }
 

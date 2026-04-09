@@ -58,14 +58,14 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	// Separate drive-meta matches from other date files so we can resolve
 	// the metas into their parent DriveFileDir and enumerate sibling content.
 	// Drive meta files themselves are not returned — only the content they
-	// point to. NewDriveMetaFile is three-valued: a false `ok` means the
+	// describe. ParseDriveMetaPath is three-valued: a false `ok` means the
 	// path isn't drive-meta shaped (treated as a regular date file); a
 	// non-nil error means the shape matched but the date was malformed —
 	// we log and skip.
 	var dateFiles []string
 	var driveMetas []paths.DriveMetaFile
 	for _, f := range matched {
-		meta, ok, err := paths.NewDriveMetaFile(f)
+		meta, ok, err := paths.ParseDriveMetaPath(f)
 		if err != nil {
 			slog.Error("parse drive-meta file", "path", f, "err", err)
 			continue
@@ -96,15 +96,15 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	return result, nil
 }
 
-// expandDriveMetaMatches resolves drive-meta files into the sibling content
-// files of their Drive file directories. Each meta is navigated up to its
-// DriveFileDir via DriveFileDirFromMeta, whose ContentFiles method lists the
-// actual searchable files.
+// expandDriveMetaMatches resolves each drive-meta file into the content
+// files it describes. The meta file is the anchor of identity for a Drive
+// file at a specific modification state, and ContentFiles enumerates the
+// tabs, sheets, and comments at that snapshot.
 func expandDriveMetaMatches(metas []paths.DriveMetaFile) ([]string, error) {
 	var content []string
 	var errs []error
 	for _, meta := range metas {
-		files, err := paths.DriveFileDirFromMeta(meta).ContentFiles()
+		files, err := meta.ContentFiles()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("list drive content for %s: %w", meta.Path(), err))
 			continue
