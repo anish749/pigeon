@@ -42,7 +42,7 @@ func TestDriveBackfillLive(t *testing.T) {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(account, cursors); err != nil {
 		// Partial errors (e.g. formula parsing on specific sheets) are expected —
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
@@ -78,7 +78,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 2: Quiet incremental poll ---
 	t.Log("=== Phase 2: Quiet poll ===")
-	if err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(account, cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

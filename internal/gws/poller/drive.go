@@ -26,14 +26,16 @@ const (
 )
 
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
-func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
+// Returns the number of changes observed plus any error. On initial seed
+// it returns the backfilled file count.
+func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
 	if cursors.Drive.PageToken == "" {
 		return seedDrive(account, cursors)
 	}
 
 	changes, newToken, err := drive.ListChanges(cursors.Drive.PageToken)
 	if err != nil {
-		return fmt.Errorf("poll drive changes: %w", err)
+		return 0, fmt.Errorf("poll drive changes: %w", err)
 	}
 
 	var errs []error
@@ -62,26 +64,26 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	}
 
 	cursors.Drive.PageToken = newToken
-	return errors.Join(errs...)
+	return len(changes), errors.Join(errs...)
 }
 
 // seedDrive acquires the changes cursor, backfills existing Docs and Sheets
 // modified within BackfillDays, then saves the cursor. The cursor is acquired
 // BEFORE backfill so that changes made during the (potentially slow) backfill
 // are captured by the first incremental poll.
-func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
+func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
 	slog.Info("seeding drive with backfill")
 
 	// Get the changes cursor first — backfill can take minutes.
 	token, err := drive.SeedPageToken()
 	if err != nil {
-		return fmt.Errorf("seed drive page token: %w", err)
+		return 0, fmt.Errorf("seed drive page token: %w", err)
 	}
 
 	timeMin := time.Now().UTC().AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339)
 	files, err := drive.ListFiles(timeMin)
 	if err != nil {
-		return fmt.Errorf("backfill drive: %w", err)
+		return 0, fmt.Errorf("backfill drive: %w", err)
 	}
 
 	var errs []error
@@ -100,7 +102,7 @@ func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 
 	cursors.Drive.PageToken = token
 	slog.Info("seeded drive with backfill", "files", len(files), "token", token)
-	return errors.Join(errs...)
+	return len(files), errors.Join(errs...)
 }
 
 func handleDoc(account paths.AccountDir, ch drive.Change) error {

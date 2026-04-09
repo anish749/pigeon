@@ -55,7 +55,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
 	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
@@ -104,7 +104,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	if err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
 	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
@@ -119,7 +119,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 3: Second incremental poll (should be quiet) ---
 	t.Log("=== Phase 3: Quiet poll ===")
-	if err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

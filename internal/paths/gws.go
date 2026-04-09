@@ -14,6 +14,7 @@ const (
 	markdownExt         = ".md"
 	csvExt              = ".csv"
 	formulaCSVSuffix    = ".formulas.csv"
+	pollMetricsFile     = ".poll-metrics.jsonl"
 )
 
 // DriveMetaFileGlob is the glob pattern for matching all Drive file metadata
@@ -31,6 +32,13 @@ const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
 // Gmail returns a GmailDir for this account.
 func (a AccountDir) Gmail() GmailDir {
 	return GmailDir{account: a}
+}
+
+// PollMetricsPath returns the path to the poll metrics JSONL file for this
+// account. One line is appended per service per poll cycle — used to analyze
+// poll hit-rate and latency for debouncer / adaptive-interval decisions.
+func (a AccountDir) PollMetricsPath() string {
+	return filepath.Join(a.Path(), pollMetricsFile)
 }
 
 // Calendar returns a CalendarDir for the given calendar ID.
