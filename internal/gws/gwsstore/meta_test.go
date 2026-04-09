@@ -1,6 +1,7 @@
 package gwsstore
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 func TestMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "meta.json")
+	path := filepath.Join(dir, "drive-meta-2026-04-07.json")
 
 	orig := &model.DocMeta{
 		FileID:       "file-123",
@@ -56,5 +57,58 @@ func TestLoadMetaNonExistent(t *testing.T) {
 	_, err := LoadMeta(paths.MetaFile(path))
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
+	}
+}
+
+func TestSaveMetaCleansUpStaleDriveMetaFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate a previously synced file with an older modifiedTime.
+	oldPath := filepath.Join(dir, "drive-meta-2026-04-01.json")
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save with a newer modifiedTime.
+	newPath := filepath.Join(dir, "drive-meta-2026-04-07.json")
+	meta := &model.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
+	if err := SaveMeta(paths.MetaFile(newPath), meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+
+	// New file exists, old file is gone.
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("new meta file missing: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("stale meta file not cleaned up: err=%v", err)
+	}
+}
+
+func TestSaveMetaLeavesUnrelatedFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create unrelated files that should not be touched.
+	unrelated := []string{
+		filepath.Join(dir, "Tab1.md"),
+		filepath.Join(dir, "comments.jsonl"),
+		filepath.Join(dir, "other.json"),
+	}
+	for _, p := range unrelated {
+		if err := os.WriteFile(p, []byte("keep me"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	metaPath := filepath.Join(dir, "drive-meta-2026-04-07.json")
+	meta := &model.DocMeta{FileID: "f1"}
+	if err := SaveMeta(paths.MetaFile(metaPath), meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+
+	for _, p := range unrelated {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("unrelated file %s was removed: %v", p, err)
+		}
 	}
 }

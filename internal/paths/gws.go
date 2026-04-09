@@ -4,16 +4,23 @@ import "path/filepath"
 
 // GWS directory and file naming constants.
 const (
-	gmailSubdir      = "gmail"
-	gcalendarSubdir  = "gcalendar"
-	gdriveSubdir     = "gdrive"
-	attachSubdir     = "attachments"
-	commentsFile     = "comments"
-	metaFile         = "meta.json"
-	markdownExt      = ".md"
-	csvExt           = ".csv"
-	formulaCSVSuffix = ".formulas.csv"
+	gmailSubdir         = "gmail"
+	gcalendarSubdir     = "gcalendar"
+	gdriveSubdir        = "gdrive"
+	attachSubdir        = "attachments"
+	commentsFile        = "comments"
+	driveMetaFilePrefix = "drive-meta-"
+	driveMetaFileExt    = ".json"
+	markdownExt         = ".md"
+	csvExt              = ".csv"
+	formulaCSVSuffix    = ".formulas.csv"
 )
+
+// DriveMetaFileGlob is the glob pattern for matching all Drive file metadata
+// files in a Drive file directory. Used for cleanup (removing stale meta files
+// when a file is re-synced) and read-layer discovery (finding files modified
+// within a time window via filename).
+const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
 
 // GWS path types extend AccountDir for Google Workspace services.
 //
@@ -93,9 +100,12 @@ func (f DriveFileDir) Path() string {
 	return filepath.Join(f.drive.Path(), f.slug)
 }
 
-// MetaFile returns the path to the file's metadata.
-func (f DriveFileDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(f.Path(), metaFile))
+// MetaFile returns the path to the file's metadata, with the Drive
+// modification date encoded in the filename (drive-meta-YYYY-MM-DD.json).
+// The date enables filename-based filtering in the read layer without
+// parsing the file contents.
+func (f DriveFileDir) MetaFile(modifiedDate string) MetaFile {
+	return MetaFile(filepath.Join(f.Path(), driveMetaFilePrefix+modifiedDate+driveMetaFileExt))
 }
 
 // CommentsFile returns the path to the file's comments JSONL.

@@ -143,6 +143,10 @@ func handleDoc(account paths.AccountDir, ch drive.Change) error {
 		errs = append(errs, err)
 	}
 
+	modifiedDate, err := driveModifiedDate(ch.File.ModifiedTime)
+	if err != nil {
+		return fmt.Errorf("extract modified date: %w", err)
+	}
 	meta := &model.DocMeta{
 		FileID:       ch.FileID,
 		MimeType:     ch.File.MimeType,
@@ -151,11 +155,21 @@ func handleDoc(account paths.AccountDir, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Tabs:         tabMetas,
 	}
-	if err := gwsstore.SaveMeta(fileDir.MetaFile(), meta); err != nil {
+	if err := gwsstore.SaveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
 	return errors.Join(errs...)
+}
+
+// driveModifiedDate extracts YYYY-MM-DD from an RFC 3339 modifiedTime string.
+// The date is in UTC, matching how the rest of the GWS read layer uses dates.
+func driveModifiedDate(modifiedTime string) (string, error) {
+	t, err := time.Parse(time.RFC3339, modifiedTime)
+	if err != nil {
+		return "", fmt.Errorf("parse modifiedTime %q: %w", modifiedTime, err)
+	}
+	return t.UTC().Format("2006-01-02"), nil
 }
 
 func handleSheet(account paths.AccountDir, ch drive.Change) error {
@@ -208,6 +222,10 @@ func handleSheet(account paths.AccountDir, ch drive.Change) error {
 		errs = append(errs, err)
 	}
 
+	modifiedDate, err := driveModifiedDate(ch.File.ModifiedTime)
+	if err != nil {
+		return fmt.Errorf("extract modified date: %w", err)
+	}
 	meta := &model.DocMeta{
 		FileID:       ch.FileID,
 		MimeType:     ch.File.MimeType,
@@ -216,7 +234,7 @@ func handleSheet(account paths.AccountDir, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Sheets:       sheetNames,
 	}
-	if err := gwsstore.SaveMeta(fileDir.MetaFile(), meta); err != nil {
+	if err := gwsstore.SaveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 

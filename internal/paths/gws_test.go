@@ -55,8 +55,8 @@ func TestDriveFileDir_Path(t *testing.T) {
 }
 
 func TestDriveFileDir_MetaFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").MetaFile().Path()
-	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/meta.json"
+	got := acctDir().Drive().File("doc-abc").MetaFile("2026-04-07").Path()
+	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/drive-meta-2026-04-07.json"
 	if got != want {
 		t.Errorf("MetaFile() = %q, want %q", got, want)
 	}
