@@ -238,6 +238,7 @@ MAINTENANCE
 		// Setup
 		newSetupWhatsAppCmd(),
 		newSetupSlackCmd(),
+		newSetupGWSCmd(),
 
 		// Daemon
 		newDaemonCmd(version),
