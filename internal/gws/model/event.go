@@ -27,6 +27,8 @@ func EventDateForStorage(ev *calendar.Event) string {
 		}
 	}
 	if d := dateFromRFC3339(ev.Updated); d != "" {
+		slog.Warn("calendar event has no start time, falling back to updated",
+			"event_id", ev.Id, "status", ev.Status)
 		return d
 	}
 	slog.Warn("calendar event has no parseable date, filing under unknown",
