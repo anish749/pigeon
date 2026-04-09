@@ -105,7 +105,7 @@ func (f DriveFileDir) Path() string {
 // The date enables filename-based filtering in the read layer without
 // parsing the file contents.
 func (f DriveFileDir) MetaFile(modifiedDate string) MetaFile {
-	return MetaFile(filepath.Join(f.Path(), driveMetaFilePrefix+modifiedDate+driveMetaFileExt))
+	return NewMetaFile(f.Path(), driveMetaFilePrefix+modifiedDate+driveMetaFileExt)
 }
 
 // CommentsFile returns the path to the file's comments JSONL.

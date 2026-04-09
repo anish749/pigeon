@@ -112,7 +112,7 @@ func (c ConversationDir) Path() string {
 
 // MetaFile returns the path to the conversation's .meta.json sidecar.
 func (c ConversationDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
+	return NewMetaFile(c.Path(), ".meta.json")
 }
 
 // DateFile returns the path to a daily message file.

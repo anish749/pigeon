@@ -48,16 +48,29 @@ type CommentsFile string
 func (c CommentsFile) Path() string { return string(c) }
 func (CommentsFile) logFile()      {}
 
-// MetaFile is a path to a document's metadata JSON file.
-type MetaFile string
+// MetaFile is a path to a document's metadata JSON file. It carries the
+// directory and filename separately so callers can access the parent directory
+// (e.g. for cleanup of sibling files) without re-parsing the path.
+type MetaFile struct {
+	dir  string
+	name string
+}
 
-// Path returns the file path as a string.
-func (m MetaFile) Path() string { return string(m) }
+// NewMetaFile constructs a MetaFile from a directory and a filename.
+// Constructors (ConversationDir.MetaFile, DriveFileDir.MetaFile) already
+// have both pieces, so this avoids re-parsing via filepath.Dir.
+func NewMetaFile(dir, name string) MetaFile {
+	return MetaFile{dir: dir, name: name}
+}
 
-// Dir returns the directory containing this meta file. Used by callers that
-// need to enumerate sibling files (e.g. cleanup of stale meta files in the
-// same directory).
-func (m MetaFile) Dir() string { return filepath.Dir(string(m)) }
+// Path returns the full file path.
+func (m MetaFile) Path() string { return filepath.Join(m.dir, m.name) }
+
+// Dir returns the directory containing this meta file.
+func (m MetaFile) Dir() string { return m.dir }
+
+// Name returns the filename (without the directory).
+func (m MetaFile) Name() string { return m.name }
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

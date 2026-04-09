@@ -11,7 +11,7 @@ import (
 
 func TestMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "drive-meta-2026-04-07.json")
+	mf := paths.NewMetaFile(dir, "drive-meta-2026-04-07.json")
 
 	orig := &model.DocMeta{
 		FileID:       "file-123",
@@ -26,11 +26,11 @@ func TestMetaRoundTrip(t *testing.T) {
 		Sheets: []string{"Sheet1", "Sheet2"},
 	}
 
-	if err := SaveMeta(paths.MetaFile(path), orig); err != nil {
+	if err := SaveMeta(mf, orig); err != nil {
 		t.Fatalf("SaveMeta: %v", err)
 	}
 
-	got, err := LoadMeta(paths.MetaFile(path))
+	got, err := LoadMeta(mf)
 	if err != nil {
 		t.Fatalf("LoadMeta: %v", err)
 	}
@@ -53,8 +53,8 @@ func TestMetaRoundTrip(t *testing.T) {
 }
 
 func TestLoadMetaNonExistent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nope.json")
-	_, err := LoadMeta(paths.MetaFile(path))
+	mf := paths.NewMetaFile(t.TempDir(), "nope.json")
+	_, err := LoadMeta(mf)
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
 	}
@@ -70,14 +70,14 @@ func TestSaveMetaCleansUpStaleDriveMetaFiles(t *testing.T) {
 	}
 
 	// Save with a newer modifiedTime.
-	newPath := filepath.Join(dir, "drive-meta-2026-04-07.json")
+	mf := paths.NewMetaFile(dir, "drive-meta-2026-04-07.json")
 	meta := &model.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
-	if err := SaveMeta(paths.MetaFile(newPath), meta); err != nil {
+	if err := SaveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveMeta: %v", err)
 	}
 
 	// New file exists, old file is gone.
-	if _, err := os.Stat(newPath); err != nil {
+	if _, err := os.Stat(mf.Path()); err != nil {
 		t.Errorf("new meta file missing: %v", err)
 	}
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
@@ -100,9 +100,9 @@ func TestSaveMetaLeavesUnrelatedFiles(t *testing.T) {
 		}
 	}
 
-	metaPath := filepath.Join(dir, "drive-meta-2026-04-07.json")
+	mf := paths.NewMetaFile(dir, "drive-meta-2026-04-07.json")
 	meta := &model.DocMeta{FileID: "f1"}
-	if err := SaveMeta(paths.MetaFile(metaPath), meta); err != nil {
+	if err := SaveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveMeta: %v", err)
 	}
 
