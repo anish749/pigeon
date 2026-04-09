@@ -14,11 +14,16 @@ import (
 	"os/exec"
 )
 
-// CurrentUser returns the email of the account currently logged into the
-// gws CLI, or an empty string if gws is not authenticated. An error is
-// returned only when gws is missing from PATH or emits output that cannot
-// be parsed — "not logged in" is a normal state, not an error.
-func CurrentUser() (string, error) {
+// User is the account currently logged into the gws CLI.
+type User struct {
+	Email string
+}
+
+// CurrentUser returns the account currently logged into the gws CLI, or
+// nil if gws is not authenticated. An error is returned only when gws is
+// missing from PATH or emits output that cannot be parsed — "not logged in"
+// is a normal state, not an error.
+func CurrentUser() (*User, error) {
 	cmd := exec.Command("gws", "auth", "status")
 	out, err := cmd.Output()
 	if err != nil {
@@ -27,16 +32,19 @@ func CurrentUser() (string, error) {
 			// Non-zero exit from `gws auth status` means "not logged in"
 			// (or credentials are invalid). Either way, from pigeon's
 			// perspective there is no current user — not an error.
-			return "", nil
+			return nil, nil
 		}
-		return "", fmt.Errorf("run gws auth status: %w", err)
+		return nil, fmt.Errorf("run gws auth status: %w", err)
 	}
 
 	var s struct {
 		User string `json:"user"`
 	}
 	if err := json.Unmarshal(out, &s); err != nil {
-		return "", fmt.Errorf("parse gws auth status: %w", err)
+		return nil, fmt.Errorf("parse gws auth status: %w", err)
 	}
-	return s.User, nil
+	if s.User == "" {
+		return nil, nil
+	}
+	return &User{Email: s.User}, nil
 }

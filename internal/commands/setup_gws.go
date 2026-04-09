@@ -1,23 +1,22 @@
 package commands
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/manifoldco/promptui"
+
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
 	gwsauth "github.com/anish749/pigeon/internal/gws/auth"
 )
 
 func RunSetupGWS(args []string) error {
-	reader := bufio.NewReader(os.Stdin)
-
-	email, err := gwsauth.CurrentUser()
+	user, err := gwsauth.CurrentUser()
 	if err != nil {
 		return fmt.Errorf("probe gws auth: %w", err)
 	}
-	if email == "" {
+	if user == nil {
 		return fmt.Errorf("gws is not logged in — run `gws auth login` first")
 	}
 
@@ -26,50 +25,48 @@ func RunSetupGWS(args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	suggestion := defaultLabel(email)
-	if existing := findGWS(cfg, email); existing != nil {
-		fmt.Printf("Updating existing entry for %s.\n", email)
-		suggestion = existing.Account
-	} else {
-		fmt.Printf("Account: %s\n", email)
+	fmt.Printf("Account: %s\n", user.Email)
+
+	// When updating an existing entry, pre-fill the prompt with the
+	// current label so <enter> keeps it.
+	var currentLabel string
+	if existing := findGWS(cfg, user.Email); existing != nil {
+		fmt.Println("(updating existing entry)")
+		currentLabel = existing.Account
 	}
 
-	fmt.Printf("Label [%s]: ", suggestion)
-	label, _ := reader.ReadString('\n')
-	label = strings.TrimSpace(label)
-	if label == "" {
-		label = suggestion
+	prompt := promptui.Prompt{
+		Label:   "Label",
+		Default: currentLabel,
+		Validate: func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("label cannot be empty")
+			}
+			return nil
+		},
+	}
+	label, err := prompt.Run()
+	if err != nil {
+		return fmt.Errorf("prompt cancelled: %w", err)
 	}
 
 	cfg.AddGWS(config.GWSConfig{
-		Account: label,
-		Email:   email,
+		Account: strings.TrimSpace(label),
+		Email:   user.Email,
 	})
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Printf("Saved. Run `pigeon daemon restart` to start polling.\n")
+	// The daemon's GWSManager watches config via fsnotify and reconciles
+	// on every change — so if it's already running, the new account is
+	// picked up automatically. Otherwise the user needs to start it.
+	if daemon.IsRunning() {
+		fmt.Println("Saved. Daemon will pick up the new account automatically.")
+	} else {
+		fmt.Println("Saved. Run `pigeon daemon start` to begin polling.")
+	}
 	return nil
-}
-
-// defaultLabel derives a friendly label from an email address by taking
-// the local-part, replacing dots and dashes with spaces, and title-casing
-// each word. "first.last@example.com" → "First Last".
-func defaultLabel(email string) string {
-	local, _, ok := strings.Cut(email, "@")
-	if !ok || local == "" {
-		return email
-	}
-	local = strings.NewReplacer(".", " ", "-", " ", "_", " ").Replace(local)
-	parts := strings.Fields(local)
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
 }
 
 // findGWS returns the existing GWS config entry for the given email, or nil.
