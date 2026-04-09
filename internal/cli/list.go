@@ -109,10 +109,18 @@ func extractConversations(files []string, root string) []activeConv {
 		}
 		parts := strings.Split(rel, string(filepath.Separator))
 		isThread := paths.IsThreadFile(f)
-		for i, p := range parts {
-			if p == paths.ThreadsSubdir {
-				parts = append(parts[:i], parts[i+1:]...)
-				break
+		if isThread {
+			// Thread files live at <conv>/threads/<ts>.jsonl. Strip the
+			// "threads" component so the conversation dir is parts[2].
+			// Only strip when the file is actually a thread file — a
+			// conversation literally named "threads" has its own
+			// YYYY-MM-DD.jsonl children which must not lose the
+			// component.
+			for i, p := range parts {
+				if p == paths.ThreadsSubdir {
+					parts = append(parts[:i], parts[i+1:]...)
+					break
+				}
 			}
 		}
 		if len(parts) < 4 {

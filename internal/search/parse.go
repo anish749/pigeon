@@ -152,14 +152,14 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 
-	// Strip "threads" directory if present — thread files are
-	// conversation/threads/TS.jsonl; we want the conversation, not "threads".
-	for i, p := range parts {
-		if p == "threads" {
-			thread = true
-			parts = append(parts[:i], parts[i+1:]...)
-			break
-		}
+	// A real thread file lives at conversation/threads/TS.jsonl. A
+	// conversation literally named "threads" has YYYY-MM-DD.jsonl
+	// children under its own path, which must NOT be treated as thread
+	// files — strip the "threads" component only in the real thread case.
+	if paths.IsThreadFile(filePart) {
+		thread = true
+		parts = parts[:len(parts)-2]
+		parts = append(parts, filepath.Base(filePart))
 	}
 
 	dateFile := parts[len(parts)-1]
@@ -177,4 +177,3 @@ func ParseFilePath(filePart, searchDir string) (platform, account, conversation,
 	}
 	return platform, account, conversation, date, thread, nil
 }
-

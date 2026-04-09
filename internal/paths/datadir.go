@@ -2,6 +2,7 @@ package paths
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -136,10 +137,25 @@ const (
 	ThreadGlobFind = "*/" + ThreadsSubdir + "/*" + FileExt
 )
 
-// IsThreadFile reports whether the given file path is a thread file
-// (i.e. its parent directory is the threads subdirectory).
+// dateFilePattern matches filenames of the form YYYY-MM-DD.jsonl.
+var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl$`)
+
+// IsDateFile reports whether the given filename matches the YYYY-MM-DD.jsonl
+// date file format.
+func IsDateFile(name string) bool {
+	return dateFilePattern.MatchString(name)
+}
+
+// IsThreadFile reports whether the given file path is a thread file.
+// A thread file has its parent directory named ThreadsSubdir AND its
+// filename is NOT a date file. A conversation literally named "threads"
+// has YYYY-MM-DD.jsonl children under its own path, which must not be
+// misclassified as thread files.
 func IsThreadFile(path string) bool {
-	return filepath.Base(filepath.Dir(path)) == ThreadsSubdir
+	if filepath.Base(filepath.Dir(path)) != ThreadsSubdir {
+		return false
+	}
+	return !IsDateFile(filepath.Base(path))
 }
 
 // ThreadsDir returns the path to the threads subdirectory.
