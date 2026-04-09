@@ -66,6 +66,34 @@ func TestExtractConversations_Empty(t *testing.T) {
 	}
 }
 
+// TestExtractConversations_ConversationNamedThreads verifies that a
+// conversation literally named "threads" is not dropped by the
+// path-component strip logic. Its date files live at
+// <acct>/threads/YYYY-MM-DD.jsonl and the "threads" component must be
+// preserved as the conversation name.
+func TestExtractConversations_ConversationNamedThreads(t *testing.T) {
+	root := "/data"
+	files := []string{
+		"/data/slack/acme/threads/2026-04-07.jsonl",
+		"/data/slack/acme/threads/threads/1742100000.jsonl",
+	}
+
+	convs := extractConversations(files, root)
+
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1: %+v", len(convs), convs)
+	}
+	if convs[0].Display != "slack/acme/threads" {
+		t.Errorf("Display = %q, want slack/acme/threads", convs[0].Display)
+	}
+	if convs[0].Dir != "/data/slack/acme/threads" {
+		t.Errorf("Dir = %q, want /data/slack/acme/threads", convs[0].Dir)
+	}
+	if convs[0].LatestDate != "2026-04-07" {
+		t.Errorf("LatestDate = %q, want 2026-04-07", convs[0].LatestDate)
+	}
+}
+
 func TestExtractConversations_PreservesOrder(t *testing.T) {
 	root := "/data"
 	files := []string{
