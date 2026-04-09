@@ -71,19 +71,6 @@ func TestDriveFileDir_MetaFile(t *testing.T) {
 	}
 }
 
-func TestNewDriveMetaFile(t *testing.T) {
-	mf := NewDriveMetaFile("/some/dir", "drive-meta-2026-04-07.json")
-	if got := mf.Dir(); got != "/some/dir" {
-		t.Errorf("Dir() = %q", got)
-	}
-	if got := mf.Name(); got != "drive-meta-2026-04-07.json" {
-		t.Errorf("Name() = %q", got)
-	}
-	if got := mf.Path(); got != "/some/dir/drive-meta-2026-04-07.json" {
-		t.Errorf("Path() = %q", got)
-	}
-}
-
 func TestDriveMetaFileZeroValue(t *testing.T) {
 	var mf DriveMetaFile
 	if mf.Path() != "" {

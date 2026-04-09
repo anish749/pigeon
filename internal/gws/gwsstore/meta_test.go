@@ -9,9 +9,19 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
+// testDriveFileDir returns a DriveFileDir rooted at a temp directory for tests.
+func testDriveFileDir(t *testing.T) paths.DriveFileDir {
+	t.Helper()
+	return paths.NewDataRoot(t.TempDir()).
+		Platform("gws").
+		AccountFromSlug("test").
+		Drive().
+		File("doc-abc")
+}
+
 func TestDriveMetaRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	mf := paths.NewDriveMetaFile(dir, "drive-meta-2026-04-07.json")
+	fileDir := testDriveFileDir(t)
+	mf := fileDir.MetaFile("2026-04-07")
 
 	orig := &model.DocMeta{
 		FileID:       "file-123",
@@ -53,7 +63,7 @@ func TestDriveMetaRoundTrip(t *testing.T) {
 }
 
 func TestLoadDriveMetaNonExistent(t *testing.T) {
-	mf := paths.NewDriveMetaFile(t.TempDir(), "nope.json")
+	mf := testDriveFileDir(t).MetaFile("2026-04-07")
 	_, err := LoadDriveMeta(mf)
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
@@ -61,16 +71,21 @@ func TestLoadDriveMetaNonExistent(t *testing.T) {
 }
 
 func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
-	dir := t.TempDir()
+	fileDir := testDriveFileDir(t)
+
+	// Create the drive file directory so we can seed a stale meta file.
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Simulate a previously synced file with an older modifiedTime.
-	oldPath := filepath.Join(dir, "drive-meta-2026-04-01.json")
+	oldPath := filepath.Join(fileDir.Path(), "drive-meta-2026-04-01.json")
 	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Save with a newer modifiedTime.
-	mf := paths.NewDriveMetaFile(dir, "drive-meta-2026-04-07.json")
+	mf := fileDir.MetaFile("2026-04-07")
 	meta := &model.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
 	if err := SaveDriveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveDriveMeta: %v", err)
@@ -86,13 +101,16 @@ func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
 }
 
 func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
-	dir := t.TempDir()
+	fileDir := testDriveFileDir(t)
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create unrelated files that should not be touched.
 	unrelated := []string{
-		filepath.Join(dir, "Tab1.md"),
-		filepath.Join(dir, "comments.jsonl"),
-		filepath.Join(dir, "other.json"),
+		filepath.Join(fileDir.Path(), "Tab1.md"),
+		filepath.Join(fileDir.Path(), "comments.jsonl"),
+		filepath.Join(fileDir.Path(), "other.json"),
 	}
 	for _, p := range unrelated {
 		if err := os.WriteFile(p, []byte("keep me"), 0o644); err != nil {
@@ -100,7 +118,7 @@ func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
 		}
 	}
 
-	mf := paths.NewDriveMetaFile(dir, "drive-meta-2026-04-07.json")
+	mf := fileDir.MetaFile("2026-04-07")
 	meta := &model.DocMeta{FileID: "f1"}
 	if err := SaveDriveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveDriveMeta: %v", err)

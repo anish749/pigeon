@@ -122,11 +122,6 @@ type DriveMetaFile struct {
 	name string
 }
 
-// NewDriveMetaFile constructs a DriveMetaFile from a directory and a filename.
-// Primarily used by tests; production code should use DriveFileDir.MetaFile.
-func NewDriveMetaFile(dir, name string) DriveMetaFile {
-	return DriveMetaFile{dir: dir, name: name}
-}
 
 // Path returns the full file path.
 func (m DriveMetaFile) Path() string { return filepath.Join(m.dir, m.name) }
