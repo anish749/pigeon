@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	calendar "google.golang.org/api/calendar/v3"
+	drive "google.golang.org/api/drive/v3"
 )
 
 // Line is a parsed JSONL line. Exactly one of the typed fields is non-nil.
@@ -13,8 +14,7 @@ type Line struct {
 	Type        string
 	Email       *EmailLine
 	EmailDelete *EmailDeleteLine
-	Comment     *CommentLine
-	Reply       *ReplyLine
+	Comment     *DriveComment
 	Event       *CalendarEvent
 }
 
@@ -26,9 +26,7 @@ func (l Line) LineID() string {
 	case l.EmailDelete != nil:
 		return l.EmailDelete.ID
 	case l.Comment != nil:
-		return l.Comment.ID
-	case l.Reply != nil:
-		return l.Reply.ID
+		return l.Comment.Runtime.Id
 	case l.Event != nil:
 		return l.Event.Runtime.Id
 	default:
@@ -59,25 +57,38 @@ func Marshal(l Line) ([]byte, error) {
 			*EmailDeleteLine
 		}{t, l.EmailDelete})
 	case l.Comment != nil:
-		return json.Marshal(struct {
-			typed
-			*CommentLine
-		}{t, l.Comment})
-	case l.Reply != nil:
-		return json.Marshal(struct {
-			typed
-			*ReplyLine
-		}{t, l.Reply})
+		return marshalRaw(l.Comment.Serialized, "comment")
 	case l.Event != nil:
-		// Copy Serialized so we can inject the storage discriminator without
-		// mutating the caller's map.
-		out := make(map[string]any, len(l.Event.Serialized)+1)
-		maps.Copy(out, l.Event.Serialized)
-		out["type"] = "event"
-		return json.Marshal(out)
+		return marshalRaw(l.Event.Serialized, "event")
 	default:
 		return nil, fmt.Errorf("marshal line: no typed field set")
 	}
+}
+
+// marshalRaw copies a serialized map and injects the storage type discriminator
+// without mutating the caller's map.
+func marshalRaw(serialized map[string]any, typeTag string) ([]byte, error) {
+	out := make(map[string]any, len(serialized)+1)
+	maps.Copy(out, serialized)
+	out["type"] = typeTag
+	return json.Marshal(out)
+}
+
+// unmarshalRaw unmarshals the same bytes into both a typed destination and a
+// raw map, then strips the storage type discriminator from the map. It is
+// the symmetric counterpart to marshalRaw: marshal builds a map-with-type
+// from a Serialized field; unmarshal rebuilds Serialized without the type.
+func unmarshalRaw(data []byte, runtime any) (map[string]any, error) {
+	if err := json.Unmarshal(data, runtime); err != nil {
+		return nil, err
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(data, &serialized); err != nil {
+		return nil, err
+	}
+	// "type" is our storage discriminator, not part of the API response.
+	delete(serialized, "type")
+	return serialized, nil
 }
 
 // typeHeader is used to peek at the "type" field before full unmarshal.
@@ -111,28 +122,18 @@ func Parse(line string) (Line, error) {
 		}
 		l.EmailDelete = &v
 	case "comment":
-		var v CommentLine
-		if err := json.Unmarshal(data, &v); err != nil {
+		var runtime drive.Comment
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
 			return Line{}, fmt.Errorf("parse comment line: %w", err)
 		}
-		l.Comment = &v
-	case "reply":
-		var v ReplyLine
-		if err := json.Unmarshal(data, &v); err != nil {
-			return Line{}, fmt.Errorf("parse reply line: %w", err)
-		}
-		l.Reply = &v
+		l.Comment = &DriveComment{Runtime: runtime, Serialized: serialized}
 	case "event":
 		var runtime calendar.Event
-		if err := json.Unmarshal(data, &runtime); err != nil {
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
-		var serialized map[string]any
-		if err := json.Unmarshal(data, &serialized); err != nil {
-			return Line{}, fmt.Errorf("parse event line serialized: %w", err)
-		}
-		// "type" is our storage discriminator, not part of the API response.
-		delete(serialized, "type")
 		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", hdr.Type)

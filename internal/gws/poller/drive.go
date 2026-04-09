@@ -294,22 +294,20 @@ func driveSlug(title, fileID string) string {
 	return s + "-" + fileID
 }
 
-// storeComments fetches all comments and replies for a Drive file and writes
-// them to comments.jsonl, replacing the previous contents. The Drive Comments
-// API has no incremental sync — every call returns the full snapshot. Overwrite
-// ensures deleted comments disappear and resolved status stays current.
+// storeComments fetches all comments (with nested replies) for a Drive file
+// and writes them to comments.jsonl, replacing the previous contents. The
+// Drive Comments API has no incremental sync — every call returns the full
+// snapshot. Overwrite ensures deleted comments disappear and resolved status
+// stays current.
 func storeComments(fileDir paths.DriveFileDir, fileID string) error {
-	comments, replies, err := drive.ListComments(fileID)
+	comments, err := drive.ListComments(fileID)
 	if err != nil {
 		return fmt.Errorf("list comments for %s: %w", fileID, err)
 	}
 
-	var lines []model.Line
+	lines := make([]model.Line, 0, len(comments))
 	for _, c := range comments {
-		lines = append(lines, model.Line{Type: "comment", Comment: &c})
-	}
-	for _, r := range replies {
-		lines = append(lines, model.Line{Type: "reply", Reply: &r})
+		lines = append(lines, model.Line{Type: "comment", Comment: c})
 	}
 
 	if err := gwsstore.WriteLines(fileDir.CommentsFile(), lines); err != nil {

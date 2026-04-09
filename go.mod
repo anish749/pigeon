@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.15.0
 	github.com/jhillyerd/enmime v1.3.0

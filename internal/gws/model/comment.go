@@ -1,23 +1,22 @@
 package model
 
-import "time"
+import (
+	drive "google.golang.org/api/drive/v3"
+)
 
-// CommentLine represents a Google Drive comment in JSONL format.
-type CommentLine struct {
-	ID       string    `json:"id"`               // Drive comment ID
-	Ts       time.Time `json:"ts"`               // created time
-	Author   string    `json:"author"`           // display name
-	Content  string    `json:"content"`          // comment text
-	Anchor   string    `json:"anchor,omitempty"` // highlighted/quoted text
-	Resolved bool      `json:"resolved"`         // thread resolved state
-}
-
-// ReplyLine represents a reply to a Google Drive comment in JSONL format.
-type ReplyLine struct {
-	ID        string    `json:"id"`               // Drive reply ID
-	CommentID string    `json:"commentId"`        // parent comment ID
-	Ts        time.Time `json:"ts"`               // created time
-	Author    string    `json:"author"`           // display name
-	Content   string    `json:"content"`          // reply text
-	Action    string    `json:"action,omitempty"` // "resolve" or "reopen"
+// DriveComment holds two representations of a single Drive comment: a
+// typed view for in-process code and a raw map that is the source of truth
+// for disk storage.
+//
+// Runtime is the typed drive.Comment used by dedup and any code that needs
+// typed field access. Serialized is a JSON-shaped map that Marshal writes
+// verbatim to disk — it preserves every field the API returned, including
+// nested replies, even ones the generated SDK types don't know about.
+//
+// Only Serialized is persisted. Mutations to Runtime are not reflected on
+// disk unless they're also pushed into Serialized, so treat Runtime as a
+// read-only view of the comment.
+type DriveComment struct {
+	Runtime    drive.Comment
+	Serialized map[string]any
 }

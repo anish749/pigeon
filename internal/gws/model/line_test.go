@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	gcal "google.golang.org/api/calendar/v3"
+	drive "google.golang.org/api/drive/v3"
 )
 
 func TestMarshalParseEmail(t *testing.T) {
@@ -99,17 +101,40 @@ func TestMarshalParseEmailDelete(t *testing.T) {
 }
 
 func TestMarshalParseComment(t *testing.T) {
-	ts := time.Date(2026, 4, 7, 14, 0, 0, 0, time.UTC)
+	// Build a DriveComment by unmarshalling a raw API-shaped JSON both ways —
+	// mirrors how drive.ListComments populates Runtime + Serialized. Replies
+	// are nested inside the comment, just like the API returns them.
+	rawJSON := `{
+		"id": "cmt-1",
+		"author": {"displayName": "Alice", "me": false, "kind": "drive#user"},
+		"content": "Please review this section",
+		"htmlContent": "<p>Please review this section</p>",
+		"quotedFileContent": {"value": "highlighted text", "mimeType": "text/plain"},
+		"resolved": false,
+		"createdTime": "2026-04-07T14:00:00Z",
+		"modifiedTime": "2026-04-07T14:05:00Z",
+		"replies": [
+			{
+				"id": "rpl-1",
+				"author": {"displayName": "Bob"},
+				"content": "Done",
+				"createdTime": "2026-04-07T15:00:00Z",
+				"action": "resolve"
+			}
+		]
+	}`
+	var runtime drive.Comment
+	if err := json.Unmarshal([]byte(rawJSON), &runtime); err != nil {
+		t.Fatalf("unmarshal typed: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+
 	orig := Line{
-		Type: "comment",
-		Comment: &CommentLine{
-			ID:       "cmt-1",
-			Ts:       ts,
-			Author:   "Alice",
-			Content:  "Please review this section",
-			Anchor:   "highlighted text",
-			Resolved: false,
-		},
+		Type:    "comment",
+		Comment: &DriveComment{Runtime: runtime, Serialized: raw},
 	}
 
 	data, err := Marshal(orig)
@@ -128,57 +153,40 @@ func TestMarshalParseComment(t *testing.T) {
 	if got.Comment == nil {
 		t.Fatal("Comment is nil")
 	}
-	c := got.Comment
-	if c.ID != "cmt-1" {
-		t.Errorf("ID = %q, want %q", c.ID, "cmt-1")
-	}
-	if c.Author != "Alice" {
-		t.Errorf("Author = %q, want %q", c.Author, "Alice")
-	}
-	if c.Anchor != "highlighted text" {
-		t.Errorf("Anchor = %q, want %q", c.Anchor, "highlighted text")
-	}
-}
 
-func TestMarshalParseReply(t *testing.T) {
-	ts := time.Date(2026, 4, 7, 15, 0, 0, 0, time.UTC)
-	orig := Line{
-		Type: "reply",
-		Reply: &ReplyLine{
-			ID:        "rpl-1",
-			CommentID: "cmt-1",
-			Ts:        ts,
-			Author:    "Bob",
-			Content:   "Done",
-			Action:    "resolve",
-		},
+	// Runtime view round-trips, including nested replies.
+	c := got.Comment.Runtime
+	if c.Id != "cmt-1" {
+		t.Errorf("Runtime.Id = %q, want %q", c.Id, "cmt-1")
+	}
+	if c.Author == nil || c.Author.DisplayName != "Alice" {
+		t.Errorf("Runtime.Author = %v, want Alice", c.Author)
+	}
+	if c.QuotedFileContent == nil || c.QuotedFileContent.Value != "highlighted text" {
+		t.Errorf("Runtime.QuotedFileContent = %v, want highlighted text", c.QuotedFileContent)
+	}
+	if len(c.Replies) != 1 {
+		t.Fatalf("Runtime.Replies count = %d, want 1", len(c.Replies))
+	}
+	if c.Replies[0].Id != "rpl-1" || c.Replies[0].Action != "resolve" {
+		t.Errorf("Runtime.Replies[0] = %+v, want rpl-1/resolve", c.Replies[0])
 	}
 
-	data, err := Marshal(orig)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	// Serialized view preserves everything — including fields the runtime view
+	// may not pluck out (htmlContent, kind) — proving storage is lossless.
+	if got.Comment.Serialized["id"] != "cmt-1" {
+		t.Errorf("Serialized[id] = %v, want cmt-1", got.Comment.Serialized["id"])
 	}
-
-	got, err := Parse(string(data))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
+	if _, hasType := got.Comment.Serialized["type"]; hasType {
+		t.Error("Serialized should not contain the storage type discriminator")
 	}
-
-	if got.Type != "reply" {
-		t.Errorf("Type = %q, want %q", got.Type, "reply")
+	if got.Comment.Serialized["htmlContent"] != "<p>Please review this section</p>" {
+		t.Errorf("Serialized[htmlContent] = %v, want <p>...</p>", got.Comment.Serialized["htmlContent"])
 	}
-	if got.Reply == nil {
-		t.Fatal("Reply is nil")
-	}
-	r := got.Reply
-	if r.ID != "rpl-1" {
-		t.Errorf("ID = %q, want %q", r.ID, "rpl-1")
-	}
-	if r.CommentID != "cmt-1" {
-		t.Errorf("CommentID = %q, want %q", r.CommentID, "cmt-1")
-	}
-	if r.Action != "resolve" {
-		t.Errorf("Action = %q, want %q", r.Action, "resolve")
+	// Replies preserved nested inside the raw comment.
+	rawReplies, ok := got.Comment.Serialized["replies"].([]any)
+	if !ok || len(rawReplies) != 1 {
+		t.Fatalf("Serialized[replies] = %v, want 1-element array", got.Comment.Serialized["replies"])
 	}
 }
 
@@ -302,8 +310,7 @@ func TestLineID(t *testing.T) {
 	}{
 		{"email", Line{Email: &EmailLine{ID: "e1"}}, "e1"},
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
-		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
-		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
+		{"comment", Line{Comment: &DriveComment{Runtime: drive.Comment{Id: "c1"}}}, "c1"},
 		{"event", Line{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},
 	}
@@ -313,5 +320,182 @@ func TestLineID(t *testing.T) {
 				t.Errorf("LineID() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMarshalRaw_InjectsTypeDiscriminator(t *testing.T) {
+	in := map[string]any{"id": "x1", "name": "hello"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget", got["type"])
+	}
+	if got["id"] != "x1" {
+		t.Errorf("id = %v, want x1", got["id"])
+	}
+	if got["name"] != "hello" {
+		t.Errorf("name = %v, want hello", got["name"])
+	}
+}
+
+func TestMarshalRaw_DoesNotMutateCaller(t *testing.T) {
+	in := map[string]any{"id": "x1"}
+	if _, err := marshalRaw(in, "widget"); err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if _, hasType := in["type"]; hasType {
+		t.Error("caller's map was mutated: type key was injected")
+	}
+	if len(in) != 1 {
+		t.Errorf("caller's map size = %d, want 1", len(in))
+	}
+}
+
+func TestMarshalRaw_EmptyMap(t *testing.T) {
+	out, err := marshalRaw(map[string]any{}, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_NilMap(t *testing.T) {
+	out, err := marshalRaw(nil, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_OverwritesExistingTypeKey(t *testing.T) {
+	// If the caller's map already has a "type" key (e.g. from an API response
+	// that happened to use that field name), marshalRaw should overwrite it
+	// with the storage discriminator. The caller's map must not be mutated.
+	in := map[string]any{"type": "api-provided", "id": "x1"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget (discriminator should win)", got["type"])
+	}
+	if in["type"] != "api-provided" {
+		t.Errorf("caller's map was mutated: in[type] = %v, want api-provided", in["type"])
+	}
+}
+
+// testItem is a minimal typed struct used by unmarshalRaw tests.
+type testItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func TestUnmarshalRaw_PopulatesTypedAndStripsType(t *testing.T) {
+	data := []byte(`{"type":"widget","id":"x1","name":"hello","extra":42}`)
+	var runtime testItem
+	serialized, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+
+	// Typed view picks up known fields.
+	if runtime.ID != "x1" {
+		t.Errorf("runtime.ID = %q, want x1", runtime.ID)
+	}
+	if runtime.Name != "hello" {
+		t.Errorf("runtime.Name = %q, want hello", runtime.Name)
+	}
+
+	// Serialized drops the storage discriminator but keeps everything else,
+	// including fields the typed view doesn't know about.
+	if _, hasType := serialized["type"]; hasType {
+		t.Error("serialized should not contain the type discriminator")
+	}
+	if serialized["id"] != "x1" {
+		t.Errorf("serialized[id] = %v, want x1", serialized["id"])
+	}
+	if serialized["extra"] != float64(42) {
+		t.Errorf("serialized[extra] = %v, want 42 (proves unknown fields are preserved)", serialized["extra"])
+	}
+}
+
+func TestUnmarshalRaw_NoTypeKey(t *testing.T) {
+	// Input without a "type" key should still work — unmarshalRaw is
+	// tolerant of missing discriminators (the delete is a no-op).
+	data := []byte(`{"id":"x1","name":"hello"}`)
+	var runtime testItem
+	serialized, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+	if runtime.ID != "x1" {
+		t.Errorf("runtime.ID = %q, want x1", runtime.ID)
+	}
+	if serialized["id"] != "x1" {
+		t.Errorf("serialized[id] = %v, want x1", serialized["id"])
+	}
+}
+
+func TestUnmarshalRaw_InvalidJSON(t *testing.T) {
+	var runtime testItem
+	_, err := unmarshalRaw([]byte(`not json`), &runtime)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
+	// Round trip: serialized map → marshalRaw → bytes → unmarshalRaw →
+	// serialized map should equal the original, and the typed view should
+	// pick up its fields correctly.
+	orig := map[string]any{
+		"id":    "x1",
+		"name":  "hello",
+		"nested": map[string]any{
+			"a": "one",
+			"b": float64(2),
+		},
+		"list": []any{"a", "b", "c"},
+		"flag": true,
+	}
+
+	data, err := marshalRaw(orig, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+
+	var runtime testItem
+	got, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+
+	// Typed view picks up the declared fields.
+	if runtime.ID != "x1" || runtime.Name != "hello" {
+		t.Errorf("runtime = %+v, want {x1 hello}", runtime)
+	}
+
+	// Serialized round-trips exactly (minus the injected type discriminator,
+	// which unmarshalRaw strips).
+	if diff := cmp.Diff(orig, got); diff != "" {
+		t.Errorf("round trip did not preserve serialized map (-orig +got):\n%s", diff)
+	}
+	if _, hasType := got["type"]; hasType {
+		t.Error("round trip left the type discriminator in serialized")
 	}
 }
