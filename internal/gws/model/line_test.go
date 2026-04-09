@@ -321,3 +321,195 @@ func TestLineID(t *testing.T) {
 		})
 	}
 }
+
+func TestMarshalRaw_InjectsTypeDiscriminator(t *testing.T) {
+	in := map[string]any{"id": "x1", "name": "hello"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget", got["type"])
+	}
+	if got["id"] != "x1" {
+		t.Errorf("id = %v, want x1", got["id"])
+	}
+	if got["name"] != "hello" {
+		t.Errorf("name = %v, want hello", got["name"])
+	}
+}
+
+func TestMarshalRaw_DoesNotMutateCaller(t *testing.T) {
+	in := map[string]any{"id": "x1"}
+	if _, err := marshalRaw(in, "widget"); err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if _, hasType := in["type"]; hasType {
+		t.Error("caller's map was mutated: type key was injected")
+	}
+	if len(in) != 1 {
+		t.Errorf("caller's map size = %d, want 1", len(in))
+	}
+}
+
+func TestMarshalRaw_EmptyMap(t *testing.T) {
+	out, err := marshalRaw(map[string]any{}, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_NilMap(t *testing.T) {
+	out, err := marshalRaw(nil, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_OverwritesExistingTypeKey(t *testing.T) {
+	// If the caller's map already has a "type" key (e.g. from an API response
+	// that happened to use that field name), marshalRaw should overwrite it
+	// with the storage discriminator. The caller's map must not be mutated.
+	in := map[string]any{"type": "api-provided", "id": "x1"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget (discriminator should win)", got["type"])
+	}
+	if in["type"] != "api-provided" {
+		t.Errorf("caller's map was mutated: in[type] = %v, want api-provided", in["type"])
+	}
+}
+
+// testItem is a minimal typed struct used by unmarshalRaw tests.
+type testItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func TestUnmarshalRaw_PopulatesTypedAndStripsType(t *testing.T) {
+	data := []byte(`{"type":"widget","id":"x1","name":"hello","extra":42}`)
+	var runtime testItem
+	serialized, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+
+	// Typed view picks up known fields.
+	if runtime.ID != "x1" {
+		t.Errorf("runtime.ID = %q, want x1", runtime.ID)
+	}
+	if runtime.Name != "hello" {
+		t.Errorf("runtime.Name = %q, want hello", runtime.Name)
+	}
+
+	// Serialized drops the storage discriminator but keeps everything else,
+	// including fields the typed view doesn't know about.
+	if _, hasType := serialized["type"]; hasType {
+		t.Error("serialized should not contain the type discriminator")
+	}
+	if serialized["id"] != "x1" {
+		t.Errorf("serialized[id] = %v, want x1", serialized["id"])
+	}
+	if serialized["extra"] != float64(42) {
+		t.Errorf("serialized[extra] = %v, want 42 (proves unknown fields are preserved)", serialized["extra"])
+	}
+}
+
+func TestUnmarshalRaw_NoTypeKey(t *testing.T) {
+	// Input without a "type" key should still work — unmarshalRaw is
+	// tolerant of missing discriminators (the delete is a no-op).
+	data := []byte(`{"id":"x1","name":"hello"}`)
+	var runtime testItem
+	serialized, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+	if runtime.ID != "x1" {
+		t.Errorf("runtime.ID = %q, want x1", runtime.ID)
+	}
+	if serialized["id"] != "x1" {
+		t.Errorf("serialized[id] = %v, want x1", serialized["id"])
+	}
+}
+
+func TestUnmarshalRaw_InvalidJSON(t *testing.T) {
+	var runtime testItem
+	_, err := unmarshalRaw([]byte(`not json`), &runtime)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
+	// Round trip: serialized map → marshalRaw → bytes → unmarshalRaw →
+	// serialized map should equal the original, and the typed view should
+	// pick up its fields correctly.
+	orig := map[string]any{
+		"id":    "x1",
+		"name":  "hello",
+		"nested": map[string]any{
+			"a": "one",
+			"b": float64(2),
+		},
+		"list": []any{"a", "b", "c"},
+		"flag": true,
+	}
+
+	data, err := marshalRaw(orig, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+
+	var runtime testItem
+	got, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+
+	// Typed view picks up the declared fields.
+	if runtime.ID != "x1" || runtime.Name != "hello" {
+		t.Errorf("runtime = %+v, want {x1 hello}", runtime)
+	}
+
+	// Serialized round-trips exactly (minus the injected type discriminator,
+	// which unmarshalRaw strips).
+	if !jsonEqual(orig, got) {
+		t.Errorf("round trip did not preserve serialized map\n orig: %#v\n  got: %#v", orig, got)
+	}
+	if _, hasType := got["type"]; hasType {
+		t.Error("round trip left the type discriminator in serialized")
+	}
+}
+
+// jsonEqual compares two values for JSON equality by marshalling both and
+// comparing bytes. This sidesteps map ordering and type quirks (e.g. all
+// JSON numbers unmarshal as float64).
+func jsonEqual(a, b any) bool {
+	ab, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(ab) == string(bb)
+}
