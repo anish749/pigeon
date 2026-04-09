@@ -27,9 +27,6 @@ func TestToEventLine(t *testing.T) {
 
 	line := ev.ToEventLine()
 
-	if line.Type != "event" {
-		t.Errorf("Type = %q, want %q", line.Type, "event")
-	}
 	if line.ID != "evt-123" {
 		t.Errorf("ID = %q, want %q", line.ID, "evt-123")
 	}

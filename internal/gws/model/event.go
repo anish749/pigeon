@@ -4,7 +4,6 @@ import "log/slog"
 
 // EventLine represents a Google Calendar event in JSONL format.
 type EventLine struct {
-	Type        string   `json:"type"`                  // always "event"
 	ID          string   `json:"id"`                    // Calendar event ID
 	Ts          string   `json:"ts"`                    // created time (RFC 3339)
 	Updated     string   `json:"updated"`               // last modified (RFC 3339)

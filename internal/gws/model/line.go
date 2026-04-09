@@ -33,19 +33,43 @@ func (l Line) LineID() string {
 	}
 }
 
+// typed is embedded in anonymous structs to inject the "type" field during
+// JSON marshaling. The Type field is first so it appears first in the output.
+type typed struct {
+	Type string `json:"type"`
+}
+
 // Marshal serialises a Line to JSONL (one JSON object, no trailing newline).
+// The "type" discriminator is injected from Line.Type — inner structs do not
+// carry a Type field.
 func Marshal(l Line) ([]byte, error) {
+	t := typed{Type: l.Type}
 	switch {
 	case l.Email != nil:
-		return json.Marshal(l.Email)
+		return json.Marshal(struct {
+			typed
+			*EmailLine
+		}{t, l.Email})
 	case l.EmailDelete != nil:
-		return json.Marshal(l.EmailDelete)
+		return json.Marshal(struct {
+			typed
+			*EmailDeleteLine
+		}{t, l.EmailDelete})
 	case l.Comment != nil:
-		return json.Marshal(l.Comment)
+		return json.Marshal(struct {
+			typed
+			*CommentLine
+		}{t, l.Comment})
 	case l.Reply != nil:
-		return json.Marshal(l.Reply)
+		return json.Marshal(struct {
+			typed
+			*ReplyLine
+		}{t, l.Reply})
 	case l.Event != nil:
-		return json.Marshal(l.Event)
+		return json.Marshal(struct {
+			typed
+			*EventLine
+		}{t, l.Event})
 	default:
 		return nil, fmt.Errorf("marshal line: no typed field set")
 	}

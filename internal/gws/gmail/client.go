@@ -174,7 +174,6 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 	}
 
 	return &model.EmailLine{
-		Type:     "email",
 		ID:       msg.ID,
 		ThreadID: msg.ThreadID,
 		Ts:       ts,

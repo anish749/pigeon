@@ -314,7 +314,6 @@ func toCommentLine(dc driveComment) (model.CommentLine, error) {
 		anchor = dc.QuotedFileContent.Value
 	}
 	return model.CommentLine{
-		Type:     "comment",
 		ID:       dc.ID,
 		Ts:       ts,
 		Author:   dc.Author.DisplayName,
@@ -330,7 +329,6 @@ func toReplyLine(commentID string, dr driveReply) (model.ReplyLine, error) {
 		return model.ReplyLine{}, fmt.Errorf("parse reply %s time %q: %w", dr.ID, dr.CreatedTime, err)
 	}
 	return model.ReplyLine{
-		Type:      "reply",
 		ID:        dr.ID,
 		CommentID: commentID,
 		Ts:        ts,

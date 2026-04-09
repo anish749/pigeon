@@ -4,7 +4,6 @@ import "time"
 
 // CommentLine represents a Google Drive comment in JSONL format.
 type CommentLine struct {
-	Type     string    `json:"type"`             // always "comment"
 	ID       string    `json:"id"`               // Drive comment ID
 	Ts       time.Time `json:"ts"`               // created time
 	Author   string    `json:"author"`           // display name
@@ -15,7 +14,6 @@ type CommentLine struct {
 
 // ReplyLine represents a reply to a Google Drive comment in JSONL format.
 type ReplyLine struct {
-	Type      string    `json:"type"`             // always "reply"
 	ID        string    `json:"id"`               // Drive reply ID
 	CommentID string    `json:"commentId"`        // parent comment ID
 	Ts        time.Time `json:"ts"`               // created time

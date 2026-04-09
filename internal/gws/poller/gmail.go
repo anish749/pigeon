@@ -35,9 +35,8 @@ func PollGmail(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	now := time.Now()
 	for _, msgID := range deleted {
 		del := &model.EmailDeleteLine{
-			Type: "email-delete",
-			ID:   msgID,
-			Ts:   now,
+			ID: msgID,
+			Ts: now,
 		}
 		datePath := account.Gmail().DateFile(now.Format("2006-01-02"))
 		line := model.Line{Type: "email-delete", EmailDelete: del}
