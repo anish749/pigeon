@@ -6,38 +6,50 @@ import (
 	calendar "google.golang.org/api/calendar/v3"
 )
 
+// CalendarEvent holds two representations of a single calendar event: a
+// typed view for in-process code and a raw map that is the source of truth
+// for disk storage.
+//
+// Runtime is the typed calendar.Event used by classify, dedup, date extraction,
+// and anything else that needs field access. Serialized is a JSON-shaped map
+// that Marshal writes verbatim to disk — it preserves every field the API
+// returned, even ones the generated SDK types don't know about.
+//
+// Only Serialized is persisted. Mutations to Runtime are not reflected on
+// disk unless they're also pushed into Serialized, so treat Runtime as a
+// read-only view of the event.
 type CalendarEvent struct {
-	Parsed calendar.Event         // This is used in the write layer for extracting info from the types.
-	Raw    map[string]any // This is used for serialization. We know that calendar events are JSON structs, not arrays / strings
+	Runtime    *calendar.Event
+	Serialized map[string]any
 }
 
-// EventDateForStorage returns the YYYY-MM-DD date for filing a calendar event
+// DateForStorage returns the YYYY-MM-DD date for filing a calendar event
 // into a per-day log file. Priority: Start > OriginalStartTime > Updated.
-func (e *CalendarEvent) EventDateForStorage() string {
-	if e.Parsed.Start != nil {
-		if d := dateFromRFC3339(e.Parsed.Start.DateTime); d != "" {
+func (e *CalendarEvent) DateForStorage() string {
+	if e.Runtime.Start != nil {
+		if d := dateFromRFC3339(e.Runtime.Start.DateTime); d != "" {
 			return d
 		}
-		if e.Parsed.Start.Date != "" {
-			return e.Parsed.Start.Date
+		if e.Runtime.Start.Date != "" {
+			return e.Runtime.Start.Date
 		}
 	}
 	// Cancelled recurring instances carry the original start instead of start/end.
-	if e.Parsed.OriginalStartTime != nil {
-		if d := dateFromRFC3339(e.Parsed.OriginalStartTime.DateTime); d != "" {
+	if e.Runtime.OriginalStartTime != nil {
+		if d := dateFromRFC3339(e.Runtime.OriginalStartTime.DateTime); d != "" {
 			return d
 		}
-		if e.Parsed.OriginalStartTime.Date != "" {
-			return e.Parsed.OriginalStartTime.Date
+		if e.Runtime.OriginalStartTime.Date != "" {
+			return e.Runtime.OriginalStartTime.Date
 		}
 	}
-	if d := dateFromRFC3339(e.Parsed.Updated); d != "" {
+	if d := dateFromRFC3339(e.Runtime.Updated); d != "" {
 		slog.Warn("calendar event has no start time, falling back to updated",
-			"event_id", e.Parsed.Id, "status", e.Parsed.Status)
+			"event_id", e.Runtime.Id, "status", e.Runtime.Status)
 		return d
 	}
 	slog.Warn("calendar event has no parseable date, filing under unknown",
-		"event_id", e.Parsed.Id, "status", e.Parsed.Status)
+		"event_id", e.Runtime.Id, "status", e.Runtime.Status)
 	return "unknown"
 }
 

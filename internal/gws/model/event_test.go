@@ -85,10 +85,10 @@ func TestEventDateForStorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ce := &CalendarEvent{Parsed: *tt.ev}
-			got := ce.EventDateForStorage()
+			ce := &CalendarEvent{Runtime: tt.ev}
+			got := ce.DateForStorage()
 			if got != tt.want {
-				t.Errorf("EventDateForStorage() = %q, want %q", got, tt.want)
+				t.Errorf("DateForStorage() = %q, want %q", got, tt.want)
 			}
 		})
 	}

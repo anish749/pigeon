@@ -82,8 +82,8 @@ func pairItems(items []*gcal.Event, raws []map[string]any) []*model.CalendarEven
 	result := make([]*model.CalendarEvent, len(items))
 	for i, item := range items {
 		result[i] = &model.CalendarEvent{
-			Parsed: *item,
-			Raw:    raws[i],
+			Runtime:    item,
+			Serialized: raws[i],
 		}
 	}
 	return result
@@ -93,11 +93,11 @@ func pairItems(items []*gcal.Event, raws []map[string]any) []*model.CalendarEven
 // (for expansion), and cancelled recurring parent IDs (for removal).
 func classify(items []*model.CalendarEvent) (events []*model.CalendarEvent, recurringIDs, cancelledRecurringIDs []string) {
 	for _, item := range items {
-		if len(item.Parsed.Recurrence) > 0 {
-			if item.Parsed.Status == "cancelled" {
-				cancelledRecurringIDs = append(cancelledRecurringIDs, item.Parsed.Id)
+		if len(item.Runtime.Recurrence) > 0 {
+			if item.Runtime.Status == "cancelled" {
+				cancelledRecurringIDs = append(cancelledRecurringIDs, item.Runtime.Id)
 			} else {
-				recurringIDs = append(recurringIDs, item.Parsed.Id)
+				recurringIDs = append(recurringIDs, item.Runtime.Id)
 			}
 			continue
 		}

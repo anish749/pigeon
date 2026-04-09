@@ -8,10 +8,10 @@ import (
 )
 
 // newEvent is a test helper that wraps a gcal.Event into the CalendarEvent
-// shape the production code expects. Raw is left nil because classify() only
-// reads from Parsed.
+// shape the production code expects. Serialized is left nil because
+// classify() only reads from Runtime.
 func newEvent(e gcal.Event) *model.CalendarEvent {
-	return &model.CalendarEvent{Parsed: e}
+	return &model.CalendarEvent{Runtime: &e}
 }
 
 func TestClassify_OneOffEvent(t *testing.T) {
@@ -28,8 +28,8 @@ func TestClassify_OneOffEvent(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events count = %d, want 1", len(events))
 	}
-	if events[0].Parsed.Id != "evt-123" {
-		t.Errorf("events[0].Parsed.Id = %q, want %q", events[0].Parsed.Id, "evt-123")
+	if events[0].Runtime.Id != "evt-123" {
+		t.Errorf("events[0].Runtime.Id = %q, want %q", events[0].Runtime.Id, "evt-123")
 	}
 	if len(recurringIDs) != 0 {
 		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
@@ -97,8 +97,8 @@ func TestClassify_RecurringInstance(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events count = %d, want 1 (instances are writable)", len(events))
 	}
-	if events[0].Parsed.Id != "evt-instance-1" {
-		t.Errorf("events[0].Parsed.Id = %q, want %q", events[0].Parsed.Id, "evt-instance-1")
+	if events[0].Runtime.Id != "evt-instance-1" {
+		t.Errorf("events[0].Runtime.Id = %q, want %q", events[0].Runtime.Id, "evt-instance-1")
 	}
 	if len(recurringIDs) != 0 {
 		t.Errorf("recurringIDs = %v, want empty", recurringIDs)

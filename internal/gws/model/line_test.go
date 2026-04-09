@@ -217,7 +217,7 @@ func TestMarshalParseEvent(t *testing.T) {
 
 	orig := Line{
 		Type:  "event",
-		Event: &CalendarEvent{Parsed: parsed, Raw: raw},
+		Event: &CalendarEvent{Runtime: &parsed, Serialized: raw},
 	}
 
 	data, err := Marshal(orig)
@@ -237,38 +237,39 @@ func TestMarshalParseEvent(t *testing.T) {
 		t.Fatal("Event is nil")
 	}
 
-	// Typed view round-trips.
-	ev := &got.Event.Parsed
+	// Runtime view round-trips.
+	ev := got.Event.Runtime
 	if ev.Id != "evt-1" {
-		t.Errorf("Parsed.Id = %q, want %q", ev.Id, "evt-1")
+		t.Errorf("Runtime.Id = %q, want %q", ev.Id, "evt-1")
 	}
 	if ev.Summary != "Team standup" {
-		t.Errorf("Parsed.Summary = %q, want %q", ev.Summary, "Team standup")
+		t.Errorf("Runtime.Summary = %q, want %q", ev.Summary, "Team standup")
 	}
 	if ev.Location != "Room 42" {
-		t.Errorf("Parsed.Location = %q, want %q", ev.Location, "Room 42")
+		t.Errorf("Runtime.Location = %q, want %q", ev.Location, "Room 42")
 	}
 	if len(ev.Attendees) != 2 {
-		t.Errorf("Parsed.Attendees count = %d, want 2", len(ev.Attendees))
+		t.Errorf("Runtime.Attendees count = %d, want 2", len(ev.Attendees))
 	}
 	if ev.RecurringEventId != "evt-base" {
-		t.Errorf("Parsed.RecurringEventId = %q, want %q", ev.RecurringEventId, "evt-base")
+		t.Errorf("Runtime.RecurringEventId = %q, want %q", ev.RecurringEventId, "evt-base")
 	}
 	if ev.Start == nil || ev.Start.DateTime != "2026-04-07T09:00:00-07:00" {
-		t.Errorf("Parsed.Start.DateTime = %v, want 2026-04-07T09:00:00-07:00", ev.Start)
+		t.Errorf("Runtime.Start.DateTime = %v, want 2026-04-07T09:00:00-07:00", ev.Start)
 	}
 
-	// Raw view preserves everything, including fields we care about via Parsed.
-	if got.Event.Raw["id"] != "evt-1" {
-		t.Errorf("Raw[id] = %v, want evt-1", got.Event.Raw["id"])
+	// Serialized view preserves everything, including fields the runtime view
+	// doesn't need to read directly.
+	if got.Event.Serialized["id"] != "evt-1" {
+		t.Errorf("Serialized[id] = %v, want evt-1", got.Event.Serialized["id"])
 	}
-	if _, hasType := got.Event.Raw["type"]; hasType {
-		t.Error("Raw should not contain the storage type discriminator")
+	if _, hasType := got.Event.Serialized["type"]; hasType {
+		t.Error("Serialized should not contain the storage type discriminator")
 	}
-	// A field stored in Raw but typically not interesting to Parsed consumers
-	// is still preserved — proving the raw form is lossless.
-	if got.Event.Raw["iCalUID"] != "evt-1@google.com" {
-		t.Errorf("Raw[iCalUID] = %v, want evt-1@google.com", got.Event.Raw["iCalUID"])
+	// A field the runtime view typically ignores is still preserved — proving
+	// the serialized form is lossless.
+	if got.Event.Serialized["iCalUID"] != "evt-1@google.com" {
+		t.Errorf("Serialized[iCalUID] = %v, want evt-1@google.com", got.Event.Serialized["iCalUID"])
 	}
 }
 
@@ -303,7 +304,7 @@ func TestLineID(t *testing.T) {
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
 		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
 		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
-		{"event", Line{Event: &CalendarEvent{Parsed: gcal.Event{Id: "v1"}}}, "v1"},
+		{"event", Line{Event: &CalendarEvent{Runtime: &gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},
 	}
 	for _, tt := range tests {

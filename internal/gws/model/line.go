@@ -30,7 +30,7 @@ func (l Line) LineID() string {
 	case l.Reply != nil:
 		return l.Reply.ID
 	case l.Event != nil:
-		return l.Event.Parsed.Id
+		return l.Event.Runtime.Id
 	default:
 		return ""
 	}
@@ -69,12 +69,12 @@ func Marshal(l Line) ([]byte, error) {
 			*ReplyLine
 		}{t, l.Reply})
 	case l.Event != nil:
-		// Copy Raw so we can inject the storage discriminator without
+		// Copy Serialized so we can inject the storage discriminator without
 		// mutating the caller's map.
-		copyRaw := make(map[string]any, len(l.Event.Raw)+1)
-		maps.Copy(copyRaw, l.Event.Raw)
-		copyRaw["type"] = "event"
-		return json.Marshal(copyRaw)
+		out := make(map[string]any, len(l.Event.Serialized)+1)
+		maps.Copy(out, l.Event.Serialized)
+		out["type"] = "event"
+		return json.Marshal(out)
 	default:
 		return nil, fmt.Errorf("marshal line: no typed field set")
 	}
@@ -123,17 +123,17 @@ func Parse(line string) (Line, error) {
 		}
 		l.Reply = &v
 	case "event":
-		var parsed calendar.Event
-		if err := json.Unmarshal(data, &parsed); err != nil {
+		var runtime calendar.Event
+		if err := json.Unmarshal(data, &runtime); err != nil {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return Line{}, fmt.Errorf("parse event line raw: %w", err)
+		var serialized map[string]any
+		if err := json.Unmarshal(data, &serialized); err != nil {
+			return Line{}, fmt.Errorf("parse event line serialized: %w", err)
 		}
 		// "type" is our storage discriminator, not part of the API response.
-		delete(raw, "type")
-		l.Event = &CalendarEvent{Parsed: parsed, Raw: raw}
+		delete(serialized, "type")
+		l.Event = &CalendarEvent{Runtime: &runtime, Serialized: serialized}
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", hdr.Type)
 	}

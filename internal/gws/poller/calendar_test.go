@@ -206,7 +206,7 @@ func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
 
 func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 	for _, e := range events {
-		if e.Parsed.Summary == summary {
+		if e.Runtime.Summary == summary {
 			return true
 		}
 	}
@@ -216,7 +216,7 @@ func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 func eventsWithPrefix(events []*model.CalendarEvent, prefix string) []*model.CalendarEvent {
 	var matched []*model.CalendarEvent
 	for _, e := range events {
-		if strings.HasPrefix(e.Parsed.Id, prefix) {
+		if strings.HasPrefix(e.Runtime.Id, prefix) {
 			matched = append(matched, e)
 		}
 	}
