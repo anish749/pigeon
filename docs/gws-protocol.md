@@ -5,13 +5,38 @@ standard tools. This protocol covers four data types: Gmail messages,
 Google Docs, Google Sheets, and Google Calendar events. All files are
 UTF-8 encoded.
 
+This document describes the on-disk wire format, directory layout, and
+sync behaviour. It is a contract for what lands on disk, not a code
+reference — anything a reader or external tool needs to understand to
+work with pigeon's Google Workspace storage should be here.
+
+## Storage Philosophy
+
+Per-item JSONL collections (calendar events, drive comments) are stored
+as the **raw API response** plus a single injected `type` discriminator.
+Pigeon does not pick a subset of "interesting" fields — the full
+response from the Google API lands on disk verbatim. This makes storage
+lossless against any field we don't currently use and future-proof
+against new fields Google adds. The unit of grep for these collections
+is the line, which represents one whole item.
+
+Parsed-content files (Docs → markdown, Sheets → CSV) are stored in a
+**converted form** because the raw API response isn't greppable — text
+is fragmented across styled runs, interleaved with metadata. For these,
+the converted output IS the greppable form.
+
+Envelope-and-body data (Gmail) uses parsed fields on the line because
+the actual message content lives inside base64-encoded MIME, not in the
+JSON envelope. Parsing MIME is necessary for greppability.
+
 ## Deduplication Rule
 
 All JSONL line types use the same rule: **deduplicate by ID, keep last
-occurrence.** This applies uniformly to emails, comments, replies, and
-calendar events. For immutable data (messages), duplicates are identical
-so first vs last produces the same result. For mutable data (events,
-comment resolved status), keeping last ensures the latest state wins.
+occurrence.** This applies uniformly to emails, comments, and calendar
+events. For immutable data (messages), duplicates are identical so first
+vs last produces the same result. For mutable data (events, comments
+with resolved status changes), keeping last ensures the latest state
+wins.
 
 ## Polling and Sync
 
@@ -19,16 +44,31 @@ All four data types use poll-based sync via the `gws` CLI. Each service
 has a cursor that tracks the last-seen state. The daemon polls every 20
 seconds, calling gws with the saved cursor and processing the delta.
 
-| Service | Cursor type | gws command | Seed command |
-|---------|-------------|-------------|--------------|
-| Gmail | `historyId` (monotonic integer) | `gmail users history list` | `gmail users getProfile` |
-| Drive | `pageToken` (opaque string) | `drive changes list` | `drive changes getStartPageToken` |
-| Calendar | `syncToken` (opaque string) | `calendar events list` | `calendar events list` with `timeMin=now` |
+| Service | Cursor type | gws command |
+|---------|-------------|-------------|
+| Gmail | `historyId` (monotonic integer) | `gmail users history list` |
+| Drive | `pageToken` (opaque string) | `drive changes list` |
+| Calendar | `syncToken` + expanded window state | `calendar events list` |
+
+### First-Run Backfill
+
+On first sync (no cursor) each service backfills ~90 days of history
+before acquiring the cursor for incremental polling:
+
+| Service | Backfill method |
+|---------|-----------------|
+| Gmail | `gmail messages list` with `q=after:{now-90d}`, then fetch each |
+| Drive | `drive files list` with `modifiedTime > now-90d` filter, then process each file through the same pipeline as incremental changes |
+| Calendar | `calendar events list` with `timeMin=now-90d`, expanding each recurring event via `events.instances` within ±90 days |
+
+Backfill writes data to disk before the cursor is saved. If the backfill
+is interrupted, re-running starts over — idempotency comes from the
+keep-last-by-ID dedup rule.
 
 ### Sync Procedure
 
 1. Load cursor from `.sync-cursors.yaml`.
-2. If no cursor, seed it (first run).
+2. If no cursor, run the service's backfill, then seed the cursor.
 3. Call the service with the cursor. Paginate until the final page
    (the one that returns the next cursor, not a `nextPageToken`).
 4. Process each item in the delta.
@@ -38,12 +78,13 @@ seconds, calling gws with the saved cursor and processing the delta.
 
 | Service | Cursor validity | Recovery |
 |---------|----------------|----------|
-| Gmail | `historyId` valid ~1 week | Full resync (re-seed from profile) |
+| Gmail | `historyId` valid ~1 week | Full resync (re-seed + backfill) |
 | Drive | `pageToken` does not expire | N/A |
-| Calendar | `syncToken` valid indefinitely (invalidated by server rarely) | Full resync (re-seed with `timeMin`) |
+| Calendar | `syncToken` valid indefinitely; occasionally invalidated by server | Full resync (re-seed + backfill) |
 
 When a cursor is rejected (HTTP 410 Gone for Calendar, HTTP 404 for
-Gmail), the poller clears the cursor and re-seeds on the next cycle.
+Gmail, or HTTP 400/invalid for Calendar), the poller clears the cursor
+and re-seeds on the next cycle.
 
 ## Directory Layout
 
@@ -52,20 +93,21 @@ Gmail), the poller clears the cursor and re-seeds on the next cycle.
 └── gws/                                        # platform
     ├── {account-slug}/                         # e.g. user-at-company-com
     │   ├── .sync-cursors.yaml                  # all cursors (gmail, drive, calendar)
+    │   ├── .poll-metrics.jsonl                 # per-poll telemetry
     │   ├── gmail/
     │   │   └── YYYY-MM-DD.jsonl                # email messages
     │   ├── gdrive/
-    │   │   ├── {doc-title-slug}/               # Google Doc
+    │   │   ├── {doc-title-slug-fileId}/        # Google Doc
     │   │   │   ├── {TabName}.md                # one markdown file per tab
     │   │   │   ├── attachments/                # inline images
     │   │   │   │   └── img-{objectId}.png      # downloaded image file
     │   │   │   ├── comments.jsonl              # comment threads
-    │   │   │   └── meta.json                   # sync metadata
-    │   │   └── {sheet-title-slug}/             # Google Sheet
+    │   │   │   └── drive-meta-YYYY-MM-DD.json  # sync metadata, dated by modifiedTime
+    │   │   └── {sheet-title-slug-fileId}/      # Google Sheet
     │   │       ├── {SheetName}.csv             # cell values per sheet
     │   │       ├── {SheetName}.formulas.csv    # formulas per sheet (optional)
     │   │       ├── comments.jsonl              # comment threads
-    │   │       └── meta.json                   # sync metadata
+    │   │       └── drive-meta-YYYY-MM-DD.json  # sync metadata
     │   └── gcalendar/
     │       └── {calendar-slug}/                # "primary", etc.
     │           └── YYYY-MM-DD.jsonl            # events by start date
@@ -103,9 +145,26 @@ gmail:
 drive:
   page_token: "1339021"
 calendar:
-  primary: "CP_frMzs2JMDEP_frMzs2JMDGAUg..."
-  work: "CJ2abc..."
+  primary:
+    sync_token: "CP_frMzs2JMDEP_frMzs2JMDGAUg..."
+    expanded_until: "2026-07-07T22:05:12Z"
+    recurring_events:
+      - "ql2e63sqv9o8jb46grq4msqijc"
+      - "e27b9a1sjhrn69l7bfatv4ultc"
 ```
+
+The calendar cursor is structured rather than a plain token because the
+calendar syncer tracks three pieces of state per calendar: the Google
+`syncToken` for incremental delta, the end of the window into which
+recurring events have been expanded (`expanded_until`), and the list of
+known recurring event parent IDs so window expansion can extend them
+without refetching the change list.
+
+### Poll Metrics
+
+`.poll-metrics.jsonl` records one line per poll cycle with per-service
+durations, item counts, and error flags. Used for monitoring and
+debugging. Append-only; rotated on disk by size.
 
 ---
 
@@ -125,14 +184,25 @@ simultaneously).
 
 ### Sync Flow
 
-1. Poll `gmail users history list` with `startHistoryId`.
-2. Response contains `messagesAdded` and `messagesDeleted` arrays.
-3. For each added message, fetch the full message via
-   `gmail users messages get` with `format=full`.
-4. Extract headers, body, and attachments. Store as one JSONL line.
-5. For each deleted message, append a delete line.
+1. **First run:** backfill via `gmail messages list` with
+   `q=after:{now-90d}`. Fetch each returned message, parse, and write.
+   Then acquire the starting `historyId` from `gmail users getProfile`.
+2. **Incremental:** poll `gmail users history list` with `startHistoryId`.
+3. Response contains `messagesAdded` and `messagesDeleted` arrays.
+4. For each added message, fetch the full message via
+   `gmail users messages get` with `format=raw`.
+5. Decode the base64url RFC 2822 body, extract headers, body parts, and
+   attachment metadata. Store as one JSONL line.
+6. For each deleted message, append a delete line.
 
 ### Line Types
+
+Unlike calendar events and drive comments, Gmail line types are
+**parsed**, not raw. The Gmail API response wraps the actual message
+content in a base64-encoded RFC 2822 MIME envelope, which is not
+directly greppable — so pigeon parses the MIME and stores extracted
+fields (from, subject, body text, attachment metadata) on the line.
+The raw MIME bytes are not currently persisted.
 
 #### Email Line
 
@@ -215,12 +285,17 @@ deletes and removes both lines.
 
 ### Organization
 
-Each Google Doc is a directory named by the slugified document title.
-The directory contains:
+Each Google Doc is a directory named by the slugified document title
+plus the Drive file ID (for collision resistance when two docs share a
+title). The directory contains:
 
 - `{TabName}.md` — one markdown file per document tab.
-- `comments.jsonl` — comment threads as JSONL.
-- `.meta.json` — sync metadata.
+- `attachments/` — inline images referenced by the markdown.
+- `comments.jsonl` — comment threads as JSONL (one comment per line,
+  replies nested inside).
+- `drive-meta-YYYY-MM-DD.json` — sync metadata, filename encodes the
+  file's `modifiedTime` date for efficient "find recently modified
+  files" queries.
 
 ### Document Tabs
 
@@ -236,19 +311,22 @@ each tab independently via `docs documents.get` with
 
 ### Sync Flow
 
-1. Poll `drive changes list` with `pageToken`.
-2. For each changed file where `mimeType` is
+1. **First run:** backfill via `drive files list` with
+   `modifiedTime > now-90d` and `mimeType` filter. Each returned file
+   flows through the same pipeline as an incremental change.
+2. **Incremental:** poll `drive changes list` with `pageToken`.
+3. For each changed file where `mimeType` is
    `application/vnd.google-apps.document`:
    a. Fetch the document: `docs documents get` with
       `includeTabsContent=true`.
    b. For each tab, convert the body to markdown. Store as
       `{TabName}.md`. If a tab is renamed, the old file remains
       and a new file is created.
-   c. Fetch comments: `drive comments list` with all fields.
-      Append new comments and replies to `comments.jsonl`.
-3. The document directory name is the slugified title from the file
-   metadata. If the title changes, a new directory is created (same
-   limitation as channel renames in the messaging protocol).
+   c. Fetch comments: `drive comments list`.
+      Write `comments.jsonl` as a full snapshot (see Comment Sync below).
+4. The document directory name is the slugified title plus the Drive
+   file ID. If the title changes, a new directory is created — the old
+   directory remains with its last-synced content.
 
 ### Content Files
 
@@ -268,56 +346,60 @@ It does **not** preserve:
 - Drawing objects.
 - Smart chips, person mentions.
 
-### Comment Line Types
+### Comment Line Format
 
-#### Comment Line
+Each line is the **raw Drive comment JSON** (everything the API
+returned) plus a `"type":"comment"` discriminator. Replies are nested
+inside their parent comment's `replies` array, exactly as the Drive API
+returns them. Only the `type` key is injected by pigeon; every other
+field is verbatim from the API response.
 
 ```json
-{"type":"comment","id":"AAABedbmvS8","ts":"2025-04-04T15:42:13Z","author":"User A","content":"416 may return a body...","anchor":"416","resolved":false}
+{"type":"comment","id":"AAABedbmvS8","kind":"drive#comment","author":{"kind":"drive#user","displayName":"User A","me":false},"content":"416 may return a body...","htmlContent":"<p>416 may return a body...</p>","createdTime":"2025-04-04T15:42:13Z","modifiedTime":"2025-04-04T15:42:13Z","resolved":false,"quotedFileContent":{"mimeType":"text/html","value":"416"},"replies":[{"id":"reply-xyz","kind":"drive#reply","author":{"displayName":"User B"},"content":"You can do this with the current design...","createdTime":"2025-04-04T16:00:00Z","modifiedTime":"2025-04-04T16:00:00Z","action":"reopen"}]}
 ```
+
+Fields callers commonly rely on (the rest are preserved but may or may
+not be interesting):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `"comment"` | Line type discriminator |
+| `type` | `"comment"` | Storage discriminator (injected, not from API) |
 | `id` | string | Drive comment ID |
-| `ts` | RFC 3339 | `createdTime` from the API |
-| `author` | string | `author.displayName` |
-| `content` | string | Comment text |
-| `anchor` | string | Quoted/highlighted text the comment is attached to (`quotedFileContent.value`, HTML-decoded) |
-| `resolved` | bool | Whether the comment thread is resolved |
-
-#### Reply Line
-
-```json
-{"type":"reply","id":"reply-xyz","commentId":"AAABedbmvS8","ts":"2025-04-04T16:00:00Z","author":"User B","content":"You can do this with the current design...","action":"reopen"}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | `"reply"` | Line type discriminator |
-| `id` | string | Drive reply ID |
-| `commentId` | string | Parent comment ID |
-| `ts` | RFC 3339 | `createdTime` |
-| `author` | string | `author.displayName` |
-| `content` | string | Reply text |
-| `action` | string | `"resolve"` or `"reopen"` if this reply changed the comment's resolved state. Omitted for normal replies. |
+| `author.displayName` | string | Comment author |
+| `content` | string | Comment text (plain) |
+| `htmlContent` | string | Comment text as HTML |
+| `createdTime` | RFC 3339 | When the comment was created |
+| `modifiedTime` | RFC 3339 | When the comment was last edited |
+| `resolved` | bool | Whether the thread is resolved |
+| `quotedFileContent.value` | string | Highlighted/quoted text the comment anchors to |
+| `replies[]` | array | Nested replies; each reply has its own `id`, `author`, `content`, `createdTime`, `modifiedTime`, optional `action` (`"resolve"`/`"reopen"`) |
 
 ### Comment Sync
 
-Comments are **append-only**. On each sync:
+Comments use **full-snapshot overwrite**, not append. The Drive comments
+API has no incremental sync cursor — every call returns the full set of
+comments for a file. On each sync that touches the file:
 
 1. Fetch all comments with `drive comments list` (paginate).
-2. For each comment not already in `comments.jsonl` (by ID), append it.
-3. For each reply not already stored (by ID), append it.
-4. If a comment's `resolved` status changed, append an updated comment
-   line. The reader uses the latest line for a given comment ID.
+2. Write the entire `comments.jsonl` file, replacing the previous
+   contents atomically.
 
-Deduplication on read: by `id` for comments, by `id` for replies. Keep
-the last occurrence (latest state wins).
+This is simpler than append + dedup and cleans up deleted comments
+automatically (they're just not in the new snapshot). Resolved-status
+changes and content edits also flow through without special handling.
+
+Deduplication on read: still by `id` (keep last), though in practice
+every line in a freshly-written `comments.jsonl` has a unique ID.
 
 ### Metadata File
 
-Path: `gws/{account}/gdrive/{doc-slug}/.meta.json`
+Path: `gws/{account}/gdrive/{doc-slug}/drive-meta-YYYY-MM-DD.json`
+
+The filename encodes the file's `modifiedTime` as `YYYY-MM-DD`. This
+lets the read layer find recently modified files by filename glob
+without opening each meta file. A given directory has exactly one
+meta file at a time; when `modifiedTime` changes, the new meta file
+replaces the old one (old name is deleted on write).
 
 ```json
 {
@@ -333,14 +415,20 @@ Path: `gws/{account}/gdrive/{doc-slug}/.meta.json`
 | Field | Description |
 |-------|-------------|
 | `fileId` | Google Drive file ID (stable identifier) |
-| `mimeType` | Always `application/vnd.google-apps.document` for docs |
+| `mimeType` | `application/vnd.google-apps.document` or `application/vnd.google-apps.spreadsheet` |
 | `title` | Original document title (before slugification) |
 | `modifiedTime` | Last modified time from Drive metadata |
 | `syncedAt` | When pigeon last synced this document |
-| `tabs` | Tab ID and title for each document tab |
+| `tabs` | (Docs only) Tab ID and title for each document tab |
+| `sheets` | (Sheets only) Names of the sheet tabs |
 
 Used for incremental sync: skip re-export if `modifiedTime` hasn't
-changed since `syncedAt`.
+changed since the last synced version on disk.
+
+Unlike the per-item JSONL collections, meta files are hand-shaped with
+a small set of fields. They are not meant to be grepped across; they
+answer targeted lookups ("when was this file last synced?", "what's the
+title?") per directory.
 
 ---
 
@@ -353,23 +441,25 @@ changed since `syncedAt`.
 ### Organization
 
 Each Google Sheet is a directory named by the slugified spreadsheet
-title. The directory contains:
+title plus the Drive file ID. The directory contains:
 
 - `{SheetName}.csv` — cell values for each sheet tab.
 - `{SheetName}.formulas.csv` — formulas for each sheet tab (optional).
 - `comments.jsonl` — comment threads as JSONL (same format as Docs).
-- `.meta.json` — sync metadata.
+- `drive-meta-YYYY-MM-DD.json` — sync metadata.
 
 ### Sync Flow
 
-1. Poll `drive changes list` with `pageToken`.
-2. For each changed file where `mimeType` is
+1. **First run:** same backfill as Docs — `drive files list` with the
+   spreadsheet mimeType also included.
+2. **Incremental:** poll `drive changes list` with `pageToken`.
+3. For each changed file where `mimeType` is
    `application/vnd.google-apps.spreadsheet`:
    a. Fetch sheet metadata: `sheets spreadsheets get` with
       `fields=sheets.properties` to discover sheet names.
-   b. For each sheet: `sheets +read --spreadsheet ID --range SheetName`.
+   b. For each sheet: `sheets values get` with `valueRenderOption=FORMATTED_VALUE`.
       Convert the `values` 2D array to CSV. Store as `{SheetName}.csv`.
-   c. Optionally fetch formulas: Sheets API `values.get` with
+   c. Optionally fetch formulas: `sheets values get` with
       `valueRenderOption=FORMULA`. Store as `{SheetName}.formulas.csv`.
    d. Fetch comments: same as Google Docs.
 
@@ -404,9 +494,9 @@ references the cell or range the comment is attached to.
 
 ### Metadata File
 
-Same schema as Google Docs, with `mimeType` set to
-`application/vnd.google-apps.spreadsheet`. Additionally includes
-the list of sheet names for efficient re-sync:
+Same path convention and schema as Google Docs, with `mimeType` set to
+`application/vnd.google-apps.spreadsheet`. Includes the list of sheet
+names instead of tabs:
 
 ```json
 {
@@ -436,78 +526,105 @@ slugified).
 
 ### Sync Flow
 
-1. Poll `calendar events list` with `syncToken` for each calendar.
-2. Response contains changed events (added, updated, or cancelled).
-3. For each event, append or update in the appropriate date file.
-4. Cancelled events are stored as event lines with `status: "cancelled"`.
+Calendar sync runs as three phases per poll cycle:
 
-### Line Type
+1. **Seed (first run only):**
+   a. `events.list` with `timeMin=now-90d` and `singleEvents=false`
+      returns all events in the window, including parent recurring
+      events with their RRULEs.
+   b. For each parent recurring event, `events.instances` expands
+      instances within ±90 days.
+   c. All one-off events, exception instances, and expanded recurring
+      instances are written to disk.
+   d. The sync token, `expanded_until` marker, and list of recurring
+      event IDs are saved to the cursor.
 
-#### Event Line
+2. **Incremental:** `events.list` with the saved `syncToken` returns
+   changed events. Re-expand any recurring parents that changed (their
+   instances are overwritten on disk by the keep-last dedup). Track new
+   recurring events; remove cancelled recurring events from the cursor.
+
+3. **Window expansion:** if `expanded_until` is within 30 days of now,
+   re-expand all tracked recurring events out to now+90d and update
+   `expanded_until`.
+
+### Line Format
+
+Each line is the **raw Google Calendar event JSON** (everything the API
+returned) plus a `"type":"event"` discriminator. Only the `type` key is
+injected by pigeon; every other field is verbatim from the Calendar API.
 
 ```json
-{"type":"event","id":"1ukte1f8011837nnv5kjnfnnag","ts":"2026-04-06T12:23:11Z","updated":"2026-04-06T12:23:12Z","status":"confirmed","summary":"Q2 Planning","description":"Discuss roadmap priorities","start":"2026-04-07T10:00:00+02:00","end":"2026-04-07T11:00:00+02:00","startDate":"","endDate":"","location":"Room 4B","organizer":"alice@example.com","attendees":["bob@example.com","charlie@example.com"],"meetLink":"https://meet.google.com/abc-defg-hij","eventType":"default","recurring":false}
+{"type":"event","kind":"calendar#event","id":"1ukte1f8011837nnv5kjnfnnag","status":"confirmed","created":"2026-04-06T12:23:11.000Z","updated":"2026-04-06T12:23:12.345Z","summary":"Q2 Planning","description":"Discuss roadmap priorities","location":"Room 4B","creator":{"email":"alice@example.com","displayName":"Alice"},"organizer":{"email":"alice@example.com","displayName":"Alice","self":true},"start":{"dateTime":"2026-04-07T10:00:00+02:00","timeZone":"Europe/Berlin"},"end":{"dateTime":"2026-04-07T11:00:00+02:00","timeZone":"Europe/Berlin"},"iCalUID":"1ukte...@google.com","sequence":0,"attendees":[{"email":"bob@example.com","displayName":"Bob","responseStatus":"accepted"},{"email":"charlie@example.com","responseStatus":"needsAction"}],"hangoutLink":"https://meet.google.com/abc-defg-hij","conferenceData":{"entryPoints":[{"entryPointType":"video","uri":"https://meet.google.com/abc-defg-hij","label":"meet.google.com/abc-defg-hij"}],"conferenceId":"abc-defg-hij"},"eventType":"default"}
 ```
+
+Fields callers commonly rely on (the rest are preserved but may or may
+not be interesting — see the [Google Calendar Events resource](https://developers.google.com/calendar/api/v3/reference/events#resource)
+for the full list):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `"event"` | Line type discriminator |
+| `type` | `"event"` | Storage discriminator (injected, not from API) |
 | `id` | string | Google Calendar event ID |
-| `ts` | RFC 3339 | Event creation time |
-| `updated` | RFC 3339 | Last modification time |
 | `status` | string | `"confirmed"`, `"tentative"`, or `"cancelled"` |
 | `summary` | string | Event title |
-| `description` | string | Event description/notes |
-| `start` | RFC 3339 | Start datetime (timed events) |
-| `end` | RFC 3339 | End datetime (timed events) |
-| `startDate` | `YYYY-MM-DD` | Start date (all-day events, mutually exclusive with `start`) |
-| `endDate` | `YYYY-MM-DD` | End date (all-day events) |
-| `location` | string | Event location |
-| `organizer` | string | Organizer email |
-| `attendees` | []string | Attendee emails |
-| `meetLink` | string | Google Meet link (omitted if none) |
-| `eventType` | string | `"default"`, `"focusTime"`, `"outOfOffice"`, `"workingLocation"` |
-| `recurring` | bool | Whether this is an instance of a recurring event |
+| `start.dateTime` / `start.date` | RFC 3339 / `YYYY-MM-DD` | Start (timed events use `dateTime`, all-day use `date`) |
+| `end.dateTime` / `end.date` | RFC 3339 / `YYYY-MM-DD` | End |
+| `created` / `updated` | RFC 3339 | Creation and last modification times |
+| `recurringEventId` | string | Present on instances of a recurring event |
+| `recurrence` | []string | Present on parent recurring events (RRULE strings); parents are not written to disk — only their instances are |
+| `originalStartTime` | `EventDateTime` | Present on cancelled recurring instances in place of `start` |
+| `hangoutLink` | string | Google Meet link (omitted if none) |
+
+All-day events use `start.date`/`end.date` as `YYYY-MM-DD` strings
+without a `dateTime` field. Timed events use `start.dateTime`/`end.dateTime`
+as RFC 3339 with timezone offset and optionally a `timeZone` field.
 
 ### Date File
 
 Path: `gws/{account}/gcalendar/{calendar-slug}/YYYY-MM-DD.jsonl`
 
-Events are filed by their **start date**. Timed events use the local
-date from the `start.dateTime` field. All-day events use `start.date`.
+Events are filed by their **start date**. Timed events use the date
+portion of `start.dateTime`. All-day events use `start.date`. Cancelled
+recurring instances (which lack `start`) use `originalStartTime`.
 
 ### Event Updates
 
-When an event is updated, the new version is **appended** to the date
-file (same file if the start date didn't change, new file if it did).
-The reader deduplicates by event `id`, keeping the **last occurrence**
-(latest state wins). Maintenance compacts duplicate event IDs down to
-the most recent version.
-
-All JSONL types across pigeon use the same dedup rule: keep last
-occurrence by ID. This works uniformly for immutable data (duplicate
-messages are identical, so first vs last doesn't matter) and mutable
-data (calendar events, comment resolved status) where the latest
-version is the truth.
+When an event is updated, the new version is appended to the date file
+(same file if the start date didn't change, new file if it did). The
+reader deduplicates by event `id`, keeping the **last occurrence**.
+Maintenance compacts duplicate event IDs down to the most recent
+version.
 
 ### Cancelled Events
 
 When `events.list` returns an event with `status: "cancelled"`, the
 event line is appended with that status. On read, cancelled events are
-excluded from display (similar to delete lines in the messaging
-protocol). Maintenance removes cancelled events and any prior versions.
+excluded from display. Maintenance removes cancelled events and any
+prior versions of the same ID.
 
 ### Recurring Events
 
-The poller uses `syncToken`-based incremental sync, which defaults to
-`singleEvents=false`. This means the API returns recurring event
-templates (with recurrence rules) and individual instance exceptions
-(modified or cancelled occurrences). The `recurring` field is set to
-`true` when `recurringEventId` is present in the API response.
+The Calendar API offers two ways to get recurring event data:
+`singleEvents=true` (server expands instances) and `singleEvents=false`
+(server returns parents + RRULEs). Pigeon uses `singleEvents=false`
+with client-side expansion via `events.instances`, for two reasons:
 
-Cancelled recurring instances carry `originalStartTime` instead of
-`start`/`end`. The `eventDate` function uses this field for date
-filing.
+1. `singleEvents=true` without a `timeMax` expands decades into the
+   future (observed: 12,750+ events paginating into 2049 on a calendar
+   with ~40 recurring events).
+2. `singleEvents=true` *with* `timeMax` scopes the sync token to the
+   time window, creating a permanent blind spot for instances beyond
+   the original window.
+
+`singleEvents=false` gives a calendar-wide sync token with no time
+scoping, and `events.instances` provides bounded expansion per parent
+event. The cursor tracks `expanded_until` so window extension is
+incremental.
+
+Parent recurring events (those with a `recurrence` array) are **not
+written to disk** — only their expanded instances are. Each instance
+carries a `recurringEventId` pointing back to its parent.
 
 ---
 
@@ -521,13 +638,16 @@ Standard text tools work directly:
 # Find emails from alice
 grep '"from":"alice@' ~/.local/share/pigeon/gws/*/gmail/
 
-# Find all calendar events mentioning "planning"
+# Find calendar events mentioning "planning"
 grep -ri 'planning' ~/.local/share/pigeon/gws/*/gcalendar/
+
+# Find events where Bob's response is "needsAction"
+grep '"email":"bob@example.com","responseStatus":"needsAction"' ~/.local/share/pigeon/gws/*/gcalendar/
 
 # Find resolved comments
 grep '"resolved":true' ~/.local/share/pigeon/gws/*/gdrive/*/comments.jsonl
 
-# Find replies that resolved a comment thread
+# Find comment threads that were resolved (reply with action:"resolve")
 grep '"action":"resolve"' ~/.local/share/pigeon/gws/*/gdrive/*/comments.jsonl
 
 # Find emails with PDF attachments
@@ -536,6 +656,10 @@ grep 'application/pdf' ~/.local/share/pigeon/gws/*/gmail/
 # Count emails per day
 wc -l ~/.local/share/pigeon/gws/*/gmail/2026-04-*.jsonl
 ```
+
+Because calendar events and comments are stored as raw API JSON, any
+field the Google API returns is grep-able. Adding a new query doesn't
+require a code change — `jq` or `grep` on the stored lines is enough.
 
 ### Content Files (Docs as Markdown, Sheets as CSV)
 
@@ -577,7 +701,9 @@ included in search globs alongside `.jsonl` date files.
 
 1. Read `{TabName}.md` files and display as markdown.
 2. Parse `comments.jsonl`, deduplicate by `id` (keep last occurrence).
-3. Display comments grouped by anchor text, with replies nested.
+   Each line is a raw comment with its replies already nested inside.
+3. Display comments grouped by anchor text; replies are in the
+   comment's `replies` array.
 4. Resolved comments can be shown or hidden based on user preference.
 
 ### Google Sheets
@@ -605,8 +731,8 @@ timestamp, rewrite.
 
 - `*.md` and `*.csv` are replaced on each sync — no maintenance
   needed for content files.
-- `comments.jsonl`: deduplicate comments by `id` (keep last), deduplicate
-  replies by `id` (keep last), sort by timestamp, rewrite.
+- `comments.jsonl`: rewritten as a full snapshot on each sync that
+  touches the file — no maintenance pass needed.
 
 ### Calendar
 
@@ -614,97 +740,6 @@ Deduplicate by `id` (keep last occurrence), remove cancelled events
 and any prior versions of the same `id`, sort by start time, rewrite.
 
 ---
-
-## Data Model
-
-```go
-// Gmail
-
-type EmailLine struct {
-    ID        string       `json:"id"`                  // Gmail message ID
-    ThreadID  string       `json:"threadId"`            // Gmail thread ID
-    Ts        time.Time    `json:"ts"`                  // when Gmail received it
-    From      string       `json:"from"`                // sender email
-    FromName  string       `json:"fromName"`            // sender display name
-    To        []string     `json:"to"`                  // recipient emails
-    CC        []string     `json:"cc,omitempty"`        // CC emails
-    Subject   string       `json:"subject"`             // email subject
-    Labels    []string     `json:"labels"`              // Gmail labels
-    Snippet   string       `json:"snippet"`             // text preview
-    Text      string       `json:"text"`                // plain text body (always populated)
-    HTML      string       `json:"html,omitempty"`      // raw HTML (multipart emails only)
-    Attach    []EmailAttachment `json:"attach,omitempty"` // attachments
-}
-
-type EmailAttachment struct {
-    ID   string `json:"id"`   // Gmail attachment/part ID
-    Type string `json:"type"` // MIME type
-    Name string `json:"name"` // filename
-}
-
-type EmailDeleteLine struct {
-    ID string    `json:"id"` // target message ID
-    Ts time.Time `json:"ts"` // when the delete was observed
-}
-
-// Drive Comments (shared by Docs and Sheets)
-
-type CommentLine struct {
-    ID       string    `json:"id"`                // Drive comment ID
-    Ts       time.Time `json:"ts"`                // created time
-    Author   string    `json:"author"`            // display name
-    Content  string    `json:"content"`           // comment text
-    Anchor   string    `json:"anchor,omitempty"`  // highlighted text
-    Resolved bool      `json:"resolved"`          // thread resolved state
-}
-
-type ReplyLine struct {
-    ID        string    `json:"id"`                // Drive reply ID
-    CommentID string    `json:"commentId"`         // parent comment ID
-    Ts        time.Time `json:"ts"`                // created time
-    Author    string    `json:"author"`            // display name
-    Content   string    `json:"content"`           // reply text
-    Action    string    `json:"action,omitempty"`  // "resolve" or "reopen"
-}
-
-// Drive Metadata
-
-type DocMeta struct {
-    FileID       string    `json:"fileId"`
-    MimeType     string    `json:"mimeType"`
-    Title        string    `json:"title"`
-    ModifiedTime string    `json:"modifiedTime"`
-    SyncedAt     string    `json:"syncedAt"`
-    Tabs         []TabMeta `json:"tabs,omitempty"`   // doc tabs (Docs only)
-    Sheets       []string  `json:"sheets,omitempty"` // sheet names (Sheets only)
-}
-
-type TabMeta struct {
-    ID    string `json:"id"`    // tab ID (e.g. "t.0")
-    Title string `json:"title"` // tab title (e.g. "Tab 1")
-}
-
-// Calendar
-
-type EventLine struct {
-    ID          string   `json:"id"`                    // Calendar event ID
-    Ts          string   `json:"ts"`                    // created time
-    Updated     string   `json:"updated"`               // last modified time
-    Status      string   `json:"status"`                // confirmed, tentative, cancelled
-    Summary     string   `json:"summary"`               // event title
-    Description string   `json:"description,omitempty"` // event notes
-    Start       string   `json:"start,omitempty"`       // RFC 3339 datetime (timed)
-    End         string   `json:"end,omitempty"`         // RFC 3339 datetime (timed)
-    StartDate   string   `json:"startDate,omitempty"`   // YYYY-MM-DD (all-day)
-    EndDate     string   `json:"endDate,omitempty"`     // YYYY-MM-DD (all-day)
-    Location    string   `json:"location,omitempty"`    // event location
-    Organizer   string   `json:"organizer,omitempty"`   // organizer email
-    Attendees   []string `json:"attendees,omitempty"`   // attendee emails
-    MeetLink    string   `json:"meetLink,omitempty"`    // Google Meet link
-    EventType   string   `json:"eventType"`             // default, focusTime, etc.
-    Recurring   bool     `json:"recurring,omitempty"`   // instance of recurring event
-}
-```
 
 ## Known Limitations
 
@@ -746,9 +781,9 @@ type EventLine struct {
   date file and the new version is appended to the new date file.
   Maintenance handles this by removing stale entries (same `id`,
   older `updated` timestamp).
-- **Recurring event expansion.** Sync with `syncToken` returns
-  individual instance changes, not the full recurrence rule. If a
-  recurring event's rule changes, all affected instances are returned
-  as individual updates.
+- **Recurring event instances are time-bounded.** Only instances
+  within the expansion window (±90 days by default) are on disk.
+  Instances outside the window are refetched as the window slides
+  forward via Phase 3 (window expansion).
 - **All-day events span multiple days.** A 3-day all-day event is
-  filed under its `startDate` only, not under each day it spans.
+  filed under its `start.date` only, not under each day it spans.
