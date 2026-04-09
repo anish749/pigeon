@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws"
@@ -166,7 +165,7 @@ func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, c
 func writeEvents(account paths.AccountDir, calID string, events []model.EventLine) []error {
 	var errs []error
 	for _, ev := range events {
-		datePath := account.Calendar(calID).DateFile(eventDate(ev))
+		datePath := account.Calendar(calID).DateFile(ev.DateForStorage())
 		line := model.Line{Type: "event", Event: &ev}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append event %s: %w", ev.ID, err))
@@ -209,47 +208,3 @@ func removeRecurringIDs(existing, removals []string) []string {
 	return kept
 }
 
-// eventDate extracts the date string (YYYY-MM-DD) from an event.
-// Priority: Start > StartDate > OriginalStartTime > Updated > "unknown".
-func eventDate(ev model.EventLine) string {
-	if ev.Start != "" {
-		if d := parseDateFromDateTime(ev.Start); d != "" {
-			return d
-		}
-	}
-	if ev.StartDate != "" {
-		return ev.StartDate
-	}
-	// Cancelled recurring instances carry the original start instead of start/end.
-	if ev.OriginalStartTime != "" {
-		if d := parseDateFromDateTime(ev.OriginalStartTime); d != "" {
-			return d
-		}
-		// OriginalStartTime may be a bare date (YYYY-MM-DD) for all-day events.
-		if len(ev.OriginalStartTime) == 10 {
-			return ev.OriginalStartTime
-		}
-	}
-	if ev.Updated != "" {
-		if d := parseDateFromDateTime(ev.Updated); d != "" {
-			return d
-		}
-	}
-	slog.Warn("calendar event has no parseable date, filing under unknown",
-		"event_id", ev.ID, "status", ev.Status)
-	return "unknown"
-}
-
-// parseDateFromDateTime extracts YYYY-MM-DD from an RFC 3339 datetime string.
-func parseDateFromDateTime(dt string) string {
-	// Try parsing as RFC 3339.
-	t, err := time.Parse(time.RFC3339, dt)
-	if err != nil {
-		// Fall back: take everything before the first 'T'.
-		if i := strings.IndexByte(dt, 'T'); i == 10 {
-			return dt[:10]
-		}
-		return ""
-	}
-	return t.Format("2006-01-02")
-}
