@@ -113,3 +113,57 @@ func TestDefaultDataRoot_UsesEnv(t *testing.T) {
 		t.Errorf("got %q, want /tmp/pigeon-test/whatsapp/15551234567", got)
 	}
 }
+
+// TestIsThreadFile_ConversationNamedThreads covers the subtle case of a
+// conversation literally named "threads". Its YYYY-MM-DD.jsonl children
+// share the same parent-dir heuristic as real thread files but must not
+// be classified as thread files.
+func TestIsThreadFile_ConversationNamedThreads(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{
+			name: "date file under conversation named threads",
+			path: "/data/slack/ws/threads/2026-04-06.jsonl",
+			want: false,
+		},
+		{
+			name: "real thread file under conversation named threads",
+			path: "/data/slack/ws/threads/threads/1742100000.123456.jsonl",
+			want: true,
+		},
+		{
+			name: "real thread file under normal conversation",
+			path: "/data/slack/ws/#general/threads/1742100000.123456.jsonl",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsThreadFile(tt.path); got != tt.want {
+				t.Errorf("IsThreadFile(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsDateFile(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"2026-04-06.jsonl", true},
+		{"2026-04-06.JSONL", false},
+		{"1742100000.123456.jsonl", false},
+		{"2026-04-06", false},
+		{"foo.jsonl", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := IsDateFile(tt.name); got != tt.want {
+			t.Errorf("IsDateFile(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
