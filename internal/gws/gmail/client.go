@@ -114,6 +114,42 @@ func ListHistory(startHistoryId string) (added []string, deleted []string, newHi
 	return added, deleted, newHistoryId, nil
 }
 
+// messagesListResponse from users.messages.list.
+type messagesListResponse struct {
+	Messages      []gmailMessageRef `json:"messages"`
+	NextPageToken string            `json:"nextPageToken"`
+}
+
+// ListMessages enumerates message IDs matching a Gmail search query.
+// Paginates through all pages. Returns message IDs only (no content).
+func ListMessages(query string) ([]string, error) {
+	params := map[string]string{
+		"userId":     "me",
+		"q":          query,
+		"maxResults": "500",
+	}
+
+	var ids []string
+	for {
+		var resp messagesListResponse
+		if err := gws.RunParsed(&resp, "gmail", "users", "messages", "list", "--params", gws.ParamsJSON(params)); err != nil {
+			return nil, fmt.Errorf("list gmail messages: %w", err)
+		}
+
+		for _, m := range resp.Messages {
+			ids = append(ids, m.ID)
+		}
+
+		if resp.NextPageToken != "" {
+			params["pageToken"] = resp.NextPageToken
+			continue
+		}
+		break
+	}
+
+	return ids, nil
+}
+
 // GetMessage fetches a raw message by ID and parses it with enmime.
 func GetMessage(messageID string) (*model.EmailLine, error) {
 	params := gws.ParamsJSON(map[string]string{
