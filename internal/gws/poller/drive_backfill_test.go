@@ -62,12 +62,12 @@ func TestDriveBackfillLive(t *testing.T) {
 		t.Fatal("test doc not found on disk after backfill seed")
 	}
 
-	// Verify meta.json exists for the test doc.
+	// Verify a drive-meta-YYYY-MM-DD.json file exists for the test doc.
 	metaPath := findDriveFileMeta(t, driveDir, docID)
 	if metaPath == "" {
-		t.Fatal("meta.json not found for test doc")
+		t.Fatal("drive-meta file not found for test doc")
 	}
-	t.Logf("meta.json: %s", metaPath)
+	t.Logf("drive-meta: %s", metaPath)
 
 	// Verify .md content exists.
 	mdPath := findDriveFileMD(t, driveDir, docID)
@@ -140,7 +140,10 @@ func findDriveFileMeta(t *testing.T, driveDir, fileID string) string {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if strings.Contains(path, fileID) && strings.HasSuffix(path, "meta.json") {
+		base := filepath.Base(path)
+		if strings.Contains(path, fileID) &&
+			strings.HasPrefix(base, "drive-meta-") &&
+			strings.HasSuffix(base, ".json") {
 			result = path
 		}
 		return nil

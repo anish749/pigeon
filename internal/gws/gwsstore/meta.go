@@ -2,6 +2,7 @@ package gwsstore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,8 +11,8 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// LoadMeta reads document metadata from a JSON file.
-func LoadMeta(mf paths.MetaFile) (*model.DocMeta, error) {
+// LoadDriveMeta reads Google Drive file metadata from a JSON file.
+func LoadDriveMeta(mf paths.DriveMetaFile) (*model.DocMeta, error) {
 	path := mf.Path()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -24,10 +25,15 @@ func LoadMeta(mf paths.MetaFile) (*model.DocMeta, error) {
 	return &m, nil
 }
 
-// SaveMeta writes document metadata to a JSON file, creating parent directories.
-func SaveMeta(mf paths.MetaFile, m *model.DocMeta) error {
+// SaveDriveMeta writes Google Drive file metadata to a JSON file, creating
+// parent directories. After successfully writing, it removes any stale Drive
+// meta files in the same directory (drive-meta-*.json with different dates)
+// to avoid accumulation. The write-then-delete order ensures we never lose
+// metadata on a crash.
+func SaveDriveMeta(mf paths.DriveMetaFile, m *model.DocMeta) error {
 	path := mf.Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := mf.Dir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
@@ -37,6 +43,33 @@ func SaveMeta(mf paths.MetaFile, m *model.DocMeta) error {
 	data = append(data, '\n')
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write meta %s: %w", path, err)
+	}
+
+	// Clean up stale Drive meta files from previous syncs.
+	if err := cleanupStaleDriveMeta(dir, mf.Name()); err != nil {
+		return fmt.Errorf("cleanup stale meta in %s: %w", dir, err)
+	}
+	return nil
+}
+
+// cleanupStaleDriveMeta removes any drive-meta-*.json files in dir except
+// keepName. Called after writing a new meta file to remove previous versions.
+func cleanupStaleDriveMeta(dir, keepName string) error {
+	matches, err := filepath.Glob(filepath.Join(dir, paths.DriveMetaFileGlob))
+	if err != nil {
+		return fmt.Errorf("glob stale meta: %w", err)
+	}
+	var errs []error
+	for _, match := range matches {
+		if filepath.Base(match) == keepName {
+			continue
+		}
+		if err := os.Remove(match); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", match, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("remove stale meta files: %w", errors.Join(errs...))
 	}
 	return nil
 }

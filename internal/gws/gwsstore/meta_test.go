@@ -1,6 +1,7 @@
 package gwsstore
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -8,9 +9,19 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-func TestMetaRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "meta.json")
+// testDriveFileDir returns a DriveFileDir rooted at a temp directory for tests.
+func testDriveFileDir(t *testing.T) paths.DriveFileDir {
+	t.Helper()
+	return paths.NewDataRoot(t.TempDir()).
+		Platform("gws").
+		AccountFromSlug("test").
+		Drive().
+		File("doc-abc")
+}
+
+func TestDriveMetaRoundTrip(t *testing.T) {
+	fileDir := testDriveFileDir(t)
+	mf := fileDir.MetaFile("2026-04-07")
 
 	orig := &model.DocMeta{
 		FileID:       "file-123",
@@ -25,13 +36,13 @@ func TestMetaRoundTrip(t *testing.T) {
 		Sheets: []string{"Sheet1", "Sheet2"},
 	}
 
-	if err := SaveMeta(paths.MetaFile(path), orig); err != nil {
-		t.Fatalf("SaveMeta: %v", err)
+	if err := SaveDriveMeta(mf, orig); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
 	}
 
-	got, err := LoadMeta(paths.MetaFile(path))
+	got, err := LoadDriveMeta(mf)
 	if err != nil {
-		t.Fatalf("LoadMeta: %v", err)
+		t.Fatalf("LoadDriveMeta: %v", err)
 	}
 
 	if got.FileID != orig.FileID {
@@ -51,10 +62,71 @@ func TestMetaRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadMetaNonExistent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nope.json")
-	_, err := LoadMeta(paths.MetaFile(path))
+func TestLoadDriveMetaNonExistent(t *testing.T) {
+	mf := testDriveFileDir(t).MetaFile("2026-04-07")
+	_, err := LoadDriveMeta(mf)
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
+	}
+}
+
+func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
+	fileDir := testDriveFileDir(t)
+
+	// Create the drive file directory so we can seed a stale meta file.
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a previously synced file with an older modifiedTime.
+	oldPath := filepath.Join(fileDir.Path(), "drive-meta-2026-04-01.json")
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save with a newer modifiedTime.
+	mf := fileDir.MetaFile("2026-04-07")
+	meta := &model.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
+	if err := SaveDriveMeta(mf, meta); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
+	}
+
+	// New file exists, old file is gone.
+	if _, err := os.Stat(mf.Path()); err != nil {
+		t.Errorf("new meta file missing: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("stale meta file not cleaned up: err=%v", err)
+	}
+}
+
+func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
+	fileDir := testDriveFileDir(t)
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create unrelated files that should not be touched.
+	unrelated := []string{
+		filepath.Join(fileDir.Path(), "Tab1.md"),
+		filepath.Join(fileDir.Path(), "comments.jsonl"),
+		filepath.Join(fileDir.Path(), "other.json"),
+	}
+	for _, p := range unrelated {
+		if err := os.WriteFile(p, []byte("keep me"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mf := fileDir.MetaFile("2026-04-07")
+	meta := &model.DocMeta{FileID: "f1"}
+	if err := SaveDriveMeta(mf, meta); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
+	}
+
+	for _, p := range unrelated {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("unrelated file %s was removed: %v", p, err)
+		}
 	}
 }

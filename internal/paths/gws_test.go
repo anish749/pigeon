@@ -55,10 +55,32 @@ func TestDriveFileDir_Path(t *testing.T) {
 }
 
 func TestDriveFileDir_MetaFile(t *testing.T) {
-	got := acctDir().Drive().File("doc-abc").MetaFile().Path()
-	want := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/meta.json"
-	if got != want {
-		t.Errorf("MetaFile() = %q, want %q", got, want)
+	mf := acctDir().Drive().File("doc-abc").MetaFile("2026-04-07")
+
+	wantPath := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc/drive-meta-2026-04-07.json"
+	if got := mf.Path(); got != wantPath {
+		t.Errorf("Path() = %q, want %q", got, wantPath)
+	}
+	wantDir := "/tmp/test/gws/user-at-gmail-com/gdrive/doc-abc"
+	if got := mf.Dir(); got != wantDir {
+		t.Errorf("Dir() = %q, want %q", got, wantDir)
+	}
+	wantName := "drive-meta-2026-04-07.json"
+	if got := mf.Name(); got != wantName {
+		t.Errorf("Name() = %q, want %q", got, wantName)
+	}
+}
+
+func TestDriveMetaFileZeroValue(t *testing.T) {
+	var mf DriveMetaFile
+	if mf.Path() != "" {
+		t.Errorf("zero Path() = %q, want empty", mf.Path())
+	}
+	if mf.Dir() != "" {
+		t.Errorf("zero Dir() = %q, want empty", mf.Dir())
+	}
+	if mf.Name() != "" {
+		t.Errorf("zero Name() = %q, want empty", mf.Name())
 	}
 }
 

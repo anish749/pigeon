@@ -46,7 +46,9 @@ type CommentsFile string
 func (c CommentsFile) Path() string { return string(c) }
 func (CommentsFile) logFile()      {}
 
-// MetaFile is a path to a document's metadata JSON file.
+// MetaFile is a path to a conversation's .meta.json sidecar (messaging data).
+// Drive file metadata uses DriveMetaFile (see paths/gws.go) which carries the
+// modification date in the filename and needs separate dir/name handling.
 type MetaFile string
 
 // Path returns the file path as a string.

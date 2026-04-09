@@ -110,10 +110,11 @@ func TestLiveSmoke(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(accountDir, path)
 		t.Logf("  %s (%d bytes)", rel, info.Size())
+		base := filepath.Base(rel)
 		switch {
 		case strings.HasSuffix(rel, ".md"):
 			mdFiles++
-		case strings.HasSuffix(rel, "meta.json"):
+		case strings.HasPrefix(base, "drive-meta-") && strings.HasSuffix(base, ".json"):
 			metaFiles++
 		case strings.HasSuffix(rel, ".jsonl"):
 			jsonlFiles++
@@ -125,7 +126,7 @@ func TestLiveSmoke(t *testing.T) {
 		t.Error("expected at least one .md file from the test doc")
 	}
 	if metaFiles == 0 {
-		t.Error("expected at least one meta.json file")
+		t.Error("expected at least one drive-meta-YYYY-MM-DD.json file")
 	}
 
 	// --- Verify .md content ---
@@ -139,9 +140,13 @@ func TestLiveSmoke(t *testing.T) {
 		return nil
 	})
 
-	// --- Verify meta.json content ---
+	// --- Verify drive-meta- content ---
 	filepath.Walk(accountDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, "meta.json") {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		if !strings.HasPrefix(base, "drive-meta-") || !strings.HasSuffix(base, ".json") {
 			return nil
 		}
 		data, _ := os.ReadFile(path)
