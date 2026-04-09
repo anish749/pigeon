@@ -39,7 +39,7 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	var errs []error
 	for _, ch := range changes {
 		if ch.Removed {
-			slog.Debug("drive file removed", "fileId", ch.FileID)
+			slog.Warn("drive file removed", "fileId", ch.FileID)
 			continue
 		}
 
@@ -53,7 +53,7 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 				errs = append(errs, fmt.Errorf("handle sheet %s: %w", ch.FileID, err))
 			}
 		default:
-			slog.Debug("skipping unsupported mime type", "fileId", ch.FileID, "mimeType", ch.File.MimeType)
+			slog.Warn("skipping unsupported mime type", "fileId", ch.FileID, "mimeType", ch.File.MimeType)
 		}
 	}
 
