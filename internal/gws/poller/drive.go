@@ -65,10 +65,18 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	return errors.Join(errs...)
 }
 
-// seedDrive backfills existing Docs and Sheets modified within BackfillDays,
-// then seeds the page token for incremental polling going forward.
+// seedDrive acquires the changes cursor, backfills existing Docs and Sheets
+// modified within BackfillDays, then saves the cursor. The cursor is acquired
+// BEFORE backfill so that changes made during the (potentially slow) backfill
+// are captured by the first incremental poll.
 func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	slog.Info("seeding drive with backfill")
+
+	// Get the changes cursor first — backfill can take minutes.
+	token, err := drive.SeedPageToken()
+	if err != nil {
+		return fmt.Errorf("seed drive page token: %w", err)
+	}
 
 	timeMin := time.Now().UTC().AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339)
 	files, err := drive.ListFiles(timeMin)
@@ -90,13 +98,7 @@ func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 		}
 	}
 
-	// Seed the page token after backfill so incremental polling starts from now.
-	token, err := drive.SeedPageToken()
-	if err != nil {
-		return fmt.Errorf("seed drive page token: %w", err)
-	}
 	cursors.Drive.PageToken = token
-
 	slog.Info("seeded drive with backfill", "files", len(files), "token", token)
 	return errors.Join(errs...)
 }

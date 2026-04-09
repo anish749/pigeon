@@ -35,12 +35,17 @@ unchanged — no new per-file logic needed.
 
 ### Seed flow
 
-1. `files.list` with `modifiedTime > now-90d` → paginate → collect all
+1. `changes.getStartPageToken` → acquire cursor BEFORE backfill starts
+2. `files.list` with `modifiedTime > now-90d` → paginate → collect all
    Docs and Sheets
-2. For each file: `handleDoc` or `handleSheet` (fetch content, convert,
+3. For each file: `handleDoc` or `handleSheet` (fetch content, convert,
    store comments, write to disk)
-3. `changes.getStartPageToken` → get cursor for incremental polling
 4. Save `pageToken`
+
+The cursor is acquired first because backfill can take minutes (one API
+call per file × content + comments). Any files modified during backfill
+are captured by the first incremental poll since the cursor predates the
+backfill window.
 
 The page token is seeded AFTER backfill so that any files modified
 between `files.list` and `getStartPageToken` are caught by the first
@@ -93,13 +98,15 @@ with `os.WriteFile`.
 | Extra cursor state | `expanded_until`, `recurring_events` | None |
 | Comment sync | N/A | Full snapshot overwrite |
 
-### Race condition: file modified between backfill and seed
+### Race condition: file modified during backfill
 
-If a file is modified after `files.list` returns but before
-`getStartPageToken` runs, the change is not lost. The next
-`changes.list` poll will report the file as changed, triggering a
-re-export. Content files are overwritten (`.md`, `.csv`), and comments
-are a full snapshot — both are idempotent.
+The changes cursor is acquired before `files.list` runs. Any file
+modified during the backfill window is captured by the first
+incremental `changes.list` poll, which triggers a re-export. Content
+files are overwritten (`.md`, `.csv`), and comments are a full
+snapshot — both are idempotent. Files may be exported twice (once
+during backfill, once during the first incremental poll), but this is
+correct and harmless.
 
 ### API cost
 
