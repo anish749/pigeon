@@ -74,6 +74,23 @@ func marshalRaw(serialized map[string]any, typeTag string) ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// unmarshalRaw unmarshals the same bytes into both a typed destination and a
+// raw map, then strips the storage type discriminator from the map. It is
+// the symmetric counterpart to marshalRaw: marshal builds a map-with-type
+// from a Serialized field; unmarshal rebuilds Serialized without the type.
+func unmarshalRaw(data []byte, runtime any) (map[string]any, error) {
+	if err := json.Unmarshal(data, runtime); err != nil {
+		return nil, err
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(data, &serialized); err != nil {
+		return nil, err
+	}
+	// "type" is our storage discriminator, not part of the API response.
+	delete(serialized, "type")
+	return serialized, nil
+}
+
 // typeHeader is used to peek at the "type" field before full unmarshal.
 type typeHeader struct {
 	Type string `json:"type"`
@@ -106,27 +123,17 @@ func Parse(line string) (Line, error) {
 		l.EmailDelete = &v
 	case "comment":
 		var runtime drive.Comment
-		if err := json.Unmarshal(data, &runtime); err != nil {
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
 			return Line{}, fmt.Errorf("parse comment line: %w", err)
 		}
-		var serialized map[string]any
-		if err := json.Unmarshal(data, &serialized); err != nil {
-			return Line{}, fmt.Errorf("parse comment line serialized: %w", err)
-		}
-		// "type" is our storage discriminator, not part of the API response.
-		delete(serialized, "type")
 		l.Comment = &DriveComment{Runtime: runtime, Serialized: serialized}
 	case "event":
 		var runtime calendar.Event
-		if err := json.Unmarshal(data, &runtime); err != nil {
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
-		var serialized map[string]any
-		if err := json.Unmarshal(data, &serialized); err != nil {
-			return Line{}, fmt.Errorf("parse event line serialized: %w", err)
-		}
-		// "type" is our storage discriminator, not part of the API response.
-		delete(serialized, "type")
 		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", hdr.Type)
