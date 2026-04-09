@@ -92,7 +92,7 @@ func fetchAndStoreMessages(account paths.AccountDir, msgIDs []string) []error {
 		email, err := gmail.GetMessage(msgID)
 		if err != nil {
 			if gws.IsNotFound(err) {
-				slog.Debug("gmail message deleted before fetch, skipping", "message_id", msgID)
+				slog.Warn("gmail message deleted before fetch, skipping", "message_id", msgID)
 				continue
 			}
 			errs = append(errs, fmt.Errorf("get message %s: %w", msgID, err))
