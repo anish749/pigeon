@@ -28,14 +28,7 @@ const (
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
 func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	if cursors.Drive.PageToken == "" {
-		slog.Info("seeding drive page token")
-		token, err := drive.SeedPageToken()
-		if err != nil {
-			return fmt.Errorf("seed drive page token: %w", err)
-		}
-		cursors.Drive.PageToken = token
-		slog.Info("seeded drive page token", "token", token)
-		return nil
+		return seedDrive(account, cursors)
 	}
 
 	changes, newToken, err := drive.ListChanges(cursors.Drive.PageToken)
@@ -69,6 +62,44 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
 	}
 
 	cursors.Drive.PageToken = newToken
+	return errors.Join(errs...)
+}
+
+// seedDrive acquires the changes cursor, backfills existing Docs and Sheets
+// modified within BackfillDays, then saves the cursor. The cursor is acquired
+// BEFORE backfill so that changes made during the (potentially slow) backfill
+// are captured by the first incremental poll.
+func seedDrive(account paths.AccountDir, cursors *gwsstore.Cursors) error {
+	slog.Info("seeding drive with backfill")
+
+	// Get the changes cursor first — backfill can take minutes.
+	token, err := drive.SeedPageToken()
+	if err != nil {
+		return fmt.Errorf("seed drive page token: %w", err)
+	}
+
+	timeMin := time.Now().UTC().AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339)
+	files, err := drive.ListFiles(timeMin)
+	if err != nil {
+		return fmt.Errorf("backfill drive: %w", err)
+	}
+
+	var errs []error
+	for _, ch := range files {
+		switch ch.File.MimeType {
+		case mimeDoc:
+			if err := handleDoc(account, ch); err != nil {
+				errs = append(errs, fmt.Errorf("backfill doc %s: %w", ch.FileID, err))
+			}
+		case mimeSheet:
+			if err := handleSheet(account, ch); err != nil {
+				errs = append(errs, fmt.Errorf("backfill sheet %s: %w", ch.FileID, err))
+			}
+		}
+	}
+
+	cursors.Drive.PageToken = token
+	slog.Info("seeded drive with backfill", "files", len(files), "token", token)
 	return errors.Join(errs...)
 }
 
@@ -243,27 +274,26 @@ func driveSlug(title, fileID string) string {
 	return s + "-" + fileID
 }
 
-// storeComments fetches comments and replies for a Drive file and appends
-// them to comments.jsonl in the given directory.
+// storeComments fetches all comments and replies for a Drive file and writes
+// them to comments.jsonl, replacing the previous contents. The Drive Comments
+// API has no incremental sync — every call returns the full snapshot. Overwrite
+// ensures deleted comments disappear and resolved status stays current.
 func storeComments(fileDir paths.DriveFileDir, fileID string) error {
 	comments, replies, err := drive.ListComments(fileID)
 	if err != nil {
 		return fmt.Errorf("list comments for %s: %w", fileID, err)
 	}
 
-	commentsPath := fileDir.CommentsFile()
-	var errs []error
+	var lines []model.Line
 	for _, c := range comments {
-		line := model.Line{Type: "comment", Comment: &c}
-		if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append comment %s: %w", c.ID, err))
-		}
+		lines = append(lines, model.Line{Type: "comment", Comment: &c})
 	}
 	for _, r := range replies {
-		line := model.Line{Type: "reply", Reply: &r}
-		if err := gwsstore.AppendLine(commentsPath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append reply %s: %w", r.ID, err))
-		}
+		lines = append(lines, model.Line{Type: "reply", Reply: &r})
 	}
-	return errors.Join(errs...)
+
+	if err := gwsstore.WriteLines(fileDir.CommentsFile(), lines); err != nil {
+		return fmt.Errorf("write comments for %s: %w", fileID, err)
+	}
+	return nil
 }

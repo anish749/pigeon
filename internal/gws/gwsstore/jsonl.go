@@ -37,6 +37,31 @@ func AppendLine(df paths.LogFile, line model.Line) error {
 	return nil
 }
 
+// WriteLines replaces the contents of a log file with the given lines.
+// Creates the file and parent directories if they don't exist.
+// Used for data that is always fetched as a full snapshot (e.g. Drive comments).
+func WriteLines(df paths.LogFile, lines []model.Line) error {
+	path := df.Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	}
+
+	var buf []byte
+	for _, line := range lines {
+		data, err := model.Marshal(line)
+		if err != nil {
+			return fmt.Errorf("marshal line: %w", err)
+		}
+		buf = append(buf, data...)
+		buf = append(buf, '\n')
+	}
+
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // ReadLines reads all JSONL lines from a log file. Returns nil, nil if the
 // file doesn't exist. Unparseable lines are collected into the error
 // but successfully parsed lines are still returned.
