@@ -11,7 +11,6 @@ import (
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
-	gcal "google.golang.org/api/calendar/v3"
 )
 
 // PollCalendar runs the calendar sync cycle: seed, incremental sync, and
@@ -163,13 +162,13 @@ func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, c
 }
 
 // writeEvents appends events to their date-partitioned JSONL files.
-func writeEvents(account paths.AccountDir, calID string, events []*gcal.Event) []error {
+func writeEvents(account paths.AccountDir, calID string, events []*model.CalendarEvent) []error {
 	var errs []error
 	for _, ev := range events {
-		datePath := account.Calendar(calID).DateFile(model.EventDateForStorage(ev))
+		datePath := account.Calendar(calID).DateFile(ev.EventDateForStorage())
 		line := model.Line{Type: "event", Event: ev}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append event %s: %w", ev.Id, err))
+			errs = append(errs, fmt.Errorf("append event %s: %w", ev.Parsed.Id, err))
 		}
 	}
 	return errs

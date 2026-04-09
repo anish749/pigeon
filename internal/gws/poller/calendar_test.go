@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws/gwsstore"
+	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
-	gcal "google.golang.org/api/calendar/v3"
 )
 
 // TestCalendarBackfillLive runs a full calendar sync lifecycle against the
@@ -183,9 +183,9 @@ func patchInstance(t *testing.T, instanceID, body string) {
 	t.Logf("patched instance %s → %q", instanceID, resp.Summary)
 }
 
-func readAllEvents(t *testing.T, calDir string) []*gcal.Event {
+func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
 	t.Helper()
-	var events []*gcal.Event
+	var events []*model.CalendarEvent
 	filepath.Walk(calDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
@@ -204,19 +204,19 @@ func readAllEvents(t *testing.T, calDir string) []*gcal.Event {
 	return events
 }
 
-func hasEventWithSummary(events []*gcal.Event, summary string) bool {
+func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 	for _, e := range events {
-		if e.Summary == summary {
+		if e.Parsed.Summary == summary {
 			return true
 		}
 	}
 	return false
 }
 
-func eventsWithPrefix(events []*gcal.Event, prefix string) []*gcal.Event {
-	var matched []*gcal.Event
+func eventsWithPrefix(events []*model.CalendarEvent, prefix string) []*model.CalendarEvent {
+	var matched []*model.CalendarEvent
 	for _, e := range events {
-		if strings.HasPrefix(e.Id, prefix) {
+		if strings.HasPrefix(e.Parsed.Id, prefix) {
 			matched = append(matched, e)
 		}
 	}

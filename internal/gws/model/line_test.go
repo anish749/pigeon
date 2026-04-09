@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -182,26 +183,41 @@ func TestMarshalParseReply(t *testing.T) {
 }
 
 func TestMarshalParseEvent(t *testing.T) {
+	// Build a CalendarEvent by marshalling a raw API-shaped JSON and parsing
+	// it both ways — mirrors how the calendar client populates Parsed + Raw.
+	rawJSON := `{
+		"id": "evt-1",
+		"created": "2026-04-07T10:00:00Z",
+		"updated": "2026-04-07T10:00:00Z",
+		"status": "confirmed",
+		"summary": "Team standup",
+		"description": "Daily team sync",
+		"start": {"dateTime": "2026-04-07T09:00:00-07:00"},
+		"end": {"dateTime": "2026-04-07T09:30:00-07:00"},
+		"location": "Room 42",
+		"organizer": {"email": "alice@example.com", "displayName": "Alice"},
+		"attendees": [
+			{"email": "bob@example.com", "displayName": "Bob", "responseStatus": "accepted"},
+			{"email": "carol@example.com", "responseStatus": "needsAction"}
+		],
+		"hangoutLink": "https://meet.google.com/abc-defg-hij",
+		"eventType": "default",
+		"recurringEventId": "evt-base",
+		"iCalUID": "evt-1@google.com",
+		"sequence": 2
+	}`
+	var parsed gcal.Event
+	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal typed: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+
 	orig := Line{
-		Type: "event",
-		Event: &gcal.Event{
-			Id:      "evt-1",
-			Created: "2026-04-07T10:00:00Z",
-			Updated: "2026-04-07T10:00:00Z",
-			Status:  "confirmed",
-			Summary: "Team standup",
-			Start:   &gcal.EventDateTime{DateTime: "2026-04-07T09:00:00-07:00"},
-			End:     &gcal.EventDateTime{DateTime: "2026-04-07T09:30:00-07:00"},
-			Location: "Room 42",
-			Organizer: &gcal.EventOrganizer{Email: "alice@example.com"},
-			Attendees: []*gcal.EventAttendee{
-				{Email: "bob@example.com"},
-				{Email: "carol@example.com"},
-			},
-			HangoutLink:      "https://meet.google.com/abc-defg-hij",
-			EventType:        "default",
-			RecurringEventId: "evt-base",
-		},
+		Type:  "event",
+		Event: &CalendarEvent{Parsed: parsed, Raw: raw},
 	}
 
 	data, err := Marshal(orig)
@@ -220,24 +236,39 @@ func TestMarshalParseEvent(t *testing.T) {
 	if got.Event == nil {
 		t.Fatal("Event is nil")
 	}
-	ev := got.Event
+
+	// Typed view round-trips.
+	ev := &got.Event.Parsed
 	if ev.Id != "evt-1" {
-		t.Errorf("Id = %q, want %q", ev.Id, "evt-1")
+		t.Errorf("Parsed.Id = %q, want %q", ev.Id, "evt-1")
 	}
 	if ev.Summary != "Team standup" {
-		t.Errorf("Summary = %q, want %q", ev.Summary, "Team standup")
+		t.Errorf("Parsed.Summary = %q, want %q", ev.Summary, "Team standup")
 	}
 	if ev.Location != "Room 42" {
-		t.Errorf("Location = %q, want %q", ev.Location, "Room 42")
+		t.Errorf("Parsed.Location = %q, want %q", ev.Location, "Room 42")
 	}
 	if len(ev.Attendees) != 2 {
-		t.Errorf("Attendees count = %d, want 2", len(ev.Attendees))
+		t.Errorf("Parsed.Attendees count = %d, want 2", len(ev.Attendees))
 	}
 	if ev.RecurringEventId != "evt-base" {
-		t.Errorf("RecurringEventId = %q, want %q", ev.RecurringEventId, "evt-base")
+		t.Errorf("Parsed.RecurringEventId = %q, want %q", ev.RecurringEventId, "evt-base")
 	}
 	if ev.Start == nil || ev.Start.DateTime != "2026-04-07T09:00:00-07:00" {
-		t.Errorf("Start.DateTime = %v, want 2026-04-07T09:00:00-07:00", ev.Start)
+		t.Errorf("Parsed.Start.DateTime = %v, want 2026-04-07T09:00:00-07:00", ev.Start)
+	}
+
+	// Raw view preserves everything, including fields we care about via Parsed.
+	if got.Event.Raw["id"] != "evt-1" {
+		t.Errorf("Raw[id] = %v, want evt-1", got.Event.Raw["id"])
+	}
+	if _, hasType := got.Event.Raw["type"]; hasType {
+		t.Error("Raw should not contain the storage type discriminator")
+	}
+	// A field stored in Raw but typically not interesting to Parsed consumers
+	// is still preserved — proving the raw form is lossless.
+	if got.Event.Raw["iCalUID"] != "evt-1@google.com" {
+		t.Errorf("Raw[iCalUID] = %v, want evt-1@google.com", got.Event.Raw["iCalUID"])
 	}
 }
 
@@ -272,7 +303,7 @@ func TestLineID(t *testing.T) {
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
 		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
 		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
-		{"event", Line{Event: &gcal.Event{Id: "v1"}}, "v1"},
+		{"event", Line{Event: &CalendarEvent{Parsed: gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},
 	}
 	for _, tt := range tests {

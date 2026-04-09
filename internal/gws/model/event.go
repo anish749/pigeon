@@ -6,33 +6,38 @@ import (
 	calendar "google.golang.org/api/calendar/v3"
 )
 
+type CalendarEvent struct {
+	Parsed calendar.Event         // This is used in the write layer for extracting info from the types.
+	Raw    map[string]any // This is used for serialization. We know that calendar events are JSON structs, not arrays / strings
+}
+
 // EventDateForStorage returns the YYYY-MM-DD date for filing a calendar event
 // into a per-day log file. Priority: Start > OriginalStartTime > Updated.
-func EventDateForStorage(ev *calendar.Event) string {
-	if ev.Start != nil {
-		if d := dateFromRFC3339(ev.Start.DateTime); d != "" {
+func (e *CalendarEvent) EventDateForStorage() string {
+	if e.Parsed.Start != nil {
+		if d := dateFromRFC3339(e.Parsed.Start.DateTime); d != "" {
 			return d
 		}
-		if ev.Start.Date != "" {
-			return ev.Start.Date
+		if e.Parsed.Start.Date != "" {
+			return e.Parsed.Start.Date
 		}
 	}
 	// Cancelled recurring instances carry the original start instead of start/end.
-	if ev.OriginalStartTime != nil {
-		if d := dateFromRFC3339(ev.OriginalStartTime.DateTime); d != "" {
+	if e.Parsed.OriginalStartTime != nil {
+		if d := dateFromRFC3339(e.Parsed.OriginalStartTime.DateTime); d != "" {
 			return d
 		}
-		if ev.OriginalStartTime.Date != "" {
-			return ev.OriginalStartTime.Date
+		if e.Parsed.OriginalStartTime.Date != "" {
+			return e.Parsed.OriginalStartTime.Date
 		}
 	}
-	if d := dateFromRFC3339(ev.Updated); d != "" {
+	if d := dateFromRFC3339(e.Parsed.Updated); d != "" {
 		slog.Warn("calendar event has no start time, falling back to updated",
-			"event_id", ev.Id, "status", ev.Status)
+			"event_id", e.Parsed.Id, "status", e.Parsed.Status)
 		return d
 	}
 	slog.Warn("calendar event has no parseable date, filing under unknown",
-		"event_id", ev.Id, "status", ev.Status)
+		"event_id", e.Parsed.Id, "status", e.Parsed.Status)
 	return "unknown"
 }
 

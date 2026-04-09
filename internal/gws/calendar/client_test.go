@@ -3,16 +3,24 @@ package calendar
 import (
 	"testing"
 
+	"github.com/anish749/pigeon/internal/gws/model"
 	gcal "google.golang.org/api/calendar/v3"
 )
 
+// newEvent is a test helper that wraps a gcal.Event into the CalendarEvent
+// shape the production code expects. Raw is left nil because classify() only
+// reads from Parsed.
+func newEvent(e gcal.Event) *model.CalendarEvent {
+	return &model.CalendarEvent{Parsed: e}
+}
+
 func TestClassify_OneOffEvent(t *testing.T) {
-	items := []*gcal.Event{
-		{
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
 			Id:      "evt-123",
 			Status:  "confirmed",
 			Summary: "Team Standup",
-		},
+		}),
 	}
 
 	events, recurringIDs, cancelledIDs := classify(items)
@@ -20,8 +28,8 @@ func TestClassify_OneOffEvent(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events count = %d, want 1", len(events))
 	}
-	if events[0].Id != "evt-123" {
-		t.Errorf("events[0].Id = %q, want %q", events[0].Id, "evt-123")
+	if events[0].Parsed.Id != "evt-123" {
+		t.Errorf("events[0].Parsed.Id = %q, want %q", events[0].Parsed.Id, "evt-123")
 	}
 	if len(recurringIDs) != 0 {
 		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
@@ -32,12 +40,12 @@ func TestClassify_OneOffEvent(t *testing.T) {
 }
 
 func TestClassify_RecurringParent(t *testing.T) {
-	items := []*gcal.Event{
-		{
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
 			Id:         "evt-recurring",
 			Status:     "confirmed",
 			Recurrence: []string{"RRULE:FREQ=WEEKLY"},
-		},
+		}),
 	}
 
 	events, recurringIDs, cancelledIDs := classify(items)
@@ -54,12 +62,12 @@ func TestClassify_RecurringParent(t *testing.T) {
 }
 
 func TestClassify_CancelledRecurringParent(t *testing.T) {
-	items := []*gcal.Event{
-		{
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
 			Id:         "evt-deleted",
 			Status:     "cancelled",
 			Recurrence: []string{"RRULE:FREQ=DAILY"},
-		},
+		}),
 	}
 
 	events, recurringIDs, cancelledIDs := classify(items)
@@ -76,12 +84,12 @@ func TestClassify_CancelledRecurringParent(t *testing.T) {
 }
 
 func TestClassify_RecurringInstance(t *testing.T) {
-	items := []*gcal.Event{
-		{
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
 			Id:               "evt-instance-1",
 			Status:           "confirmed",
 			RecurringEventId: "evt-recurring",
-		},
+		}),
 	}
 
 	events, recurringIDs, cancelledIDs := classify(items)
@@ -89,8 +97,8 @@ func TestClassify_RecurringInstance(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events count = %d, want 1 (instances are writable)", len(events))
 	}
-	if events[0].Id != "evt-instance-1" {
-		t.Errorf("events[0].Id = %q, want %q", events[0].Id, "evt-instance-1")
+	if events[0].Parsed.Id != "evt-instance-1" {
+		t.Errorf("events[0].Parsed.Id = %q, want %q", events[0].Parsed.Id, "evt-instance-1")
 	}
 	if len(recurringIDs) != 0 {
 		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
@@ -101,11 +109,11 @@ func TestClassify_RecurringInstance(t *testing.T) {
 }
 
 func TestClassify_Mixed(t *testing.T) {
-	items := []*gcal.Event{
-		{Id: "oneoff", Status: "confirmed"},
-		{Id: "parent", Recurrence: []string{"RRULE:FREQ=WEEKLY"}},
-		{Id: "instance", RecurringEventId: "parent"},
-		{Id: "deleted-parent", Status: "cancelled", Recurrence: []string{"RRULE:FREQ=DAILY"}},
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{Id: "oneoff", Status: "confirmed"}),
+		newEvent(gcal.Event{Id: "parent", Recurrence: []string{"RRULE:FREQ=WEEKLY"}}),
+		newEvent(gcal.Event{Id: "instance", RecurringEventId: "parent"}),
+		newEvent(gcal.Event{Id: "deleted-parent", Status: "cancelled", Recurrence: []string{"RRULE:FREQ=DAILY"}}),
 	}
 
 	events, recurringIDs, cancelledIDs := classify(items)
