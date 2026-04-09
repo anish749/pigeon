@@ -1,6 +1,12 @@
 package paths
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
 
 func acctDir() AccountDir {
 	return NewDataRoot("/tmp/test").Platform("gws").AccountFromSlug("user-at-gmail-com")
@@ -68,6 +74,112 @@ func TestDriveFileDir_MetaFile(t *testing.T) {
 	wantName := "drive-meta-2026-04-07.json"
 	if got := mf.Name(); got != wantName {
 		t.Errorf("Name() = %q, want %q", got, wantName)
+	}
+}
+
+func TestParseDriveMetaPath_Valid(t *testing.T) {
+	path := "/tmp/test/gws/user/gdrive/doc-abc/drive-meta-2026-04-07.json"
+	meta, ok, err := ParseDriveMetaPath(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if meta.Path() != path {
+		t.Errorf("Path() = %q, want %q", meta.Path(), path)
+	}
+	if meta.Dir() != "/tmp/test/gws/user/gdrive/doc-abc" {
+		t.Errorf("Dir() = %q", meta.Dir())
+	}
+}
+
+func TestParseDriveMetaPath_NotAMetaFile(t *testing.T) {
+	cases := []string{
+		"/tmp/test/gws/user/gmail/2026-04-07.jsonl",        // wrong subdir
+		"/tmp/test/gws/user/gdrive/doc-abc/Tab1.md",        // content file
+		"/tmp/test/gws/user/gdrive/doc-abc/comments.jsonl", // comments file
+		"/tmp/test/random/file.txt",                         // unrelated
+	}
+	for _, path := range cases {
+		meta, ok, err := ParseDriveMetaPath(path)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", path, err)
+		}
+		if ok {
+			t.Errorf("%s: ok = true, want false", path)
+		}
+		if meta != (DriveMetaFile{}) {
+			t.Errorf("%s: meta != zero value", path)
+		}
+	}
+}
+
+func TestParseDriveMetaPath_MalformedDate(t *testing.T) {
+	// Filename has the right prefix/extension but an unparseable date.
+	cases := []string{
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-not-a-date.json",
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-2026-13-45.json",
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-.json",
+	}
+	for _, path := range cases {
+		_, ok, err := ParseDriveMetaPath(path)
+		if err == nil {
+			t.Errorf("%s: expected error for malformed date", path)
+		}
+		if !ok {
+			t.Errorf("%s: ok = false, want true (shape matched)", path)
+		}
+	}
+}
+
+func TestDriveMetaFileGlobsSince(t *testing.T) {
+	// 2-day window should produce patterns for today, yesterday, and 2 days ago.
+	globs := DriveMetaFileGlobsSince(48 * time.Hour)
+	if len(globs) != 3 {
+		t.Errorf("got %d globs, want 3: %v", len(globs), globs)
+	}
+	// Each glob should be drive-meta-YYYY-MM-DD.json.
+	for _, g := range globs {
+		if !strings.HasPrefix(g, "drive-meta-") {
+			t.Errorf("glob %q missing prefix", g)
+		}
+		if !strings.HasSuffix(g, ".json") {
+			t.Errorf("glob %q missing suffix", g)
+		}
+	}
+}
+
+func TestDriveMetaFile_ContentFiles(t *testing.T) {
+	// Use a temp dir because ContentFiles does a real os.ReadDir.
+	dir := t.TempDir()
+	root := NewDataRoot(dir)
+	driveFile := root.Platform("gws").AccountFromSlug("user").Drive().File("doc-abc")
+	meta := driveFile.MetaFile("2026-04-07")
+
+	// Create the meta file and sibling content files.
+	if err := os.MkdirAll(driveFile.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(meta.Path(), `{}`)
+	write(driveFile.TabFile("Tab1").Path(), "content")
+	write(driveFile.SheetFile("Sheet1").Path(), "a,b,c")
+	write(driveFile.CommentsFile().Path(), `{}`)
+	// Non-content file that should be ignored.
+	write(filepath.Join(driveFile.Path(), "ignore.txt"), "ignored")
+
+	content, err := meta.ContentFiles()
+	if err != nil {
+		t.Fatalf("ContentFiles: %v", err)
+	}
+	if len(content) != 3 {
+		t.Errorf("got %d content files, want 3: %v", len(content), content)
 	}
 }
 
