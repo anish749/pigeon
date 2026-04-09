@@ -3,6 +3,7 @@ package gmail
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -171,6 +172,10 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 	parsed, err := parseRawMessage(msg.Raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse message %s: %w", messageID, err)
+	}
+	for _, w := range parsed.warnings {
+		slog.Warn("recovered malformed mime part",
+			"messageId", messageID, "subject", parsed.subject, "warning", w)
 	}
 
 	return &model.EmailLine{

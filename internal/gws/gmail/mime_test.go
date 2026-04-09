@@ -126,6 +126,49 @@ func TestParseRawMessage_PaddedBase64URL(t *testing.T) {
 	}
 }
 
+func TestParseRawMessage_MalformedSubPartContentType(t *testing.T) {
+	// Regression: some bulk-mail senders generate attachments whose
+	// Content-Type header contains literal shell error output (e.g.
+	// "cannot open (No such file or directory)") because their template
+	// pastes the stderr of a `file` invocation verbatim. Go's
+	// mime.ParseMediaType rejects this with "expected slash after first
+	// token", which previously caused enmime to drop the entire envelope
+	// — losing the valid body text along with the bad attachment.
+	//
+	// The parser is configured with SkipMalformedParts so the body is
+	// recovered and the broken part is reported via parsedMessage.warnings.
+	raw := encode("From: sender@example.com\r\n" +
+		"To: recipient@example.com\r\n" +
+		"Subject: Broken attachment\r\n" +
+		"Content-Type: multipart/mixed; boundary=outer\r\n" +
+		"\r\n" +
+		"--outer\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Body still readable\r\n" +
+		"--outer\r\n" +
+		"Content-Type: cannot open (No such file or directory)\r\n" +
+		"Content-Disposition: attachment; filename=\"doc.pdf\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"\r\n" +
+		"JVBERi0xLjQK\r\n" +
+		"--outer--\r\n")
+
+	parsed, err := parseRawMessage(raw)
+	if err != nil {
+		t.Fatalf("parseRawMessage should recover from malformed sub-part: %v", err)
+	}
+	if parsed.subject != "Broken attachment" {
+		t.Errorf("subject = %q, want %q", parsed.subject, "Broken attachment")
+	}
+	if parsed.text != "Body still readable" {
+		t.Errorf("text = %q, want %q", parsed.text, "Body still readable")
+	}
+	if len(parsed.warnings) == 0 {
+		t.Error("warnings is empty, expected the malformed part to be reported")
+	}
+}
+
 func TestParseRawMessage_WithAttachment(t *testing.T) {
 	raw := encode("From: sender@example.com\r\n" +
 		"Subject: Attachment\r\n" +
