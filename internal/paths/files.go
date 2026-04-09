@@ -1,5 +1,7 @@
 package paths
 
+import "path/filepath"
+
 // LogFile is a sealed interface for typed file paths that hold JSONL log data.
 // The unexported method restricts implementations to this package.
 type LogFile interface {
@@ -51,6 +53,11 @@ type MetaFile string
 
 // Path returns the file path as a string.
 func (m MetaFile) Path() string { return string(m) }
+
+// Dir returns the directory containing this meta file. Used by callers that
+// need to enumerate sibling files (e.g. cleanup of stale meta files in the
+// same directory).
+func (m MetaFile) Dir() string { return filepath.Dir(string(m)) }
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

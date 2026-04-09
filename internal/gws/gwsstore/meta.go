@@ -31,7 +31,7 @@ func LoadMeta(mf paths.MetaFile) (*model.DocMeta, error) {
 // The write-then-delete order ensures we never lose metadata on a crash.
 func SaveMeta(mf paths.MetaFile, m *model.DocMeta) error {
 	path := mf.Path()
-	dir := filepath.Dir(path)
+	dir := mf.Dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)
 	}
