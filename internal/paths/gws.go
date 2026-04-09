@@ -4,16 +4,23 @@ import "path/filepath"
 
 // GWS directory and file naming constants.
 const (
-	gmailSubdir      = "gmail"
-	gcalendarSubdir  = "gcalendar"
-	gdriveSubdir     = "gdrive"
-	attachSubdir     = "attachments"
-	commentsFile     = "comments"
-	metaFile         = "meta.json"
-	markdownExt      = ".md"
-	csvExt           = ".csv"
-	formulaCSVSuffix = ".formulas.csv"
+	gmailSubdir         = "gmail"
+	gcalendarSubdir     = "gcalendar"
+	gdriveSubdir        = "gdrive"
+	attachSubdir        = "attachments"
+	commentsFile        = "comments"
+	driveMetaFilePrefix = "drive-meta-"
+	driveMetaFileExt    = ".json"
+	markdownExt         = ".md"
+	csvExt              = ".csv"
+	formulaCSVSuffix    = ".formulas.csv"
 )
+
+// DriveMetaFileGlob is the glob pattern for matching all Drive file metadata
+// files in a Drive file directory. Used for cleanup (removing stale meta files
+// when a file is re-synced) and read-layer discovery (finding files modified
+// within a time window via filename).
+const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
 
 // GWS path types extend AccountDir for Google Workspace services.
 //
@@ -93,10 +100,37 @@ func (f DriveFileDir) Path() string {
 	return filepath.Join(f.drive.Path(), f.slug)
 }
 
-// MetaFile returns the path to the file's metadata.
-func (f DriveFileDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(f.Path(), metaFile))
+// MetaFile returns the path to the file's metadata, with the Drive
+// modification date encoded in the filename (drive-meta-YYYY-MM-DD.json).
+// The date enables filename-based filtering in the read layer without
+// parsing the file contents.
+func (f DriveFileDir) MetaFile(modifiedDate string) DriveMetaFile {
+	return DriveMetaFile{
+		dir:  f.Path(),
+		name: driveMetaFilePrefix + modifiedDate + driveMetaFileExt,
+	}
 }
+
+// DriveMetaFile is a path to a Google Drive file's metadata JSON, named
+// drive-meta-YYYY-MM-DD.json where the date is the Drive modification date.
+// Unlike conversation MetaFile (a fixed .meta.json sidecar), Drive meta files
+// are date-partitioned and require sibling file cleanup on update. The struct
+// carries dir and name separately so callers can access the parent directory
+// directly rather than parsing the path via filepath.Dir.
+type DriveMetaFile struct {
+	dir  string
+	name string
+}
+
+
+// Path returns the full file path.
+func (m DriveMetaFile) Path() string { return filepath.Join(m.dir, m.name) }
+
+// Dir returns the directory containing this meta file.
+func (m DriveMetaFile) Dir() string { return m.dir }
+
+// Name returns the filename (without the directory).
+func (m DriveMetaFile) Name() string { return m.name }
 
 // CommentsFile returns the path to the file's comments JSONL.
 func (f DriveFileDir) CommentsFile() CommentsFile {
