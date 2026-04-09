@@ -47,10 +47,6 @@ call per file × content + comments). Any files modified during backfill
 are captured by the first incremental poll since the cursor predates the
 backfill window.
 
-The page token is seeded AFTER backfill so that any files modified
-between `files.list` and `getStartPageToken` are caught by the first
-incremental poll (re-exported, overwrite handles dedup).
-
 ### No extra cursor state needed
 
 Unlike Calendar (which needs `expanded_until` and `recurring_events`),
@@ -85,8 +81,10 @@ states correctly:
 | Modified comment | Both versions on disk | Only current version |
 
 `WriteLines` was added to `gwsstore` alongside `AppendLine` and
-`ReadLines`. It marshals all lines to bytes and writes atomically
-with `os.WriteFile`.
+`ReadLines`. It marshals all lines to bytes and writes with
+`os.WriteFile` (truncate + write, not atomic). A crash mid-write
+leaves a corrupt file, but comments are re-fetched as a full snapshot
+on the next file change, so the file self-heals.
 
 ### Difference from Calendar backfill
 
