@@ -11,8 +11,8 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// LoadMeta reads document metadata from a JSON file.
-func LoadMeta(mf paths.MetaFile) (*model.DocMeta, error) {
+// LoadDriveMeta reads Google Drive file metadata from a JSON file.
+func LoadDriveMeta(mf paths.DriveMetaFile) (*model.DocMeta, error) {
 	path := mf.Path()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -25,11 +25,12 @@ func LoadMeta(mf paths.MetaFile) (*model.DocMeta, error) {
 	return &m, nil
 }
 
-// SaveMeta writes document metadata to a JSON file, creating parent directories.
-// After successfully writing, it removes any stale Drive meta files in the same
-// directory (drive-meta-*.json with different dates) to avoid accumulation.
-// The write-then-delete order ensures we never lose metadata on a crash.
-func SaveMeta(mf paths.MetaFile, m *model.DocMeta) error {
+// SaveDriveMeta writes Google Drive file metadata to a JSON file, creating
+// parent directories. After successfully writing, it removes any stale Drive
+// meta files in the same directory (drive-meta-*.json with different dates)
+// to avoid accumulation. The write-then-delete order ensures we never lose
+// metadata on a crash.
+func SaveDriveMeta(mf paths.DriveMetaFile, m *model.DocMeta) error {
 	path := mf.Path()
 	dir := mf.Dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -45,7 +46,7 @@ func SaveMeta(mf paths.MetaFile, m *model.DocMeta) error {
 	}
 
 	// Clean up stale Drive meta files from previous syncs.
-	if err := cleanupStaleDriveMeta(dir, filepath.Base(path)); err != nil {
+	if err := cleanupStaleDriveMeta(dir, mf.Name()); err != nil {
 		return fmt.Errorf("cleanup stale meta in %s: %w", dir, err)
 	}
 	return nil

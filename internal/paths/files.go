@@ -1,7 +1,5 @@
 package paths
 
-import "path/filepath"
-
 // LogFile is a sealed interface for typed file paths that hold JSONL log data.
 // The unexported method restricts implementations to this package.
 type LogFile interface {
@@ -48,29 +46,13 @@ type CommentsFile string
 func (c CommentsFile) Path() string { return string(c) }
 func (CommentsFile) logFile()      {}
 
-// MetaFile is a path to a document's metadata JSON file. It carries the
-// directory and filename separately so callers can access the parent directory
-// (e.g. for cleanup of sibling files) without re-parsing the path.
-type MetaFile struct {
-	dir  string
-	name string
-}
+// MetaFile is a path to a conversation's .meta.json sidecar (messaging data).
+// Drive file metadata uses DriveMetaFile (see paths/gws.go) which carries the
+// modification date in the filename and needs separate dir/name handling.
+type MetaFile string
 
-// NewMetaFile constructs a MetaFile from a directory and a filename.
-// Constructors (ConversationDir.MetaFile, DriveFileDir.MetaFile) already
-// have both pieces, so this avoids re-parsing via filepath.Dir.
-func NewMetaFile(dir, name string) MetaFile {
-	return MetaFile{dir: dir, name: name}
-}
-
-// Path returns the full file path.
-func (m MetaFile) Path() string { return filepath.Join(m.dir, m.name) }
-
-// Dir returns the directory containing this meta file.
-func (m MetaFile) Dir() string { return m.dir }
-
-// Name returns the filename (without the directory).
-func (m MetaFile) Name() string { return m.name }
+// Path returns the file path as a string.
+func (m MetaFile) Path() string { return string(m) }
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

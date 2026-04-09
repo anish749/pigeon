@@ -155,7 +155,7 @@ func handleDoc(account paths.AccountDir, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Tabs:         tabMetas,
 	}
-	if err := gwsstore.SaveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
+	if err := gwsstore.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
@@ -234,7 +234,7 @@ func handleSheet(account paths.AccountDir, ch drive.Change) error {
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Sheets:       sheetNames,
 	}
-	if err := gwsstore.SaveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
+	if err := gwsstore.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
