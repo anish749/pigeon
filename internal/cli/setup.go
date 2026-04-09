@@ -47,3 +47,15 @@ To create a Slack app:
 		},
 	}
 }
+
+func newSetupGWSCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup-gws",
+		Short:   "Register a Google Workspace account (Gmail, Calendar, Drive)",
+		GroupID: groupSetup,
+		Long:    `Registers the account from the gws CLI. Run 'gws auth login' first.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return commands.RunSetupGWS(args)
+		},
+	}
+}
