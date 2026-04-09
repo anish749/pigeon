@@ -1,6 +1,9 @@
 package paths
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // GWS directory and file naming constants.
 const (
@@ -11,17 +14,42 @@ const (
 	commentsFile        = "comments"
 	driveMetaFilePrefix = "drive-meta-"
 	driveMetaFileExt    = ".json"
-	markdownExt         = ".md"
-	csvExt              = ".csv"
 	formulaCSVSuffix    = ".formulas.csv"
 	pollMetricsFile     = ".poll-metrics.jsonl"
 )
+
+// Drive content file extensions. Drive file directories hold the exported
+// content of a single Google Doc or Sheet: markdown per tab, CSV per sheet,
+// and a JSONL comments snapshot.
+const (
+	MarkdownExt = ".md"
+	CSVExt      = ".csv"
+)
+
+// DriveContentExts lists the file extensions of Drive content files — the
+// files that live alongside a drive-meta-*.json in a Drive file directory.
+// Used by the read layer to discover Drive content across glob patterns.
+var DriveContentExts = []string{MarkdownExt, CSVExt, FileExt}
 
 // DriveMetaFileGlob is the glob pattern for matching all Drive file metadata
 // files in a Drive file directory. Used for cleanup (removing stale meta files
 // when a file is re-synced) and read-layer discovery (finding files modified
 // within a time window via filename).
 const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
+
+// DriveMetaFileForDate returns the drive-meta filename for a given date string
+// (YYYY-MM-DD). Used by the read layer to construct date-filtered globs.
+func DriveMetaFileForDate(date string) string {
+	return driveMetaFilePrefix + date + driveMetaFileExt
+}
+
+// IsDriveMetaFile reports whether the given file path points to a drive-meta
+// file (drive-meta-YYYY-MM-DD.json). Uses the base filename, so works with
+// both absolute and relative paths.
+func IsDriveMetaFile(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, driveMetaFilePrefix) && strings.HasSuffix(base, driveMetaFileExt)
+}
 
 // GWS path types extend AccountDir for Google Workspace services.
 //
@@ -147,12 +175,12 @@ func (f DriveFileDir) CommentsFile() CommentsFile {
 
 // TabFile returns the path to a document tab's markdown content.
 func (f DriveFileDir) TabFile(tabTitle string) TabFile {
-	return TabFile(filepath.Join(f.Path(), tabTitle+markdownExt))
+	return TabFile(filepath.Join(f.Path(), tabTitle+MarkdownExt))
 }
 
 // SheetFile returns the path to a sheet's CSV export.
 func (f DriveFileDir) SheetFile(sheetName string) SheetFile {
-	return SheetFile(filepath.Join(f.Path(), sheetName+csvExt))
+	return SheetFile(filepath.Join(f.Path(), sheetName+CSVExt))
 }
 
 // FormulaFile returns the path to a sheet's formulas CSV export.

@@ -4,9 +4,12 @@ package read
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
@@ -25,6 +28,50 @@ func dateGlobs(since time.Duration) []string {
 		globs = append(globs, d.Format("2006-01-02")+paths.FileExt)
 	}
 	return globs
+}
+
+// driveMetaGlobs generates filename glob patterns for drive-meta files dated
+// within the since window. Each pattern matches a meta file like
+// "drive-meta-2026-04-07.json". When a meta file falls within the window,
+// the caller should include its sibling content files (see expandDriveContent).
+func driveMetaGlobs(since time.Duration) []string {
+	now := time.Now().UTC()
+	cutoff := now.Add(-since).Truncate(24 * time.Hour)
+	today := now.Truncate(24 * time.Hour)
+
+	var globs []string
+	for d := cutoff; !d.After(today); d = d.Add(24 * time.Hour) {
+		globs = append(globs, paths.DriveMetaFileForDate(d.Format("2006-01-02")))
+	}
+	return globs
+}
+
+// expandDriveContent takes a list of drive-meta file paths and returns the
+// paths of all sibling content files (.md, .csv, .jsonl) in each meta file's
+// directory. Skips directories that cannot be read, collecting errors for
+// the caller to report.
+func expandDriveContent(metaPaths []string) ([]string, error) {
+	var content []string
+	var errs []error
+	for _, metaPath := range metaPaths {
+		dir := filepath.Dir(metaPath)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read drive dir %s: %w", dir, err))
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			ext := filepath.Ext(name)
+			if slices.Contains(paths.DriveContentExts, ext) {
+				content = append(content, filepath.Join(dir, name))
+			}
+		}
+	}
+	return content, errors.Join(errs...)
 }
 
 // threadDatePatterns generates rg -e patterns that match timestamp prefixes

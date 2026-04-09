@@ -21,17 +21,59 @@ type GrepOpts struct {
 }
 
 // Grep runs a content search over data files under dir. Returns raw rg
-// output. When Since is set, date files are filtered by the same date
-// globs as Glob, and thread files are included unfiltered (the caller
-// should post-filter thread results by message timestamp if needed).
+// output.
+//
+// Files covered (same set as Glob):
+//   - Messaging JSONL date and thread files.
+//   - Gmail and Calendar JSONL date files.
+//   - Drive content files (.md, .csv, comments.jsonl) whose sibling
+//     drive-meta file falls within the since window.
+//
+// When Since is zero, all data files under dir are searched. When Since is
+// set, the file list is pre-computed via Glob (to handle Drive content files
+// which cannot be filtered by filename glob alone) and passed to rg as
+// positional arguments.
 func Grep(dir string, opts GrepOpts) ([]byte, error) {
+	args := buildGrepFlags(opts)
+
+	if opts.Since == 0 {
+		// Without a time window, let rg walk the tree itself and filter by
+		// extension glob. This is faster than pre-computing the file list.
+		args = append(args, "--glob", "*"+paths.FileExt)
+		for _, ext := range paths.DriveContentExts {
+			if ext != paths.FileExt {
+				args = append(args, "--glob", "*"+ext)
+			}
+		}
+		args = append(args, opts.Query, dir)
+		return runGrep(args)
+	}
+
+	// With a time window, pre-compute the file list via Glob. This handles
+	// Drive content files (which aren't date-named) by resolving sibling
+	// files of drive-meta matches.
+	files, err := Glob(dir, opts.Since)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate grep files: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	args = append(args, opts.Query)
+	args = append(args, files...)
+	return runGrep(args)
+}
+
+// buildGrepFlags constructs the rg flag list for the given options, excluding
+// the query and file/dir arguments.
+func buildGrepFlags(opts GrepOpts) []string {
 	var args []string
 	if opts.JSON {
 		args = append(args, "--json")
 	} else {
 		args = append(args, "--color=never")
 	}
-
 	if opts.FilesOnly {
 		args = append(args, "-l")
 	}
@@ -47,22 +89,12 @@ func Grep(dir string, opts GrepOpts) ([]byte, error) {
 	if opts.Context > 0 {
 		args = append(args, fmt.Sprintf("-C%d", opts.Context))
 	}
+	return args
+}
 
-	// File selection: same --since logic as Glob for date files.
-	if opts.Since > 0 {
-		for _, g := range dateGlobs(opts.Since) {
-			args = append(args, "--glob", g)
-		}
-		// Include all thread files — post-filter by message ts is the
-		// caller's responsibility (same as Glob uses rg -l for threads,
-		// but grep needs content, not just paths).
-		args = append(args, "--glob", paths.ThreadGlobRg)
-	} else {
-		args = append(args, "--glob", "*"+paths.FileExt)
-	}
-
-	args = append(args, opts.Query, dir)
-
+// runGrep executes rg and returns its output. Exit code 1 (no matches) is
+// treated as success with no output.
+func runGrep(args []string) ([]byte, error) {
 	out, err := exec.Command("rg", args...).Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
