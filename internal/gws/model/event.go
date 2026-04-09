@@ -1,49 +1,55 @@
 package model
 
-import "log/slog"
+import (
+	"log/slog"
 
-// EventLine represents a Google Calendar event in JSONL format.
-type EventLine struct {
-	ID          string   `json:"id"`                    // Calendar event ID
-	Ts          string   `json:"ts"`                    // created time (RFC 3339)
-	Updated     string   `json:"updated"`               // last modified (RFC 3339)
-	Status      string   `json:"status"`                // confirmed, tentative, cancelled
-	Summary     string   `json:"summary"`               // event title
-	Description string   `json:"description,omitempty"` // event notes
-	Start       string   `json:"start,omitempty"`       // RFC 3339 datetime (timed)
-	End         string   `json:"end,omitempty"`         // RFC 3339 datetime (timed)
-	StartDate   string   `json:"startDate,omitempty"`   // YYYY-MM-DD (all-day)
-	EndDate     string   `json:"endDate,omitempty"`     // YYYY-MM-DD (all-day)
-	Location    string   `json:"location,omitempty"`    // event location
-	Organizer   string   `json:"organizer,omitempty"`   // organizer email
-	Attendees   []string `json:"attendees,omitempty"`   // attendee emails
-	MeetLink          string   `json:"meetLink,omitempty"`          // Google Meet link
-	EventType         string   `json:"eventType"`                   // default, focusTime, etc.
-	Recurring         bool     `json:"recurring,omitempty"`         // recurring event instance
-	OriginalStartTime string   `json:"originalStartTime,omitempty"` // original start for cancelled recurring instances
+	calendar "google.golang.org/api/calendar/v3"
+)
+
+// CalendarEvent holds two representations of a single calendar event: a
+// typed view for in-process code and a raw map that is the source of truth
+// for disk storage.
+//
+// Runtime is the typed calendar.Event used by classify, dedup, date extraction,
+// and anything else that needs field access. Serialized is a JSON-shaped map
+// that Marshal writes verbatim to disk — it preserves every field the API
+// returned, even ones the generated SDK types don't know about.
+//
+// Only Serialized is persisted. Mutations to Runtime are not reflected on
+// disk unless they're also pushed into Serialized, so treat Runtime as a
+// read-only view of the event.
+type CalendarEvent struct {
+	Runtime    calendar.Event
+	Serialized map[string]any
 }
 
-// DateForStorage returns the YYYY-MM-DD date for filing this event into a
-// per-day log file. Priority: Start > StartDate > OriginalStartTime > Updated.
-func (e EventLine) DateForStorage() string {
-	if d := dateFromRFC3339(e.Start); d != "" {
-		return d
-	}
-	if e.StartDate != "" {
-		return e.StartDate
+// DateForStorage returns the YYYY-MM-DD date for filing a calendar event
+// into a per-day log file. Priority: Start > OriginalStartTime > Updated.
+func (e *CalendarEvent) DateForStorage() string {
+	if e.Runtime.Start != nil {
+		if d := dateFromRFC3339(e.Runtime.Start.DateTime); d != "" {
+			return d
+		}
+		if e.Runtime.Start.Date != "" {
+			return e.Runtime.Start.Date
+		}
 	}
 	// Cancelled recurring instances carry the original start instead of start/end.
-	if d := dateFromRFC3339(e.OriginalStartTime); d != "" {
-		return d
+	if e.Runtime.OriginalStartTime != nil {
+		if d := dateFromRFC3339(e.Runtime.OriginalStartTime.DateTime); d != "" {
+			return d
+		}
+		if e.Runtime.OriginalStartTime.Date != "" {
+			return e.Runtime.OriginalStartTime.Date
+		}
 	}
-	if e.OriginalStartTime != "" && len(e.OriginalStartTime) >= 10 {
-		return e.OriginalStartTime[:10]
-	}
-	if d := dateFromRFC3339(e.Updated); d != "" {
+	if d := dateFromRFC3339(e.Runtime.Updated); d != "" {
+		slog.Warn("calendar event has no start time, falling back to updated",
+			"event_id", e.Runtime.Id, "status", e.Runtime.Status)
 		return d
 	}
 	slog.Warn("calendar event has no parseable date, filing under unknown",
-		"event_id", e.ID, "status", e.Status)
+		"event_id", e.Runtime.Id, "status", e.Runtime.Status)
 	return "unknown"
 }
 

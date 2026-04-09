@@ -3,6 +3,9 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 // Line is a parsed JSONL line. Exactly one of the typed fields is non-nil.
@@ -12,7 +15,7 @@ type Line struct {
 	EmailDelete *EmailDeleteLine
 	Comment     *CommentLine
 	Reply       *ReplyLine
-	Event       *EventLine
+	Event       *CalendarEvent
 }
 
 // LineID returns the ID of the line's inner type, used for deduplication.
@@ -27,7 +30,7 @@ func (l Line) LineID() string {
 	case l.Reply != nil:
 		return l.Reply.ID
 	case l.Event != nil:
-		return l.Event.ID
+		return l.Event.Runtime.Id
 	default:
 		return ""
 	}
@@ -66,10 +69,12 @@ func Marshal(l Line) ([]byte, error) {
 			*ReplyLine
 		}{t, l.Reply})
 	case l.Event != nil:
-		return json.Marshal(struct {
-			typed
-			*EventLine
-		}{t, l.Event})
+		// Copy Serialized so we can inject the storage discriminator without
+		// mutating the caller's map.
+		out := make(map[string]any, len(l.Event.Serialized)+1)
+		maps.Copy(out, l.Event.Serialized)
+		out["type"] = "event"
+		return json.Marshal(out)
 	default:
 		return nil, fmt.Errorf("marshal line: no typed field set")
 	}
@@ -118,11 +123,17 @@ func Parse(line string) (Line, error) {
 		}
 		l.Reply = &v
 	case "event":
-		var v EventLine
-		if err := json.Unmarshal(data, &v); err != nil {
+		var runtime calendar.Event
+		if err := json.Unmarshal(data, &runtime); err != nil {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
-		l.Event = &v
+		var serialized map[string]any
+		if err := json.Unmarshal(data, &serialized); err != nil {
+			return Line{}, fmt.Errorf("parse event line serialized: %w", err)
+		}
+		// "type" is our storage discriminator, not part of the API response.
+		delete(serialized, "type")
+		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", hdr.Type)
 	}

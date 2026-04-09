@@ -1,72 +1,83 @@
 package model
 
-import "testing"
+import (
+	"testing"
 
-func TestDateForStorage(t *testing.T) {
+	gcal "google.golang.org/api/calendar/v3"
+)
+
+func TestEventDateForStorage(t *testing.T) {
 	tests := []struct {
 		name string
-		ev   EventLine
+		ev   *gcal.Event
 		want string
 	}{
 		{
-			name: "timed event uses Start",
-			ev:   EventLine{Start: "2026-04-09T14:00:00-07:00"},
+			name: "timed event uses Start.DateTime",
+			ev:   &gcal.Event{Start: &gcal.EventDateTime{DateTime: "2026-04-09T14:00:00-07:00"}},
 			want: "2026-04-09",
 		},
 		{
 			name: "timed event with UTC offset",
-			ev:   EventLine{Start: "2026-04-09T14:00:00Z"},
+			ev:   &gcal.Event{Start: &gcal.EventDateTime{DateTime: "2026-04-09T14:00:00Z"}},
 			want: "2026-04-09",
 		},
 		{
-			name: "all-day event uses StartDate",
-			ev:   EventLine{StartDate: "2026-04-10"},
+			name: "all-day event uses Start.Date",
+			ev:   &gcal.Event{Start: &gcal.EventDateTime{Date: "2026-04-10"}},
 			want: "2026-04-10",
 		},
 		{
-			name: "Start takes priority over StartDate",
-			ev:   EventLine{Start: "2026-04-09T23:00:00Z", StartDate: "2026-04-10"},
+			name: "DateTime takes priority over Date",
+			ev:   &gcal.Event{Start: &gcal.EventDateTime{DateTime: "2026-04-09T23:00:00Z", Date: "2026-04-10"}},
 			want: "2026-04-09",
 		},
 		{
 			name: "cancelled recurring instance with datetime OriginalStartTime",
-			ev: EventLine{
+			ev: &gcal.Event{
 				Status:            "cancelled",
-				OriginalStartTime: "2026-04-07T14:00:00Z",
+				OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-07T14:00:00Z"},
 			},
 			want: "2026-04-07",
 		},
 		{
 			name: "cancelled recurring all-day instance with date OriginalStartTime",
-			ev: EventLine{
+			ev: &gcal.Event{
 				Status:            "cancelled",
-				OriginalStartTime: "2026-04-07",
+				OriginalStartTime: &gcal.EventDateTime{Date: "2026-04-07"},
 			},
 			want: "2026-04-07",
 		},
 		{
 			name: "falls back to Updated when no start fields",
-			ev:   EventLine{Updated: "2026-04-06T15:00:00Z"},
+			ev:   &gcal.Event{Updated: "2026-04-06T15:00:00Z"},
 			want: "2026-04-06",
 		},
 		{
 			name: "unknown when no parseable date",
-			ev:   EventLine{ID: "orphan", Status: "cancelled"},
+			ev:   &gcal.Event{Id: "orphan", Status: "cancelled"},
 			want: "unknown",
 		},
 		{
-			name: "StartDate preferred over OriginalStartTime",
-			ev: EventLine{
-				StartDate:         "2026-04-10",
-				OriginalStartTime: "2026-04-07T14:00:00Z",
+			name: "Start.Date preferred over OriginalStartTime",
+			ev: &gcal.Event{
+				Start:             &gcal.EventDateTime{Date: "2026-04-10"},
+				OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-07T14:00:00Z"},
 			},
 			want: "2026-04-10",
 		},
 		{
 			name: "OriginalStartTime preferred over Updated",
-			ev: EventLine{
-				OriginalStartTime: "2026-04-07T09:00:00-05:00",
+			ev: &gcal.Event{
+				OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-07T09:00:00-05:00"},
 				Updated:           "2026-04-08T12:00:00Z",
+			},
+			want: "2026-04-07",
+		},
+		{
+			name: "nil Start falls through to OriginalStartTime",
+			ev: &gcal.Event{
+				OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-07T14:00:00Z"},
 			},
 			want: "2026-04-07",
 		},
@@ -74,7 +85,8 @@ func TestDateForStorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.ev.DateForStorage()
+			ce := &CalendarEvent{Runtime: *tt.ev}
+			got := ce.DateForStorage()
 			if got != tt.want {
 				t.Errorf("DateForStorage() = %q, want %q", got, tt.want)
 			}

@@ -183,9 +183,9 @@ func patchInstance(t *testing.T, instanceID, body string) {
 	t.Logf("patched instance %s → %q", instanceID, resp.Summary)
 }
 
-func readAllEvents(t *testing.T, calDir string) []model.EventLine {
+func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
 	t.Helper()
-	var events []model.EventLine
+	var events []*model.CalendarEvent
 	filepath.Walk(calDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
@@ -196,7 +196,7 @@ func readAllEvents(t *testing.T, calDir string) []model.EventLine {
 		}
 		for _, line := range lines {
 			if line.Event != nil {
-				events = append(events, *line.Event)
+				events = append(events, line.Event)
 			}
 		}
 		return nil
@@ -204,22 +204,21 @@ func readAllEvents(t *testing.T, calDir string) []model.EventLine {
 	return events
 }
 
-func hasEventWithSummary(events []model.EventLine, summary string) bool {
+func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 	for _, e := range events {
-		if e.Summary == summary {
+		if e.Runtime.Summary == summary {
 			return true
 		}
 	}
 	return false
 }
 
-func eventsWithPrefix(events []model.EventLine, prefix string) []model.EventLine {
-	var matched []model.EventLine
+func eventsWithPrefix(events []*model.CalendarEvent, prefix string) []*model.CalendarEvent {
+	var matched []*model.CalendarEvent
 	for _, e := range events {
-		if strings.HasPrefix(e.ID, prefix) {
+		if strings.HasPrefix(e.Runtime.Id, prefix) {
 			matched = append(matched, e)
 		}
 	}
 	return matched
 }
-

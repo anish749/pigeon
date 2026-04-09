@@ -172,13 +172,13 @@ func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, c
 }
 
 // writeEvents appends events to their date-partitioned JSONL files.
-func writeEvents(account paths.AccountDir, calID string, events []model.EventLine) []error {
+func writeEvents(account paths.AccountDir, calID string, events []*model.CalendarEvent) []error {
 	var errs []error
 	for _, ev := range events {
 		datePath := account.Calendar(calID).DateFile(ev.DateForStorage())
-		line := model.Line{Type: "event", Event: &ev}
+		line := model.Line{Type: "event", Event: ev}
 		if err := gwsstore.AppendLine(datePath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append event %s: %w", ev.ID, err))
+			errs = append(errs, fmt.Errorf("append event %s: %w", ev.Runtime.Id, err))
 		}
 	}
 	return errs
@@ -217,4 +217,3 @@ func removeRecurringIDs(existing, removals []string) []string {
 	}
 	return kept
 }
-

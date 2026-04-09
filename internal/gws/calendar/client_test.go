@@ -2,133 +2,129 @@ package calendar
 
 import (
 	"testing"
+
+	"github.com/anish749/pigeon/internal/gws/model"
+	gcal "google.golang.org/api/calendar/v3"
 )
 
-func TestToEventLine(t *testing.T) {
-	ev := calendarEvent{
-		ID:          "evt-123",
-		Status:      "confirmed",
-		Summary:     "Team Standup",
-		Description: "Daily sync",
-		Start:       calendarTimeRef{DateTime: "2026-04-07T09:00:00-07:00"},
-		End:         calendarTimeRef{DateTime: "2026-04-07T09:30:00-07:00"},
-		Location:    "Room 42",
-		Created:     "2026-04-01T10:00:00Z",
-		Updated:     "2026-04-06T15:00:00Z",
-		Creator:     calendarPerson{Email: "creator@example.com"},
-		Organizer:   calendarPerson{Email: "organizer@example.com"},
-		Attendees: []calendarPerson{
-			{Email: "alice@example.com"},
-			{Email: "bob@example.com"},
-		},
-		HangoutLink: "https://meet.google.com/abc-defg-hij",
-		EventType:   "default",
+// newEvent is a test helper that wraps a gcal.Event into the CalendarEvent
+// shape the production code expects. Serialized is left nil because
+// classify() only reads from Runtime.
+func newEvent(e gcal.Event) *model.CalendarEvent {
+	return &model.CalendarEvent{Runtime: e}
+}
+
+func TestClassify_OneOffEvent(t *testing.T) {
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
+			Id:      "evt-123",
+			Status:  "confirmed",
+			Summary: "Team Standup",
+		}),
 	}
 
-	line := ev.ToEventLine()
+	events, recurringIDs, cancelledIDs := classify(items)
 
-	if line.ID != "evt-123" {
-		t.Errorf("ID = %q, want %q", line.ID, "evt-123")
+	if len(events) != 1 {
+		t.Fatalf("events count = %d, want 1", len(events))
 	}
-	if line.Status != "confirmed" {
-		t.Errorf("Status = %q, want %q", line.Status, "confirmed")
+	if events[0].Runtime.Id != "evt-123" {
+		t.Errorf("events[0].Runtime.Id = %q, want %q", events[0].Runtime.Id, "evt-123")
 	}
-	if line.Summary != "Team Standup" {
-		t.Errorf("Summary = %q, want %q", line.Summary, "Team Standup")
+	if len(recurringIDs) != 0 {
+		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
 	}
-	if line.Description != "Daily sync" {
-		t.Errorf("Description = %q, want %q", line.Description, "Daily sync")
-	}
-	if line.Start != "2026-04-07T09:00:00-07:00" {
-		t.Errorf("Start = %q, want %q", line.Start, "2026-04-07T09:00:00-07:00")
-	}
-	if line.End != "2026-04-07T09:30:00-07:00" {
-		t.Errorf("End = %q, want %q", line.End, "2026-04-07T09:30:00-07:00")
-	}
-	if line.StartDate != "" {
-		t.Errorf("StartDate = %q, want empty for timed event", line.StartDate)
-	}
-	if line.EndDate != "" {
-		t.Errorf("EndDate = %q, want empty for timed event", line.EndDate)
-	}
-	if line.Location != "Room 42" {
-		t.Errorf("Location = %q, want %q", line.Location, "Room 42")
-	}
-	if line.Ts != "2026-04-01T10:00:00Z" {
-		t.Errorf("Ts = %q, want %q", line.Ts, "2026-04-01T10:00:00Z")
-	}
-	if line.Updated != "2026-04-06T15:00:00Z" {
-		t.Errorf("Updated = %q, want %q", line.Updated, "2026-04-06T15:00:00Z")
-	}
-	if line.Organizer != "organizer@example.com" {
-		t.Errorf("Organizer = %q, want %q", line.Organizer, "organizer@example.com")
-	}
-	if len(line.Attendees) != 2 {
-		t.Fatalf("len(Attendees) = %d, want 2", len(line.Attendees))
-	}
-	if line.Attendees[0] != "alice@example.com" {
-		t.Errorf("Attendees[0] = %q, want %q", line.Attendees[0], "alice@example.com")
-	}
-	if line.Attendees[1] != "bob@example.com" {
-		t.Errorf("Attendees[1] = %q, want %q", line.Attendees[1], "bob@example.com")
-	}
-	if line.MeetLink != "https://meet.google.com/abc-defg-hij" {
-		t.Errorf("MeetLink = %q, want %q", line.MeetLink, "https://meet.google.com/abc-defg-hij")
-	}
-	if line.EventType != "default" {
-		t.Errorf("EventType = %q, want %q", line.EventType, "default")
-	}
-	if line.Recurring {
-		t.Errorf("Recurring = true, want false for non-recurring event")
+	if len(cancelledIDs) != 0 {
+		t.Errorf("cancelledIDs = %v, want empty", cancelledIDs)
 	}
 }
 
-func TestToEventLine_AllDay(t *testing.T) {
-	ev := calendarEvent{
-		ID:        "evt-allday",
-		Status:    "confirmed",
-		Summary:   "Company Holiday",
-		Start:     calendarTimeRef{Date: "2026-04-10"},
-		End:       calendarTimeRef{Date: "2026-04-11"},
-		Created:   "2026-04-01T08:00:00Z",
-		Updated:   "2026-04-01T08:00:00Z",
-		Organizer: calendarPerson{Email: "admin@example.com"},
-		EventType: "default",
+func TestClassify_RecurringParent(t *testing.T) {
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
+			Id:         "evt-recurring",
+			Status:     "confirmed",
+			Recurrence: []string{"RRULE:FREQ=WEEKLY"},
+		}),
 	}
 
-	line := ev.ToEventLine()
+	events, recurringIDs, cancelledIDs := classify(items)
 
-	if line.Start != "" {
-		t.Errorf("Start = %q, want empty for all-day event", line.Start)
+	if len(events) != 0 {
+		t.Errorf("events count = %d, want 0 (parent not written)", len(events))
 	}
-	if line.End != "" {
-		t.Errorf("End = %q, want empty for all-day event", line.End)
+	if len(recurringIDs) != 1 || recurringIDs[0] != "evt-recurring" {
+		t.Errorf("recurringIDs = %v, want [evt-recurring]", recurringIDs)
 	}
-	if line.StartDate != "2026-04-10" {
-		t.Errorf("StartDate = %q, want %q", line.StartDate, "2026-04-10")
-	}
-	if line.EndDate != "2026-04-11" {
-		t.Errorf("EndDate = %q, want %q", line.EndDate, "2026-04-11")
+	if len(cancelledIDs) != 0 {
+		t.Errorf("cancelledIDs = %v, want empty", cancelledIDs)
 	}
 }
 
-func TestToEventLine_Recurring(t *testing.T) {
-	ev := calendarEvent{
-		ID:               "evt-instance-1",
-		Status:           "confirmed",
-		Summary:          "Weekly Sync",
-		Start:            calendarTimeRef{DateTime: "2026-04-07T14:00:00Z"},
-		End:              calendarTimeRef{DateTime: "2026-04-07T15:00:00Z"},
-		Created:          "2026-03-01T10:00:00Z",
-		Updated:          "2026-04-06T12:00:00Z",
-		Organizer:        calendarPerson{Email: "lead@example.com"},
-		EventType:        "default",
-		RecurringEventId: "evt-recurring-base",
+func TestClassify_CancelledRecurringParent(t *testing.T) {
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
+			Id:         "evt-deleted",
+			Status:     "cancelled",
+			Recurrence: []string{"RRULE:FREQ=DAILY"},
+		}),
 	}
 
-	line := ev.ToEventLine()
+	events, recurringIDs, cancelledIDs := classify(items)
 
-	if !line.Recurring {
-		t.Errorf("Recurring = false, want true for recurring event instance")
+	if len(events) != 0 {
+		t.Errorf("events count = %d, want 0", len(events))
+	}
+	if len(recurringIDs) != 0 {
+		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
+	}
+	if len(cancelledIDs) != 1 || cancelledIDs[0] != "evt-deleted" {
+		t.Errorf("cancelledIDs = %v, want [evt-deleted]", cancelledIDs)
+	}
+}
+
+func TestClassify_RecurringInstance(t *testing.T) {
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{
+			Id:               "evt-instance-1",
+			Status:           "confirmed",
+			RecurringEventId: "evt-recurring",
+		}),
+	}
+
+	events, recurringIDs, cancelledIDs := classify(items)
+
+	if len(events) != 1 {
+		t.Fatalf("events count = %d, want 1 (instances are writable)", len(events))
+	}
+	if events[0].Runtime.Id != "evt-instance-1" {
+		t.Errorf("events[0].Runtime.Id = %q, want %q", events[0].Runtime.Id, "evt-instance-1")
+	}
+	if len(recurringIDs) != 0 {
+		t.Errorf("recurringIDs = %v, want empty", recurringIDs)
+	}
+	if len(cancelledIDs) != 0 {
+		t.Errorf("cancelledIDs = %v, want empty", cancelledIDs)
+	}
+}
+
+func TestClassify_Mixed(t *testing.T) {
+	items := []*model.CalendarEvent{
+		newEvent(gcal.Event{Id: "oneoff", Status: "confirmed"}),
+		newEvent(gcal.Event{Id: "parent", Recurrence: []string{"RRULE:FREQ=WEEKLY"}}),
+		newEvent(gcal.Event{Id: "instance", RecurringEventId: "parent"}),
+		newEvent(gcal.Event{Id: "deleted-parent", Status: "cancelled", Recurrence: []string{"RRULE:FREQ=DAILY"}}),
+	}
+
+	events, recurringIDs, cancelledIDs := classify(items)
+
+	if len(events) != 2 {
+		t.Errorf("events count = %d, want 2 (oneoff + instance)", len(events))
+	}
+	if len(recurringIDs) != 1 || recurringIDs[0] != "parent" {
+		t.Errorf("recurringIDs = %v, want [parent]", recurringIDs)
+	}
+	if len(cancelledIDs) != 1 || cancelledIDs[0] != "deleted-parent" {
+		t.Errorf("cancelledIDs = %v, want [deleted-parent]", cancelledIDs)
 	}
 }
