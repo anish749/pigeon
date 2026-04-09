@@ -27,23 +27,6 @@ func dateGlobs(since time.Duration) []string {
 	return globs
 }
 
-// driveMetaGlobs generates filename glob patterns for drive-meta files dated
-// within the since window. Each pattern matches a meta file like
-// "drive-meta-2026-04-07.json". Matched meta files are resolved to their
-// DriveFileDir by the caller, which then enumerates content siblings via
-// DriveFileDir.ContentFiles.
-func driveMetaGlobs(since time.Duration) []string {
-	now := time.Now().UTC()
-	cutoff := now.Add(-since).Truncate(24 * time.Hour)
-	today := now.Truncate(24 * time.Hour)
-
-	var globs []string
-	for d := cutoff; !d.After(today); d = d.Add(24 * time.Hour) {
-		globs = append(globs, paths.DriveMetaFileForDate(d.Format("2006-01-02")))
-	}
-	return globs
-}
-
 // threadDatePatterns generates rg -e patterns that match timestamp prefixes
 // inside thread files for dates within the since window. Each pattern is a
 // literal string like `"ts":"2026-04-07`.

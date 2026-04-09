@@ -10,7 +10,8 @@ import (
 )
 
 // setupGWSFixture creates a data tree with all GWS file types (gmail JSONL,
-// calendar JSONL, and Drive content with drive-meta dates).
+// calendar JSONL, and Drive content with drive-meta dates). Uses the paths
+// type chain for all file locations.
 func setupGWSFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -18,53 +19,54 @@ func setupGWSFixture(t *testing.T) string {
 	today := time.Now().UTC().Format("2006-01-02")
 	old := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
 
-	account := filepath.Join(dir, "gws", "user-at-example-com")
+	root := paths.NewDataRoot(dir)
+	account := root.Platform("gws").AccountFromSlug("user-at-example-com")
 
 	// Gmail JSONL files (date-partitioned).
 	writeFile(t,
-		filepath.Join(account, "gmail", today+".jsonl"),
+		account.Gmail().DateFile(today).Path(),
 		`{"type":"email","id":"E1","subject":"recent email","from":"alice@example.com"}`+"\n",
 	)
 	writeFile(t,
-		filepath.Join(account, "gmail", old+".jsonl"),
+		account.Gmail().DateFile(old).Path(),
 		`{"type":"email","id":"E2","subject":"old email","from":"bob@example.com"}`+"\n",
 	)
 
 	// Calendar JSONL files (date-partitioned).
 	writeFile(t,
-		filepath.Join(account, "gcalendar", "primary", today+".jsonl"),
+		account.Calendar("primary").DateFile(today).Path(),
 		`{"type":"event","id":"EV1","summary":"recent meeting"}`+"\n",
 	)
 
 	// Drive file — recent (drive-meta dated today).
-	recentDoc := filepath.Join(account, "gdrive", "recent-doc-FILEID1")
+	recentDoc := account.Drive().File("recent-doc-FILEID1")
 	writeFile(t,
-		filepath.Join(recentDoc, paths.DriveMetaFileForDate(today)),
+		recentDoc.MetaFile(today).Path(),
 		`{"fileId":"FILEID1","title":"Recent Doc","modifiedTime":"`+today+`T09:00:00Z"}`,
 	)
-	writeFile(t, filepath.Join(recentDoc, "Tab1.md"), "# Recent Doc\n\nThis is recent markdown content.\n")
-	writeFile(t, filepath.Join(recentDoc, "comments.jsonl"),
+	writeFile(t, recentDoc.TabFile("Tab1").Path(), "# Recent Doc\n\nThis is recent markdown content.\n")
+	writeFile(t, recentDoc.CommentsFile().Path(),
 		`{"type":"comment","id":"C1","content":"recent comment","author":"Alice"}`+"\n",
 	)
 
 	// Drive file — old (drive-meta dated 30 days ago).
-	oldDoc := filepath.Join(account, "gdrive", "old-doc-FILEID2")
+	oldDoc := account.Drive().File("old-doc-FILEID2")
 	writeFile(t,
-		filepath.Join(oldDoc, paths.DriveMetaFileForDate(old)),
+		oldDoc.MetaFile(old).Path(),
 		`{"fileId":"FILEID2","title":"Old Doc","modifiedTime":"`+old+`T09:00:00Z"}`,
 	)
-	writeFile(t, filepath.Join(oldDoc, "Tab1.md"), "# Old Doc\n\nThis is old markdown content.\n")
-	writeFile(t, filepath.Join(oldDoc, "comments.jsonl"),
+	writeFile(t, oldDoc.TabFile("Tab1").Path(), "# Old Doc\n\nThis is old markdown content.\n")
+	writeFile(t, oldDoc.CommentsFile().Path(),
 		`{"type":"comment","id":"C2","content":"old comment","author":"Bob"}`+"\n",
 	)
 
 	// Drive sheet — recent.
-	recentSheet := filepath.Join(account, "gdrive", "recent-sheet-FILEID3")
+	recentSheet := account.Drive().File("recent-sheet-FILEID3")
 	writeFile(t,
-		filepath.Join(recentSheet, paths.DriveMetaFileForDate(today)),
+		recentSheet.MetaFile(today).Path(),
 		`{"fileId":"FILEID3","title":"Recent Sheet","modifiedTime":"`+today+`T09:00:00Z"}`,
 	)
-	writeFile(t, filepath.Join(recentSheet, "Sheet1.csv"), "Name,Value\nAlice,recent data\nBob,more data\n")
+	writeFile(t, recentSheet.SheetFile("Sheet1").Path(), "Name,Value\nAlice,recent data\nBob,more data\n")
 
 	return dir
 }
@@ -253,18 +255,21 @@ func TestExpandDriveMetaMatches(t *testing.T) {
 	dir := t.TempDir()
 	today := time.Now().UTC().Format("2006-01-02")
 
-	driveFile := filepath.Join(dir, "my-doc-FILEID")
-	metaPath := filepath.Join(driveFile, paths.DriveMetaFileForDate(today))
-	writeFile(t, metaPath, `{"fileId":"FILEID"}`)
-	writeFile(t, filepath.Join(driveFile, "Tab1.md"), "content")
-	writeFile(t, filepath.Join(driveFile, "Sheet1.csv"), "a,b,c")
-	writeFile(t, filepath.Join(driveFile, "comments.jsonl"), `{"type":"comment"}`)
+	root := paths.NewDataRoot(dir)
+	driveFile := root.Platform("gws").AccountFromSlug("test").Drive().File("my-doc-FILEID")
+	writeFile(t, driveFile.MetaFile(today).Path(), `{"fileId":"FILEID"}`)
+	writeFile(t, driveFile.TabFile("Tab1").Path(), "content")
+	writeFile(t, driveFile.SheetFile("Sheet1").Path(), "a,b,c")
+	writeFile(t, driveFile.CommentsFile().Path(), `{"type":"comment"}`)
 	// Non-content file that should be ignored.
-	writeFile(t, filepath.Join(driveFile, "ignore.txt"), "ignored")
+	writeFile(t, filepath.Join(driveFile.Path(), "ignore.txt"), "ignored")
 
-	meta, err := paths.NewDriveMetaFile(metaPath)
+	meta, ok, err := paths.NewDriveMetaFile(driveFile.MetaFile(today).Path())
 	if err != nil {
 		t.Fatalf("NewDriveMetaFile: %v", err)
+	}
+	if !ok {
+		t.Fatal("NewDriveMetaFile: ok=false, want true")
 	}
 	content, err := expandDriveMetaMatches([]paths.DriveMetaFile{meta})
 	if err != nil {

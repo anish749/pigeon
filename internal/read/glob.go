@@ -3,6 +3,7 @@ package read
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
@@ -41,7 +42,7 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	}
 
 	dateFileGlobs := dateGlobs(since)
-	metaGlobs := driveMetaGlobs(since)
+	metaGlobs := paths.DriveMetaFileGlobsSince(since)
 	if len(dateFileGlobs) == 0 && len(metaGlobs) == 0 {
 		return nil, nil
 	}
@@ -57,14 +58,19 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	// Separate drive-meta matches from other date files so we can resolve
 	// the metas into their parent DriveFileDir and enumerate sibling content.
 	// Drive meta files themselves are not returned — only the content they
-	// point to. NewDriveMetaFile both classifies and validates in one step:
-	// entries that don't parse as valid drive-meta files are treated as
-	// regular date files.
+	// point to. NewDriveMetaFile is three-valued: a false `ok` means the
+	// path isn't drive-meta shaped (treated as a regular date file); a
+	// non-nil error means the shape matched but the date was malformed —
+	// we log and skip.
 	var dateFiles []string
 	var driveMetas []paths.DriveMetaFile
 	for _, f := range matched {
-		meta, err := paths.NewDriveMetaFile(f)
+		meta, ok, err := paths.NewDriveMetaFile(f)
 		if err != nil {
+			slog.Error("parse drive-meta file", "path", f, "err", err)
+			continue
+		}
+		if !ok {
 			dateFiles = append(dateFiles, f)
 			continue
 		}

@@ -1,6 +1,10 @@
 package paths
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func acctDir() AccountDir {
 	return NewDataRoot("/tmp/test").Platform("gws").AccountFromSlug("user-at-gmail-com")
@@ -68,6 +72,87 @@ func TestDriveFileDir_MetaFile(t *testing.T) {
 	wantName := "drive-meta-2026-04-07.json"
 	if got := mf.Name(); got != wantName {
 		t.Errorf("Name() = %q, want %q", got, wantName)
+	}
+}
+
+func TestNewDriveMetaFile_Valid(t *testing.T) {
+	path := "/tmp/test/gws/user/gdrive/doc-abc/drive-meta-2026-04-07.json"
+	meta, ok, err := NewDriveMetaFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if meta.Path() != path {
+		t.Errorf("Path() = %q, want %q", meta.Path(), path)
+	}
+	if meta.Dir() != "/tmp/test/gws/user/gdrive/doc-abc" {
+		t.Errorf("Dir() = %q", meta.Dir())
+	}
+}
+
+func TestNewDriveMetaFile_NotAMetaFile(t *testing.T) {
+	cases := []string{
+		"/tmp/test/gws/user/gmail/2026-04-07.jsonl",        // wrong subdir
+		"/tmp/test/gws/user/gdrive/doc-abc/Tab1.md",        // content file
+		"/tmp/test/gws/user/gdrive/doc-abc/comments.jsonl", // comments file
+		"/tmp/test/random/file.txt",                         // unrelated
+	}
+	for _, path := range cases {
+		meta, ok, err := NewDriveMetaFile(path)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", path, err)
+		}
+		if ok {
+			t.Errorf("%s: ok = true, want false", path)
+		}
+		if meta != (DriveMetaFile{}) {
+			t.Errorf("%s: meta != zero value", path)
+		}
+	}
+}
+
+func TestNewDriveMetaFile_MalformedDate(t *testing.T) {
+	// Filename has the right prefix/extension but an unparseable date.
+	cases := []string{
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-not-a-date.json",
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-2026-13-45.json",
+		"/tmp/test/gws/user/gdrive/doc-abc/drive-meta-.json",
+	}
+	for _, path := range cases {
+		_, ok, err := NewDriveMetaFile(path)
+		if err == nil {
+			t.Errorf("%s: expected error for malformed date", path)
+		}
+		if !ok {
+			t.Errorf("%s: ok = false, want true (shape matched)", path)
+		}
+	}
+}
+
+func TestDriveMetaFileGlobsSince(t *testing.T) {
+	// 2-day window should produce patterns for today, yesterday, and 2 days ago.
+	globs := DriveMetaFileGlobsSince(48 * time.Hour)
+	if len(globs) != 3 {
+		t.Errorf("got %d globs, want 3: %v", len(globs), globs)
+	}
+	// Each glob should be drive-meta-YYYY-MM-DD.json.
+	for _, g := range globs {
+		if !strings.HasPrefix(g, "drive-meta-") {
+			t.Errorf("glob %q missing prefix", g)
+		}
+		if !strings.HasSuffix(g, ".json") {
+			t.Errorf("glob %q missing suffix", g)
+		}
+	}
+}
+
+func TestDriveFileDirFromMeta(t *testing.T) {
+	meta := acctDir().Drive().File("doc-abc").MetaFile("2026-04-07")
+	driveDir := DriveFileDirFromMeta(meta)
+	if driveDir.Path() != meta.Dir() {
+		t.Errorf("DriveFileDirFromMeta.Path() = %q, want %q", driveDir.Path(), meta.Dir())
 	}
 }
 

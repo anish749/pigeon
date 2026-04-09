@@ -41,29 +41,46 @@ var DriveContentExts = []string{MarkdownExt, CSVExt, FileExt}
 // within a time window via filename).
 const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
 
-// DriveMetaFileForDate returns the drive-meta filename for a given date string
-// (YYYY-MM-DD). Used by the read layer to construct date-filtered globs.
-func DriveMetaFileForDate(date string) string {
-	return driveMetaFilePrefix + date + driveMetaFileExt
-}
-
-// NewDriveMetaFile constructs a DriveMetaFile from an absolute filesystem
-// path. Validates that the filename matches drive-meta-YYYY-MM-DD.json and
-// that the date portion parses as a valid date. Used by the read layer to
-// parse drive-meta paths discovered by ripgrep into typed values.
-func NewDriveMetaFile(path string) (DriveMetaFile, error) {
+// NewDriveMetaFile attempts to parse a filesystem path as a DriveMetaFile.
+// Three-valued result:
+//
+//   - (meta, true, nil): path is a valid drive-meta-YYYY-MM-DD.json file.
+//   - (_, false, nil): path does not look like a drive-meta file at all
+//     (wrong prefix or extension). Not an error — callers should treat
+//     the path as unrelated and move on.
+//   - (_, true, err): path has the drive-meta prefix and extension but
+//     the date portion failed to parse. A real error — callers should
+//     log this, since it means an unexpected filename shape.
+func NewDriveMetaFile(path string) (DriveMetaFile, bool, error) {
 	base := filepath.Base(path)
 	if !strings.HasPrefix(base, driveMetaFilePrefix) || !strings.HasSuffix(base, driveMetaFileExt) {
-		return DriveMetaFile{}, fmt.Errorf("not a drive-meta file: %s", path)
+		return DriveMetaFile{}, false, nil
 	}
 	dateStr := strings.TrimSuffix(strings.TrimPrefix(base, driveMetaFilePrefix), driveMetaFileExt)
 	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
-		return DriveMetaFile{}, fmt.Errorf("invalid drive-meta date %q in %s: %w", dateStr, path, err)
+		return DriveMetaFile{}, true, fmt.Errorf("invalid drive-meta date %q in %s: %w", dateStr, path, err)
 	}
 	return DriveMetaFile{
 		dir:  filepath.Dir(path),
 		name: base,
-	}, nil
+	}, true, nil
+}
+
+// DriveMetaFileGlobsSince returns ripgrep filename glob patterns matching
+// drive-meta files with modification dates within the last `since` duration.
+// One pattern per UTC day in the window. The read layer uses these to
+// discover Drive files modified recently — matched meta files are then
+// resolved via DriveFileDirFromMeta and expanded with ContentFiles.
+func DriveMetaFileGlobsSince(since time.Duration) []string {
+	now := time.Now().UTC()
+	cutoff := now.Add(-since).Truncate(24 * time.Hour)
+	today := now.Truncate(24 * time.Hour)
+
+	var globs []string
+	for d := cutoff; !d.After(today); d = d.Add(24 * time.Hour) {
+		globs = append(globs, driveMetaFilePrefix+d.Format("2006-01-02")+driveMetaFileExt)
+	}
+	return globs
 }
 
 // GWS path types extend AccountDir for Google Workspace services.
