@@ -235,3 +235,62 @@ func TestDriveFileDir_AttachmentFile(t *testing.T) {
 		t.Errorf("AttachmentFile() = %q, want %q", got, want)
 	}
 }
+
+func TestDriveDir_FindFilesByID(t *testing.T) {
+	drive := NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("user").Drive()
+	if err := os.MkdirAll(drive.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(drive.Path(), "hello-world-fileID123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(drive.Path(), "fileID456"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(drive.Path(), "other-doc-fileID789"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Slugged dir matches fileID.
+	got, err := drive.FindFilesByID("fileID123")
+	if err != nil {
+		t.Fatalf("FindFilesByID(fileID123): %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches for fileID123, want 1: %v", len(got), got)
+	}
+	if got[0].Path() != filepath.Join(drive.Path(), "hello-world-fileID123") {
+		t.Errorf("match path = %q, want hello-world-fileID123", got[0].Path())
+	}
+
+	// Plain fileID dir matches fileID.
+	got, err = drive.FindFilesByID("fileID456")
+	if err != nil {
+		t.Fatalf("FindFilesByID(fileID456): %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches for fileID456, want 1: %v", len(got), got)
+	}
+	if got[0].Path() != filepath.Join(drive.Path(), "fileID456") {
+		t.Errorf("match path = %q, want fileID456", got[0].Path())
+	}
+
+	// No match returns empty slice, no error.
+	got, err = drive.FindFilesByID("missingFileID")
+	if err != nil {
+		t.Fatalf("FindFilesByID(missingFileID): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d matches for missingFileID, want 0: %v", len(got), got)
+	}
+
+	// Missing gdrive directory returns empty slice, no error.
+	missingDrive := NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("nonexistent").Drive()
+	got, err = missingDrive.FindFilesByID("fileID123")
+	if err != nil {
+		t.Fatalf("FindFilesByID on missing dir: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d matches on missing dir, want 0: %v", len(got), got)
+	}
+}

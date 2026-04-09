@@ -158,6 +158,34 @@ func (d DriveDir) File(slug string) DriveFileDir {
 	return DriveFileDir{drive: d, slug: slug}
 }
 
+// FindFilesByID locates existing DriveFileDirs for a given Drive fileID by
+// scanning the gdrive directory. Drive file directories are named either
+// exactly "<fileID>" (empty title fallback) or "<title-slug>-<fileID>", so a
+// fileID may match either the full name or the "-<fileID>" suffix. Returns
+// an empty slice if the gdrive directory does not exist yet or no directory
+// matches — a missing gdrive dir is not an error.
+func (d DriveDir) FindFilesByID(fileID string) ([]DriveFileDir, error) {
+	entries, err := os.ReadDir(d.Path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read drive dir %s: %w", d.Path(), err)
+	}
+	suffix := "-" + fileID
+	var matches []DriveFileDir
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == fileID || strings.HasSuffix(name, suffix) {
+			matches = append(matches, DriveFileDir{drive: d, slug: name})
+		}
+	}
+	return matches, nil
+}
+
 // DriveFileDir represents a Drive file directory: <account>/gdrive/<slug>/.
 // Only constructable through the type chain (DataRoot → ... → DriveDir.File).
 // Read-layer callers that need to enumerate content for a discovered Drive

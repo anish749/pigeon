@@ -41,7 +41,22 @@ func PollDrive(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error)
 	var errs []error
 	for _, ch := range changes {
 		if ch.Removed {
-			slog.Warn("drive file removed", "fileId", ch.FileID)
+			dirs, err := account.Drive().FindFilesByID(ch.FileID)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("find drive dir %s: %w", ch.FileID, err))
+				continue
+			}
+			if len(dirs) == 0 {
+				slog.Info("drive file removed, no local dir to clean", "fileId", ch.FileID)
+				continue
+			}
+			for _, dir := range dirs {
+				if err := os.RemoveAll(dir.Path()); err != nil {
+					errs = append(errs, fmt.Errorf("remove drive dir %s: %w", dir.Path(), err))
+					continue
+				}
+				slog.Info("drive file removed, cleaned local dir", "fileId", ch.FileID, "path", dir.Path())
+			}
 			continue
 		}
 
