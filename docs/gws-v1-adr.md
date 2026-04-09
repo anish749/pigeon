@@ -9,61 +9,6 @@ The read-path (search, display, `pigeon list/grep`) was deliberately
 excluded; it will be designed separately as a unified abstraction
 across messaging and GWS data.
 
-## File inventory
-
-```
-internal/gws/
-├── gws.go                          # CLI wrapper, APIError, IsCursorExpired
-├── gws_test.go
-├── model/
-│   ├── email.go                    # EmailLine, EmailDeleteLine, EmailAttachment
-│   ├── comment.go                  # CommentLine, ReplyLine
-│   ├── event.go                    # EventLine (includes OriginalStartTime)
-│   ├── meta.go                     # DocMeta, TabMeta
-│   ├── doc.go                      # Document, Tab, Body, Paragraph, TextRun, etc.
-│   ├── doc_test.go
-│   ├── line.go                     # Line union type, Marshal, Parse
-│   └── line_test.go
-├── gwsstore/
-│   ├── jsonl.go                    # AppendLine, ReadLines, Dedup (keep last by ID)
-│   ├── jsonl_test.go
-│   ├── content.go                  # WriteContent (replace-on-sync for .md/.csv)
-│   ├── content_test.go
-│   ├── cursors.go                  # Cursors (Gmail historyId, Drive pageToken, Calendar syncTokens)
-│   ├── cursors_test.go
-│   ├── meta.go                     # LoadMeta, SaveMeta
-│   └── meta_test.go
-├── gmail/
-│   ├── client.go                   # GetHistoryID, ListHistory, GetMessage (format=raw)
-│   ├── mime.go                     # parseRawMessage via enmime, parseAddress, parseAddresses
-│   └── mime_test.go
-├── calendar/
-│   ├── client.go                   # ListEvents, SeedSyncToken, ToEventLine
-│   └── client_test.go
-├── drive/
-│   ├── client.go                   # ListChanges, SeedPageToken, GetDocument, GetSheetNames,
-│   │                               #   ReadSheetValues, ReadSheetFormulas, ListComments
-│   └── converter/
-│       ├── markdown.go             # MarkdownConverter.Convert → ConvertResult (markdown + images)
-│       ├── markdown_test.go
-│       ├── csv.go                  # ToCSV with row padding
-│       └── csv_test.go
-├── poller/
-│   ├── poller.go                   # Poller (ticker loop, polls all 3 services)
-│   ├── gmail.go                    # PollGmail (history → fetch → store JSONL)
-│   ├── calendar.go                 # PollCalendar (syncToken → store JSONL)
-│   ├── drive.go                    # PollDrive (changes → handleDoc/handleSheet)
-│   ├── cursor_reset_test.go
-│   ├── drive_test.go
-│   └── validate_test.go           # Live smoke test (GWS_LIVE_TEST=1)
-
-internal/daemon/gws_manager.go      # GWSManager lifecycle (start/stop/reconcile)
-internal/config/config.go           # GWSConfig type, AddGWS method
-internal/paths/gws.go               # Typed path hierarchy: GmailDir, CalendarDir, DriveDir, DriveFileDir
-internal/paths/gws_test.go
-docs/gws-protocol.md                # Full protocol spec
-```
-
 ## Directory layout on disk
 
 ```
