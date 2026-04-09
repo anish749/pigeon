@@ -186,7 +186,7 @@ func (f DriveFileDir) MetaFile(modifiedDate string) DriveMetaFile {
 
 // DriveMetaFile is a path to a Google Drive file's metadata JSON, named
 // drive-meta-YYYY-MM-DD.json where the date is the Drive modification date.
-// Unlike conversation MetaFile (a fixed .meta.json sidecar), Drive meta files
+// Unlike conversation ConvMetaFile (a fixed .meta.json sidecar), Drive meta files
 // are date-partitioned and require sibling file cleanup on update.
 //
 // A DriveMetaFile anchors the identity of a Drive file at a specific

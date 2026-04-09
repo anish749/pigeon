@@ -46,13 +46,13 @@ type CommentsFile string
 func (c CommentsFile) Path() string { return string(c) }
 func (CommentsFile) logFile()      {}
 
-// MetaFile is a path to a conversation's .meta.json sidecar (messaging data).
+// ConvMetaFile is a path to a conversation's .meta.json sidecar (messaging data).
 // Drive file metadata uses DriveMetaFile (see paths/gws.go) which carries the
 // modification date in the filename and needs separate dir/name handling.
-type MetaFile string
+type ConvMetaFile string
 
 // Path returns the file path as a string.
-func (m MetaFile) Path() string { return string(m) }
+func (m ConvMetaFile) Path() string { return string(m) }
 
 // TabFile is a path to a document tab's markdown content.
 type TabFile string

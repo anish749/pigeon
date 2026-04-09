@@ -22,6 +22,9 @@ func SearchDir(platform, accountName string) string {
 	}
 }
 
+// ConvMetaFilename is the filename for a conversation's metadata sidecar.
+const ConvMetaFilename = ".meta.json"
+
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
@@ -111,8 +114,8 @@ func (c ConversationDir) Path() string {
 }
 
 // MetaFile returns the path to the conversation's .meta.json sidecar.
-func (c ConversationDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
+func (c ConversationDir) MetaFile() ConvMetaFile {
+	return ConvMetaFile(filepath.Join(c.Path(), ConvMetaFilename))
 }
 
 // DateFile returns the path to a daily message file.
