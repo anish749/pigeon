@@ -251,6 +251,127 @@ func TestGrep_GWS_SinceIncludesRecentDriveContent(t *testing.T) {
 	}
 }
 
+// TestGlob_GWS_Mixed verifies that a tree containing BOTH messaging data and
+// GWS data classifies correctly: messaging date files go to dateFiles, Drive
+// content is expanded from drive-meta files, and everything is returned.
+func TestGlob_GWS_Mixed(t *testing.T) {
+	dir := t.TempDir()
+	today := time.Now().UTC().Format("2006-01-02")
+
+	root := paths.NewDataRoot(dir)
+
+	// Messaging data.
+	slackAccount := root.Platform("slack").AccountFromSlug("acme")
+	writeFile(t,
+		slackAccount.Conversation("#general").DateFile(today).Path(),
+		`{"type":"msg","ts":"`+today+`T09:00:00Z","id":"M1","sender":"Alice","from":"U1","text":"hello"}`+"\n",
+	)
+
+	// Gmail JSONL.
+	gwsAccount := root.Platform("gws").AccountFromSlug("user-at-example-com")
+	writeFile(t,
+		gwsAccount.Gmail().DateFile(today).Path(),
+		`{"type":"email","id":"E1","subject":"hello"}`+"\n",
+	)
+
+	// Drive doc with recent meta.
+	driveFile := gwsAccount.Drive().File("doc-FILEID")
+	writeFile(t, driveFile.MetaFile(today).Path(), `{"fileId":"FILEID"}`)
+	writeFile(t, driveFile.TabFile("Tab1").Path(), "# Doc content")
+
+	files, err := Glob(dir, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+
+	// Expect: slack date file, gmail date file, drive .md (3 files).
+	// drive-meta-*.json should NOT be in the output.
+	if len(files) != 3 {
+		for _, f := range files {
+			t.Logf("  %s", f)
+		}
+		t.Errorf("got %d files, want 3", len(files))
+	}
+
+	for _, f := range files {
+		if strings.Contains(filepath.Base(f), "drive-meta-") {
+			t.Errorf("drive-meta file should not be in Glob output: %s", f)
+		}
+	}
+
+	// Verify we got one of each expected type.
+	hasMessaging := false
+	hasGmail := false
+	hasDriveMD := false
+	for _, f := range files {
+		switch {
+		case strings.Contains(f, "/slack/"):
+			hasMessaging = true
+		case strings.Contains(f, "/gmail/"):
+			hasGmail = true
+		case strings.HasSuffix(f, ".md"):
+			hasDriveMD = true
+		}
+	}
+	if !hasMessaging {
+		t.Error("missing messaging file")
+	}
+	if !hasGmail {
+		t.Error("missing gmail file")
+	}
+	if !hasDriveMD {
+		t.Error("missing drive .md file")
+	}
+}
+
+// TestExpandDriveMetaMatches_Empty verifies that an empty meta list returns
+// no files and no error.
+func TestExpandDriveMetaMatches_Empty(t *testing.T) {
+	content, err := expandDriveMetaMatches(nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(content) != 0 {
+		t.Errorf("got %d files, want 0", len(content))
+	}
+}
+
+// TestExpandDriveMetaMatches_MissingDir verifies that a meta whose directory
+// was removed produces an error, but the function keeps going for the rest.
+func TestExpandDriveMetaMatches_PartialFailure(t *testing.T) {
+	dir := t.TempDir()
+	today := time.Now().UTC().Format("2006-01-02")
+
+	root := paths.NewDataRoot(dir)
+	account := root.Platform("gws").AccountFromSlug("test")
+
+	// Good meta — directory exists with content.
+	goodFile := account.Drive().File("good-doc")
+	writeFile(t, goodFile.MetaFile(today).Path(), `{}`)
+	writeFile(t, goodFile.TabFile("Tab1").Path(), "content")
+	goodMeta, ok, err := paths.ParseDriveMetaPath(goodFile.MetaFile(today).Path())
+	if err != nil || !ok {
+		t.Fatalf("parse good meta: ok=%v err=%v", ok, err)
+	}
+
+	// Bad meta — references a directory that doesn't exist on disk.
+	// Construct it via the type chain but never create the files.
+	badFile := account.Drive().File("nonexistent-doc")
+	badMeta, ok, err := paths.ParseDriveMetaPath(badFile.MetaFile(today).Path())
+	if err != nil || !ok {
+		t.Fatalf("parse bad meta: ok=%v err=%v", ok, err)
+	}
+
+	content, err := expandDriveMetaMatches([]paths.DriveMetaFile{goodMeta, badMeta})
+	if err == nil {
+		t.Error("expected error from missing directory")
+	}
+	// Despite the error, the good meta's content should still be returned.
+	if len(content) != 1 {
+		t.Errorf("got %d content files, want 1 (from the good meta): %v", len(content), content)
+	}
+}
+
 func TestExpandDriveMetaMatches(t *testing.T) {
 	dir := t.TempDir()
 	today := time.Now().UTC().Format("2006-01-02")
