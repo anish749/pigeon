@@ -98,12 +98,9 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 
 func TestParseRawMessage_PaddedBase64URL(t *testing.T) {
 	// Regression: Gmail's API returns the `raw` field as padded base64url.
-	// parseRawMessage uses RawURLEncoding, which rejects `=` padding and
-	// causes backfill to drop messages with errors like:
-	//   "decode raw message: illegal base64 data at input byte 204114"
-	//
-	// Real example: Gmail message ID 19d713b16284a48e — a 204116-byte
-	// payload whose last two bytes are `==`. Byte 204114 is the first `=`.
+	// parseRawMessage previously used RawURLEncoding, which rejects `=`
+	// padding and fails with "decode raw message: illegal base64 data ...".
+	// The error byte offset points at the first `=` of the trailing padding.
 	msg := "From: sender@example.com\r\n" +
 		"To: recipient@example.com\r\n" +
 		"Subject: Padded\r\n" +
