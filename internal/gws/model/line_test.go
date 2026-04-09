@@ -6,6 +6,7 @@ import (
 	"time"
 
 	gcal "google.golang.org/api/calendar/v3"
+	drive "google.golang.org/api/drive/v3"
 )
 
 func TestMarshalParseEmail(t *testing.T) {
@@ -99,17 +100,40 @@ func TestMarshalParseEmailDelete(t *testing.T) {
 }
 
 func TestMarshalParseComment(t *testing.T) {
-	ts := time.Date(2026, 4, 7, 14, 0, 0, 0, time.UTC)
+	// Build a DriveComment by unmarshalling a raw API-shaped JSON both ways —
+	// mirrors how drive.ListComments populates Runtime + Serialized. Replies
+	// are nested inside the comment, just like the API returns them.
+	rawJSON := `{
+		"id": "cmt-1",
+		"author": {"displayName": "Alice", "me": false, "kind": "drive#user"},
+		"content": "Please review this section",
+		"htmlContent": "<p>Please review this section</p>",
+		"quotedFileContent": {"value": "highlighted text", "mimeType": "text/plain"},
+		"resolved": false,
+		"createdTime": "2026-04-07T14:00:00Z",
+		"modifiedTime": "2026-04-07T14:05:00Z",
+		"replies": [
+			{
+				"id": "rpl-1",
+				"author": {"displayName": "Bob"},
+				"content": "Done",
+				"createdTime": "2026-04-07T15:00:00Z",
+				"action": "resolve"
+			}
+		]
+	}`
+	var runtime drive.Comment
+	if err := json.Unmarshal([]byte(rawJSON), &runtime); err != nil {
+		t.Fatalf("unmarshal typed: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+
 	orig := Line{
-		Type: "comment",
-		Comment: &CommentLine{
-			ID:       "cmt-1",
-			Ts:       ts,
-			Author:   "Alice",
-			Content:  "Please review this section",
-			Anchor:   "highlighted text",
-			Resolved: false,
-		},
+		Type:    "comment",
+		Comment: &DriveComment{Runtime: runtime, Serialized: raw},
 	}
 
 	data, err := Marshal(orig)
@@ -128,57 +152,40 @@ func TestMarshalParseComment(t *testing.T) {
 	if got.Comment == nil {
 		t.Fatal("Comment is nil")
 	}
-	c := got.Comment
-	if c.ID != "cmt-1" {
-		t.Errorf("ID = %q, want %q", c.ID, "cmt-1")
-	}
-	if c.Author != "Alice" {
-		t.Errorf("Author = %q, want %q", c.Author, "Alice")
-	}
-	if c.Anchor != "highlighted text" {
-		t.Errorf("Anchor = %q, want %q", c.Anchor, "highlighted text")
-	}
-}
 
-func TestMarshalParseReply(t *testing.T) {
-	ts := time.Date(2026, 4, 7, 15, 0, 0, 0, time.UTC)
-	orig := Line{
-		Type: "reply",
-		Reply: &ReplyLine{
-			ID:        "rpl-1",
-			CommentID: "cmt-1",
-			Ts:        ts,
-			Author:    "Bob",
-			Content:   "Done",
-			Action:    "resolve",
-		},
+	// Runtime view round-trips, including nested replies.
+	c := got.Comment.Runtime
+	if c.Id != "cmt-1" {
+		t.Errorf("Runtime.Id = %q, want %q", c.Id, "cmt-1")
+	}
+	if c.Author == nil || c.Author.DisplayName != "Alice" {
+		t.Errorf("Runtime.Author = %v, want Alice", c.Author)
+	}
+	if c.QuotedFileContent == nil || c.QuotedFileContent.Value != "highlighted text" {
+		t.Errorf("Runtime.QuotedFileContent = %v, want highlighted text", c.QuotedFileContent)
+	}
+	if len(c.Replies) != 1 {
+		t.Fatalf("Runtime.Replies count = %d, want 1", len(c.Replies))
+	}
+	if c.Replies[0].Id != "rpl-1" || c.Replies[0].Action != "resolve" {
+		t.Errorf("Runtime.Replies[0] = %+v, want rpl-1/resolve", c.Replies[0])
 	}
 
-	data, err := Marshal(orig)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	// Serialized view preserves everything — including fields the runtime view
+	// may not pluck out (htmlContent, kind) — proving storage is lossless.
+	if got.Comment.Serialized["id"] != "cmt-1" {
+		t.Errorf("Serialized[id] = %v, want cmt-1", got.Comment.Serialized["id"])
 	}
-
-	got, err := Parse(string(data))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
+	if _, hasType := got.Comment.Serialized["type"]; hasType {
+		t.Error("Serialized should not contain the storage type discriminator")
 	}
-
-	if got.Type != "reply" {
-		t.Errorf("Type = %q, want %q", got.Type, "reply")
+	if got.Comment.Serialized["htmlContent"] != "<p>Please review this section</p>" {
+		t.Errorf("Serialized[htmlContent] = %v, want <p>...</p>", got.Comment.Serialized["htmlContent"])
 	}
-	if got.Reply == nil {
-		t.Fatal("Reply is nil")
-	}
-	r := got.Reply
-	if r.ID != "rpl-1" {
-		t.Errorf("ID = %q, want %q", r.ID, "rpl-1")
-	}
-	if r.CommentID != "cmt-1" {
-		t.Errorf("CommentID = %q, want %q", r.CommentID, "cmt-1")
-	}
-	if r.Action != "resolve" {
-		t.Errorf("Action = %q, want %q", r.Action, "resolve")
+	// Replies preserved nested inside the raw comment.
+	rawReplies, ok := got.Comment.Serialized["replies"].([]any)
+	if !ok || len(rawReplies) != 1 {
+		t.Fatalf("Serialized[replies] = %v, want 1-element array", got.Comment.Serialized["replies"])
 	}
 }
 
@@ -302,8 +309,7 @@ func TestLineID(t *testing.T) {
 	}{
 		{"email", Line{Email: &EmailLine{ID: "e1"}}, "e1"},
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
-		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
-		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
+		{"comment", Line{Comment: &DriveComment{Runtime: drive.Comment{Id: "c1"}}}, "c1"},
 		{"event", Line{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},
 	}

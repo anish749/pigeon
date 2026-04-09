@@ -3,12 +3,11 @@ package drive
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/model"
+	drive "google.golang.org/api/drive/v3"
 )
 
 // --- Changes API ---
@@ -222,76 +221,44 @@ func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, 
 
 // --- Comments API ---
 
-type commentsResponse struct {
-	Comments      []driveComment `json:"comments"`
-	NextPageToken string         `json:"nextPageToken"`
-}
-
-type driveComment struct {
-	ID                string         `json:"id"`
-	Author            driveUser      `json:"author"`
-	Content           string         `json:"content"`
-	QuotedFileContent *quotedContent `json:"quotedFileContent"`
-	Resolved          bool           `json:"resolved"`
-	CreatedTime       string         `json:"createdTime"`
-	ModifiedTime      string         `json:"modifiedTime"`
-	Replies           []driveReply   `json:"replies"`
-}
-
-type driveUser struct {
-	DisplayName string `json:"displayName"`
-}
-
-type quotedContent struct {
-	Value string `json:"value"`
-}
-
-type driveReply struct {
-	ID           string    `json:"id"`
-	Author       driveUser `json:"author"`
-	Content      string    `json:"content"`
-	CreatedTime  string    `json:"createdTime"`
-	ModifiedTime string    `json:"modifiedTime"`
-	Action       string    `json:"action"`
-}
-
 // ListComments fetches all comments on a file, including replies. Paginates
-// through all pages. Returns comment lines and reply lines.
-func ListComments(fileID string) ([]model.CommentLine, []model.ReplyLine, error) {
-	var comments []model.CommentLine
-	var replies []model.ReplyLine
-
+// through all pages. Each returned DriveComment pairs a typed drive.Comment
+// (for field access) with the raw API response map (for lossless storage).
+// Replies are nested inside each comment — the API returns them that way
+// and storage preserves that shape.
+func ListComments(fileID string) ([]*model.DriveComment, error) {
 	params := map[string]string{
 		"fileId": fileID,
-		"fields": "comments(id,author,content,quotedFileContent,resolved,createdTime,modifiedTime,replies(id,author,content,createdTime,modifiedTime,action)),nextPageToken",
+		"fields": "comments,nextPageToken",
 	}
 
+	var all []*model.DriveComment
 	for {
-		var resp commentsResponse
-		if err := gws.RunParsed(&resp, "drive", "comments", "list", "--params", gws.ParamsJSON(params)); err != nil {
-			return nil, nil, fmt.Errorf("list comments for %s: %w", fileID, err)
+		out, err := gws.Run("drive", "comments", "list", "--params", gws.ParamsJSON(params))
+		if err != nil {
+			return nil, fmt.Errorf("list comments for %s: %w", fileID, err)
 		}
 
-		var errs []error
-		for _, dc := range resp.Comments {
-			cl, err := toCommentLine(dc)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			comments = append(comments, cl)
-
-			for _, dr := range dc.Replies {
-				rl, err := toReplyLine(dc.ID, dr)
-				if err != nil {
-					errs = append(errs, err)
-					continue
-				}
-				replies = append(replies, rl)
-			}
+		var resp drive.CommentList
+		if err := json.Unmarshal(out, &resp); err != nil {
+			return nil, fmt.Errorf("parse comments for %s: %w", fileID, err)
 		}
-		if err := errors.Join(errs...); err != nil {
-			return comments, replies, err
+
+		var rawResp map[string]any
+		if err := json.Unmarshal(out, &rawResp); err != nil {
+			return nil, fmt.Errorf("parse comments for %s as map: %w", fileID, err)
+		}
+
+		rawComments, err := extractCommentItems(rawResp, len(resp.Comments))
+		if err != nil {
+			return nil, fmt.Errorf("extract comments for %s: %w", fileID, err)
+		}
+
+		for i, c := range resp.Comments {
+			all = append(all, &model.DriveComment{
+				Runtime:    *c,
+				Serialized: rawComments[i],
+			})
 		}
 
 		if resp.NextPageToken != "" {
@@ -301,39 +268,33 @@ func ListComments(fileID string) ([]model.CommentLine, []model.ReplyLine, error)
 		break
 	}
 
-	return comments, replies, nil
+	return all, nil
 }
 
-func toCommentLine(dc driveComment) (model.CommentLine, error) {
-	ts, err := time.Parse(time.RFC3339, dc.CreatedTime)
-	if err != nil {
-		return model.CommentLine{}, fmt.Errorf("parse comment %s time %q: %w", dc.ID, dc.CreatedTime, err)
+// extractCommentItems pulls the per-comment raw maps from a drive.CommentList
+// response's "comments" array and validates the shape against the expected count.
+func extractCommentItems(rawResp map[string]any, expected int) ([]map[string]any, error) {
+	if expected == 0 {
+		return nil, nil
 	}
-	var anchor string
-	if dc.QuotedFileContent != nil {
-		anchor = dc.QuotedFileContent.Value
+	rawItemsAny, ok := rawResp["comments"]
+	if !ok || rawItemsAny == nil {
+		return nil, fmt.Errorf("raw response missing comments field but typed response has %d comments", expected)
 	}
-	return model.CommentLine{
-		ID:       dc.ID,
-		Ts:       ts,
-		Author:   dc.Author.DisplayName,
-		Content:  dc.Content,
-		Anchor:   anchor,
-		Resolved: dc.Resolved,
-	}, nil
-}
-
-func toReplyLine(commentID string, dr driveReply) (model.ReplyLine, error) {
-	ts, err := time.Parse(time.RFC3339, dr.CreatedTime)
-	if err != nil {
-		return model.ReplyLine{}, fmt.Errorf("parse reply %s time %q: %w", dr.ID, dr.CreatedTime, err)
+	rawSlice, ok := rawItemsAny.([]any)
+	if !ok {
+		return nil, fmt.Errorf("raw comments is not an array: got %T", rawItemsAny)
 	}
-	return model.ReplyLine{
-		ID:        dr.ID,
-		CommentID: commentID,
-		Ts:        ts,
-		Author:    dr.Author.DisplayName,
-		Content:   dr.Content,
-		Action:    dr.Action,
-	}, nil
+	if len(rawSlice) != expected {
+		return nil, fmt.Errorf("raw comments count %d does not match typed comments count %d", len(rawSlice), expected)
+	}
+	result := make([]map[string]any, len(rawSlice))
+	for i, item := range rawSlice {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("raw comments[%d] is not an object: got %T", i, item)
+		}
+		result[i] = m
+	}
+	return result, nil
 }
