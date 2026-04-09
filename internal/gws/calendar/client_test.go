@@ -11,7 +11,7 @@ import (
 // shape the production code expects. Serialized is left nil because
 // classify() only reads from Runtime.
 func newEvent(e gcal.Event) *model.CalendarEvent {
-	return &model.CalendarEvent{Runtime: &e}
+	return &model.CalendarEvent{Runtime: e}
 }
 
 func TestClassify_OneOffEvent(t *testing.T) {

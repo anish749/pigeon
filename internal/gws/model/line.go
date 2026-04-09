@@ -133,7 +133,7 @@ func Parse(line string) (Line, error) {
 		}
 		// "type" is our storage discriminator, not part of the API response.
 		delete(serialized, "type")
-		l.Event = &CalendarEvent{Runtime: &runtime, Serialized: serialized}
+		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", hdr.Type)
 	}

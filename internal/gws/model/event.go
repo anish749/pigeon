@@ -19,7 +19,7 @@ import (
 // disk unless they're also pushed into Serialized, so treat Runtime as a
 // read-only view of the event.
 type CalendarEvent struct {
-	Runtime    *calendar.Event
+	Runtime    calendar.Event
 	Serialized map[string]any
 }
 

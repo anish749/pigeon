@@ -82,7 +82,7 @@ func pairItems(items []*gcal.Event, raws []map[string]any) []*model.CalendarEven
 	result := make([]*model.CalendarEvent, len(items))
 	for i, item := range items {
 		result[i] = &model.CalendarEvent{
-			Runtime:    item,
+			Runtime:    *item,
 			Serialized: raws[i],
 		}
 	}

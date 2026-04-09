@@ -217,7 +217,7 @@ func TestMarshalParseEvent(t *testing.T) {
 
 	orig := Line{
 		Type:  "event",
-		Event: &CalendarEvent{Runtime: &parsed, Serialized: raw},
+		Event: &CalendarEvent{Runtime: parsed, Serialized: raw},
 	}
 
 	data, err := Marshal(orig)
@@ -304,7 +304,7 @@ func TestLineID(t *testing.T) {
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
 		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
 		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
-		{"event", Line{Event: &CalendarEvent{Runtime: &gcal.Event{Id: "v1"}}}, "v1"},
+		{"event", Line{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},
 	}
 	for _, tt := range tests {
