@@ -12,6 +12,14 @@ import (
 	"github.com/anish749/pigeon/internal/gws/model"
 )
 
+// mimeParser parses raw messages with malformed-part tolerance enabled.
+// Real-world mail from buggy senders (e.g. bulk mailers whose template
+// scripts paste shell error output into Content-Type headers) produces
+// MIME parts that fail strict parsing. Without this option a single bad
+// sub-part would drop the entire envelope — including the valid body
+// text and headers we actually care about.
+var mimeParser = enmime.NewParser(enmime.SkipMalformedParts(true))
+
 // parseRawMessage decodes a base64url-encoded RFC 2822 message and
 // extracts the body text, headers, and attachment metadata using enmime.
 //
@@ -26,7 +34,7 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		return nil, fmt.Errorf("decode raw message: %w", err)
 	}
 
-	env, err := enmime.ReadEnvelope(bytes.NewReader(b))
+	env, err := mimeParser.ReadEnvelope(bytes.NewReader(b))
 	if err != nil {
 		return nil, fmt.Errorf("parse MIME envelope: %w", err)
 	}
@@ -44,6 +52,17 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		})
 	}
 
+	// Collect severe parse errors so the caller can log them with
+	// message-level context (ID, subject). SkipMalformedParts recovers
+	// the envelope but records each dropped part here — without
+	// surfacing them, parts would silently vanish.
+	var warnings []string
+	for _, e := range env.Errors {
+		if e.Severe {
+			warnings = append(warnings, fmt.Sprintf("%s: %s", e.Name, e.Detail))
+		}
+	}
+
 	// env.Text is always populated — either from the text/plain part
 	// or from enmime's HTML→text conversion. env.HTML is only populated
 	// when a multipart message has an explicit text/html part.
@@ -59,6 +78,7 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		text:        env.Text,
 		html:        env.HTML,
 		attachments: attachments,
+		warnings:    warnings,
 	}, nil
 }
 
@@ -71,6 +91,7 @@ type parsedMessage struct {
 	text        string
 	html        string
 	attachments []model.EmailAttachment
+	warnings    []string
 }
 
 // parseAddress extracts display name and email from a single address header.
