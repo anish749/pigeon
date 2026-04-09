@@ -10,7 +10,6 @@ func TestMarshalParseEmail(t *testing.T) {
 	orig := Line{
 		Type: "email",
 		Email: &EmailLine{
-			Type:     "email",
 			ID:       "msg-1",
 			ThreadID: "thread-1",
 			Ts:       ts,
@@ -70,7 +69,6 @@ func TestMarshalParseEmailDelete(t *testing.T) {
 	orig := Line{
 		Type: "email-delete",
 		EmailDelete: &EmailDeleteLine{
-			Type: "email-delete",
 			ID:   "msg-1",
 			Ts:   ts,
 		},
@@ -102,7 +100,6 @@ func TestMarshalParseComment(t *testing.T) {
 	orig := Line{
 		Type: "comment",
 		Comment: &CommentLine{
-			Type:     "comment",
 			ID:       "cmt-1",
 			Ts:       ts,
 			Author:   "Alice",
@@ -145,7 +142,6 @@ func TestMarshalParseReply(t *testing.T) {
 	orig := Line{
 		Type: "reply",
 		Reply: &ReplyLine{
-			Type:      "reply",
 			ID:        "rpl-1",
 			CommentID: "cmt-1",
 			Ts:        ts,
@@ -187,7 +183,6 @@ func TestMarshalParseEvent(t *testing.T) {
 	orig := Line{
 		Type: "event",
 		Event: &EventLine{
-			Type:      "event",
 			ID:        "evt-1",
 			Ts:        "2026-04-07T10:00:00Z",
 			Updated:   "2026-04-07T10:00:00Z",

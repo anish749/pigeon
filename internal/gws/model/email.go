@@ -4,7 +4,6 @@ import "time"
 
 // EmailLine represents a single Gmail message in JSONL format.
 type EmailLine struct {
-	Type     string            `json:"type"`             // always "email"
 	ID       string            `json:"id"`               // Gmail message ID
 	ThreadID string            `json:"threadId"`         // Gmail thread ID
 	Ts       time.Time         `json:"ts"`               // when Gmail received it
@@ -29,7 +28,6 @@ type EmailAttachment struct {
 
 // EmailDeleteLine records the deletion of a Gmail message.
 type EmailDeleteLine struct {
-	Type string    `json:"type"` // always "email-delete"
 	ID   string    `json:"id"`   // target message ID
 	Ts   time.Time `json:"ts"`   // when observed
 }

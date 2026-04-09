@@ -14,7 +14,6 @@ func emailLine(id string) model.Line {
 	return model.Line{
 		Type: "email",
 		Email: &model.EmailLine{
-			Type:    "email",
 			ID:      id,
 			Subject: "Subject " + id,
 			Ts:      time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC),
@@ -29,7 +28,6 @@ func emailDeleteLine(id string) model.Line {
 	return model.Line{
 		Type: "email-delete",
 		EmailDelete: &model.EmailDeleteLine{
-			Type: "email-delete",
 			ID:   id,
 			Ts:   time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC),
 		},

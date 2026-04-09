@@ -68,7 +68,6 @@ func (e calendarEvent) ToEventLine() model.EventLine {
 	}
 
 	ev := model.EventLine{
-		Type:        "event",
 		ID:          e.ID,
 		Ts:          e.Created,
 		Updated:     e.Updated,
