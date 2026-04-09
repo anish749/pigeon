@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	gcal "google.golang.org/api/calendar/v3"
 	drive "google.golang.org/api/drive/v3"
 )
@@ -491,25 +492,10 @@ func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
 
 	// Serialized round-trips exactly (minus the injected type discriminator,
 	// which unmarshalRaw strips).
-	if !jsonEqual(orig, got) {
-		t.Errorf("round trip did not preserve serialized map\n orig: %#v\n  got: %#v", orig, got)
+	if diff := cmp.Diff(orig, got); diff != "" {
+		t.Errorf("round trip did not preserve serialized map (-orig +got):\n%s", diff)
 	}
 	if _, hasType := got["type"]; hasType {
 		t.Error("round trip left the type discriminator in serialized")
 	}
-}
-
-// jsonEqual compares two values for JSON equality by marshalling both and
-// comparing bytes. This sidesteps map ordering and type quirks (e.g. all
-// JSON numbers unmarshal as float64).
-func jsonEqual(a, b any) bool {
-	ab, err := json.Marshal(a)
-	if err != nil {
-		return false
-	}
-	bb, err := json.Marshal(b)
-	if err != nil {
-		return false
-	}
-	return string(ab) == string(bb)
 }
