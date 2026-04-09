@@ -3,6 +3,8 @@ package model
 import (
 	"testing"
 	"time"
+
+	gcal "google.golang.org/api/calendar/v3"
 )
 
 func TestMarshalParseEmail(t *testing.T) {
@@ -182,20 +184,23 @@ func TestMarshalParseReply(t *testing.T) {
 func TestMarshalParseEvent(t *testing.T) {
 	orig := Line{
 		Type: "event",
-		Event: &EventLine{
-			ID:        "evt-1",
-			Ts:        "2026-04-07T10:00:00Z",
-			Updated:   "2026-04-07T10:00:00Z",
-			Status:    "confirmed",
-			Summary:   "Team standup",
-			Start:     "2026-04-07T09:00:00-07:00",
-			End:       "2026-04-07T09:30:00-07:00",
-			Location:  "Room 42",
-			Organizer: "alice@example.com",
-			Attendees: []string{"bob@example.com", "carol@example.com"},
-			MeetLink:  "https://meet.google.com/abc-defg-hij",
-			EventType: "default",
-			Recurring: true,
+		Event: &gcal.Event{
+			Id:      "evt-1",
+			Created: "2026-04-07T10:00:00Z",
+			Updated: "2026-04-07T10:00:00Z",
+			Status:  "confirmed",
+			Summary: "Team standup",
+			Start:   &gcal.EventDateTime{DateTime: "2026-04-07T09:00:00-07:00"},
+			End:     &gcal.EventDateTime{DateTime: "2026-04-07T09:30:00-07:00"},
+			Location: "Room 42",
+			Organizer: &gcal.EventOrganizer{Email: "alice@example.com"},
+			Attendees: []*gcal.EventAttendee{
+				{Email: "bob@example.com"},
+				{Email: "carol@example.com"},
+			},
+			HangoutLink:      "https://meet.google.com/abc-defg-hij",
+			EventType:        "default",
+			RecurringEventId: "evt-base",
 		},
 	}
 
@@ -216,8 +221,8 @@ func TestMarshalParseEvent(t *testing.T) {
 		t.Fatal("Event is nil")
 	}
 	ev := got.Event
-	if ev.ID != "evt-1" {
-		t.Errorf("ID = %q, want %q", ev.ID, "evt-1")
+	if ev.Id != "evt-1" {
+		t.Errorf("Id = %q, want %q", ev.Id, "evt-1")
 	}
 	if ev.Summary != "Team standup" {
 		t.Errorf("Summary = %q, want %q", ev.Summary, "Team standup")
@@ -228,8 +233,11 @@ func TestMarshalParseEvent(t *testing.T) {
 	if len(ev.Attendees) != 2 {
 		t.Errorf("Attendees count = %d, want 2", len(ev.Attendees))
 	}
-	if !ev.Recurring {
-		t.Error("Recurring = false, want true")
+	if ev.RecurringEventId != "evt-base" {
+		t.Errorf("RecurringEventId = %q, want %q", ev.RecurringEventId, "evt-base")
+	}
+	if ev.Start == nil || ev.Start.DateTime != "2026-04-07T09:00:00-07:00" {
+		t.Errorf("Start.DateTime = %v, want 2026-04-07T09:00:00-07:00", ev.Start)
 	}
 }
 
@@ -264,7 +272,7 @@ func TestLineID(t *testing.T) {
 		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
 		{"comment", Line{Comment: &CommentLine{ID: "c1"}}, "c1"},
 		{"reply", Line{Reply: &ReplyLine{ID: "r1"}}, "r1"},
-		{"event", Line{Event: &EventLine{ID: "v1"}}, "v1"},
+		{"event", Line{Event: &gcal.Event{Id: "v1"}}, "v1"},
 		{"empty", Line{}, ""},
 	}
 	for _, tt := range tests {

@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 // Line is a parsed JSONL line. Exactly one of the typed fields is non-nil.
@@ -12,7 +14,7 @@ type Line struct {
 	EmailDelete *EmailDeleteLine
 	Comment     *CommentLine
 	Reply       *ReplyLine
-	Event       *EventLine
+	Event       *calendar.Event
 }
 
 // LineID returns the ID of the line's inner type, used for deduplication.
@@ -27,7 +29,7 @@ func (l Line) LineID() string {
 	case l.Reply != nil:
 		return l.Reply.ID
 	case l.Event != nil:
-		return l.Event.ID
+		return l.Event.Id
 	default:
 		return ""
 	}
@@ -66,10 +68,15 @@ func Marshal(l Line) ([]byte, error) {
 			*ReplyLine
 		}{t, l.Reply})
 	case l.Event != nil:
-		return json.Marshal(struct {
-			typed
-			*EventLine
-		}{t, l.Event})
+		// calendar.Event has a custom MarshalJSON (from the Google SDK) which
+		// would shadow the anonymous struct's field-by-field encoding if we
+		// used embedding. Instead, marshal the event and prepend the type
+		// discriminator into the JSON object.
+		raw, err := json.Marshal(l.Event)
+		if err != nil {
+			return nil, fmt.Errorf("marshal event: %w", err)
+		}
+		return append([]byte(`{"type":"event",`), raw[1:]...), nil
 	default:
 		return nil, fmt.Errorf("marshal line: no typed field set")
 	}
@@ -118,7 +125,7 @@ func Parse(line string) (Line, error) {
 		}
 		l.Reply = &v
 	case "event":
-		var v EventLine
+		var v calendar.Event
 		if err := json.Unmarshal(data, &v); err != nil {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
