@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
 )
@@ -26,7 +26,7 @@ func TestLiveSmoke(t *testing.T) {
 	accountDir := account.Path()
 	cursorsPath := account.SyncCursorsPath()
 
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := store.LoadCursors(cursorsPath)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLiveSmoke(t *testing.T) {
 	}
 	t.Logf("drive pageToken: %s", cursors.Drive.PageToken)
 
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestLiveSmoke(t *testing.T) {
 	if _, err := poller.PollDrive(account, cursors); err != nil {
 		t.Fatalf("drive poll: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 

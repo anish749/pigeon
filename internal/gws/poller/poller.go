@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // Poller runs periodic polls against GWS services.
@@ -28,14 +28,14 @@ func New(interval time.Duration, account paths.AccountDir) *Poller {
 // Run starts the polling loop. Blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) error {
 	cursorsPath := p.account.SyncCursorsPath()
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := store.LoadCursors(cursorsPath)
 	if err != nil {
 		return fmt.Errorf("load cursors: %w", err)
 	}
 
 	// Initial poll.
 	p.pollAll(ctx, cursors)
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		slog.Error("save cursors", "err", err)
 	}
 
@@ -48,14 +48,14 @@ func (p *Poller) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			p.pollAll(ctx, cursors)
-			if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+			if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 				slog.Error("save cursors", "err", err)
 			}
 		}
 	}
 }
 
-func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
+func (p *Poller) pollAll(ctx context.Context, cursors *store.Cursors) {
 	if ctx.Err() != nil {
 		return
 	}

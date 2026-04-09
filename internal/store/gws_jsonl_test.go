@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"os"
@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-func emailLine(id string) model.Line {
-	return model.Line{
+func gwsEmailLine(id string) modelv1.GWSLine {
+	return modelv1.GWSLine{
 		Type: "email",
-		Email: &model.EmailLine{
+		Email: &modelv1.EmailLine{
 			ID:      id,
 			Subject: "Subject " + id,
 			Ts:      time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC),
@@ -24,22 +24,22 @@ func emailLine(id string) model.Line {
 	}
 }
 
-func emailDeleteLine(id string) model.Line {
-	return model.Line{
+func gwsEmailDeleteLine(id string) modelv1.GWSLine {
+	return modelv1.GWSLine{
 		Type: "email-delete",
-		EmailDelete: &model.EmailDeleteLine{
-			ID:   id,
-			Ts:   time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC),
+		EmailDelete: &modelv1.EmailDeleteLine{
+			ID: id,
+			Ts: time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC),
 		},
 	}
 }
 
-func TestAppendAndReadLines(t *testing.T) {
+func TestGWSAppendAndReadLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := AppendLine(paths.DateFile(path), emailLine(id)); err != nil {
+		if err := AppendLine(paths.DateFile(path), gwsEmailLine(id)); err != nil {
 			t.Fatalf("AppendLine(%q): %v", id, err)
 		}
 	}
@@ -58,12 +58,12 @@ func TestAppendAndReadLines(t *testing.T) {
 	}
 }
 
-func TestWriteLines(t *testing.T) {
+func TestGWSWriteLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "write.jsonl")
 
 	// Write initial lines.
-	initial := []model.Line{emailLine("a"), emailLine("b")}
+	initial := []modelv1.GWSLine{gwsEmailLine("a"), gwsEmailLine("b")}
 	if err := WriteLines(paths.DateFile(path), initial); err != nil {
 		t.Fatalf("WriteLines: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestWriteLines(t *testing.T) {
 	}
 
 	// Overwrite with fewer lines — verifies replacement, not append.
-	replacement := []model.Line{emailLine("c")}
+	replacement := []modelv1.GWSLine{gwsEmailLine("c")}
 	if err := WriteLines(paths.DateFile(path), replacement); err != nil {
 		t.Fatalf("WriteLines overwrite: %v", err)
 	}
@@ -94,12 +94,12 @@ func TestWriteLines(t *testing.T) {
 	}
 }
 
-func TestWriteLinesEmpty(t *testing.T) {
+func TestGWSWriteLinesEmpty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.jsonl")
 
 	// Write initial content.
-	if err := WriteLines(paths.DateFile(path), []model.Line{emailLine("a")}); err != nil {
+	if err := WriteLines(paths.DateFile(path), []modelv1.GWSLine{gwsEmailLine("a")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,13 +117,13 @@ func TestWriteLinesEmpty(t *testing.T) {
 	}
 }
 
-func TestDedupKeepsLast(t *testing.T) {
+func TestGWSDedupKeepsLast(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dup.jsonl")
 
 	// Append 3 lines with the same ID — Dedup should keep the last.
 	for i := range 3 {
-		l := emailLine("same")
+		l := gwsEmailLine("same")
 		l.Email.Subject = "version-" + string(rune('0'+i))
 		if err := AppendLine(paths.DateFile(path), l); err != nil {
 			t.Fatalf("AppendLine: %v", err)
@@ -147,14 +147,14 @@ func TestDedupKeepsLast(t *testing.T) {
 	}
 }
 
-func TestDedupDeleteSemantics(t *testing.T) {
+func TestGWSDedupDeleteSemantics(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "del.jsonl")
 
-	if err := AppendLine(paths.DateFile(path), emailLine("target")); err != nil {
+	if err := AppendLine(paths.DateFile(path), gwsEmailLine("target")); err != nil {
 		t.Fatal(err)
 	}
-	if err := AppendLine(paths.DateFile(path), emailDeleteLine("target")); err != nil {
+	if err := AppendLine(paths.DateFile(path), gwsEmailDeleteLine("target")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,7 +172,7 @@ func TestDedupDeleteSemantics(t *testing.T) {
 	}
 }
 
-func TestReadLinesNonExistent(t *testing.T) {
+func TestGWSReadLinesNonExistent(t *testing.T) {
 	lines, err := ReadLines(paths.DateFile(filepath.Join(t.TempDir(), "nope.jsonl")))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
@@ -182,12 +182,12 @@ func TestReadLinesNonExistent(t *testing.T) {
 	}
 }
 
-func TestReadLinesCorruptLines(t *testing.T) {
+func TestGWSReadLinesCorruptLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "corrupt.jsonl")
 
 	// Write a valid line, a corrupt line, then another valid line.
-	if err := AppendLine(paths.DateFile(path), emailLine("good1")); err != nil {
+	if err := AppendLine(paths.DateFile(path), gwsEmailLine("good1")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +200,7 @@ func TestReadLinesCorruptLines(t *testing.T) {
 	}
 	f.Close()
 
-	if err := AppendLine(paths.DateFile(path), emailLine("good2")); err != nil {
+	if err := AppendLine(paths.DateFile(path), gwsEmailLine("good2")); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"fmt"
@@ -9,7 +9,8 @@ import (
 )
 
 // WriteContent writes content bytes to a file, creating parent directories.
-// Replaces the file if it already exists. Used for markdown and CSV files.
+// Replaces the file if it already exists. Used for markdown and CSV files
+// written as part of GWS ingestion.
 func WriteContent(cf paths.ContentFile, data []byte) error {
 	path := cf.Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"os"

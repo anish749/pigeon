@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
 )
@@ -50,7 +50,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed ---
 	t.Log("=== Phase 1: Seed ===")
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := store.LoadCursors(cursorsPath)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	if _, err := poller.PollCalendar(account, cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -183,14 +183,14 @@ func patchInstance(t *testing.T, instanceID, body string) {
 	t.Logf("patched instance %s → %q", instanceID, resp.Summary)
 }
 
-func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
+func readAllEvents(t *testing.T, calDir string) []*modelv1.CalendarEvent {
 	t.Helper()
-	var events []*model.CalendarEvent
+	var events []*modelv1.CalendarEvent
 	filepath.Walk(calDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
 		}
-		lines, readErr := gwsstore.ReadLines(paths.DateFile(path))
+		lines, readErr := store.ReadLines(paths.DateFile(path))
 		if readErr != nil {
 			t.Logf("warning: read %s: %v", path, readErr)
 		}
@@ -204,7 +204,7 @@ func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
 	return events
 }
 
-func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
+func hasEventWithSummary(events []*modelv1.CalendarEvent, summary string) bool {
 	for _, e := range events {
 		if e.Runtime.Summary == summary {
 			return true
@@ -213,8 +213,8 @@ func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 	return false
 }
 
-func eventsWithPrefix(events []*model.CalendarEvent, prefix string) []*model.CalendarEvent {
-	var matched []*model.CalendarEvent
+func eventsWithPrefix(events []*modelv1.CalendarEvent, prefix string) []*modelv1.CalendarEvent {
+	var matched []*modelv1.CalendarEvent
 	for _, e := range events {
 		if strings.HasPrefix(e.Runtime.Id, prefix) {
 			matched = append(matched, e)

@@ -1,4 +1,4 @@
-package model
+package modelv1
 
 import (
 	"log/slog"
@@ -12,7 +12,7 @@ import (
 //
 // Runtime is the typed calendar.Event used by classify, dedup, date extraction,
 // and anything else that needs field access. Serialized is a JSON-shaped map
-// that Marshal writes verbatim to disk — it preserves every field the API
+// that MarshalGWS writes verbatim to disk — it preserves every field the API
 // returned, even ones the generated SDK types don't know about.
 //
 // Only Serialized is persisted. Mutations to Runtime are not reflected on

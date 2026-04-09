@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"encoding/json"
@@ -7,18 +7,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // LoadDriveMeta reads Google Drive file metadata from a JSON file.
-func LoadDriveMeta(mf paths.DriveMetaFile) (*model.DocMeta, error) {
+func LoadDriveMeta(mf paths.DriveMetaFile) (*modelv1.DocMeta, error) {
 	path := mf.Path()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read meta %s: %w", path, err)
 	}
-	var m model.DocMeta
+	var m modelv1.DocMeta
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse meta %s: %w", path, err)
 	}
@@ -30,7 +30,7 @@ func LoadDriveMeta(mf paths.DriveMetaFile) (*model.DocMeta, error) {
 // meta files in the same directory (drive-meta-*.json with different dates)
 // to avoid accumulation. The write-then-delete order ensures we never lose
 // metadata on a crash.
-func SaveDriveMeta(mf paths.DriveMetaFile, m *model.DocMeta) error {
+func SaveDriveMeta(mf paths.DriveMetaFile, m *modelv1.DocMeta) error {
 	path := mf.Path()
 	dir := mf.Dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"errors"
@@ -36,7 +36,7 @@ type CalendarCursor struct {
 // CalendarCursors maps calendar ID to its cursor.
 type CalendarCursors map[string]*CalendarCursor
 
-// LoadCursors reads cursors from a YAML file.
+// LoadCursors reads GWS cursors from a YAML file.
 // Returns an empty Cursors if the file doesn't exist.
 func LoadCursors(path string) (*Cursors, error) {
 	data, err := os.ReadFile(path)
@@ -53,7 +53,7 @@ func LoadCursors(path string) (*Cursors, error) {
 	return &c, nil
 }
 
-// SaveCursors writes cursors to a YAML file, creating parent directories.
+// SaveCursors writes GWS cursors to a YAML file, creating parent directories.
 func SaveCursors(path string, c *Cursors) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)

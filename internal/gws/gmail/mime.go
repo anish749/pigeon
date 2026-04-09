@@ -9,7 +9,7 @@ import (
 
 	"github.com/jhillyerd/enmime"
 
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // mimeParser parses raw messages with malformed-part tolerance enabled.
@@ -43,9 +43,9 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 	to := parseAddresses(env.GetHeaderValues("To"))
 	cc := parseAddresses(env.GetHeaderValues("Cc"))
 
-	var attachments []model.EmailAttachment
+	var attachments []modelv1.EmailAttachment
 	for _, a := range env.Attachments {
-		attachments = append(attachments, model.EmailAttachment{
+		attachments = append(attachments, modelv1.EmailAttachment{
 			ID:   a.ContentID,
 			Type: a.ContentType,
 			Name: a.FileName,
@@ -90,7 +90,7 @@ type parsedMessage struct {
 	cc          []string
 	text        string
 	html        string
-	attachments []model.EmailAttachment
+	attachments []modelv1.EmailAttachment
 	warnings    []string
 }
 

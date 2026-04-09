@@ -1,4 +1,4 @@
-package model
+package modelv1
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 
 func TestMarshalParseEmail(t *testing.T) {
 	ts := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
-	orig := Line{
+	orig := GWSLine{
 		Type: "email",
 		Email: &EmailLine{
 			ID:       "msg-1",
@@ -32,14 +32,14 @@ func TestMarshalParseEmail(t *testing.T) {
 		},
 	}
 
-	data, err := Marshal(orig)
+	data, err := MarshalGWS(orig)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("MarshalGWS: %v", err)
 	}
 
-	got, err := Parse(string(data))
+	got, err := ParseGWS(string(data))
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("ParseGWS: %v", err)
 	}
 
 	if got.Type != "email" {
@@ -71,22 +71,22 @@ func TestMarshalParseEmail(t *testing.T) {
 
 func TestMarshalParseEmailDelete(t *testing.T) {
 	ts := time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC)
-	orig := Line{
+	orig := GWSLine{
 		Type: "email-delete",
 		EmailDelete: &EmailDeleteLine{
-			ID:   "msg-1",
-			Ts:   ts,
+			ID: "msg-1",
+			Ts: ts,
 		},
 	}
 
-	data, err := Marshal(orig)
+	data, err := MarshalGWS(orig)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("MarshalGWS: %v", err)
 	}
 
-	got, err := Parse(string(data))
+	got, err := ParseGWS(string(data))
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("ParseGWS: %v", err)
 	}
 
 	if got.Type != "email-delete" {
@@ -132,19 +132,19 @@ func TestMarshalParseComment(t *testing.T) {
 		t.Fatalf("unmarshal raw: %v", err)
 	}
 
-	orig := Line{
+	orig := GWSLine{
 		Type:    "comment",
 		Comment: &DriveComment{Runtime: runtime, Serialized: raw},
 	}
 
-	data, err := Marshal(orig)
+	data, err := MarshalGWS(orig)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("MarshalGWS: %v", err)
 	}
 
-	got, err := Parse(string(data))
+	got, err := ParseGWS(string(data))
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("ParseGWS: %v", err)
 	}
 
 	if got.Type != "comment" {
@@ -223,19 +223,19 @@ func TestMarshalParseEvent(t *testing.T) {
 		t.Fatalf("unmarshal raw: %v", err)
 	}
 
-	orig := Line{
+	orig := GWSLine{
 		Type:  "event",
 		Event: &CalendarEvent{Runtime: parsed, Serialized: raw},
 	}
 
-	data, err := Marshal(orig)
+	data, err := MarshalGWS(orig)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("MarshalGWS: %v", err)
 	}
 
-	got, err := Parse(string(data))
+	got, err := ParseGWS(string(data))
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("ParseGWS: %v", err)
 	}
 
 	if got.Type != "event" {
@@ -281,38 +281,38 @@ func TestMarshalParseEvent(t *testing.T) {
 	}
 }
 
-func TestParseUnknownType(t *testing.T) {
-	_, err := Parse(`{"type":"bogus","id":"x"}`)
+func TestParseGWSUnknownType(t *testing.T) {
+	_, err := ParseGWS(`{"type":"bogus","id":"x"}`)
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
 }
 
-func TestParseInvalidJSON(t *testing.T) {
-	_, err := Parse(`not json`)
+func TestParseGWSInvalidJSON(t *testing.T) {
+	_, err := ParseGWS(`not json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
 
-func TestMarshalNoField(t *testing.T) {
-	_, err := Marshal(Line{})
+func TestMarshalGWSNoField(t *testing.T) {
+	_, err := MarshalGWS(GWSLine{})
 	if err == nil {
 		t.Fatal("expected error for empty line")
 	}
 }
 
-func TestLineID(t *testing.T) {
+func TestGWSLineID(t *testing.T) {
 	tests := []struct {
 		name string
-		line Line
+		line GWSLine
 		want string
 	}{
-		{"email", Line{Email: &EmailLine{ID: "e1"}}, "e1"},
-		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
-		{"comment", Line{Comment: &DriveComment{Runtime: drive.Comment{Id: "c1"}}}, "c1"},
-		{"event", Line{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
-		{"empty", Line{}, ""},
+		{"email", GWSLine{Email: &EmailLine{ID: "e1"}}, "e1"},
+		{"email-delete", GWSLine{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
+		{"comment", GWSLine{Comment: &DriveComment{Runtime: drive.Comment{Id: "c1"}}}, "c1"},
+		{"event", GWSLine{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
+		{"empty", GWSLine{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -399,15 +399,15 @@ func TestMarshalRaw_OverwritesExistingTypeKey(t *testing.T) {
 	}
 }
 
-// testItem is a minimal typed struct used by unmarshalRaw tests.
-type testItem struct {
+// gwsTestItem is a minimal typed struct used by unmarshalRaw tests.
+type gwsTestItem struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
 func TestUnmarshalRaw_PopulatesTypedAndStripsType(t *testing.T) {
 	data := []byte(`{"type":"widget","id":"x1","name":"hello","extra":42}`)
-	var runtime testItem
+	var runtime gwsTestItem
 	serialized, err := unmarshalRaw(data, &runtime)
 	if err != nil {
 		t.Fatalf("unmarshalRaw: %v", err)
@@ -438,7 +438,7 @@ func TestUnmarshalRaw_NoTypeKey(t *testing.T) {
 	// Input without a "type" key should still work — unmarshalRaw is
 	// tolerant of missing discriminators (the delete is a no-op).
 	data := []byte(`{"id":"x1","name":"hello"}`)
-	var runtime testItem
+	var runtime gwsTestItem
 	serialized, err := unmarshalRaw(data, &runtime)
 	if err != nil {
 		t.Fatalf("unmarshalRaw: %v", err)
@@ -452,7 +452,7 @@ func TestUnmarshalRaw_NoTypeKey(t *testing.T) {
 }
 
 func TestUnmarshalRaw_InvalidJSON(t *testing.T) {
-	var runtime testItem
+	var runtime gwsTestItem
 	_, err := unmarshalRaw([]byte(`not json`), &runtime)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
@@ -464,8 +464,8 @@ func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
 	// serialized map should equal the original, and the typed view should
 	// pick up its fields correctly.
 	orig := map[string]any{
-		"id":    "x1",
-		"name":  "hello",
+		"id":   "x1",
+		"name": "hello",
 		"nested": map[string]any{
 			"a": "one",
 			"b": float64(2),
@@ -479,7 +479,7 @@ func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
 		t.Fatalf("marshalRaw: %v", err)
 	}
 
-	var runtime testItem
+	var runtime gwsTestItem
 	got, err := unmarshalRaw(data, &runtime)
 	if err != nil {
 		t.Fatalf("unmarshalRaw: %v", err)

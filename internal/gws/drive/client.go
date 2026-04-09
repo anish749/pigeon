@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anish749/pigeon/internal/gws"
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	drive "google.golang.org/api/drive/v3"
 )
 
@@ -138,7 +138,7 @@ type filesListFile struct {
 // --- Docs API ---
 
 // GetDocument fetches a Google Doc with all tab content.
-func GetDocument(docID string) (*model.Document, error) {
+func GetDocument(docID string) (*modelv1.Document, error) {
 	// includeTabsContent is a boolean, so we use json.Marshal directly
 	// instead of ParamsJSON (which only handles map[string]string).
 	params := map[string]any{"documentId": docID, "includeTabsContent": true}
@@ -147,7 +147,7 @@ func GetDocument(docID string) (*model.Document, error) {
 		return nil, fmt.Errorf("marshal doc params: %w", err)
 	}
 
-	var doc model.Document
+	var doc modelv1.Document
 	if err := gws.RunParsed(&doc, "docs", "documents", "get", "--params", string(paramsJSON)); err != nil {
 		return nil, fmt.Errorf("get document %s: %w", docID, err)
 	}
@@ -226,13 +226,13 @@ func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, 
 // (for field access) with the raw API response map (for lossless storage).
 // Replies are nested inside each comment — the API returns them that way
 // and storage preserves that shape.
-func ListComments(fileID string) ([]*model.DriveComment, error) {
+func ListComments(fileID string) ([]*modelv1.DriveComment, error) {
 	params := map[string]string{
 		"fileId": fileID,
 		"fields": "comments,nextPageToken",
 	}
 
-	var all []*model.DriveComment
+	var all []*modelv1.DriveComment
 	for {
 		out, err := gws.Run("drive", "comments", "list", "--params", gws.ParamsJSON(params))
 		if err != nil {
@@ -255,7 +255,7 @@ func ListComments(fileID string) ([]*model.DriveComment, error) {
 		}
 
 		for i, c := range resp.Comments {
-			all = append(all, &model.DriveComment{
+			all = append(all, &modelv1.DriveComment{
 				Runtime:    *c,
 				Serialized: rawComments[i],
 			})

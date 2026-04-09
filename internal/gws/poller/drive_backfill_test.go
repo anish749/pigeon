@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
 )
@@ -37,7 +37,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed with backfill ---
 	t.Log("=== Phase 1: Seed with backfill ===")
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := store.LoadCursors(cursorsPath)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestDriveBackfillLive(t *testing.T) {
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 

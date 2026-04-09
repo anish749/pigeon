@@ -1,4 +1,4 @@
-package model
+package modelv1
 
 // DocMeta holds metadata about a synced Google Drive document.
 type DocMeta struct {

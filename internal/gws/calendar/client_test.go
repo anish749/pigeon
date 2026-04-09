@@ -3,19 +3,19 @@ package calendar
 import (
 	"testing"
 
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	gcal "google.golang.org/api/calendar/v3"
 )
 
 // newEvent is a test helper that wraps a gcal.Event into the CalendarEvent
 // shape the production code expects. Serialized is left nil because
 // classify() only reads from Runtime.
-func newEvent(e gcal.Event) *model.CalendarEvent {
-	return &model.CalendarEvent{Runtime: e}
+func newEvent(e gcal.Event) *modelv1.CalendarEvent {
+	return &modelv1.CalendarEvent{Runtime: e}
 }
 
 func TestClassify_OneOffEvent(t *testing.T) {
-	items := []*model.CalendarEvent{
+	items := []*modelv1.CalendarEvent{
 		newEvent(gcal.Event{
 			Id:      "evt-123",
 			Status:  "confirmed",
@@ -40,7 +40,7 @@ func TestClassify_OneOffEvent(t *testing.T) {
 }
 
 func TestClassify_RecurringParent(t *testing.T) {
-	items := []*model.CalendarEvent{
+	items := []*modelv1.CalendarEvent{
 		newEvent(gcal.Event{
 			Id:         "evt-recurring",
 			Status:     "confirmed",
@@ -62,7 +62,7 @@ func TestClassify_RecurringParent(t *testing.T) {
 }
 
 func TestClassify_CancelledRecurringParent(t *testing.T) {
-	items := []*model.CalendarEvent{
+	items := []*modelv1.CalendarEvent{
 		newEvent(gcal.Event{
 			Id:         "evt-deleted",
 			Status:     "cancelled",
@@ -84,7 +84,7 @@ func TestClassify_CancelledRecurringParent(t *testing.T) {
 }
 
 func TestClassify_RecurringInstance(t *testing.T) {
-	items := []*model.CalendarEvent{
+	items := []*modelv1.CalendarEvent{
 		newEvent(gcal.Event{
 			Id:               "evt-instance-1",
 			Status:           "confirmed",
@@ -109,7 +109,7 @@ func TestClassify_RecurringInstance(t *testing.T) {
 }
 
 func TestClassify_Mixed(t *testing.T) {
-	items := []*model.CalendarEvent{
+	items := []*modelv1.CalendarEvent{
 		newEvent(gcal.Event{Id: "oneoff", Status: "confirmed"}),
 		newEvent(gcal.Event{Id: "parent", Recurrence: []string{"RRULE:FREQ=WEEKLY"}}),
 		newEvent(gcal.Event{Id: "instance", RecurringEventId: "parent"}),

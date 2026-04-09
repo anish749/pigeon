@@ -1,4 +1,4 @@
-package gwsstore
+package store
 
 import (
 	"bufio"
@@ -7,19 +7,19 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// AppendLine appends a single JSONL line to a log file. Creates the file and
-// parent directories if they don't exist. Appends a newline after the JSON.
-func AppendLine(df paths.LogFile, line model.Line) error {
+// AppendLine appends a single JSONL line to a GWS log file. Creates the file
+// and parent directories if they don't exist. Appends a newline after the JSON.
+func AppendLine(df paths.LogFile, line modelv1.GWSLine) error {
 	path := df.Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)
 	}
 
-	data, err := model.Marshal(line)
+	data, err := modelv1.MarshalGWS(line)
 	if err != nil {
 		return fmt.Errorf("marshal line: %w", err)
 	}
@@ -37,10 +37,10 @@ func AppendLine(df paths.LogFile, line model.Line) error {
 	return nil
 }
 
-// WriteLines replaces the contents of a log file with the given lines.
+// WriteLines replaces the contents of a GWS log file with the given lines.
 // Creates the file and parent directories if they don't exist.
 // Used for data that is always fetched as a full snapshot (e.g. Drive comments).
-func WriteLines(df paths.LogFile, lines []model.Line) error {
+func WriteLines(df paths.LogFile, lines []modelv1.GWSLine) error {
 	path := df.Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create parent dirs for %s: %w", path, err)
@@ -48,7 +48,7 @@ func WriteLines(df paths.LogFile, lines []model.Line) error {
 
 	var buf []byte
 	for _, line := range lines {
-		data, err := model.Marshal(line)
+		data, err := modelv1.MarshalGWS(line)
 		if err != nil {
 			return fmt.Errorf("marshal line: %w", err)
 		}
@@ -62,10 +62,10 @@ func WriteLines(df paths.LogFile, lines []model.Line) error {
 	return nil
 }
 
-// ReadLines reads all JSONL lines from a log file. Returns nil, nil if the
-// file doesn't exist. Unparseable lines are collected into the error
+// ReadLines reads all GWS JSONL lines from a log file. Returns nil, nil if
+// the file doesn't exist. Unparseable lines are collected into the error
 // but successfully parsed lines are still returned.
-func ReadLines(df paths.LogFile) ([]model.Line, error) {
+func ReadLines(df paths.LogFile) ([]modelv1.GWSLine, error) {
 	path := df.Path()
 	f, err := os.Open(path)
 	if err != nil {
@@ -76,7 +76,7 @@ func ReadLines(df paths.LogFile) ([]model.Line, error) {
 	}
 	defer f.Close()
 
-	var lines []model.Line
+	var lines []modelv1.GWSLine
 	var errs []error
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
@@ -86,7 +86,7 @@ func ReadLines(df paths.LogFile) ([]model.Line, error) {
 		if text == "" {
 			continue
 		}
-		l, err := model.Parse(text)
+		l, err := modelv1.ParseGWS(text)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
 			continue
@@ -99,10 +99,10 @@ func ReadLines(df paths.LogFile) ([]model.Line, error) {
 	return lines, errors.Join(errs...)
 }
 
-// Dedup removes duplicate lines by ID (keep last occurrence).
+// Dedup removes duplicate GWS lines by ID (keep last occurrence).
 // Also applies delete semantics: email-delete removes the matching email.
 // Lines without IDs (if any) are kept as-is.
-func Dedup(lines []model.Line) []model.Line {
+func Dedup(lines []modelv1.GWSLine) []modelv1.GWSLine {
 	// First pass: find the last occurrence index of each ID, and collect
 	// deleted email IDs.
 	lastIndex := make(map[string]int)
@@ -120,7 +120,7 @@ func Dedup(lines []model.Line) []model.Line {
 
 	// Second pass: keep only last-occurrence lines, excluding deleted emails
 	// and the delete markers themselves.
-	var result []model.Line
+	var result []modelv1.GWSLine
 	for i, l := range lines {
 		id := l.LineID()
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/anish749/pigeon/internal/gws"
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 func TestGmailCursorResetOnExpiry(t *testing.T) {
@@ -23,7 +23,7 @@ func TestGmailCursorResetOnExpiry(t *testing.T) {
 	}
 
 	// Verify cursor clearing works.
-	cursors := &gwsstore.Cursors{}
+	cursors := &store.Cursors{}
 	cursors.Gmail.HistoryID = "12345"
 
 	// This is what PollGmail does on cursor expiry:
@@ -51,7 +51,7 @@ func TestCalendarCursorResetOnExpiry(t *testing.T) {
 		t.Fatal("expected IsCursorExpired to be true for Calendar 400/invalid")
 	}
 
-	cursors := &gwsstore.Cursors{Calendar: gwsstore.CalendarCursors{
+	cursors := &store.Cursors{Calendar: store.CalendarCursors{
 		"primary": {SyncToken: "old-token"},
 	}}
 	cursors.Calendar["primary"] = nil

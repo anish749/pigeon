@@ -1,12 +1,12 @@
-package gwsstore
+package store
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // testDriveFileDir returns a DriveFileDir rooted at a temp directory for tests.
@@ -23,13 +23,13 @@ func TestDriveMetaRoundTrip(t *testing.T) {
 	fileDir := testDriveFileDir(t)
 	mf := fileDir.MetaFile("2026-04-07")
 
-	orig := &model.DocMeta{
+	orig := &modelv1.DocMeta{
 		FileID:       "file-123",
 		MimeType:     "application/vnd.google-apps.document",
 		Title:        "My Doc",
 		ModifiedTime: "2026-04-07T12:00:00Z",
 		SyncedAt:     "2026-04-07T12:01:00Z",
-		Tabs: []model.TabMeta{
+		Tabs: []modelv1.TabMeta{
 			{ID: "tab-1", Title: "Main"},
 			{ID: "tab-2", Title: "Notes"},
 		},
@@ -86,7 +86,7 @@ func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
 
 	// Save with a newer modifiedTime.
 	mf := fileDir.MetaFile("2026-04-07")
-	meta := &model.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
+	meta := &modelv1.DocMeta{FileID: "f1", ModifiedTime: "2026-04-07T12:00:00Z"}
 	if err := SaveDriveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveDriveMeta: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
 	}
 
 	mf := fileDir.MetaFile("2026-04-07")
-	meta := &model.DocMeta{FileID: "f1"}
+	meta := &modelv1.DocMeta{FileID: "f1"}
 	if err := SaveDriveMeta(mf, meta); err != nil {
 		t.Fatalf("SaveDriveMeta: %v", err)
 	}
