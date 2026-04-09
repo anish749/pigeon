@@ -13,46 +13,28 @@ import (
 func RunSetupGWS(args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("Google Workspace Account Setup")
-	fmt.Println("==============================")
-	fmt.Println()
-	fmt.Println("Pigeon uses the `gws` CLI for all Google Workspace auth.")
-	fmt.Println("Whichever account `gws` is logged into is the one pigeon will poll.")
-	fmt.Println()
-
 	email, err := gwsauth.CurrentUser()
 	if err != nil {
 		return fmt.Errorf("probe gws auth: %w", err)
 	}
 	if email == "" {
-		fmt.Println("  No Google account is logged into the gws CLI.")
-		fmt.Println()
-		fmt.Println("  Run the following, then re-run `pigeon setup-gws`:")
-		fmt.Println("    gws auth login")
-		return fmt.Errorf("gws is not logged in")
+		return fmt.Errorf("gws is not logged in — run `gws auth login` first")
 	}
-
-	fmt.Printf("  Detected Google account: %s\n", email)
-	fmt.Println()
-
-	// Suggest a label from the email's local-part, title-cased.
-	suggestion := defaultLabel(email)
 
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// If an entry for this email already exists, surface it so the user
-	// can see they're updating rather than adding.
+	suggestion := defaultLabel(email)
 	if existing := findGWS(cfg, email); existing != nil {
-		fmt.Printf("  An entry for this email already exists (label: %q).\n", existing.Account)
-		fmt.Println("  Continuing will update its label.")
-		fmt.Println()
+		fmt.Printf("Updating existing entry for %s.\n", email)
 		suggestion = existing.Account
+	} else {
+		fmt.Printf("Account: %s\n", email)
 	}
 
-	fmt.Printf("  Account label [%s]: ", suggestion)
+	fmt.Printf("Label [%s]: ", suggestion)
 	label, _ := reader.ReadString('\n')
 	label = strings.TrimSpace(label)
 	if label == "" {
@@ -67,11 +49,7 @@ func RunSetupGWS(args []string) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Printf("Saved %s (%q) to config.\n", email, label)
-	fmt.Println()
-	fmt.Println("To start polling Gmail, Calendar, and Drive:")
-	fmt.Println("  pigeon daemon restart")
+	fmt.Printf("Saved. Run `pigeon daemon restart` to start polling.\n")
 	return nil
 }
 

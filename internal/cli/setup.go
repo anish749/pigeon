@@ -53,20 +53,7 @@ func newSetupGWSCmd() *cobra.Command {
 		Use:     "setup-gws",
 		Short:   "Register a Google Workspace account (Gmail, Calendar, Drive)",
 		GroupID: groupSetup,
-		Long: `Registers the Google Workspace account currently logged into the
-gws CLI with pigeon, so the daemon will poll Gmail, Calendar, and Drive.
-
-Pigeon does not own Google authentication — the external gws CLI does.
-Before running this command, make sure gws is logged in:
-
-  gws auth login
-  gws auth status
-
-Then run:
-
-  pigeon setup-gws
-
-You'll be prompted for a display label; the email is detected automatically.`,
+		Long:    `Registers the account from the gws CLI. Run 'gws auth login' first.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return commands.RunSetupGWS(args)
 		},
