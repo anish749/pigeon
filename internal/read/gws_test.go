@@ -249,7 +249,7 @@ func TestGrep_GWS_SinceIncludesRecentDriveContent(t *testing.T) {
 	}
 }
 
-func TestExpandDriveContent(t *testing.T) {
+func TestExpandDriveMetaMatches(t *testing.T) {
 	dir := t.TempDir()
 	today := time.Now().UTC().Format("2006-01-02")
 
@@ -262,9 +262,13 @@ func TestExpandDriveContent(t *testing.T) {
 	// Non-content file that should be ignored.
 	writeFile(t, filepath.Join(driveFile, "ignore.txt"), "ignored")
 
-	content, err := expandDriveContent([]string{metaPath})
+	meta, err := paths.NewDriveMetaFile(metaPath)
 	if err != nil {
-		t.Fatalf("expandDriveContent: %v", err)
+		t.Fatalf("NewDriveMetaFile: %v", err)
+	}
+	content, err := expandDriveMetaMatches([]paths.DriveMetaFile{meta})
+	if err != nil {
+		t.Fatalf("expandDriveMetaMatches: %v", err)
 	}
 	if len(content) != 3 {
 		t.Errorf("expected 3 content files, got %d: %v", len(content), content)

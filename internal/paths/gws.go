@@ -1,8 +1,12 @@
 package paths
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
 // GWS directory and file naming constants.
@@ -43,12 +47,23 @@ func DriveMetaFileForDate(date string) string {
 	return driveMetaFilePrefix + date + driveMetaFileExt
 }
 
-// IsDriveMetaFile reports whether the given file path points to a drive-meta
-// file (drive-meta-YYYY-MM-DD.json). Uses the base filename, so works with
-// both absolute and relative paths.
-func IsDriveMetaFile(path string) bool {
+// NewDriveMetaFile constructs a DriveMetaFile from an absolute filesystem
+// path. Validates that the filename matches drive-meta-YYYY-MM-DD.json and
+// that the date portion parses as a valid date. Used by the read layer to
+// parse drive-meta paths discovered by ripgrep into typed values.
+func NewDriveMetaFile(path string) (DriveMetaFile, error) {
 	base := filepath.Base(path)
-	return strings.HasPrefix(base, driveMetaFilePrefix) && strings.HasSuffix(base, driveMetaFileExt)
+	if !strings.HasPrefix(base, driveMetaFilePrefix) || !strings.HasSuffix(base, driveMetaFileExt) {
+		return DriveMetaFile{}, fmt.Errorf("not a drive-meta file: %s", path)
+	}
+	dateStr := strings.TrimSuffix(strings.TrimPrefix(base, driveMetaFilePrefix), driveMetaFileExt)
+	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		return DriveMetaFile{}, fmt.Errorf("invalid drive-meta date %q in %s: %w", dateStr, path, err)
+	}
+	return DriveMetaFile{
+		dir:  filepath.Dir(path),
+		name: base,
+	}, nil
 }
 
 // GWS path types extend AccountDir for Google Workspace services.
@@ -122,18 +137,28 @@ func (d DriveDir) Path() string {
 
 // File returns a DriveFileDir for the given slug.
 func (d DriveDir) File(slug string) DriveFileDir {
-	return DriveFileDir{drive: d, slug: slug}
+	return DriveFileDir{path: filepath.Join(d.Path(), slug)}
+}
+
+// DriveFileDirFromMeta returns the DriveFileDir containing the given
+// drive-meta file. Used by the read layer to navigate from a matched
+// meta file (discovered via a filename glob) back to its Drive file
+// directory, so sibling content files can be enumerated.
+func DriveFileDirFromMeta(meta DriveMetaFile) DriveFileDir {
+	return DriveFileDir{path: meta.Dir()}
 }
 
 // DriveFileDir represents a Drive file directory: <account>/gdrive/<slug>/
+// The path is stored directly (rather than as drive+slug) so the type can
+// be constructed both through the DataRoot → ... → DriveDir.File(slug) chain
+// and from a drive-meta file via DriveFileDirFromMeta.
 type DriveFileDir struct {
-	drive DriveDir
-	slug  string
+	path string
 }
 
 // Path returns the drive file directory path.
 func (f DriveFileDir) Path() string {
-	return filepath.Join(f.drive.Path(), f.slug)
+	return f.path
 }
 
 // MetaFile returns the path to the file's metadata, with the Drive
@@ -142,9 +167,31 @@ func (f DriveFileDir) Path() string {
 // parsing the file contents.
 func (f DriveFileDir) MetaFile(modifiedDate string) DriveMetaFile {
 	return DriveMetaFile{
-		dir:  f.Path(),
+		dir:  f.path,
 		name: driveMetaFilePrefix + modifiedDate + driveMetaFileExt,
 	}
+}
+
+// ContentFiles returns absolute paths of all Drive content files in this
+// directory (markdown tabs, CSV sheets, comments JSONL). Skips subdirectories
+// such as attachments/ and meta JSON files. Used by the read layer to
+// enumerate searchable content for a Drive file.
+func (f DriveFileDir) ContentFiles() ([]string, error) {
+	entries, err := os.ReadDir(f.path)
+	if err != nil {
+		return nil, fmt.Errorf("read drive dir %s: %w", f.path, err)
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(entry.Name())
+		if slices.Contains(DriveContentExts, ext) {
+			files = append(files, filepath.Join(f.path, entry.Name()))
+		}
+	}
+	return files, nil
 }
 
 // DriveMetaFile is a path to a Google Drive file's metadata JSON, named
