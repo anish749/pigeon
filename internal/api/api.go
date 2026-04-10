@@ -181,6 +181,7 @@ type SendRequest struct {
 	Broadcast bool   `json:"broadcast,omitempty"`
 	AsUser    bool   `json:"as_user,omitempty"`
 	DryRun    bool   `json:"dry_run,omitempty"`
+	Force     bool   `json:"force,omitempty"`
 	// SessionID, when set, routes the send through the outbox for human
 	// review instead of sending immediately. Set automatically by the CLI
 	// when PIGEON_SESSION_ID is in the environment.
@@ -337,6 +338,16 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 			ChannelID:   channelID,
 			ChannelName: channelName,
 			SendAs:      senderName,
+		}
+	}
+
+	// Validate thread exists locally before sending.
+	if req.Thread != "" && !req.Force {
+		if !s.store.ThreadExists(sender.Acct, channelName, req.Thread) {
+			return SendResponse{Error: fmt.Sprintf(
+				"thread %s not found in %s — check the timestamp with "+
+					"'pigeon search' or 'pigeon read'. Use --force to send anyway.",
+				req.Thread, channelName)}
 		}
 	}
 

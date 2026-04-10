@@ -30,6 +30,7 @@ type SendParams struct {
 	Broadcast bool
 	AsUser    bool
 	DryRun    bool
+	Force     bool
 }
 
 func RunSend(p SendParams) error {
@@ -43,6 +44,7 @@ func RunSend(p SendParams) error {
 		Broadcast: p.Broadcast,
 		AsUser:    p.AsUser,
 		DryRun:    p.DryRun,
+		Force:     p.Force,
 		SessionID: os.Getenv("PIGEON_SESSION_ID"),
 	}
 	body, err := json.Marshal(req)
