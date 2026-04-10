@@ -223,6 +223,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Undo shell escaping: zsh (and bash with histexpand) escape "!" to "\!"
+	// in interactive sessions, so messages composed via CLI often contain
+	// literal backslash-bang that wasn't intended.
+	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
+
 	// When a session ID is present, queue for review instead of sending.
 	if req.SessionID != "" {
 		payload, err := json.Marshal(req)
