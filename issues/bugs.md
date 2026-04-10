@@ -95,6 +95,16 @@ Combined with the comments re-fetch bug above, this means `comments.jsonl` files
 
 **Files affected:** `internal/gws/gwsstore/jsonl.go`, `internal/gws/poller/`.
 
+## GWS Gmail: email deletes should use a pending-deletes file
+
+The poller currently appends `email-delete` tombstone lines to today's date file when `history.list` reports a deletion. This is broken: the tombstone and the original email are in different date files, and `Dedup` (which would reconcile them) is never called from the read path. Deleted emails remain visible.
+
+The poller should not try to locate and rewrite the original date file at poll time — it doesn't know the email's date, and scanning all date files during a sync event is too expensive.
+
+Instead: the poller should write deleted message IDs to a separate pending-deletes file (e.g. `.pending-email-deletes` in the gmail dir). Maintenance is then responsible for reading the pending-deletes file, finding the corresponding email lines across date files, removing them, and clearing the pending-deletes file.
+
+**Files affected:** `internal/gws/poller/gmail.go`, `internal/gws/gwsstore/`, `internal/gws/model/email.go`.
+
 ## Validate date where calendar events are attributed
 
 Right now we used a start date. This can be particularly problematic for multi day events.
