@@ -100,51 +100,27 @@ func ReadLines(df paths.LogFile) ([]model.Line, error) {
 }
 
 // Dedup removes duplicate lines by ID (keep last occurrence).
-// Also applies delete semantics: email-delete removes the matching email.
 // Lines without IDs (if any) are kept as-is.
 func Dedup(lines []model.Line) []model.Line {
-	// First pass: find the last occurrence index of each ID, and collect
-	// deleted email IDs.
+	// First pass: find the last occurrence index of each ID.
 	lastIndex := make(map[string]int)
-	deletedIDs := make(map[string]bool)
-
 	for i, l := range lines {
-		id := l.LineID()
-		if id != "" {
+		if id := l.LineID(); id != "" {
 			lastIndex[id] = i
-		}
-		if l.Type == "email-delete" {
-			deletedIDs[l.EmailDelete.ID] = true
 		}
 	}
 
-	// Second pass: keep only last-occurrence lines, excluding deleted emails
-	// and the delete markers themselves.
+	// Second pass: keep only the last-occurrence lines.
 	var result []model.Line
 	for i, l := range lines {
 		id := l.LineID()
-
-		// Lines without IDs are always kept.
 		if id == "" {
 			result = append(result, l)
 			continue
 		}
-
-		// Skip if not the last occurrence of this ID.
 		if lastIndex[id] != i {
 			continue
 		}
-
-		// Skip email-delete lines (they are consumed by the delete logic).
-		if l.Type == "email-delete" {
-			continue
-		}
-
-		// Skip emails that have been deleted.
-		if l.Type == "email" && deletedIDs[id] {
-			continue
-		}
-
 		result = append(result, l)
 	}
 	return result

@@ -11,11 +11,10 @@ import (
 
 // Line is a parsed JSONL line. Exactly one of the typed fields is non-nil.
 type Line struct {
-	Type        string
-	Email       *EmailLine
-	EmailDelete *EmailDeleteLine
-	Comment     *DriveComment
-	Event       *CalendarEvent
+	Type    string
+	Email   *EmailLine
+	Comment *DriveComment
+	Event   *CalendarEvent
 }
 
 // LineID returns the ID of the line's inner type, used for deduplication.
@@ -23,8 +22,6 @@ func (l Line) LineID() string {
 	switch {
 	case l.Email != nil:
 		return l.Email.ID
-	case l.EmailDelete != nil:
-		return l.EmailDelete.ID
 	case l.Comment != nil:
 		return l.Comment.Runtime.Id
 	case l.Event != nil:
@@ -51,11 +48,6 @@ func Marshal(l Line) ([]byte, error) {
 			typed
 			*EmailLine
 		}{t, l.Email})
-	case l.EmailDelete != nil:
-		return json.Marshal(struct {
-			typed
-			*EmailDeleteLine
-		}{t, l.EmailDelete})
 	case l.Comment != nil:
 		return marshalRaw(l.Comment.Serialized, "comment")
 	case l.Event != nil:
@@ -115,12 +107,6 @@ func Parse(line string) (Line, error) {
 			return Line{}, fmt.Errorf("parse email line: %w", err)
 		}
 		l.Email = &v
-	case "email-delete":
-		var v EmailDeleteLine
-		if err := json.Unmarshal(data, &v); err != nil {
-			return Line{}, fmt.Errorf("parse email-delete line: %w", err)
-		}
-		l.EmailDelete = &v
 	case "comment":
 		var runtime drive.Comment
 		serialized, err := unmarshalRaw(data, &runtime)

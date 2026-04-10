@@ -25,9 +25,3 @@ type EmailAttachment struct {
 	Type string `json:"type"` // MIME type
 	Name string `json:"name"` // filename
 }
-
-// EmailDeleteLine records the deletion of a Gmail message.
-type EmailDeleteLine struct {
-	ID   string    `json:"id"`   // target message ID
-	Ts   time.Time `json:"ts"`   // when observed
-}

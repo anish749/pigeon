@@ -193,7 +193,7 @@ simultaneously).
    `gmail users messages get` with `format=raw`.
 5. Decode the base64url RFC 2822 body, extract headers, body parts, and
    attachment metadata. Store as one JSONL line.
-6. For each deleted message, append a delete line.
+6. For each deleted message, remove its line from the date file.
 
 ### Line Types
 
@@ -226,14 +226,6 @@ The raw MIME bytes are not currently persisted.
 | `text` | string | Plain text body (from `text/plain` part, or enmime's HTML→text conversion) |
 | `html` | string | Raw HTML body (only present for multipart emails with a `text/html` part; omitted otherwise) |
 | `attach` | []object | Attachments: `{id, type, name}` |
-
-#### Email Delete Line
-
-```json
-{"type":"email-delete","id":"19d644c4ddc7c70c","ts":"2026-04-06T12:00:00Z"}
-```
-
-Appended when `history.list` reports a message was deleted (trashed/removed).
 
 ### Date File
 
@@ -271,9 +263,9 @@ Thread grouping is a display-time operation, not a storage concern.
 
 ### Deduplication
 
-Messages are deduplicated by `id` (keep last occurrence). Delete lines
-cause the target message to be excluded on read. Maintenance applies
-deletes and removes both lines.
+Messages are deduplicated by `id` (keep last occurrence). When a
+message is deleted upstream, its line is removed from the date file
+directly — no tombstone marker is stored.
 
 ---
 
@@ -693,8 +685,7 @@ included in search globs alongside `.jsonl` date files.
 
 1. Parse all email lines from the requested date range.
 2. Deduplicate by `id` (keep last occurrence).
-3. Apply deletes (exclude emails with a matching `email-delete` line).
-4. Sort by timestamp.
+3. Sort by timestamp.
 5. Optionally group by `threadId` for threaded display.
 
 ### Google Docs
@@ -724,8 +715,9 @@ included in search globs alongside `.jsonl` date files.
 
 ### Gmail
 
-Same as messaging: deduplicate by `id`, apply deletes, sort by
-timestamp, rewrite.
+Deduplicate by `id` (keep last), sort by timestamp, rewrite.
+Deleted emails are already removed at poll time — maintenance
+only needs to collapse duplicate entries.
 
 ### Google Docs / Sheets
 

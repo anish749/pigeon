@@ -69,37 +69,6 @@ func TestMarshalParseEmail(t *testing.T) {
 	}
 }
 
-func TestMarshalParseEmailDelete(t *testing.T) {
-	ts := time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC)
-	orig := Line{
-		Type: "email-delete",
-		EmailDelete: &EmailDeleteLine{
-			ID:   "msg-1",
-			Ts:   ts,
-		},
-	}
-
-	data, err := Marshal(orig)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	got, err := Parse(string(data))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	if got.Type != "email-delete" {
-		t.Errorf("Type = %q, want %q", got.Type, "email-delete")
-	}
-	if got.EmailDelete == nil {
-		t.Fatal("EmailDelete is nil")
-	}
-	if got.EmailDelete.ID != "msg-1" {
-		t.Errorf("ID = %q, want %q", got.EmailDelete.ID, "msg-1")
-	}
-}
-
 func TestMarshalParseComment(t *testing.T) {
 	// Build a DriveComment by unmarshalling a raw API-shaped JSON both ways —
 	// mirrors how drive.ListComments populates Runtime + Serialized. Replies
@@ -309,7 +278,6 @@ func TestLineID(t *testing.T) {
 		want string
 	}{
 		{"email", Line{Email: &EmailLine{ID: "e1"}}, "e1"},
-		{"email-delete", Line{EmailDelete: &EmailDeleteLine{ID: "e1"}}, "e1"},
 		{"comment", Line{Comment: &DriveComment{Runtime: drive.Comment{Id: "c1"}}}, "c1"},
 		{"event", Line{Event: &CalendarEvent{Runtime: gcal.Event{Id: "v1"}}}, "v1"},
 		{"empty", Line{}, ""},

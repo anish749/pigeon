@@ -24,16 +24,6 @@ func emailLine(id string) model.Line {
 	}
 }
 
-func emailDeleteLine(id string) model.Line {
-	return model.Line{
-		Type: "email-delete",
-		EmailDelete: &model.EmailDeleteLine{
-			ID:   id,
-			Ts:   time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC),
-		},
-	}
-}
-
 func TestAppendAndReadLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
@@ -144,31 +134,6 @@ func TestDedupKeepsLast(t *testing.T) {
 	}
 	if deduped[0].Email.Subject != "version-2" {
 		t.Errorf("kept subject %q, want %q", deduped[0].Email.Subject, "version-2")
-	}
-}
-
-func TestDedupDeleteSemantics(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "del.jsonl")
-
-	if err := AppendLine(paths.DateFile(path), emailLine("target")); err != nil {
-		t.Fatal(err)
-	}
-	if err := AppendLine(paths.DateFile(path), emailDeleteLine("target")); err != nil {
-		t.Fatal(err)
-	}
-
-	lines, err := ReadLines(paths.DateFile(path))
-	if err != nil {
-		t.Fatalf("ReadLines: %v", err)
-	}
-	if len(lines) != 2 {
-		t.Fatalf("got %d raw lines, want 2", len(lines))
-	}
-
-	deduped := Dedup(lines)
-	if len(deduped) != 0 {
-		t.Fatalf("got %d deduped lines, want 0 (both should be removed)", len(deduped))
 	}
 }
 
