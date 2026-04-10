@@ -346,7 +346,8 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		if !s.store.ThreadExists(sender.Acct, channelName, req.Thread) {
 			return SendResponse{Error: fmt.Sprintf(
 				"thread %s not found in %s — check the timestamp with "+
-					"'pigeon search' or 'pigeon read'. Use --force to send anyway.",
+					"'pigeon search' or 'pigeon read'. "+
+					"Use --force to send anyway (Slack will post as a top-level message if the thread doesn't exist).",
 				req.Thread, channelName)}
 		}
 	}
