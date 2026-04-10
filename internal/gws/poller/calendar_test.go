@@ -25,8 +25,9 @@ func TestCalendarBackfillLive(t *testing.T) {
 		t.Skip("set GWS_LIVE_TEST=1 to run live calendar test")
 	}
 
-	account := paths.NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("test")
-	cursorsPath := account.SyncCursorsPath()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create test events ---
 	oneoffID := createEvent(t, `{
@@ -50,15 +51,15 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed ---
 	t.Log("=== Phase 1: Seed ===")
-	cursors, err := store.LoadCursors(cursorsPath)
+	cursors, err := s.LoadCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
-	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := s.SaveCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -84,7 +85,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// Verify events landed on disk.
 	calDir := account.Calendar("primary").Path()
-	allEvents := readAllEvents(t, calDir)
+	allEvents := readAllEvents(t, s, calDir)
 
 	if !hasEventWithSummary(allEvents, "pigeon-test-oneoff") {
 		t.Error("one-off event not found on disk")
@@ -104,22 +105,22 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
-	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := s.SaveCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
 	// Verify the modified instance is on disk.
-	allEvents = readAllEvents(t, calDir)
+	allEvents = readAllEvents(t, s, calDir)
 	if !hasEventWithSummary(allEvents, "pigeon-test-modified") {
 		t.Error("modified instance not found on disk after incremental sync")
 	}
 
 	// --- Phase 3: Second incremental poll (should be quiet) ---
 	t.Log("=== Phase 3: Quiet poll ===")
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 
@@ -183,14 +184,14 @@ func patchInstance(t *testing.T, instanceID, body string) {
 	t.Logf("patched instance %s → %q", instanceID, resp.Summary)
 }
 
-func readAllEvents(t *testing.T, calDir string) []*modelv1.CalendarEvent {
+func readAllEvents(t *testing.T, s *store.FSStore, calDir string) []*modelv1.CalendarEvent {
 	t.Helper()
 	var events []*modelv1.CalendarEvent
 	filepath.Walk(calDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
 		}
-		lines, readErr := store.ReadLines(paths.DateFile(path))
+		lines, readErr := s.ReadLines(paths.DateFile(path))
 		if readErr != nil {
 			t.Logf("warning: read %s: %v", path, readErr)
 		}

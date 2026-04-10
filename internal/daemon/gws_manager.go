@@ -9,12 +9,14 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 const gwsPollInterval = 20 * time.Second
 
 // GWSManager owns the lifecycle of GWS pollers.
 type GWSManager struct {
+	store   *store.FSStore
 	running map[string]*runningGWSAccount // email → account
 }
 
@@ -22,9 +24,12 @@ type runningGWSAccount struct {
 	cancel context.CancelFunc
 }
 
-// NewGWSManager creates a new GWSManager.
-func NewGWSManager() *GWSManager {
+// NewGWSManager creates a new GWSManager. The store is shared with the rest
+// of the daemon so that GWS persistence uses the same per-file locks and
+// filesystem layout as messaging.
+func NewGWSManager(s *store.FSStore) *GWSManager {
 	return &GWSManager{
+		store:   s,
 		running: make(map[string]*runningGWSAccount),
 	}
 }
@@ -72,7 +77,7 @@ func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
-	p := poller.New(gwsPollInterval, acctDir)
+	p := poller.New(gwsPollInterval, acctDir, m.store)
 	go func() {
 		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
 		if err := p.Run(child); err != nil && child.Err() == nil {

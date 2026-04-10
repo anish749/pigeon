@@ -23,8 +23,9 @@ func TestDriveBackfillLive(t *testing.T) {
 		t.Skip("set GWS_LIVE_TEST=1 to run live drive backfill test")
 	}
 
-	account := paths.NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("test")
-	cursorsPath := account.SyncCursorsPath()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create a test doc BEFORE seeding ---
 	t.Log("=== Creating test doc before seed ===")
@@ -37,17 +38,17 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed with backfill ---
 	t.Log("=== Phase 1: Seed with backfill ===")
-	cursors, err := store.LoadCursors(cursorsPath)
+	cursors, err := s.LoadCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(s, account, cursors); err != nil {
 		// Partial errors (e.g. formula parsing on specific sheets) are expected —
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
 	}
-	if err := store.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := s.SaveCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -78,7 +79,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 2: Quiet incremental poll ---
 	t.Log("=== Phase 2: Quiet poll ===")
-	if _, err := poller.PollDrive(account, cursors); err != nil {
+	if _, err := poller.PollDrive(s, account, cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

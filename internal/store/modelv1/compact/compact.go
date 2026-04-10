@@ -285,3 +285,43 @@ func cloneAttachments(a []modelv1.Attachment) []modelv1.Attachment {
 	copy(out, a)
 	return out
 }
+
+// Dedup removes duplicate Lines by ID (keep last occurrence) and applies
+// delete semantics: an email-delete line removes the matching email.
+// Lines without IDs (e.g. messaging lines, separators) are kept as-is.
+func Dedup(lines []modelv1.Line) []modelv1.Line {
+	lastIndex := make(map[string]int)
+	deletedIDs := make(map[string]bool)
+
+	for i, l := range lines {
+		id := l.ID()
+		if id != "" {
+			lastIndex[id] = i
+		}
+		if l.Type == modelv1.LineEmailDelete {
+			deletedIDs[l.EmailDelete.ID] = true
+		}
+	}
+
+	var result []modelv1.Line
+	for i, l := range lines {
+		id := l.ID()
+
+		if id == "" {
+			result = append(result, l)
+			continue
+		}
+		if lastIndex[id] != i {
+			continue
+		}
+		if l.Type == modelv1.LineEmailDelete {
+			continue
+		}
+		if l.Type == modelv1.LineEmail && deletedIDs[id] {
+			continue
+		}
+
+		result = append(result, l)
+	}
+	return result
+}

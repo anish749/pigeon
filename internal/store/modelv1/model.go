@@ -3,7 +3,11 @@ package modelv1
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
+
+	calendar "google.golang.org/api/calendar/v3"
+	drive "google.golang.org/api/drive/v3"
 )
 
 // Via represents the message pathway through pigeon.
@@ -16,16 +20,22 @@ const (
 	ViaPigeonAsBot  Via = "pigeon-as-bot"  // pigeon sent using the bot's identity
 )
 
-// LineType classifies a parsed line.
+// LineType classifies a parsed line. Messaging types (msg, react, etc.) and
+// Google Workspace types (email, comment, etc.) share the same discriminator
+// space because they all live in the same JSONL format on disk.
 type LineType string
 
 const (
-	LineMessage    LineType = "msg"
-	LineReaction   LineType = "react"
-	LineUnreaction LineType = "unreact"
-	LineEdit       LineType = "edit"
-	LineDelete     LineType = "delete"
-	LineSeparator  LineType = "separator"
+	LineMessage     LineType = "msg"
+	LineReaction    LineType = "react"
+	LineUnreaction  LineType = "unreact"
+	LineEdit        LineType = "edit"
+	LineDelete      LineType = "delete"
+	LineSeparator   LineType = "separator"
+	LineEmail       LineType = "email"
+	LineEmailDelete LineType = "email-delete"
+	LineComment     LineType = "comment"
+	LineEvent       LineType = "event"
 )
 
 // MsgLine represents a message event.
@@ -37,7 +47,7 @@ type MsgLine struct {
 	Ts          time.Time    `json:"ts"`                // message timestamp
 	Sender      string       `json:"sender"`            // display name (best-effort at write time)
 	SenderID    string       `json:"from"`              // platform user ID (stable identity)
-	Via         Via          `json:"via,omitempty"`      // message pathway
+	Via         Via          `json:"via,omitempty"`     // message pathway
 	ReplyTo     string       `json:"replyTo,omitempty"` // quoted message ID (WhatsApp quote-reply), empty if not a reply
 	Text        string       `json:"text,omitempty"`    // message body (may contain newlines)
 	Reply       bool         `json:"reply,omitempty"`   // thread reply
@@ -52,13 +62,13 @@ type Attachment struct {
 
 // ReactLine represents a reaction or unreaction event.
 type ReactLine struct {
-	Ts       time.Time `json:"ts"`               // when the reaction happened
-	MsgID    string    `json:"msg"`              // target message ID
-	Sender   string    `json:"sender"`           // who reacted (display name)
-	SenderID string    `json:"from"`             // who reacted (platform ID)
-	Via      Via       `json:"via,omitempty"`     // message pathway
-	Emoji    string    `json:"emoji"`            // emoji name or Unicode character
-	Remove   bool      `json:"-"`                // true = unreact (derived from LineType, not serialized)
+	Ts       time.Time `json:"ts"`            // when the reaction happened
+	MsgID    string    `json:"msg"`           // target message ID
+	Sender   string    `json:"sender"`        // who reacted (display name)
+	SenderID string    `json:"from"`          // who reacted (platform ID)
+	Via      Via       `json:"via,omitempty"` // message pathway
+	Emoji    string    `json:"emoji"`         // emoji name or Unicode character
+	Remove   bool      `json:"-"`             // true = unreact (derived from LineType, not serialized)
 }
 
 // EditLine represents a message edit event.
@@ -67,7 +77,7 @@ type EditLine struct {
 	MsgID       string       `json:"msg"`              // target message ID
 	Sender      string       `json:"sender"`           // who edited (display name)
 	SenderID    string       `json:"from"`             // who edited (platform ID)
-	Via         Via          `json:"via,omitempty"`     // message pathway
+	Via         Via          `json:"via,omitempty"`    // message pathway
 	Text        string       `json:"text,omitempty"`   // new message text
 	Attachments []Attachment `json:"attach,omitempty"` // complete attachment set after edit
 }
@@ -81,17 +91,26 @@ type DeleteLine struct {
 	Via      Via       `json:"via,omitempty"` // message pathway
 }
 
-// Line is a parsed protocol line. Exactly one of Msg, React, Edit, or
-// Delete is non-nil. For LineSeparator, all are nil.
+// Line is a parsed protocol line. Exactly one of the payload pointers is
+// non-nil (none for LineSeparator). Messaging payloads (Msg, React, Edit,
+// Delete) and Google Workspace payloads (Email, EmailDelete, Comment, Event)
+// share one envelope because they use the same JSONL format on disk.
 type Line struct {
-	Type   LineType
-	Msg    *MsgLine
-	React  *ReactLine
-	Edit   *EditLine
-	Delete *DeleteLine
+	Type        LineType
+	Msg         *MsgLine
+	React       *ReactLine
+	Edit        *EditLine
+	Delete      *DeleteLine
+	Email       *EmailLine
+	EmailDelete *EmailDeleteLine
+	Comment     *DriveComment
+	Event       *CalendarEvent
 }
 
-// Ts returns the timestamp of the line's inner type.
+// Ts returns the timestamp of the line's inner type. Returns the zero time
+// for LineComment and LineEvent, whose timestamps live in nested API
+// structures rather than a single field — callers that need a storage date
+// for those types should derive it explicitly (e.g. CalendarEvent.DateForStorage).
 func (l Line) Ts() time.Time {
 	switch l.Type {
 	case LineMessage:
@@ -110,8 +129,40 @@ func (l Line) Ts() time.Time {
 		if l.Delete != nil {
 			return l.Delete.Ts
 		}
+	case LineEmail:
+		if l.Email != nil {
+			return l.Email.Ts
+		}
+	case LineEmailDelete:
+		if l.EmailDelete != nil {
+			return l.EmailDelete.Ts
+		}
 	}
 	return time.Time{}
+}
+
+// ID returns the identifier of the line's inner type, used for deduplication.
+// Separator lines and messaging events without a stable ID return "".
+func (l Line) ID() string {
+	switch l.Type {
+	case LineEmail:
+		if l.Email != nil {
+			return l.Email.ID
+		}
+	case LineEmailDelete:
+		if l.EmailDelete != nil {
+			return l.EmailDelete.ID
+		}
+	case LineComment:
+		if l.Comment != nil {
+			return l.Comment.Runtime.Id
+		}
+	case LineEvent:
+		if l.Event != nil {
+			return l.Event.Runtime.Id
+		}
+	}
+	return ""
 }
 
 // SeparatorLine is the JSON representation of a separator event.
@@ -148,6 +199,20 @@ func Marshal(l Line) ([]byte, error) {
 		}{typed{l.Type}, l.Delete}
 	case LineSeparator:
 		return []byte(SeparatorLine), nil
+	case LineEmail:
+		v = struct {
+			typed
+			*EmailLine
+		}{typed{l.Type}, l.Email}
+	case LineEmailDelete:
+		v = struct {
+			typed
+			*EmailDeleteLine
+		}{typed{l.Type}, l.EmailDelete}
+	case LineComment:
+		return marshalRaw(l.Comment.Serialized, string(LineComment))
+	case LineEvent:
+		return marshalRaw(l.Event.Serialized, string(LineEvent))
 	default:
 		return nil, fmt.Errorf("marshal line: unknown type %q", l.Type)
 	}
@@ -156,8 +221,10 @@ func Marshal(l Line) ([]byte, error) {
 
 // Parse parses a single JSONL line into a Line.
 func Parse(line string) (Line, error) {
+	data := []byte(line)
+
 	var t typed
-	if err := json.Unmarshal([]byte(line), &t); err != nil {
+	if err := json.Unmarshal(data, &t); err != nil {
 		return Line{}, fmt.Errorf("parse line: %w", err)
 	}
 
@@ -165,37 +232,89 @@ func Parse(line string) (Line, error) {
 	switch t.Type {
 	case LineMessage:
 		l.Msg = &MsgLine{}
-		if err := json.Unmarshal([]byte(line), l.Msg); err != nil {
+		if err := json.Unmarshal(data, l.Msg); err != nil {
 			return Line{}, fmt.Errorf("parse line: %w", err)
 		}
 	case LineReaction:
 		l.React = &ReactLine{}
-		if err := json.Unmarshal([]byte(line), l.React); err != nil {
+		if err := json.Unmarshal(data, l.React); err != nil {
 			return Line{}, fmt.Errorf("parse line: %w", err)
 		}
 	case LineUnreaction:
 		l.React = &ReactLine{Remove: true}
-		if err := json.Unmarshal([]byte(line), l.React); err != nil {
+		if err := json.Unmarshal(data, l.React); err != nil {
 			return Line{}, fmt.Errorf("parse line: %w", err)
 		}
 	case LineEdit:
 		l.Edit = &EditLine{}
-		if err := json.Unmarshal([]byte(line), l.Edit); err != nil {
+		if err := json.Unmarshal(data, l.Edit); err != nil {
 			return Line{}, fmt.Errorf("parse line: %w", err)
 		}
 	case LineDelete:
 		l.Delete = &DeleteLine{}
-		if err := json.Unmarshal([]byte(line), l.Delete); err != nil {
+		if err := json.Unmarshal(data, l.Delete); err != nil {
 			return Line{}, fmt.Errorf("parse line: %w", err)
 		}
 	case LineSeparator:
 		// no fields to parse
+	case LineEmail:
+		l.Email = &EmailLine{}
+		if err := json.Unmarshal(data, l.Email); err != nil {
+			return Line{}, fmt.Errorf("parse email line: %w", err)
+		}
+	case LineEmailDelete:
+		l.EmailDelete = &EmailDeleteLine{}
+		if err := json.Unmarshal(data, l.EmailDelete); err != nil {
+			return Line{}, fmt.Errorf("parse email-delete line: %w", err)
+		}
+	case LineComment:
+		var runtime drive.Comment
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse comment line: %w", err)
+		}
+		l.Comment = &DriveComment{Runtime: runtime, Serialized: serialized}
+	case LineEvent:
+		var runtime calendar.Event
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse event line: %w", err)
+		}
+		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
 	case "":
 		return Line{}, fmt.Errorf("parse line: missing type field")
 	default:
 		return Line{}, fmt.Errorf("parse line: unknown type %q", t.Type)
 	}
 	return l, nil
+}
+
+// marshalRaw copies a serialized map and injects the storage type discriminator
+// without mutating the caller's map. Used by LineComment and LineEvent, which
+// persist the raw API map verbatim so that fields the typed SDK structs don't
+// know about still round-trip through disk.
+func marshalRaw(serialized map[string]any, typeTag string) ([]byte, error) {
+	out := make(map[string]any, len(serialized)+1)
+	maps.Copy(out, serialized)
+	out["type"] = typeTag
+	return json.Marshal(out)
+}
+
+// unmarshalRaw unmarshals the same bytes into both a typed destination and a
+// raw map, then strips the storage type discriminator from the map. It is
+// the symmetric counterpart to marshalRaw: marshal builds a map-with-type
+// from a Serialized field; unmarshal rebuilds Serialized without the type.
+func unmarshalRaw(data []byte, runtime any) (map[string]any, error) {
+	if err := json.Unmarshal(data, runtime); err != nil {
+		return nil, err
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(data, &serialized); err != nil {
+		return nil, err
+	}
+	// "type" is our storage discriminator, not part of the API response.
+	delete(serialized, "type")
+	return serialized, nil
 }
 
 // DateFile holds all parsed events from a single date file.
