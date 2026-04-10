@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,6 +29,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
   pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY --as-user -m "sent as me"
   pigeon send -p slack -a acme-corp --channel '#engineering' -m "deploying now"
   pigeon send -p slack -a acme-corp --channel '#engineering' --thread 1711568938.123456 -m "fixed!"
+  pigeon send -p slack -a acme-corp --channel '#engineering' --post-at 2026-04-11T09:00:00 -m "scheduled"
   pigeon send -p slack -a acme-corp --channel '@mpdm-alice--bob-1' -m "hey all"
 
   # WhatsApp
@@ -65,6 +68,10 @@ Run 'pigeon list' to find user IDs and channel names.`,
 			if err != nil {
 				return err
 			}
+			postAt, err := cmd.Flags().GetString("post-at")
+			if err != nil {
+				return err
+			}
 			asUser, err := cmd.Flags().GetBool("as-user")
 			if err != nil {
 				return err
@@ -87,6 +94,18 @@ Run 'pigeon list' to find user IDs and channel names.`,
 				if userID != "" || channel != "" {
 					return fmt.Errorf("use --contact for WhatsApp, not --user-id or --channel")
 				}
+				if postAt != "" {
+					return fmt.Errorf("--post-at is only supported for Slack")
+				}
+			}
+
+			// Convert human-readable --post-at to Unix timestamp for the API.
+			if postAt != "" {
+				ts, err := parsePostAt(postAt)
+				if err != nil {
+					return err
+				}
+				postAt = strconv.FormatInt(ts, 10)
 			}
 
 			return commands.RunSend(commands.SendParams{
@@ -98,6 +117,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 				Message:   message,
 				Thread:    thread,
 				Broadcast: broadcast,
+				PostAt:    postAt,
 				AsUser:    asUser,
 				DryRun:    dryRun,
 				Force:     force,
@@ -122,9 +142,35 @@ Run 'pigeon list' to find user IDs and channel names.`,
 	// Slack-specific flags.
 	cmd.Flags().String("thread", "", "thread timestamp to reply to")
 	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
+	cmd.Flags().String("post-at", "", "when to send: ISO 8601 (2026-04-11T09:00:00, local timezone) or Unix timestamp (Slack only, up to 120 days)")
 	cmd.Flags().Bool("as-user", false, "send as yourself instead of the bot (Slack only)")
 	cmd.Flags().Bool("dry-run", false, "validate without sending")
 	cmd.Flags().Bool("force", false, "send even if the thread is not found locally")
 
 	return cmd
+}
+
+// parsePostAt accepts either a Unix timestamp (all digits) or an ISO 8601
+// datetime string, and returns the corresponding Unix timestamp.
+func parsePostAt(s string) (int64, error) {
+	// Pure digits → already a Unix timestamp.
+	if ts, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return ts, nil
+	}
+
+	// Try common ISO 8601 layouts, most specific first.
+	layouts := []string{
+		time.RFC3339,          // 2006-01-02T15:04:05Z07:00
+		"2006-01-02T15:04:05", // no timezone → local
+		"2006-01-02T15:04",    // no seconds
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	}
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, s, time.Now().Location()); err == nil {
+			return t.Unix(), nil
+		}
+	}
+
+	return 0, fmt.Errorf("cannot parse --post-at %q: use ISO 8601 (e.g. 2026-04-11T09:00:00, local timezone unless offset given) or a Unix timestamp", s)
 }

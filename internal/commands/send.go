@@ -28,6 +28,7 @@ type SendParams struct {
 	Message   string
 	Thread    string
 	Broadcast bool
+	PostAt    string // Unix timestamp — schedule for later (Slack only)
 	AsUser    bool
 	DryRun    bool
 	Force     bool
@@ -42,6 +43,7 @@ func RunSend(p SendParams) error {
 		Message:   p.Message,
 		Thread:    p.Thread,
 		Broadcast: p.Broadcast,
+		PostAt:    p.PostAt,
 		AsUser:    p.AsUser,
 		DryRun:    p.DryRun,
 		Force:     p.Force,
@@ -79,6 +81,8 @@ func RunSend(p SendParams) error {
 
 	if p.DryRun {
 		fmt.Printf("Dry run — would send to %s (%s) as %s\n", result.ChannelName, result.ChannelID, result.SendAs)
+	} else if result.ScheduledMessageID != "" {
+		fmt.Printf("Scheduled to %s (ID: %s)\n", req.Target(), result.ScheduledMessageID)
 	} else {
 		fmt.Printf("Sent to %s at %s\n", req.Target(), result.Timestamp)
 	}
