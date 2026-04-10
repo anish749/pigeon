@@ -73,6 +73,10 @@ Run 'pigeon list' to find user IDs and channel names.`,
 			if err != nil {
 				return err
 			}
+			force, err := cmd.Flags().GetBool("force")
+			if err != nil {
+				return err
+			}
 
 			switch platform {
 			case "slack":
@@ -96,6 +100,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 				Broadcast: broadcast,
 				AsUser:    asUser,
 				DryRun:    dryRun,
+				Force:     force,
 			})
 		},
 	}
@@ -119,6 +124,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
 	cmd.Flags().Bool("as-user", false, "send as yourself instead of the bot (Slack only)")
 	cmd.Flags().Bool("dry-run", false, "validate without sending")
+	cmd.Flags().Bool("force", false, "send even if the thread is not found locally")
 
 	return cmd
 }
