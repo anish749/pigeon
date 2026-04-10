@@ -41,7 +41,10 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.Cursor
 	var errs []error
 	for _, ch := range changes {
 		if ch.Removed {
-			slog.Warn("drive file removed", "fileId", ch.FileID)
+			if err := gwsstore.RemoveDriveFile(account.Drive(), ch.FileID); err != nil {
+				errs = append(errs, fmt.Errorf("remove drive file %s: %w", ch.FileID, err))
+			}
+			slog.Info("drive file removed", "fileId", ch.FileID)
 			continue
 		}
 

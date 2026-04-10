@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -565,8 +564,10 @@ func (s *FSStore) maintainFile(path string) error {
 		return err
 	}
 
-	// Determine if this is a thread file (parent directory is "threads").
-	if filepath.Base(filepath.Dir(path)) == paths.ThreadsSubdir {
+	// Thread files live under <conversation>/threads/<ts>.jsonl. A date
+	// file for a conversation literally named "threads" has the same
+	// parent dir name but must be compacted as a date file.
+	if paths.IsThreadFile(path) {
 		tf, parseErr := modelv1.ParseThreadFile(data)
 		if parseErr != nil {
 			slog.Warn("parse thread file: some lines skipped", "file", path, "error", parseErr)
@@ -600,8 +601,6 @@ func (s *FSStore) maintainFile(path string) error {
 	return os.WriteFile(path, newData, 0644)
 }
 
-var dateFilePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl$`)
-
 func listDateFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -612,7 +611,7 @@ func listDateFiles(dir string) ([]string, error) {
 	}
 	var files []string
 	for _, e := range entries {
-		if !e.IsDir() && dateFilePattern.MatchString(e.Name()) {
+		if !e.IsDir() && paths.IsDateFile(e.Name()) {
 			files = append(files, filepath.Join(dir, e.Name()))
 		}
 	}
@@ -636,7 +635,6 @@ func listSubdirs(dir string) ([]string, error) {
 	}
 	return dirs, nil
 }
-
 
 func fileExists(df paths.LogFile) bool {
 	_, err := os.Stat(df.Path())

@@ -619,3 +619,56 @@ func TestInterleaveThreads_ThreadWithReactions(t *testing.T) {
 		t.Errorf("parent reactions = %d, want 1", len(df.Messages[0].Reactions))
 	}
 }
+
+// TestMaintain_ConversationNamedThreads verifies that a conversation
+// literally named "threads" has its date files compacted via Compact
+// (not CompactThread). The date file for such a conversation lives
+// at <acct>/threads/YYYY-MM-DD.jsonl, which shares its parent-dir
+// heuristic with real thread files.
+//
+// The distinguishing setup: a message and a later delete for that
+// message. CompactThread would treat the message as the thread parent,
+// see it deleted, and return nil — triggering os.Remove on the date
+// file and losing data. Compact reconciles the delete into removing
+// the message from the file, but the file itself remains on disk.
+func TestMaintain_ConversationNamedThreads(t *testing.T) {
+	s, acct := setup(t)
+
+	m1 := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	m2 := msgLine("M2", ts(2026, 3, 16, 9, 1, 0), "Bob", "U2", "still here")
+	del := modelv1.Line{
+		Type: modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{
+			Ts: ts(2026, 3, 16, 9, 2, 0), MsgID: "M1",
+			Sender: "Alice", SenderID: "U1",
+		},
+	}
+
+	for _, line := range []modelv1.Line{m1, m2, del} {
+		if err := s.Append(acct, "threads", line); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// With the bug, CompactThread treats M1 as the thread parent, sees
+	// the delete, returns nil, and maintainFile calls os.Remove — so
+	// the entire date file (including M2) is lost. With the fix, Compact
+	// removes only M1 and the file is rewritten with M2 intact.
+	conv := s.convDir(acct, "threads")
+	datePath := conv.DateFile("2026-03-16").Path()
+	data, err := os.ReadFile(datePath)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", datePath, err)
+	}
+	df, parseErr := modelv1.ParseDateFile(data)
+	if parseErr != nil {
+		t.Fatalf("ParseDateFile after maintain: %v", parseErr)
+	}
+	if len(df.Messages) != 1 || df.Messages[0].ID != "M2" {
+		t.Errorf("after maintenance: messages = %+v, want [M2]", df.Messages)
+	}
+}

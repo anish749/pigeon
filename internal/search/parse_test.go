@@ -371,3 +371,43 @@ func TestParseFilePath_WhatsApp(t *testing.T) {
 		t.Errorf("got (%q, %q, %q, %q)", plat, acct, conv, date)
 	}
 }
+
+// TestParseFilePath_ConversationNamedThreads verifies that a date file
+// under a conversation literally named "threads" is parsed correctly:
+// the conversation is "threads" and the thread flag is false.
+func TestParseFilePath_ConversationNamedThreads(t *testing.T) {
+	plat, acct, conv, date, thread, err := ParseFilePath(
+		"/data/slack/acme-corp/threads/2026-04-06.jsonl",
+		"/data",
+	)
+	if err != nil {
+		t.Fatalf("ParseFilePath: %v", err)
+	}
+	if plat != "slack" || acct != "acme-corp" || conv != "threads" || date != "2026-04-06" {
+		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, threads, 2026-04-06)",
+			plat, acct, conv, date)
+	}
+	if thread {
+		t.Error("thread = true, want false for date file under conversation named threads")
+	}
+}
+
+// TestParseFilePath_ThreadFile_InConvNamedThreads verifies that a real
+// thread file under a conversation literally named "threads" is still
+// correctly identified (conv/threads/threads/TS.jsonl).
+func TestParseFilePath_ThreadFile_InConvNamedThreads(t *testing.T) {
+	plat, acct, conv, date, thread, err := ParseFilePath(
+		"/data/slack/acme-corp/threads/threads/1711568940.789012.jsonl",
+		"/data",
+	)
+	if err != nil {
+		t.Fatalf("ParseFilePath: %v", err)
+	}
+	if plat != "slack" || acct != "acme-corp" || conv != "threads" || date != "1711568940.789012" {
+		t.Errorf("got (%q, %q, %q, %q), want (slack, acme-corp, threads, 1711568940.789012)",
+			plat, acct, conv, date)
+	}
+	if !thread {
+		t.Error("thread = false, want true")
+	}
+}
