@@ -179,6 +179,7 @@ type SendRequest struct {
 
 	Thread    string `json:"thread,omitempty"`
 	Broadcast bool   `json:"broadcast,omitempty"`
+	PostAt    string `json:"post_at,omitempty"` // Unix timestamp — schedule instead of send immediately
 	AsUser    bool   `json:"as_user,omitempty"`
 	DryRun    bool   `json:"dry_run,omitempty"`
 	Force     bool   `json:"force,omitempty"`
@@ -198,13 +199,14 @@ func (r SendRequest) Target() string {
 
 // SendResponse is the daemon API response for /api/send.
 type SendResponse struct {
-	OK          bool   `json:"ok"`
-	Timestamp   string `json:"timestamp,omitempty"`
-	Error       string `json:"error,omitempty"`
-	ChannelID   string `json:"channel_id,omitempty"`   // resolved channel ID (dry-run)
-	ChannelName string `json:"channel_name,omitempty"` // resolved channel name (dry-run)
-	SendAs      string `json:"send_as,omitempty"`      // sender identity
-	OutboxID    string `json:"outbox_id,omitempty"`
+	OK                 bool   `json:"ok"`
+	Timestamp          string `json:"timestamp,omitempty"`
+	ScheduledMessageID string `json:"scheduled_message_id,omitempty"` // returned when post_at is set
+	Error              string `json:"error,omitempty"`
+	ChannelID          string `json:"channel_id,omitempty"`   // resolved channel ID (dry-run)
+	ChannelName        string `json:"channel_name,omitempty"` // resolved channel name (dry-run)
+	SendAs             string `json:"send_as,omitempty"`      // sender identity
+	OutboxID           string `json:"outbox_id,omitempty"`
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -364,6 +366,15 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		if req.Broadcast {
 			opts = append(opts, goslack.MsgOptionBroadcast())
 		}
+	}
+
+	// Schedule or send immediately.
+	if req.PostAt != "" {
+		_, scheduledID, err := api.ScheduleMessageContext(ctx, channelID, req.PostAt, opts...)
+		if err != nil {
+			return SendResponse{Error: fmt.Sprintf("schedule to %s failed: %v", channelName, err)}
+		}
+		return SendResponse{OK: true, ScheduledMessageID: scheduledID, SendAs: senderName}
 	}
 
 	// Send the message.

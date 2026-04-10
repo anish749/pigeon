@@ -58,3 +58,41 @@ func TestSendSlack_MessagePassthrough(t *testing.T) {
 		t.Errorf("text mismatch:\n  sent: %q\n  got:  %q", msg, gotText)
 	}
 }
+
+func TestScheduleSlack_PostAtPassthrough(t *testing.T) {
+	// Verify that --post-at routes through chat.scheduleMessage with the
+	// correct post_at value and message text.
+	var gotPostAt, gotText, gotEndpoint string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEndpoint = r.URL.Path
+		r.ParseForm()
+		gotPostAt = r.FormValue("post_at")
+		gotText = r.FormValue("text")
+		json.NewEncoder(w).Encode(map[string]any{
+			"ok":                   true,
+			"channel":              "C123",
+			"scheduled_message_id": "Q1234567890",
+		})
+	}))
+	defer ts.Close()
+
+	api := goslack.New("xoxb-fake", goslack.OptionAPIURL(ts.URL+"/"))
+	msg := "scheduled message"
+	postAt := "1711568938"
+	_, scheduledID, err := api.ScheduleMessage("C123", postAt, goslack.MsgOptionText(msg, false))
+	if err != nil {
+		t.Fatalf("ScheduleMessage: %v", err)
+	}
+	if gotEndpoint != "/chat.scheduleMessage" {
+		t.Errorf("endpoint = %q, want /chat.scheduleMessage", gotEndpoint)
+	}
+	if gotPostAt != postAt {
+		t.Errorf("post_at = %q, want %q", gotPostAt, postAt)
+	}
+	if gotText != msg {
+		t.Errorf("text = %q, want %q", gotText, msg)
+	}
+	if scheduledID != "Q1234567890" {
+		t.Errorf("scheduled_message_id = %q, want Q1234567890", scheduledID)
+	}
+}
