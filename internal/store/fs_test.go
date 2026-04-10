@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -670,5 +671,42 @@ func TestMaintain_ConversationNamedThreads(t *testing.T) {
 	}
 	if len(df.Messages) != 1 || df.Messages[0].ID != "M2" {
 		t.Errorf("after maintenance: messages = %+v, want [M2]", df.Messages)
+	}
+}
+
+func TestRemoveDriveFile_SluggedDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+
+	target := filepath.Join(driveDir.Path(), "my-doc-fileID123")
+	keep := filepath.Join(driveDir.Path(), "other-doc-fileID456")
+	for _, d := range []string{target, keep} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "content.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.RemoveDriveFile(driveDir, "fileID123"); err != nil {
+		t.Fatalf("RemoveDriveFile: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("target dir still exists: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("unrelated dir removed: %v", err)
+	}
+}
+
+func TestRemoveDriveFile_MissingDriveDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("neverbackfilled").Drive()
+
+	if err := s.RemoveDriveFile(driveDir, "fileIDXYZ"); err != nil {
+		t.Errorf("RemoveDriveFile on missing dir: %v", err)
 	}
 }

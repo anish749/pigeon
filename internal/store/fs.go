@@ -532,6 +532,39 @@ func (s *FSStore) SaveCursors(acct paths.AccountDir, c *Cursors) error {
 	return nil
 }
 
+// RemoveDriveFile deletes any local Drive file directories whose names
+// match the given fileID. Drive file directories are named either exactly
+// "<fileID>" (empty-title fallback) or "<title-slug>-<fileID>", so a name
+// matches if it equals fileID or ends with "-<fileID>".
+//
+// A missing gdrive directory is not an error — a newly-set-up account
+// that hasn't backfilled yet has no local state to clean.
+func (s *FSStore) RemoveDriveFile(driveDir paths.DriveDir, fileID string) error {
+	entries, err := os.ReadDir(driveDir.Path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read drive dir %s: %w", driveDir.Path(), err)
+	}
+	suffix := "-" + fileID
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name != fileID && !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		path := driveDir.File(name).Path()
+		if err := os.RemoveAll(path); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // cleanupStaleDriveMeta removes any drive-meta-*.json files in dir except
 // keepName. Called after writing a new meta file to remove previous versions.
 func cleanupStaleDriveMeta(dir, keepName string) error {
