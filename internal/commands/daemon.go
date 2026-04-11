@@ -135,7 +135,7 @@ func DaemonRun(version string) error {
 	store := store.NewFSStore(dataRoot)
 
 	// Identity service — uses "default" context until the context system is built.
-	identitySvc := identity.NewService(dataRoot.Identity("default").PeopleFile())
+	identitySvc := identity.NewService(store, dataRoot.Identity("default"))
 
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {

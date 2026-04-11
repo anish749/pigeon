@@ -29,6 +29,12 @@ const ConvMetaFilename = ".meta.json"
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
+// IdentitySubdir is the top-level directory under the data root for identity files.
+const IdentitySubdir = "identity"
+
+// PeopleFilename is the filename for the per-context identity JSONL file.
+const PeopleFilename = "people.jsonl"
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -181,10 +187,10 @@ type IdentityDir struct {
 
 // Path returns the identity directory path.
 func (i IdentityDir) Path() string {
-	return filepath.Join(i.root.base, "identity", i.context)
+	return filepath.Join(i.root.base, IdentitySubdir, i.context)
 }
 
 // PeopleFile returns the path to the people.jsonl file for this context.
 func (i IdentityDir) PeopleFile() string {
-	return filepath.Join(i.Path(), "people.jsonl")
+	return filepath.Join(i.Path(), PeopleFilename)
 }

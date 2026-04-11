@@ -1,20 +1,26 @@
-package identity
+package identity_test
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
-func tempPeoplePath(t *testing.T) string {
+func testService(t *testing.T) (*identity.Service, paths.IdentityDir) {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "identity", "test", "people.jsonl")
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	dir := root.Identity("test")
+	return identity.NewService(s, dir), dir
 }
 
 func TestObserve_NewPerson(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	err := svc.Observe(Signal{
+	err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
 	})
@@ -38,18 +44,18 @@ func TestObserve_NewPerson(t *testing.T) {
 }
 
 func TestObserveBatch_SlackUsers(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	signals := []Signal{
+	signals := []identity.Signal{
 		{
 			Email: "alice@company.com",
 			Name:  "Alice Smith",
-			Slack: &SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
+			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
 		},
 		{
 			Email: "bob@company.com",
 			Name:  "Bob Jones",
-			Slack: &SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob.jones"},
+			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob.jones"},
 		},
 	}
 	if err := svc.ObserveBatch(signals); err != nil {
@@ -69,10 +75,10 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 }
 
 func TestMerge_EmailMatch(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
 	// First: email-only person from Gmail.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice S",
 	}); err != nil {
@@ -80,10 +86,10 @@ func TestMerge_EmailMatch(t *testing.T) {
 	}
 
 	// Second: Slack signal with the same email → should merge.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,21 +107,21 @@ func TestMerge_EmailMatch(t *testing.T) {
 }
 
 func TestMerge_SlackIDMatch(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
 	// First: Slack-only signal.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Name:  "Bob",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Second: signal with email + same Slack ID → merge.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "bob@company.com",
 		Name:  "Bob Jones",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "Bob Jones"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "Bob Jones"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,21 +139,12 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 }
 
 func TestMerge_PhoneMatch(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	// First: WhatsApp contact.
-	if err := svc.Observe(Signal{
-		Phone: "+15559876543",
-		Name:  "Dave",
-	}); err != nil {
+	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
 		t.Fatal(err)
 	}
-
-	// Second: same phone, updated name.
-	if err := svc.Observe(Signal{
-		Phone: "+15559876543",
-		Name:  "Dave Wilson",
-	}); err != nil {
+	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave Wilson"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,12 +161,12 @@ func TestMerge_PhoneMatch(t *testing.T) {
 }
 
 func TestMerge_NoMatchCreatesNew(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	if err := svc.Observe(Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
+	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Observe(Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
+	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,13 +177,12 @@ func TestMerge_NoMatchCreatesNew(t *testing.T) {
 }
 
 func TestMerge_DuplicateEmailNotAppended(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	if err := svc.Observe(Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
+	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
 		t.Fatal(err)
 	}
-	// Same email again.
-	if err := svc.Observe(Signal{Email: "alice@company.com", Name: "Alice Smith"}); err != nil {
+	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice Smith"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -197,21 +193,20 @@ func TestMerge_DuplicateEmailNotAppended(t *testing.T) {
 }
 
 func TestMerge_MultipleEmails(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	// First signal with one email.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Second signal: different email, same Slack ID → merge, add second email.
-	if err := svc.Observe(Signal{
+	// Different email, same Slack ID → merge, add second email.
+	if err := svc.Observe(identity.Signal{
 		Email: "alice.personal@gmail.com",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,20 +221,19 @@ func TestMerge_MultipleEmails(t *testing.T) {
 }
 
 func TestMerge_MultiWorkspace(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "carol@company.com",
 		Name:  "Carol Davis",
-		Slack: &SlackIdentity{Workspace: "acme", ID: "U06CDEFGH", Mention: "Carol Davis"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U06CDEFGH", Mention: "Carol Davis"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Same person in a second workspace, matched by email.
-	if err := svc.Observe(Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "carol@company.com",
-		Slack: &SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZABC", Mention: "Carol (Acme)"},
+		Slack: &identity.SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZABC", Mention: "Carol (Acme)"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,19 +251,21 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 }
 
 func TestPersistence_RoundTrip(t *testing.T) {
-	path := tempPeoplePath(t)
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	dir := root.Identity("test")
 
 	// Write with one service instance.
-	svc1 := NewService(path)
-	if err := svc1.ObserveBatch([]Signal{
-		{Email: "alice@company.com", Name: "Alice", Slack: &SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"}},
+	svc1 := identity.NewService(s, dir)
+	if err := svc1.ObserveBatch([]identity.Signal{
+		{Email: "alice@company.com", Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"}},
 		{Phone: "+15559876543", Name: "Dave"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Read with a fresh service instance.
-	svc2 := NewService(path)
+	// Read with a fresh service instance (proves it went through disk).
+	svc2 := identity.NewService(s, dir)
 	people, err := svc2.People()
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +282,10 @@ func TestPersistence_RoundTrip(t *testing.T) {
 }
 
 func TestLoadPeople_MissingFile(t *testing.T) {
-	svc := NewService(filepath.Join(t.TempDir(), "nonexistent", "people.jsonl"))
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	svc := identity.NewService(s, root.Identity("nonexistent"))
+
 	people, err := svc.People()
 	if err != nil {
 		t.Fatal(err)
@@ -297,19 +296,20 @@ func TestLoadPeople_MissingFile(t *testing.T) {
 }
 
 func TestObserveBatch_Empty(t *testing.T) {
-	svc := NewService(tempPeoplePath(t))
+	svc, _ := testService(t)
 	if err := svc.ObserveBatch(nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestAtomicWrite_TempFileCleanup(t *testing.T) {
-	path := tempPeoplePath(t)
-	svc := NewService(path)
+	svc, dir := testService(t)
 
-	if err := svc.Observe(Signal{Email: "test@example.com", Name: "Test"}); err != nil {
+	if err := svc.Observe(identity.Signal{Email: "test@example.com", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
+
+	path := dir.PeopleFile()
 
 	// The .tmp file should not exist after a successful write.
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {

@@ -26,7 +26,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewService(root.Identity("test").PeopleFile())
+	id := identity.NewService(s, root.Identity("test"))
 	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create a test doc BEFORE seeding ---

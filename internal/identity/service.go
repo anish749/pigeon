@@ -1,30 +1,34 @@
 package identity
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/anish749/pigeon/internal/paths"
 )
+
+// Store is the persistence interface for identity data.
+type Store interface {
+	LoadPeople(dir paths.IdentityDir) ([]Person, error)
+	SavePeople(dir paths.IdentityDir, people []Person) error
+}
 
 // Service manages cross-source person identities for a single context.
 // It is safe for concurrent use by multiple goroutines.
 type Service struct {
-	filePath string
-	mu       sync.Mutex
-	people   []Person
-	loaded   bool
-	dirty    bool
+	store  Store
+	dir    paths.IdentityDir
+	mu     sync.Mutex
+	people []Person
+	loaded bool
+	dirty  bool
 }
 
 // NewService creates an identity service that stores people in the given
-// people.jsonl file path.
-func NewService(peoplePath string) *Service {
-	return &Service{filePath: peoplePath}
+// identity directory using the provided store for IO.
+func NewService(store Store, dir paths.IdentityDir) *Service {
+	return &Service{store: store, dir: dir}
 }
 
 // Observe processes a single identity signal. The signal is matched against
@@ -93,7 +97,7 @@ func (s *Service) loadLocked() error {
 		return nil
 	}
 
-	people, err := loadPeople(s.filePath)
+	people, err := s.store.LoadPeople(s.dir)
 	if err != nil {
 		return err
 	}
@@ -102,86 +106,11 @@ func (s *Service) loadLocked() error {
 	return nil
 }
 
-// saveLocked atomically writes people to disk. Must be called with s.mu held.
+// saveLocked writes people to disk via the store. Must be called with s.mu held.
 func (s *Service) saveLocked() error {
-	if err := savePeople(s.filePath, s.people); err != nil {
+	if err := s.store.SavePeople(s.dir, s.people); err != nil {
 		return err
 	}
 	s.dirty = false
-	return nil
-}
-
-// loadPeople reads a people.jsonl file into memory. Returns an empty slice
-// if the file does not exist (first-run case).
-func loadPeople(path string) ([]Person, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	var people []Person
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var p Person
-		if err := json.Unmarshal(line, &p); err != nil {
-			slog.Warn("identity: skipping malformed line",
-				"file", path, "line", lineNum, "error", err)
-			continue
-		}
-		people = append(people, p)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	return people, nil
-}
-
-// savePeople atomically writes people to a JSONL file (write to temp, rename).
-func savePeople(path string, people []Person) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("create identity dir: %w", err)
-	}
-
-	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-
-	w := bufio.NewWriter(f)
-	for _, p := range people {
-		data, err := json.Marshal(p)
-		if err != nil {
-			f.Close()
-			os.Remove(tmp)
-			return fmt.Errorf("marshal person: %w", err)
-		}
-		w.Write(data)
-		w.WriteByte('\n')
-	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("flush: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("rename: %w", err)
-	}
 	return nil
 }

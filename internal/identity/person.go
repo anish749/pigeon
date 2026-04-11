@@ -1,6 +1,9 @@
 package identity
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // Person represents a single person's cross-source identity.
 // One JSONL line per person in people.jsonl.
@@ -19,8 +22,22 @@ type PersonSlack struct {
 }
 
 // matchesEmail reports whether this person has the given email address.
+// Comparison is case-insensitive. For Gmail addresses, dots and plus
+// suffixes are ignored.
 func (p *Person) matchesEmail(email string) bool {
-	return slices.Contains(p.Email, email)
+	norm := NormalizeEmail(email)
+	return slices.ContainsFunc(p.Email, func(e string) bool {
+		return NormalizeEmail(e) == norm
+	})
+}
+
+// hasExactEmail reports whether this person already has the given email
+// stored verbatim (case-insensitive).
+func (p *Person) hasExactEmail(email string) bool {
+	lower := strings.ToLower(email)
+	return slices.ContainsFunc(p.Email, func(e string) bool {
+		return strings.ToLower(e) == lower
+	})
 }
 
 // matchesSlackID reports whether this person has the given Slack user ID
@@ -50,7 +67,7 @@ func (p *Person) merge(sig Signal, today string) {
 		p.Name = sig.Name
 	}
 
-	if sig.Email != "" && !p.matchesEmail(sig.Email) {
+	if sig.Email != "" && !p.hasExactEmail(sig.Email) {
 		p.Email = append(p.Email, sig.Email)
 	}
 
