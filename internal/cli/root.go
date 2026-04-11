@@ -114,7 +114,7 @@ DATA LAYOUT
   All JSONL lines have a "type" field — use it with jq to filter:
     Messaging: "msg", "react", "unreact", "edit", "delete", "separator"
     GWS:       "email", "comment", "event"
-    Linear:    "issue", "linear-comment"
+    Linear:    "linear-issue", "linear-comment"
 
   Common fields (messaging):
     ts, id, sender, from, text, via, emoji, attach, reply, replyTo

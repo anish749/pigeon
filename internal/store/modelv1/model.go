@@ -35,7 +35,7 @@ const (
 	LineEmail         LineType = "email"
 	LineComment       LineType = "comment"
 	LineEvent         LineType = "event"
-	LineIssue         LineType = "issue"
+	LineLinearIssue   LineType = "linear-issue"
 	LineLinearComment LineType = "linear-comment"
 )
 
@@ -135,7 +135,7 @@ func (l Line) Ts() time.Time {
 		if l.Email != nil {
 			return l.Email.Ts
 		}
-	case LineIssue:
+	case LineLinearIssue:
 		if l.Issue != nil {
 			if t, err := time.Parse(time.RFC3339, l.Issue.Runtime.UpdatedAt); err == nil {
 				return t
@@ -172,7 +172,7 @@ func (l Line) ID() (string, bool) {
 		if l.Event != nil {
 			return l.Event.Runtime.Id, true
 		}
-	case LineIssue:
+	case LineLinearIssue:
 		if l.Issue != nil {
 			return l.Issue.Runtime.ID, true
 		}
@@ -227,8 +227,8 @@ func Marshal(l Line) ([]byte, error) {
 		return marshalRaw(l.Comment.Serialized, string(LineComment))
 	case LineEvent:
 		return marshalRaw(l.Event.Serialized, string(LineEvent))
-	case LineIssue:
-		return marshalRaw(l.Issue.Serialized, string(LineIssue))
+	case LineLinearIssue:
+		return marshalRaw(l.Issue.Serialized, string(LineLinearIssue))
 	case LineLinearComment:
 		return marshalRaw(l.LinearComment.Serialized, string(LineLinearComment))
 	default:
@@ -294,7 +294,7 @@ func Parse(line string) (Line, error) {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
 		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
-	case LineIssue:
+	case LineLinearIssue:
 		var runtime LinearIssueRuntime
 		serialized, err := unmarshalRaw(data, &runtime)
 		if err != nil {

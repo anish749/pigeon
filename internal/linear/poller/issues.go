@@ -7,18 +7,32 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// PollIssues runs one sync cycle for Linear issues. Returns the number of
-// issues processed and any error.
+// backfillDays is the number of days to look back for recently closed issues
+// during first-run backfill.
+const backfillDays = 90
+
+// PollIssues runs one sync cycle for Linear issues. On first run (no cursor),
+// it backfills active issues + recently closed issues. On subsequent runs, it
+// fetches only issues updated since the cursor. Returns the number of issues
+// processed and any error.
 func PollIssues(ctx context.Context, s *store.FSStore, account paths.AccountDir, workspace string, cursors *store.LinearCursors) (int, error) {
 	cursor := cursors.Issues.UpdatedAfter
 
-	issues, err := queryIssues(ctx, workspace, cursor)
+	var issues []map[string]any
+	var err error
+
+	if cursor == "" {
+		issues, err = backfillIssues(ctx, workspace)
+	} else {
+		issues, err = queryIssues(ctx, workspace, "--all-states", "--updated-after="+cursor)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("query issues: %w", err)
 	}
@@ -26,13 +40,51 @@ func PollIssues(ctx context.Context, s *store.FSStore, account paths.AccountDir,
 		return 0, nil
 	}
 
+	n, maxUpdatedAt, err := writeIssues(ctx, s, account.Linear(), workspace, issues)
+
+	// Only advance the cursor if every issue was processed without error.
+	// If any issue failed (write, comment fetch, etc.), the cursor stays
+	// put so the next poll retries the entire batch.
+	if err == nil && maxUpdatedAt > cursor {
+		cursors.Issues.UpdatedAfter = maxUpdatedAt
+	}
+	return n, err
+}
+
+// backfillIssues fetches two sets for first-run backfill:
+// 1. All active issues (triage, backlog, unstarted, started)
+// 2. Recently closed issues (completed, canceled) from the last 90 days
+func backfillIssues(ctx context.Context, workspace string) ([]map[string]any, error) {
+	slog.Info("linear backfill starting", "workspace", workspace)
+
+	active, err := queryIssues(ctx, workspace,
+		"-s", "triage", "-s", "backlog", "-s", "unstarted", "-s", "started")
+	if err != nil {
+		return nil, fmt.Errorf("query active issues: %w", err)
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -backfillDays).Format(time.RFC3339)
+	closed, err := queryIssues(ctx, workspace,
+		"-s", "completed", "-s", "canceled", "--updated-after="+cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("query closed issues: %w", err)
+	}
+
+	slog.Info("linear backfill fetched", "workspace", workspace,
+		"active", len(active), "closed", len(closed))
+
+	return append(active, closed...), nil
+}
+
+// writeIssues writes a batch of issues and their comments to disk. Returns
+// the count of issues processed, the maximum updatedAt seen, and any error.
+func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDir, workspace string, issues []map[string]any) (int, string, error) {
 	var errs []error
-	maxUpdatedAt := cursor
-	linearDir := account.Linear()
+	var maxUpdatedAt string
 
 	for _, issue := range issues {
 		if ctx.Err() != nil {
-			return 0, ctx.Err()
+			return 0, "", ctx.Err()
 		}
 
 		identifier, _ := issue["identifier"].(string)
@@ -74,22 +126,15 @@ func PollIssues(ctx context.Context, s *store.FSStore, account paths.AccountDir,
 		}
 	}
 
-	// Only advance the cursor if every issue was processed without error.
-	// If any issue failed (write, comment fetch, etc.), the cursor stays
-	// put so the next poll retries the entire batch.
-	if len(errs) == 0 {
-		cursors.Issues.UpdatedAfter = maxUpdatedAt
-	}
-	return len(issues), errors.Join(errs...)
+	return len(issues), maxUpdatedAt, errors.Join(errs...)
 }
 
-// queryIssues runs `linear issue query` and returns the list of issue objects.
-func queryIssues(ctx context.Context, workspace, cursor string) ([]map[string]any, error) {
-	args := []string{"issue", "query", "-j", "--all-teams", "--all-states", "--limit=0", "--no-pager",
+// queryIssues runs `linear issue query` with the given extra args and returns
+// the list of issue objects.
+func queryIssues(ctx context.Context, workspace string, extraArgs ...string) ([]map[string]any, error) {
+	args := []string{"issue", "query", "-j", "--all-teams", "--limit=0", "--no-pager",
 		"--workspace", workspace}
-	if cursor != "" {
-		args = append(args, "--updated-after="+cursor)
-	}
+	args = append(args, extraArgs...)
 
 	out, err := runLinear(ctx, args...)
 	if err != nil {
@@ -137,7 +182,7 @@ func issueToLine(issue map[string]any) (modelv1.Line, error) {
 		return modelv1.Line{}, fmt.Errorf("parse issue runtime: %w", err)
 	}
 	return modelv1.Line{
-		Type: modelv1.LineIssue,
+		Type: modelv1.LineLinearIssue,
 		Issue: &modelv1.LinearIssue{
 			Runtime:    runtime,
 			Serialized: issue,
