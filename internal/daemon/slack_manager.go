@@ -185,10 +185,11 @@ func observeSlackUsers(ctx context.Context, api *goslack.Client, workspace strin
 
 	signals := make([]identity.Signal, 0, len(users))
 	for _, u := range users {
-		if u.Deleted || u.IsBot {
+		if u.Deleted {
 			continue
 		}
 
+		// Use the best available name for the top-level person name.
 		name := u.Profile.DisplayName
 		if name == "" {
 			name = u.RealName
@@ -201,9 +202,11 @@ func observeSlackUsers(ctx context.Context, api *goslack.Client, workspace strin
 			Email: u.Profile.Email,
 			Name:  name,
 			Slack: &identity.SlackIdentity{
-				Workspace: workspace,
-				ID:        u.ID,
-				Mention:   name,
+				Workspace:   workspace,
+				ID:          u.ID,
+				DisplayName: u.Profile.DisplayName,
+				RealName:    u.RealName,
+				Name:        u.Name,
 			},
 		}
 		signals = append(signals, sig)

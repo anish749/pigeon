@@ -195,10 +195,8 @@ func writeEvents(s *store.FSStore, account paths.AccountDir, calID string, event
 		}
 	}
 
-	if len(signals) > 0 {
-		if err := id.ObserveBatch(signals); err != nil {
-			slog.Warn("identity: calendar signal batch failed", "error", err)
-		}
+	if err := id.ObserveBatch(signals); err != nil {
+		slog.Warn("identity: calendar signal batch failed", "error", err)
 	}
 	return errs
 }

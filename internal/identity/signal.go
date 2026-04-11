@@ -14,7 +14,9 @@ type Signal struct {
 
 // SlackIdentity holds a Slack-specific identity within a workspace.
 type SlackIdentity struct {
-	Workspace string // workspace slug (e.g. "acme-corp")
-	ID        string // Slack user ID (U-prefixed)
-	Mention   string // display name as used after @ in stored messages
+	Workspace   string // workspace slug (e.g. "acme-corp")
+	ID          string // Slack user ID (U-prefixed)
+	DisplayName string // Slack profile display name
+	RealName    string // Slack profile real name
+	Name        string // Slack username (handle)
 }

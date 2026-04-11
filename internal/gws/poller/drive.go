@@ -335,10 +335,8 @@ func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, 
 		return fmt.Errorf("write comments for %s: %w", fileID, err)
 	}
 
-	if len(signals) > 0 {
-		if err := id.ObserveBatch(signals); err != nil {
-			slog.Warn("identity: drive comment signal batch failed", "error", err)
-		}
+	if err := id.ObserveBatch(signals); err != nil {
+		slog.Warn("identity: drive comment signal batch failed", "error", err)
 	}
 	return nil
 }

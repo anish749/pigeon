@@ -17,8 +17,10 @@ type Person struct {
 
 // PersonSlack holds a person's identity in a single Slack workspace.
 type PersonSlack struct {
-	ID      string `json:"id"`      // Slack user ID (U-prefixed)
-	Mention string `json:"mention"` // display name as used in @mentions
+	ID          string `json:"id"`                    // Slack user ID (U-prefixed)
+	DisplayName string `json:"displayName,omitempty"` // profile display name
+	RealName    string `json:"realName,omitempty"`    // profile real name
+	Name        string `json:"name,omitempty"`        // username (handle)
 }
 
 // matchesEmail reports whether this person has the given email address.
@@ -76,8 +78,10 @@ func (p *Person) merge(sig Signal, today string) {
 			p.Slack = make(map[string]PersonSlack)
 		}
 		p.Slack[sig.Slack.Workspace] = PersonSlack{
-			ID:      sig.Slack.ID,
-			Mention: sig.Slack.Mention,
+			ID:          sig.Slack.ID,
+			DisplayName: sig.Slack.DisplayName,
+			RealName:    sig.Slack.RealName,
+			Name:        sig.Slack.Name,
 		}
 	}
 
@@ -120,8 +124,10 @@ func newPerson(sig Signal, today string) Person {
 	if sig.Slack != nil {
 		p.Slack = map[string]PersonSlack{
 			sig.Slack.Workspace: {
-				ID:      sig.Slack.ID,
-				Mention: sig.Slack.Mention,
+				ID:          sig.Slack.ID,
+				DisplayName: sig.Slack.DisplayName,
+				RealName:    sig.Slack.RealName,
+				Name:        sig.Slack.Name,
 			},
 		}
 	}

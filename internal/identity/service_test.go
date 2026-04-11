@@ -50,12 +50,12 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 		{
 			Email: "alice@company.com",
 			Name:  "Alice Smith",
-			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
+			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice Smith"},
 		},
 		{
 			Email: "bob@company.com",
 			Name:  "Bob Jones",
-			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob.jones"},
+			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob.jones"},
 		},
 	}
 	if err := svc.ObserveBatch(signals); err != nil {
@@ -89,7 +89,7 @@ func TestMerge_EmailMatch(t *testing.T) {
 	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice Smith"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice Smith"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 	// First: Slack-only signal.
 	if err := svc.Observe(identity.Signal{
 		Name:  "Bob",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "bob"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 	if err := svc.Observe(identity.Signal{
 		Email: "bob@company.com",
 		Name:  "Bob Jones",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", Mention: "Bob Jones"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "Bob Jones"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,8 +133,8 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 	if len(people[0].Email) != 1 || people[0].Email[0] != "bob@company.com" {
 		t.Errorf("email = %v, want [bob@company.com]", people[0].Email)
 	}
-	if people[0].Slack["acme"].Mention != "Bob Jones" {
-		t.Errorf("mention = %q, want %q", people[0].Slack["acme"].Mention, "Bob Jones")
+	if people[0].Slack["acme"].DisplayName != "Bob Jones" {
+		t.Errorf("displayName = %q, want %q", people[0].Slack["acme"].DisplayName, "Bob Jones")
 	}
 }
 
@@ -198,7 +198,7 @@ func TestMerge_MultipleEmails(t *testing.T) {
 	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestMerge_MultipleEmails(t *testing.T) {
 	// Different email, same Slack ID → merge, add second email.
 	if err := svc.Observe(identity.Signal{
 		Email: "alice.personal@gmail.com",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,14 +226,14 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 	if err := svc.Observe(identity.Signal{
 		Email: "carol@company.com",
 		Name:  "Carol Davis",
-		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U06CDEFGH", Mention: "Carol Davis"},
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U06CDEFGH", DisplayName: "Carol Davis"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := svc.Observe(identity.Signal{
 		Email: "carol@company.com",
-		Slack: &identity.SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZABC", Mention: "Carol (Acme)"},
+		Slack: &identity.SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZABC", DisplayName: "Carol (Acme)"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -245,8 +245,8 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 	if len(people[0].Slack) != 2 {
 		t.Errorf("slack workspaces = %d, want 2", len(people[0].Slack))
 	}
-	if people[0].Slack["vendor-ws"].Mention != "Carol (Acme)" {
-		t.Errorf("vendor mention = %q, want %q", people[0].Slack["vendor-ws"].Mention, "Carol (Acme)")
+	if people[0].Slack["vendor-ws"].DisplayName != "Carol (Acme)" {
+		t.Errorf("vendor displayName = %q, want %q", people[0].Slack["vendor-ws"].DisplayName, "Carol (Acme)")
 	}
 }
 
@@ -258,7 +258,7 @@ func TestPersistence_RoundTrip(t *testing.T) {
 	// Write with one service instance.
 	svc1 := identity.NewService(s, dir)
 	if err := svc1.ObserveBatch([]identity.Signal{
-		{Email: "alice@company.com", Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", Mention: "Alice"}},
+		{Email: "alice@company.com", Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"}},
 		{Phone: "+15559876543", Name: "Dave"},
 	}); err != nil {
 		t.Fatal(err)
