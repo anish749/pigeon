@@ -96,6 +96,20 @@ func (s *Service) LookupBySlackID(workspace, userID string) (*Person, error) {
 	return nil, nil
 }
 
+// People returns a copy of all known people. Loads from disk if needed.
+func (s *Service) People() ([]Person, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.loadLocked(); err != nil {
+		return nil, fmt.Errorf("load identity: %w", err)
+	}
+
+	out := make([]Person, len(s.people))
+	copy(out, s.people)
+	return out, nil
+}
+
 // SearchCandidates returns people matching the trimmed query. If the query
 // equals a stable identifier (Slack user ID in any workspace, WhatsApp number,
 // or email), at most one person is returned. Otherwise names are matched with
