@@ -31,3 +31,7 @@ Tombstone (`email-delete`) lines replaced with a pending-deletes file. The polle
 ## ~~GWS Gmail: hard delete at poll time~~ — rejected in #156
 
 Rejected: rewriting date files during sync is too expensive — the poller doesn't know the email's date, so it would scan all date files on every deletion. The correct design is to write deleted IDs to a pending-deletes file during sync and let maintenance handle the actual removal (#159).
+
+## ~~Root help omits GWS~~ — fixed in #163
+
+Added GWS to config example, data layout tree, JSON fields, setup workflow, and grep examples in `pigeon help`.
