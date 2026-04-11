@@ -26,15 +26,17 @@ const (
 type LineType string
 
 const (
-	LineMessage    LineType = "msg"
-	LineReaction   LineType = "react"
-	LineUnreaction LineType = "unreact"
-	LineEdit       LineType = "edit"
-	LineDelete     LineType = "delete"
-	LineSeparator  LineType = "separator"
-	LineEmail      LineType = "email"
-	LineComment    LineType = "comment"
-	LineEvent      LineType = "event"
+	LineMessage       LineType = "msg"
+	LineReaction      LineType = "react"
+	LineUnreaction    LineType = "unreact"
+	LineEdit          LineType = "edit"
+	LineDelete        LineType = "delete"
+	LineSeparator     LineType = "separator"
+	LineEmail         LineType = "email"
+	LineComment       LineType = "comment"
+	LineEvent         LineType = "event"
+	LineIssue         LineType = "issue"
+	LineLinearComment LineType = "linear-comment"
 )
 
 // MsgLine represents a message event.
@@ -95,14 +97,16 @@ type DeleteLine struct {
 // Delete) and Google Workspace payloads (Email, Comment, Event) share one
 // envelope because they use the same JSONL format on disk.
 type Line struct {
-	Type    LineType
-	Msg     *MsgLine
-	React   *ReactLine
-	Edit    *EditLine
-	Delete  *DeleteLine
-	Email   *EmailLine
-	Comment *DriveComment
-	Event   *CalendarEvent
+	Type          LineType
+	Msg           *MsgLine
+	React         *ReactLine
+	Edit          *EditLine
+	Delete        *DeleteLine
+	Email         *EmailLine
+	Comment       *DriveComment
+	Event         *CalendarEvent
+	Issue         *LinearIssue
+	LinearComment *LinearComment
 }
 
 // Ts returns the timestamp of the line's inner type. Returns the zero time
@@ -156,6 +160,14 @@ func (l Line) ID() (string, bool) {
 		if l.Event != nil {
 			return l.Event.Runtime.Id, true
 		}
+	case LineIssue:
+		if l.Issue != nil {
+			return l.Issue.Runtime.ID, true
+		}
+	case LineLinearComment:
+		if l.LinearComment != nil {
+			return l.LinearComment.Runtime.ID, true
+		}
 	}
 	return "", false
 }
@@ -203,6 +215,10 @@ func Marshal(l Line) ([]byte, error) {
 		return marshalRaw(l.Comment.Serialized, string(LineComment))
 	case LineEvent:
 		return marshalRaw(l.Event.Serialized, string(LineEvent))
+	case LineIssue:
+		return marshalRaw(l.Issue.Serialized, string(LineIssue))
+	case LineLinearComment:
+		return marshalRaw(l.LinearComment.Serialized, string(LineLinearComment))
 	default:
 		return nil, fmt.Errorf("marshal line: unknown type %q", l.Type)
 	}
@@ -266,6 +282,20 @@ func Parse(line string) (Line, error) {
 			return Line{}, fmt.Errorf("parse event line: %w", err)
 		}
 		l.Event = &CalendarEvent{Runtime: runtime, Serialized: serialized}
+	case LineIssue:
+		var runtime LinearIssueRuntime
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse issue line: %w", err)
+		}
+		l.Issue = &LinearIssue{Runtime: runtime, Serialized: serialized}
+	case LineLinearComment:
+		var runtime LinearCommentRuntime
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse linear comment line: %w", err)
+		}
+		l.LinearComment = &LinearComment{Runtime: runtime, Serialized: serialized}
 	case "":
 		return Line{}, fmt.Errorf("parse line: missing type field")
 	default:

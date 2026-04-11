@@ -59,3 +59,15 @@ func newSetupGWSCmd() *cobra.Command {
 		},
 	}
 }
+
+func newSetupLinearCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup-linear",
+		Short:   "Register a Linear workspace for issue tracking",
+		GroupID: groupSetup,
+		Long:    `Registers the workspace from the linear CLI. Run 'linear auth login' first.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return commands.RunSetupLinear(args)
+		},
+	}
+}

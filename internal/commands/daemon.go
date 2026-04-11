@@ -115,7 +115,7 @@ func DaemonRun(version string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 && len(cfg.GWS) == 0 {
+	if len(cfg.WhatsApp) == 0 && len(cfg.Slack) == 0 && len(cfg.GWS) == 0 && len(cfg.Linear) == 0 {
 		return fmt.Errorf("no listeners configured in %s\nRun 'pigeon setup-whatsapp', 'pigeon setup-slack', or add a gws account first", paths.ConfigPath())
 	}
 
@@ -150,6 +150,9 @@ func DaemonRun(version string) error {
 	gwsMgr := daemon.NewGWSManager(store)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
+	linearMgr := daemon.NewLinearManager(store)
+	go linearMgr.Run(ctx, cfg.Linear)
+
 	go apiServer.Start(ctx, paths.SocketPath())
 
 	// Periodic update check — re-execs the daemon when a new version is installed.
@@ -165,7 +168,8 @@ func DaemonRun(version string) error {
 		"version", version,
 		"whatsapp_accounts", len(cfg.WhatsApp),
 		"slack_workspaces", len(cfg.Slack),
-		"gws_accounts", len(cfg.GWS))
+		"gws_accounts", len(cfg.GWS),
+		"linear_workspaces", len(cfg.Linear))
 
 	select {
 	case <-ctx.Done():

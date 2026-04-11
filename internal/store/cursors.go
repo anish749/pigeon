@@ -28,3 +28,15 @@ type GWSCalendarCursor struct {
 
 // GWSCalendarCursors maps calendar ID to its cursor.
 type GWSCalendarCursors map[string]*GWSCalendarCursor
+
+// LinearCursors holds polling cursors for a Linear workspace. The daemon
+// loads and saves them via FSStore.LoadLinearCursors / SaveLinearCursors so
+// that the poller can resume where it left off across restarts.
+type LinearCursors struct {
+	Issues LinearIssueCursor `yaml:"issues,omitempty"`
+}
+
+// LinearIssueCursor holds the incremental sync cursor for Linear issues.
+type LinearIssueCursor struct {
+	UpdatedAfter string `yaml:"updated_after,omitempty"`
+}

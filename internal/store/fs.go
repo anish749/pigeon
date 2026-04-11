@@ -532,6 +532,45 @@ func (s *FSStore) SaveGWSCursors(acct paths.AccountDir, c *GWSCursors) error {
 	return nil
 }
 
+// LoadLinearCursors reads Linear polling cursors for the given account.
+// Returns empty cursors if the file does not exist yet (first-run case).
+func (s *FSStore) LoadLinearCursors(acct paths.AccountDir) (*LinearCursors, error) {
+	path := acct.SyncCursorsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &LinearCursors{}, nil
+		}
+		return nil, fmt.Errorf("read cursors %s: %w", path, err)
+	}
+	var c LinearCursors
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
+	}
+	return &c, nil
+}
+
+// SaveLinearCursors writes Linear polling cursors for the given account.
+func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) error {
+	path := acct.SyncCursorsPath()
+
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal cursors: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write cursors %s: %w", path, err)
+	}
+	return nil
+}
+
 // RemoveDriveFile deletes any local Drive file directories whose names
 // match the given fileID. Drive file directories are named either exactly
 // "<fileID>" (empty-title fallback) or "<title-slug>-<fileID>", so a name
