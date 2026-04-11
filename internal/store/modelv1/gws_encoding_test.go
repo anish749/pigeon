@@ -68,37 +68,6 @@ func TestMarshalParseEmail(t *testing.T) {
 	}
 }
 
-func TestMarshalParseEmailDelete(t *testing.T) {
-	at := time.Date(2026, 4, 7, 13, 0, 0, 0, time.UTC)
-	orig := Line{
-		Type: LineEmailDelete,
-		EmailDelete: &EmailDeleteLine{
-			ID: "msg-1",
-			Ts: at,
-		},
-	}
-
-	data, err := Marshal(orig)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	got, err := Parse(string(data))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	if got.Type != LineEmailDelete {
-		t.Errorf("Type = %q, want %q", got.Type, LineEmailDelete)
-	}
-	if got.EmailDelete == nil || got.EmailDelete.ID != "msg-1" {
-		t.Fatalf("EmailDelete = %+v, want id=msg-1", got.EmailDelete)
-	}
-	if !got.Ts().Equal(at) {
-		t.Errorf("Line.Ts() = %v, want %v", got.Ts(), at)
-	}
-}
-
 func TestMarshalParseComment(t *testing.T) {
 	// Build a DriveComment by unmarshalling a raw API-shaped JSON both ways —
 	// mirrors how drive.ListComments populates Runtime + Serialized. Replies

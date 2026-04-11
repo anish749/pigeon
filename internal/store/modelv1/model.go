@@ -32,9 +32,8 @@ const (
 	LineEdit        LineType = "edit"
 	LineDelete      LineType = "delete"
 	LineSeparator   LineType = "separator"
-	LineEmail       LineType = "email"
-	LineEmailDelete LineType = "email-delete"
-	LineComment     LineType = "comment"
+	LineEmail   LineType = "email"
+	LineComment LineType = "comment"
 	LineEvent       LineType = "event"
 )
 
@@ -93,18 +92,17 @@ type DeleteLine struct {
 
 // Line is a parsed protocol line. Exactly one of the payload pointers is
 // non-nil (none for LineSeparator). Messaging payloads (Msg, React, Edit,
-// Delete) and Google Workspace payloads (Email, EmailDelete, Comment, Event)
-// share one envelope because they use the same JSONL format on disk.
+// Delete) and Google Workspace payloads (Email, Comment, Event) share one
+// envelope because they use the same JSONL format on disk.
 type Line struct {
-	Type        LineType
-	Msg         *MsgLine
-	React       *ReactLine
-	Edit        *EditLine
-	Delete      *DeleteLine
-	Email       *EmailLine
-	EmailDelete *EmailDeleteLine
-	Comment     *DriveComment
-	Event       *CalendarEvent
+	Type    LineType
+	Msg     *MsgLine
+	React   *ReactLine
+	Edit    *EditLine
+	Delete  *DeleteLine
+	Email   *EmailLine
+	Comment *DriveComment
+	Event   *CalendarEvent
 }
 
 // Ts returns the timestamp of the line's inner type. Returns the zero time
@@ -133,10 +131,6 @@ func (l Line) Ts() time.Time {
 		if l.Email != nil {
 			return l.Email.Ts
 		}
-	case LineEmailDelete:
-		if l.EmailDelete != nil {
-			return l.EmailDelete.Ts
-		}
 	}
 	return time.Time{}
 }
@@ -153,10 +147,6 @@ func (l Line) ID() (string, bool) {
 	case LineEmail:
 		if l.Email != nil {
 			return l.Email.ID, true
-		}
-	case LineEmailDelete:
-		if l.EmailDelete != nil {
-			return l.EmailDelete.ID, true
 		}
 	case LineComment:
 		if l.Comment != nil {
@@ -209,11 +199,6 @@ func Marshal(l Line) ([]byte, error) {
 			typed
 			*EmailLine
 		}{typed{l.Type}, l.Email}
-	case LineEmailDelete:
-		v = struct {
-			typed
-			*EmailDeleteLine
-		}{typed{l.Type}, l.EmailDelete}
 	case LineComment:
 		return marshalRaw(l.Comment.Serialized, string(LineComment))
 	case LineEvent:
@@ -266,11 +251,6 @@ func Parse(line string) (Line, error) {
 		l.Email = &EmailLine{}
 		if err := json.Unmarshal(data, l.Email); err != nil {
 			return Line{}, fmt.Errorf("parse email line: %w", err)
-		}
-	case LineEmailDelete:
-		l.EmailDelete = &EmailDeleteLine{}
-		if err := json.Unmarshal(data, l.EmailDelete); err != nil {
-			return Line{}, fmt.Errorf("parse email-delete line: %w", err)
 		}
 	case LineComment:
 		var runtime drive.Comment

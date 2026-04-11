@@ -968,16 +968,6 @@ func gwsEmailLine(id, subject string) modelv1.Line {
 	}
 }
 
-func gwsEmailDeleteLine(id string) modelv1.Line {
-	return modelv1.Line{
-		Type: modelv1.LineEmailDelete,
-		EmailDelete: &modelv1.EmailDeleteLine{
-			ID: id,
-			Ts: ts(2026, 4, 7, 13, 0, 0),
-		},
-	}
-}
-
 func TestDedupGWS_KeepsLast(t *testing.T) {
 	lines := []modelv1.Line{
 		gwsEmailLine("same", "version-0"),
@@ -994,14 +984,3 @@ func TestDedupGWS_KeepsLast(t *testing.T) {
 	}
 }
 
-func TestDedupGWS_DeleteSemantics(t *testing.T) {
-	lines := []modelv1.Line{
-		gwsEmailLine("target", "hello"),
-		gwsEmailDeleteLine("target"),
-	}
-
-	deduped := compact.DedupGWS(lines)
-	if len(deduped) != 0 {
-		t.Fatalf("got %d deduped lines, want 0 (both should be removed)", len(deduped))
-	}
-}

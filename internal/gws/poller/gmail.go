@@ -33,17 +33,10 @@ func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 
 	errs := fetchAndStoreMessages(s, account, added)
 
-	// Record deleted messages.
-	now := time.Now()
+	// Record deleted messages for deferred removal during maintenance.
 	for _, msgID := range deleted {
-		del := &modelv1.EmailDeleteLine{
-			ID: msgID,
-			Ts: now,
-		}
-		datePath := account.Gmail().DateFile(now.Format("2006-01-02"))
-		line := modelv1.Line{Type: modelv1.LineEmailDelete, EmailDelete: del}
-		if err := s.AppendLine(datePath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append delete %s: %w", msgID, err))
+		if err := s.AppendPendingDelete(account.Gmail(), msgID); err != nil {
+			errs = append(errs, fmt.Errorf("record delete %s: %w", msgID, err))
 		}
 	}
 
