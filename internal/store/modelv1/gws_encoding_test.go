@@ -237,6 +237,87 @@ func TestMarshalParseEvent(t *testing.T) {
 	}
 }
 
+// --- Parse/Marshal error paths ---
+
+func TestParseGWS_UnknownType(t *testing.T) {
+	_, err := Parse(`{"type":"bogus","id":"x"}`)
+	if err == nil {
+		t.Fatal("expected error for unknown type")
+	}
+}
+
+func TestParseGWS_InvalidJSON(t *testing.T) {
+	_, err := Parse(`not json`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMarshalGWS_NoType(t *testing.T) {
+	_, err := Marshal(Line{})
+	if err == nil {
+		t.Fatal("expected error for empty line with no type")
+	}
+}
+
+// --- marshalRaw edge cases ---
+
+func TestMarshalRaw_InjectsTypeDiscriminator(t *testing.T) {
+	in := map[string]any{"id": "x1", "name": "hello"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget", got["type"])
+	}
+	if got["id"] != "x1" {
+		t.Errorf("id = %v, want x1", got["id"])
+	}
+}
+
+func TestMarshalRaw_EmptyMap(t *testing.T) {
+	out, err := marshalRaw(map[string]any{}, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_NilMap(t *testing.T) {
+	out, err := marshalRaw(nil, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	if string(out) != `{"type":"widget"}` {
+		t.Errorf("got %s, want {\"type\":\"widget\"}", out)
+	}
+}
+
+func TestMarshalRaw_OverwritesExistingTypeKey(t *testing.T) {
+	in := map[string]any{"type": "api-provided", "id": "x1"}
+	out, err := marshalRaw(in, "widget")
+	if err != nil {
+		t.Fatalf("marshalRaw: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got["type"] != "widget" {
+		t.Errorf("type = %v, want widget (discriminator should win)", got["type"])
+	}
+	if in["type"] != "api-provided" {
+		t.Errorf("caller's map was mutated: in[type] = %v, want api-provided", in["type"])
+	}
+}
+
 func TestMarshalRaw_DoesNotMutateCaller(t *testing.T) {
 	in := map[string]any{"id": "x1"}
 	if _, err := marshalRaw(in, "widget"); err != nil {

@@ -286,10 +286,10 @@ func cloneAttachments(a []modelv1.Attachment) []modelv1.Attachment {
 	return out
 }
 
-// Dedup removes duplicate Lines by ID (keep last occurrence) and applies
-// delete semantics: an email-delete line removes the matching email.
-// Lines without IDs (e.g. messaging lines, separators) are kept as-is.
-func Dedup(lines []modelv1.Line) []modelv1.Line {
+// DedupGWS removes duplicate GWS lines by ID (keep last occurrence) and
+// applies delete semantics: an email-delete line removes the matching email.
+// Lines without IDs are kept as-is.
+func DedupGWS(lines []modelv1.Line) []modelv1.Line {
 	lastIndex := make(map[string]int)
 	deletedIDs := make(map[string]bool)
 
