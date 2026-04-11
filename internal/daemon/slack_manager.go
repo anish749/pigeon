@@ -170,4 +170,3 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		UserID:    userID,
 	}
 }
-
