@@ -32,16 +32,16 @@ type ContextConfig struct {
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
 }
 
-// LinearConfig holds configuration for a single Linear workspace.
-type LinearConfig struct {
-	Workspace string `yaml:"workspace"` // Linear workspace slug
-	Account   string `yaml:"account"`   // display name for pigeon
-}
-
 // GWSConfig holds configuration for a single Google Workspace account.
 type GWSConfig struct {
 	Account string `yaml:"account"` // display name for this account
 	Email   string `yaml:"email"`   // Google account email (used for account slug)
+}
+
+// LinearConfig holds configuration for a single Linear workspace.
+type LinearConfig struct {
+	Workspace string `yaml:"workspace"` // Linear workspace slug
+	Account   string `yaml:"account"`   // display name for pigeon
 }
 
 type WhatsAppConfig struct {
