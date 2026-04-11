@@ -142,27 +142,32 @@ func (l Line) Ts() time.Time {
 }
 
 // ID returns the identifier of the line's inner type, used for deduplication.
-// Separator lines and messaging events without a stable ID return "".
-func (l Line) ID() string {
+// The second return value is false for types that don't carry a standalone ID
+// (reactions, edits, deletes, separators).
+func (l Line) ID() (string, bool) {
 	switch l.Type {
+	case LineMessage:
+		if l.Msg != nil {
+			return l.Msg.ID, true
+		}
 	case LineEmail:
 		if l.Email != nil {
-			return l.Email.ID
+			return l.Email.ID, true
 		}
 	case LineEmailDelete:
 		if l.EmailDelete != nil {
-			return l.EmailDelete.ID
+			return l.EmailDelete.ID, true
 		}
 	case LineComment:
 		if l.Comment != nil {
-			return l.Comment.Runtime.Id
+			return l.Comment.Runtime.Id, true
 		}
 	case LineEvent:
 		if l.Event != nil {
-			return l.Event.Runtime.Id
+			return l.Event.Runtime.Id, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // SeparatorLine is the JSON representation of a separator event.

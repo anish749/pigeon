@@ -51,7 +51,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed ---
 	t.Log("=== Phase 1: Seed ===")
-	cursors, err := s.LoadCursors(account)
+	cursors, err := s.LoadGWSCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
-	if err := s.SaveCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
-	if err := s.SaveCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 

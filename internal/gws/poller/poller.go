@@ -32,14 +32,14 @@ func New(interval time.Duration, account paths.AccountDir, s *store.FSStore) *Po
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) error {
-	cursors, err := p.store.LoadCursors(p.account)
+	cursors, err := p.store.LoadGWSCursors(p.account)
 	if err != nil {
 		return fmt.Errorf("load cursors: %w", err)
 	}
 
 	// Initial poll.
 	p.pollAll(ctx, cursors)
-	if err := p.store.SaveCursors(p.account, cursors); err != nil {
+	if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
 		slog.Error("save cursors", "err", err)
 	}
 
@@ -52,14 +52,14 @@ func (p *Poller) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			p.pollAll(ctx, cursors)
-			if err := p.store.SaveCursors(p.account, cursors); err != nil {
+			if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
 				slog.Error("save cursors", "err", err)
 			}
 		}
 	}
 }
 
-func (p *Poller) pollAll(ctx context.Context, cursors *store.Cursors) {
+func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	if ctx.Err() != nil {
 		return
 	}

@@ -495,16 +495,16 @@ func (s *FSStore) SaveDriveMeta(mf paths.DriveMetaFile, m *modelv1.DocMeta) erro
 
 // LoadCursors reads GWS polling cursors for the given account.
 // Returns empty Cursors if the file does not exist yet (first-run case).
-func (s *FSStore) LoadCursors(acct paths.AccountDir) (*Cursors, error) {
+func (s *FSStore) LoadGWSCursors(acct paths.AccountDir) (*GWSCursors, error) {
 	path := acct.SyncCursorsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &Cursors{}, nil
+			return &GWSCursors{}, nil
 		}
 		return nil, fmt.Errorf("read cursors %s: %w", path, err)
 	}
-	var c Cursors
+	var c GWSCursors
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
 	}
@@ -512,7 +512,7 @@ func (s *FSStore) LoadCursors(acct paths.AccountDir) (*Cursors, error) {
 }
 
 // SaveCursors writes GWS polling cursors for the given account.
-func (s *FSStore) SaveCursors(acct paths.AccountDir, c *Cursors) error {
+func (s *FSStore) SaveGWSCursors(acct paths.AccountDir, c *GWSCursors) error {
 	path := acct.SyncCursorsPath()
 
 	mu := s.fileMu(path)

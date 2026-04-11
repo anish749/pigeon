@@ -294,8 +294,8 @@ func Dedup(lines []modelv1.Line) []modelv1.Line {
 	deletedIDs := make(map[string]bool)
 
 	for i, l := range lines {
-		id := l.ID()
-		if id != "" {
+		id, ok := l.ID()
+		if ok {
 			lastIndex[id] = i
 		}
 		if l.Type == modelv1.LineEmailDelete {
@@ -305,9 +305,9 @@ func Dedup(lines []modelv1.Line) []modelv1.Line {
 
 	var result []modelv1.Line
 	for i, l := range lines {
-		id := l.ID()
+		id, ok := l.ID()
 
-		if id == "" {
+		if !ok {
 			result = append(result, l)
 			continue
 		}

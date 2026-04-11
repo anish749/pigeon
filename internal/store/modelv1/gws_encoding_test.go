@@ -63,8 +63,8 @@ func TestMarshalParseEmail(t *testing.T) {
 	if !got.Ts().Equal(at) {
 		t.Errorf("Line.Ts() = %v, want %v", got.Ts(), at)
 	}
-	if got.ID() != "msg-1" {
-		t.Errorf("Line.ID() = %q, want msg-1", got.ID())
+	if id, _ := got.ID(); id != "msg-1" {
+		id2, _ := got.ID(); t.Errorf("Line.ID() = %q, want msg-1", id2)
 	}
 }
 
@@ -174,8 +174,8 @@ func TestMarshalParseComment(t *testing.T) {
 		t.Errorf("Serialized[htmlContent] = %v", got.Comment.Serialized["htmlContent"])
 	}
 	// Line.ID surfaces the drive comment ID.
-	if got.ID() != "cmt-1" {
-		t.Errorf("Line.ID() = %q, want cmt-1", got.ID())
+	if id, _ := got.ID(); id != "cmt-1" {
+		id2, _ := got.ID(); t.Errorf("Line.ID() = %q, want cmt-1", id2)
 	}
 }
 
@@ -232,8 +232,8 @@ func TestMarshalParseEvent(t *testing.T) {
 	if got.Event.Serialized["iCalUID"] != "evt-1@google.com" {
 		t.Errorf("Serialized[iCalUID] = %v", got.Event.Serialized["iCalUID"])
 	}
-	if got.ID() != "evt-1" {
-		t.Errorf("Line.ID() = %q, want evt-1", got.ID())
+	if id, _ := got.ID(); id != "evt-1" {
+		id2, _ := got.ID(); t.Errorf("Line.ID() = %q, want evt-1", id2)
 	}
 }
 

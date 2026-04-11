@@ -38,7 +38,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed with backfill ---
 	t.Log("=== Phase 1: Seed with backfill ===")
-	cursors, err := s.LoadCursors(account)
+	cursors, err := s.LoadGWSCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestDriveBackfillLive(t *testing.T) {
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
 	}
-	if err := s.SaveCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 

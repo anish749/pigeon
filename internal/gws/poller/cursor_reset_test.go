@@ -23,7 +23,7 @@ func TestGmailCursorResetOnExpiry(t *testing.T) {
 	}
 
 	// Verify cursor clearing works.
-	cursors := &store.Cursors{}
+	cursors := &store.GWSCursors{}
 	cursors.Gmail.HistoryID = "12345"
 
 	// This is what PollGmail does on cursor expiry:
@@ -51,7 +51,7 @@ func TestCalendarCursorResetOnExpiry(t *testing.T) {
 		t.Fatal("expected IsCursorExpired to be true for Calendar 400/invalid")
 	}
 
-	cursors := &store.Cursors{Calendar: store.CalendarCursors{
+	cursors := &store.GWSCursors{Calendar: store.GWSCalendarCursors{
 		"primary": {SyncToken: "old-token"},
 	}}
 	cursors.Calendar["primary"] = nil

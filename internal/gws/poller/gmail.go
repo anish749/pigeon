@@ -16,7 +16,7 @@ import (
 // PollGmail polls for new Gmail messages and stores them as JSONL.
 // Returns the number of changes observed (added + deleted) plus any error.
 // On initial seed it returns the backfilled message count.
-func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.Cursors) (int, error) {
+func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	if cursors.Gmail.HistoryID == "" {
 		return seedGmail(s, account, cursors)
 	}
@@ -60,7 +60,7 @@ func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.Cursor
 // BackfillDays, then saves the cursor. The cursor is acquired BEFORE backfill
 // so that messages arriving during the (potentially slow) backfill are captured
 // by the first incremental poll.
-func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.Cursors) (int, error) {
+func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	slog.Info("seeding gmail with backfill")
 
 	// Get the history cursor first — backfill can take many minutes.

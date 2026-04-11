@@ -27,7 +27,7 @@ func TestLiveSmoke(t *testing.T) {
 	account := root.Platform("gws").AccountFromSlug("test")
 	accountDir := account.Path()
 
-	cursors, err := s.LoadCursors(account)
+	cursors, err := s.LoadGWSCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestLiveSmoke(t *testing.T) {
 	}
 	t.Logf("drive pageToken: %s", cursors.Drive.PageToken)
 
-	if err := s.SaveCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestLiveSmoke(t *testing.T) {
 	if _, err := poller.PollDrive(s, account, cursors); err != nil {
 		t.Fatalf("drive poll: %v", err)
 	}
-	if err := s.SaveCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 

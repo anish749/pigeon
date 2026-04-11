@@ -28,7 +28,7 @@ const (
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
 // Returns the number of changes observed plus any error. On initial seed
 // it returns the backfilled file count.
-func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.Cursors) (int, error) {
+func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	if cursors.Drive.PageToken == "" {
 		return seedDrive(s, account, cursors)
 	}
@@ -74,7 +74,7 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.Cursor
 // modified within BackfillDays, then saves the cursor. The cursor is acquired
 // BEFORE backfill so that changes made during the (potentially slow) backfill
 // are captured by the first incremental poll.
-func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.Cursors) (int, error) {
+func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	slog.Info("seeding drive with backfill")
 
 	// Get the changes cursor first — backfill can take minutes.
