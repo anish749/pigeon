@@ -2,8 +2,8 @@ package reader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +14,9 @@ import (
 
 // DriveResult holds the output of reading a Drive document or sheet.
 type DriveResult struct {
-	Title    string              // original document title from metadata
-	MimeType string              // doc or sheet
-	Tabs     []DriveTab          // markdown tabs (docs) or CSV sheets
+	Title    string                 // original document title from metadata
+	MimeType string                 // doc or sheet
+	Tabs     []DriveTab             // markdown tabs (docs) or CSV sheets
 	Comments []modelv1.DriveComment // deduplicated comments
 }
 
@@ -28,11 +28,11 @@ type DriveTab struct {
 
 // DriveMeta is the parsed drive-meta-YYYY-MM-DD.json file.
 type DriveMeta struct {
-	FileID       string   `json:"fileId"`
-	MimeType     string   `json:"mimeType"`
-	Title        string   `json:"title"`
-	ModifiedTime string   `json:"modifiedTime"`
-	SyncedAt     string   `json:"syncedAt"`
+	FileID       string `json:"fileId"`
+	MimeType     string `json:"mimeType"`
+	Title        string `json:"title"`
+	ModifiedTime string `json:"modifiedTime"`
+	SyncedAt     string `json:"syncedAt"`
 	Tabs         []struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
@@ -96,10 +96,9 @@ func ReadDrive(dir paths.DriveFileDir) (*DriveResult, error) {
 	// Read and deduplicate comments.
 	comments, err := readDriveComments(dir.CommentsFile().Path())
 	if err != nil {
-		slog.Warn("read drive comments", "dir", dir.Path(), "error", err)
-	} else {
-		result.Comments = comments
+		return nil, fmt.Errorf("read drive comments: %w", err)
 	}
+	result.Comments = comments
 
 	return result, nil
 }
@@ -123,14 +122,20 @@ func FindDriveFile(driveDir paths.DriveDir, selector string) (paths.DriveFileDir
 			continue
 		}
 		name := e.Name()
-		// Try matching against directory name and metadata title.
+		// Try matching against directory name.
 		if strings.Contains(strings.ToLower(name), q) {
 			matches = append(matches, name)
 			continue
 		}
 		// Also try matching against the title in metadata.
 		meta, err := readDriveMeta(filepath.Join(driveDir.Path(), name))
-		if err == nil && strings.Contains(strings.ToLower(meta.Title), q) {
+		if err != nil {
+			// No metadata or unreadable — skip this entry for title matching
+			// but don't fail the whole search. The directory was already tried
+			// by slug above.
+			continue
+		}
+		if strings.Contains(strings.ToLower(meta.Title), q) {
 			matches = append(matches, name)
 		}
 	}
@@ -150,13 +155,13 @@ func FindDriveFile(driveDir paths.DriveDir, selector string) (paths.DriveFileDir
 func readDriveMeta(dir string) (*DriveMeta, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read dir %s: %w", dir, err)
 	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "drive-meta-") && strings.HasSuffix(e.Name(), ".json") {
 			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("read %s: %w", e.Name(), err)
 			}
 			var meta DriveMeta
 			if err := json.Unmarshal(data, &meta); err != nil {
@@ -168,21 +173,24 @@ func readDriveMeta(dir string) (*DriveMeta, error) {
 	return nil, fmt.Errorf("no drive-meta file found in %s", dir)
 }
 
-// readDriveComments parses and deduplicates comments from a comments.jsonl file.
+// readDriveComments parses and deduplicates comments from a comments.jsonl
+// file. Returns nil, nil when the file does not exist (no comments is a
+// normal state for files that have never been commented on).
 func readDriveComments(path string) ([]modelv1.DriveComment, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	var comments []modelv1.DriveComment
+	var errs []error
 	for _, rawLine := range splitLines(data) {
 		line, err := modelv1.Parse(rawLine)
 		if err != nil {
-			slog.Warn("skip unparseable comment line", "error", err)
+			errs = append(errs, fmt.Errorf("parse comment line: %w", err))
 			continue
 		}
 		if line.Type == modelv1.LineComment && line.Comment != nil {
@@ -191,7 +199,7 @@ func readDriveComments(path string) ([]modelv1.DriveComment, error) {
 	}
 
 	// Dedup by ID (keep last occurrence).
-	return dedupComments(comments), nil
+	return dedupComments(comments), errors.Join(errs...)
 }
 
 // dedupComments deduplicates comments by ID, keeping the last occurrence.

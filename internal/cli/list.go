@@ -29,14 +29,26 @@ func newListCmd() *cobra.Command {
   pigeon list --platform=whatsapp --account=+14155551234`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
-			since, _ := cmd.Flags().GetString("since")
-			contextFlag, _ := cmd.Flags().GetString("context")
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return fmt.Errorf("get platform flag: %w", err)
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return fmt.Errorf("get account flag: %w", err)
+			}
+			since, err := cmd.Flags().GetString("since")
+			if err != nil {
+				return fmt.Errorf("get since flag: %w", err)
+			}
+			contextFlag, err := cmd.Flags().GetString("context")
+			if err != nil {
+				return fmt.Errorf("get context flag: %w", err)
+			}
 
 			// Context-aware listing.
 			if contextFlag != "" || hasActiveContext() {
-				return runListContext(contextFlag, since)
+				return runListContext(contextFlag)
 			}
 
 			// Legacy listing (no context).
@@ -66,7 +78,7 @@ func hasActiveContext() bool {
 }
 
 // runListContext lists sources for the active context.
-func runListContext(contextFlag, _ string) error {
+func runListContext(contextFlag string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

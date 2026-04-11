@@ -2,8 +2,8 @@ package reader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,10 +73,11 @@ func ReadLinearIssue(accountDir paths.AccountDir, identifier string) (*LinearIss
 
 	var issues []LinearIssue
 	var comments []LinearComment
+	var errs []error
 	for _, rawLine := range splitLines(data) {
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(rawLine), &raw); err != nil {
-			slog.Warn("skip unparseable linear line", "error", err)
+			errs = append(errs, fmt.Errorf("parse line in %s: %w", identifier, err))
 			continue
 		}
 		lineType, _ := raw["type"].(string)
@@ -84,7 +85,7 @@ func ReadLinearIssue(accountDir paths.AccountDir, identifier string) (*LinearIss
 		case "issue":
 			var issue LinearIssue
 			if err := json.Unmarshal([]byte(rawLine), &issue); err != nil {
-				slog.Warn("skip unparseable issue line", "error", err)
+				errs = append(errs, fmt.Errorf("parse issue line in %s: %w", identifier, err))
 				continue
 			}
 			issue.Raw = raw
@@ -92,7 +93,7 @@ func ReadLinearIssue(accountDir paths.AccountDir, identifier string) (*LinearIss
 		case "comment":
 			var comment LinearComment
 			if err := json.Unmarshal([]byte(rawLine), &comment); err != nil {
-				slog.Warn("skip unparseable comment line", "error", err)
+				errs = append(errs, fmt.Errorf("parse comment line in %s: %w", identifier, err))
 				continue
 			}
 			comment.Raw = raw
@@ -130,7 +131,7 @@ func ReadLinearIssue(accountDir paths.AccountDir, identifier string) (*LinearIss
 	return &LinearIssueResult{
 		Issue:    latestIssue,
 		Comments: comments,
-	}, nil
+	}, errors.Join(errs...)
 }
 
 // ListLinearIssues lists recently updated issues across all issue files.
@@ -145,13 +146,14 @@ func ListLinearIssues(accountDir paths.AccountDir, filters Filters) (*LinearList
 	}
 
 	var issues []LinearIssue
+	var errs []error
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != paths.FileExt {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(issuesDir, e.Name()))
 		if err != nil {
-			slog.Warn("read linear issue file", "file", e.Name(), "error", err)
+			errs = append(errs, fmt.Errorf("read %s: %w", e.Name(), err))
 			continue
 		}
 		// Read the last issue line in the file.
@@ -175,7 +177,7 @@ func ListLinearIssues(accountDir paths.AccountDir, filters Filters) (*LinearList
 		return issues[i].UpdatedAt > issues[j].UpdatedAt
 	})
 
-	return &LinearListResult{Issues: issues}, nil
+	return &LinearListResult{Issues: issues}, errors.Join(errs...)
 }
 
 // FindLinearIssue fuzzy-matches an identifier or title against issue files.
@@ -209,7 +211,7 @@ func FindLinearIssue(accountDir paths.AccountDir, selector string) (string, erro
 		// Also try title match.
 		data, err := os.ReadFile(filepath.Join(issuesDir, e.Name()))
 		if err != nil {
-			continue
+			return "", fmt.Errorf("read %s for title match: %w", e.Name(), err)
 		}
 		issue := lastIssueLine(data)
 		if issue != nil && strings.Contains(strings.ToLower(issue.Title), q) {

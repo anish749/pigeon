@@ -1,9 +1,10 @@
 package reader
 
 import (
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -35,12 +36,14 @@ func ReadCalendar(dir paths.CalendarDir, filters Filters) (*CalendarResult, erro
 		return &CalendarResult{}, nil
 	}
 
-	// Parse all events from selected files.
+	// Parse all events from selected files. Collect parse errors so the
+	// caller knows about partial failures.
 	var allEvents []modelv1.CalendarEvent
+	var errs []error
 	for _, f := range selected {
 		events, err := parseEventFile(f)
 		if err != nil {
-			slog.Warn("parse calendar file", "file", f, "error", err)
+			errs = append(errs, err)
 			continue
 		}
 		allEvents = append(allEvents, events...)
@@ -62,7 +65,7 @@ func ReadCalendar(dir paths.CalendarDir, filters Filters) (*CalendarResult, erro
 		return eventStartTime(live[i]).Before(eventStartTime(live[j]))
 	})
 
-	return &CalendarResult{Events: live}, nil
+	return &CalendarResult{Events: live}, errors.Join(errs...)
 }
 
 // selectCalendarDateFiles picks date files based on filters. Calendar
@@ -78,6 +81,8 @@ func selectCalendarDateFiles(dir string, files []string, filters Filters) []stri
 }
 
 // parseEventFile reads a JSONL file and returns all calendar event lines.
+// Parse errors for individual lines are collected and returned alongside
+// successfully parsed events.
 func parseEventFile(path string) ([]modelv1.CalendarEvent, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -85,17 +90,18 @@ func parseEventFile(path string) ([]modelv1.CalendarEvent, error) {
 	}
 
 	var events []modelv1.CalendarEvent
+	var errs []error
 	for _, rawLine := range splitLines(data) {
 		line, err := modelv1.Parse(rawLine)
 		if err != nil {
-			slog.Warn("skip unparseable line", "file", path, "error", err)
+			errs = append(errs, fmt.Errorf("parse line in %s: %w", filepath.Base(path), err))
 			continue
 		}
 		if line.Type == modelv1.LineEvent && line.Event != nil {
 			events = append(events, *line.Event)
 		}
 	}
-	return events, nil
+	return events, errors.Join(errs...)
 }
 
 // dedupEvents deduplicates events by ID, keeping the last occurrence.
