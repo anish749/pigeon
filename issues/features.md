@@ -26,11 +26,7 @@ is a first-class platform.
 
 Observable issues:
 
-- **`pigeon` root help omits GWS.** `internal/cli/root.go`'s `Long` description
-  walks through WhatsApp and Slack under `WORKFLOW — FIRST-TIME SETUP`, and the
-  example `config.yaml` in the `CONFIG` section shows only `whatsapp:` and
-  `slack:` blocks. `setup-gws` is listed in the Setup group but never
-  documented alongside the others.
+- ~~**`pigeon` root help omits GWS.**~~ Fixed in #163.
 - **Prompt libraries are inconsistent.** `setup-slack` uses `bufio.NewReader`
   with hand-rolled `fmt.Print` prompts, `setup-whatsapp` drives its own
   interactive flow around QR pairing, `setup-gws` uses `promptui`. Three

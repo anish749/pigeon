@@ -35,8 +35,8 @@ func newRootCmd(version string) *cobra.Command {
 		Short: "Messaging data CLI for AI agents",
 		Long: `pigeon — messaging data CLI for AI agents
 
-Reads locally-stored messaging data (WhatsApp, Slack, etc.) and provides
-listeners that receive real-time messages and save them as JSONL files.
+Reads locally-stored messaging and workspace data (WhatsApp, Slack,
+Google Workspace) and provides listeners/pollers that sync in real-time.
 
 ─────────────────────────────────────────────────────────
 
@@ -61,6 +61,10 @@ CONFIG
         app_token: "xapp-1-..."
         bot_token: "xoxb-..."
 
+    gws:
+      - account: "work"
+        email: "you@company.com"
+
 ─────────────────────────────────────────────────────────
 
 DATA LAYOUT
@@ -80,23 +84,34 @@ DATA LAYOUT
     │   │   │       └── 1711568940.789012.jsonl
     │   │   └── @dave/                     # DM
     │   │       └── 2026-03-16.jsonl
+    ├── gws/
+    │   ├── user-at-company-com/           # account (slugified email)
+    │   │   ├── gmail/
+    │   │   │   └── 2026-03-16.jsonl      # emails by date
+    │   │   ├── gdrive/
+    │   │   │   └── my-doc-fileId/        # one dir per Doc/Sheet
+    │   │   │       ├── Tab1.md           # doc tab as markdown
+    │   │   │       ├── Sheet1.csv        # sheet as CSV
+    │   │   │       └── comments.jsonl    # comment threads
+    │   │   └── gcalendar/
+    │   │       └── primary/
+    │   │           └── 2026-03-16.jsonl  # events by start date
 
-  Hierarchy: platform / account / conversation / YYYY-MM-DD.jsonl
+  Messaging: platform / account / conversation / YYYY-MM-DD.jsonl
+  GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
-  JSON fields:
-    type      event type: "msg", "react", "unreact", "edit", "delete", "separator"
-    ts        timestamp (ISO 8601, e.g. "2026-03-16T09:15:02Z")
-    id        message ID (on msg events)
-    msg       target message ID (on react/edit/delete events)
-    sender    display name
-    from      platform user ID (stable identity)
-    text      message body (on msg/edit events)
-    via       message pathway: "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
-    emoji     reaction emoji (on react/unreact events)
-    attach    attachments array, each with "id" and "type" (MIME)
-    reply     true if thread reply (on msg events)
-    replyTo   quoted message ID (on msg events, WhatsApp quote-reply)
+  All JSONL lines have a "type" field — use it with jq to filter:
+    Messaging: "msg", "react", "unreact", "edit", "delete", "separator"
+    GWS:       "email", "comment", "event"
+
+  Common fields (messaging):
+    ts, id, sender, from, text, via, emoji, attach, reply, replyTo
+
+  Common fields (email):
+    id, threadId, ts, from, fromName, to, subject, text, labels
+
+  Events and comments store the full Google API response as the line.
 
 ─────────────────────────────────────────────────────────
 
@@ -106,8 +121,9 @@ DIRECT FILE ACCESS — rg and jq
   pigeon glob and pigeon grep wrap rg with --since filtering and
   thread awareness, but you can also use rg and jq directly:
 
-    rg "deploy" ~/.local/share/pigeon/                                # all messages mentioning "deploy"
+    rg "deploy" ~/.local/share/pigeon/                                # all data mentioning "deploy"
     rg "deploy" ~/.local/share/pigeon/slack/acme-corp/                # scoped to workspace
+    rg "Q2 planning" ~/.local/share/pigeon/gws/                      # search emails, docs, events
 
   Pipe to jq for structured queries:
 
@@ -118,7 +134,8 @@ DIRECT FILE ACCESS — rg and jq
   jq on a single file (no rg needed):
 
     jq 'select(.type == "msg")' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
-    jq -r 'select(.sender == "Alice") | .text' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
+    jq -r 'select(.type == "email") | .subject' ~/.local/share/pigeon/gws/*/gmail/2026-03-16.jsonl
+    jq -r 'select(.type == "event") | .summary' ~/.local/share/pigeon/gws/*/gcalendar/*/2026-03-16.jsonl
 
 ─────────────────────────────────────────────────────────
 
@@ -141,6 +158,12 @@ WORKFLOW — FIRST-TIME SETUP
     8. pigeon daemon start                # starts listener in background
 
   Add more workspaces by running pigeon setup-slack again.
+
+  Google Workspace (Gmail, Docs, Sheets, Calendar):
+
+    1. gws auth login                       # authenticate with Google
+    2. pigeon setup-gws                     # register the account
+    3. pigeon daemon start                  # starts poller in background
 
 ─────────────────────────────────────────────────────────
 
@@ -170,6 +193,7 @@ WORKFLOW — READING MESSAGES
     pigeon grep -q "deploy" -l              # file paths only
     pigeon grep -q "deploy" -c              # match counts per file
     pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
+    pigeon grep -q "Q2" --platform=gws --since=30d
 
 ─────────────────────────────────────────────────────────
 
