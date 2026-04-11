@@ -184,32 +184,32 @@ WORKFLOW — FIRST-TIME SETUP
 
 ─────────────────────────────────────────────────────────
 
-WORKFLOW — READING MESSAGES
+WORKFLOW — READING DATA
 
   Discover what's available:
 
     pigeon list                             # all platforms and accounts
-    pigeon list --platform=whatsapp         # accounts in a platform
+    pigeon list --context=work              # sources in a context
     pigeon list --since=2h                  # conversations with recent activity
     pigeon glob --since=7d                  # find data files in a time window
 
-  Read messages from a conversation:
+  Read data from any source:
 
-    pigeon read --platform=whatsapp --account=+14155551234 --contact=Alice --last=20
-    pigeon read --platform=slack --account=acme-corp --contact=#engineering --since=2h
-    pigeon read --platform=whatsapp --account=+14155551234 --contact=Bob --date=2026-03-16
+    pigeon read gmail --since=7d            # emails from last 7 days
+    pigeon read calendar                    # today's events
+    pigeon read drive "Q2 Planning"         # document content + comments
+    pigeon read slack #engineering --since=2h
+    pigeon read whatsapp Alice --last=20
+    pigeon read linear TRU-253             # issue + comments
 
-    Modes: --last=N (last N messages), --since=DURATION (e.g. 30m, 2h, 7d),
-           --date=YYYY-MM-DD (specific day). Default: today's messages.
+    Sources: gmail, calendar, drive, slack, whatsapp, linear
+    Filters: --since=DURATION, --date=YYYY-MM-DD, --last=N
+    Context: --context=NAME or PIGEON_CONTEXT env var
 
-  Search across conversations (requires ripgrep):
+  Search across sources (requires ripgrep):
 
     pigeon grep -q "meeting" --since=24h
     pigeon grep -q "deploy" --platform=slack
-    pigeon grep -q "bug" -p slack -a acme-corp --since=7d -C 3
-    pigeon grep -q "deploy" -l              # file paths only
-    pigeon grep -q "deploy" -c              # match counts per file
-    pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
     pigeon grep -q "Q2" --platform=gws --since=30d
 
 ─────────────────────────────────────────────────────────

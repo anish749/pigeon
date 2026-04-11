@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -9,7 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/pctx"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
@@ -17,38 +20,88 @@ import (
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "List platforms, accounts, or conversations",
+		Short:   "List sources and conversations",
 		GroupID: groupReading,
 		Example: `  pigeon list
-  pigeon list --platform=slack
-  pigeon list --platform=whatsapp --account=+14155551234
+  pigeon list --context=work
   pigeon list --since=2h
-  pigeon list --since=7d --platform=slack`,
+  pigeon list --platform=slack
+  pigeon list --platform=whatsapp --account=+14155551234`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, err := cmd.Flags().GetString("platform")
-			if err != nil {
-				return fmt.Errorf("get platform flag: %w", err)
-			}
-			account, err := cmd.Flags().GetString("account")
-			if err != nil {
-				return fmt.Errorf("get account flag: %w", err)
-			}
-			since, err := cmd.Flags().GetString("since")
-			if err != nil {
-				return fmt.Errorf("get since flag: %w", err)
+			platform, _ := cmd.Flags().GetString("platform")
+			account, _ := cmd.Flags().GetString("account")
+			since, _ := cmd.Flags().GetString("since")
+			contextFlag, _ := cmd.Flags().GetString("context")
+
+			// Context-aware listing.
+			if contextFlag != "" || hasActiveContext() {
+				return runListContext(contextFlag, since)
 			}
 
+			// Legacy listing (no context).
 			if since != "" {
 				return runListSince(platform, account, since)
 			}
 			return commands.RunList(platform, account)
 		},
 	}
-	cmd.Flags().StringP("platform", "p", "", "filter by platform (e.g. whatsapp, slack)")
-	cmd.Flags().StringP("account", "a", "", "filter by account (e.g. +14155551234, acme-corp)")
-	cmd.Flags().String("since", "", "only show conversations with recent activity (e.g. 2h, 7d)")
+	cmd.Flags().StringP("platform", "p", "", "filter by platform")
+	cmd.Flags().StringP("account", "a", "", "filter by account")
+	cmd.Flags().String("since", "", "only show sources with recent activity (e.g. 2h, 7d)")
+	cmd.Flags().String("context", "", "override active context")
 	return cmd
+}
+
+// hasActiveContext checks if a context is active via env or config default.
+func hasActiveContext() bool {
+	if os.Getenv("PIGEON_CONTEXT") != "" {
+		return true
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	return cfg.DefaultContext != ""
+}
+
+// runListContext lists sources for the active context.
+func runListContext(contextFlag, _ string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	ctxName := contextFlag
+	if ctxName == "" {
+		ctxName = os.Getenv("PIGEON_CONTEXT")
+	}
+	if ctxName == "" {
+		ctxName = cfg.DefaultContext
+	}
+	if ctxName == "" {
+		return fmt.Errorf("no context active — use --context or set default_context in config")
+	}
+
+	ctx, ok := cfg.Contexts[ctxName]
+	if !ok {
+		return fmt.Errorf("unknown context %q", ctxName)
+	}
+
+	fmt.Printf("Sources for %s:\n\n", ctxName)
+
+	// List each platform's sources in the context.
+	for _, src := range pctx.AllSources {
+		platform := src.ContextKey()
+		identifiers := ctx.Accounts(platform)
+		if len(identifiers) == 0 {
+			continue
+		}
+		for _, id := range identifiers {
+			fmt.Printf("  %-36s %s\n", src, id)
+		}
+	}
+	return nil
 }
 
 // runListSince uses read.Glob to find active files, then extracts unique
@@ -110,12 +163,6 @@ func extractConversations(files []string, root string) []activeConv {
 		parts := strings.Split(rel, string(filepath.Separator))
 		isThread := paths.IsThreadFile(f)
 		if isThread {
-			// Thread files live at <conv>/threads/<ts>.jsonl. Strip the
-			// "threads" component so the conversation dir is parts[2].
-			// Only strip when the file is actually a thread file — a
-			// conversation literally named "threads" has its own
-			// YYYY-MM-DD.jsonl children which must not lose the
-			// component.
 			for i, p := range parts {
 				if p == paths.ThreadsSubdir {
 					parts = append(parts[:i], parts[i+1:]...)
