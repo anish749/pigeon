@@ -125,9 +125,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	}
 
 	// Push identity signals from Slack user profiles.
-	if id != nil {
-		go observeSlackUsers(ctx, userAPI, sl.Workspace, id)
-	}
+	go observeSlackUsers(ctx, userAPI, sl.Workspace, id)
 
 	var userName string
 	var userID string

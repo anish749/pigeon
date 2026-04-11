@@ -102,7 +102,7 @@ func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []
 		}
 
 		// Collect identity signals from email participants.
-		if id != nil && email.From != "" {
+		if email.From != "" {
 			signals = append(signals, identity.Signal{
 				Email: email.From,
 				Name:  email.FromName,
@@ -116,7 +116,7 @@ func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []
 	}
 
 	// Push identity signals as a batch after processing all messages.
-	if id != nil && len(signals) > 0 {
+	if len(signals) > 0 {
 		if err := id.ObserveBatch(signals); err != nil {
 			slog.Warn("identity: gmail signal batch failed", "error", err)
 		}

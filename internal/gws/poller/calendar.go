@@ -46,7 +46,7 @@ func PollCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWS
 	// expanded_until is within ExpansionThresholdDays of now. Window
 	// expansion writes events to disk but is not an observed "change"
 	// from Google's perspective, so we don't add it to the changes count.
-	if err := maybeExpandWindow(s, account, cur, calID); err != nil {
+	if err := maybeExpandWindow(s, account, cur, calID, id); err != nil {
 		return changes, err
 	}
 	return changes, nil
@@ -136,7 +136,7 @@ func syncCalendar(s *store.FSStore, account paths.AccountDir, cur *store.GWSCale
 
 // maybeExpandWindow checks if the expansion window needs extending and, if so,
 // fetches new instances for all known recurring events.
-func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string) error {
+func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string, id *identity.Service) error {
 	if cur.ExpandedUntil == "" || len(cur.RecurringEvents) == 0 {
 		return nil
 	}
@@ -165,7 +165,7 @@ func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GW
 			errs = append(errs, fmt.Errorf("expand window %s: %w", recurID, err))
 			continue
 		}
-		errs = append(errs, writeEvents(s, account, calID, instances, nil)...)
+		errs = append(errs, writeEvents(s, account, calID, instances, id)...)
 	}
 
 	cur.ExpandedUntil = newTimeMax
@@ -185,19 +185,17 @@ func writeEvents(s *store.FSStore, account paths.AccountDir, calID string, event
 		}
 
 		// Collect attendee identity signals.
-		if id != nil {
-			for _, att := range ev.Runtime.Attendees {
-				if att.Email != "" {
-					signals = append(signals, identity.Signal{
-						Email: att.Email,
-						Name:  att.DisplayName,
-					})
-				}
+		for _, att := range ev.Runtime.Attendees {
+			if att.Email != "" {
+				signals = append(signals, identity.Signal{
+					Email: att.Email,
+					Name:  att.DisplayName,
+				})
 			}
 		}
 	}
 
-	if id != nil && len(signals) > 0 {
+	if len(signals) > 0 {
 		if err := id.ObserveBatch(signals); err != nil {
 			slog.Warn("identity: calendar signal batch failed", "error", err)
 		}

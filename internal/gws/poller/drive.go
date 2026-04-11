@@ -315,20 +315,18 @@ func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, 
 		lines = append(lines, modelv1.Line{Type: modelv1.LineComment, Comment: c})
 
 		// Collect identity signals from comment authors and reply authors.
-		if id != nil && c.Runtime.Author != nil && c.Runtime.Author.EmailAddress != "" {
+		if c.Runtime.Author != nil && c.Runtime.Author.EmailAddress != "" {
 			signals = append(signals, identity.Signal{
 				Email: c.Runtime.Author.EmailAddress,
 				Name:  c.Runtime.Author.DisplayName,
 			})
 		}
-		if id != nil {
-			for _, r := range c.Runtime.Replies {
-				if r.Author != nil && r.Author.EmailAddress != "" {
-					signals = append(signals, identity.Signal{
-						Email: r.Author.EmailAddress,
-						Name:  r.Author.DisplayName,
-					})
-				}
+		for _, r := range c.Runtime.Replies {
+			if r.Author != nil && r.Author.EmailAddress != "" {
+				signals = append(signals, identity.Signal{
+					Email: r.Author.EmailAddress,
+					Name:  r.Author.DisplayName,
+				})
 			}
 		}
 	}
@@ -337,7 +335,7 @@ func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, 
 		return fmt.Errorf("write comments for %s: %w", fileID, err)
 	}
 
-	if id != nil && len(signals) > 0 {
+	if len(signals) > 0 {
 		if err := id.ObserveBatch(signals); err != nil {
 			slog.Warn("identity: drive comment signal batch failed", "error", err)
 		}

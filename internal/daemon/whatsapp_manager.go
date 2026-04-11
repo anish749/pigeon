@@ -136,9 +136,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 	}
 
 	// Push identity signals from WhatsApp contacts.
-	if m.identity != nil {
-		go observeWhatsAppContacts(acctCtx, client, m.identity)
-	}
+	go observeWhatsAppContacts(acctCtx, client, m.identity)
 
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
