@@ -55,6 +55,11 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
 }
 
+// Identity returns an IdentityDir for the given context name.
+func (r DataRoot) Identity(context string) IdentityDir {
+	return IdentityDir{root: r, context: context}
+}
+
 // AccountFor returns an AccountDir from an account.Account.
 func (r DataRoot) AccountFor(acct account.Account) AccountDir {
 	return r.Platform(acct.Platform).AccountFromSlug(acct.NameSlug())
@@ -166,4 +171,20 @@ func (c ConversationDir) ThreadsDir() string {
 // ThreadFile returns the path to a specific thread file.
 func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
+}
+
+// IdentityDir represents the identity directory for a context: <base>/identity/<context>/
+type IdentityDir struct {
+	root    DataRoot
+	context string
+}
+
+// Path returns the identity directory path.
+func (i IdentityDir) Path() string {
+	return filepath.Join(i.root.base, "identity", i.context)
+}
+
+// PeopleFile returns the path to the people.jsonl file for this context.
+func (i IdentityDir) PeopleFile() string {
+	return filepath.Join(i.Path(), "people.jsonl")
 }

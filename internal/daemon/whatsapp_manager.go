@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/identity"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/walog"
@@ -27,6 +28,7 @@ type WhatsAppManager struct {
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
 	store     store.Store
+	identity  *identity.Service
 	running   map[string]*runningWAAccount // account → state
 }
 
@@ -37,11 +39,12 @@ type runningWAAccount struct {
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
 // the given API server. onMessage is called when a message is received (may be nil).
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc) *WhatsAppManager {
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,
 		onMessage: onMessage,
 		store:     s,
+		identity:  id,
 		running:   make(map[string]*runningWAAccount),
 	}
 }
@@ -132,6 +135,11 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 		return
 	}
 
+	// Push identity signals from WhatsApp contacts.
+	if m.identity != nil {
+		go observeWhatsAppContacts(acctCtx, client, m.identity)
+	}
+
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
 		Acct:     acct,
@@ -159,4 +167,44 @@ func ConnectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsm
 	}
 
 	return whatsmeow.NewClient(device, walog.New(ctx, "whatsapp")), nil
+}
+
+// observeWhatsAppContacts loads contacts from the whatsmeow store and pushes
+// identity signals. Runs in a goroutine so it doesn't block listener startup.
+func observeWhatsAppContacts(ctx context.Context, client *whatsmeow.Client, id *identity.Service) {
+	contacts, err := client.Store.Contacts.GetAllContacts(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "identity: failed to load WhatsApp contacts", "error", err)
+		return
+	}
+
+	signals := make([]identity.Signal, 0, len(contacts))
+	for jid, info := range contacts {
+		if jid.Server != types.DefaultUserServer {
+			continue
+		}
+		phone := "+" + jid.User
+
+		name := info.FullName
+		if name == "" {
+			name = info.PushName
+		}
+		if name == "" {
+			name = info.BusinessName
+		}
+		if name == "" {
+			continue
+		}
+
+		signals = append(signals, identity.Signal{
+			Phone: phone,
+			Name:  name,
+		})
+	}
+
+	if err := id.ObserveBatch(signals); err != nil {
+		slog.ErrorContext(ctx, "identity: failed to observe WhatsApp contacts", "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "identity: observed WhatsApp contacts", "count", len(signals))
 }

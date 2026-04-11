@@ -11,6 +11,7 @@ import (
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/identity"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -22,6 +23,7 @@ type SlackManager struct {
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
 	store     store.Store
+	identity  *identity.Service
 	running   map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -32,11 +34,12 @@ type runningWorkspace struct {
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onMessage is called when a routable message arrives
 // (DMs, MPDMs, private channels, bot mentions). May be nil.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *SlackManager {
 	return &SlackManager{
 		apiServer: apiServer,
 		onMessage: onMessage,
 		store:     s,
+		identity:  id,
 		running:   make(map[string]*runningWorkspace),
 	}
 }
@@ -96,7 +99,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage)
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.identity)
 	if sender == nil {
 		cancel()
 		return
@@ -108,7 +111,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
@@ -119,6 +122,11 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)
+	}
+
+	// Push identity signals from Slack user profiles.
+	if id != nil {
+		go observeSlackUsers(ctx, userAPI, sl.Workspace, id)
 	}
 
 	var userName string
@@ -166,4 +174,46 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		UserName:  userName,
 		UserID:    userID,
 	}
+}
+
+// observeSlackUsers fetches Slack user profiles and pushes identity signals.
+// Runs in a goroutine so it doesn't block listener startup.
+func observeSlackUsers(ctx context.Context, api *goslack.Client, workspace string, id *identity.Service) {
+	users, err := api.GetUsersContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "identity: failed to fetch Slack users", "workspace", workspace, "error", err)
+		return
+	}
+
+	signals := make([]identity.Signal, 0, len(users))
+	for _, u := range users {
+		if u.Deleted || u.IsBot {
+			continue
+		}
+
+		name := u.Profile.DisplayName
+		if name == "" {
+			name = u.RealName
+		}
+		if name == "" {
+			name = u.Name
+		}
+
+		sig := identity.Signal{
+			Email: u.Profile.Email,
+			Name:  name,
+			Slack: &identity.SlackIdentity{
+				Workspace: workspace,
+				ID:        u.ID,
+				Mention:   name,
+			},
+		}
+		signals = append(signals, sig)
+	}
+
+	if err := id.ObserveBatch(signals); err != nil {
+		slog.ErrorContext(ctx, "identity: failed to observe Slack users", "workspace", workspace, "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "identity: observed Slack users", "workspace", workspace, "count", len(signals))
 }
