@@ -19,12 +19,6 @@ The whatsmeow library may support requesting a history re-sync via a specific pr
 
 **Files affected:** `internal/listener/whatsapp/listener.go`, `internal/listener/whatsapp/historysync.go`, `internal/daemon/whatsapp_manager.go`.
 
-## Maintain() detects thread files by path substring
-
-`FSStore.Maintain()` distinguishes thread files from date files using `strings.Contains(path, "/threads/")`. This is fragile — if a conversation name ever contained "threads" as a path segment (e.g. a Slack channel named `threads`), the path would be `…/threads/2026-04-06.txt` and a date file inside it would be misidentified as a thread file and compacted with `CompactThread` instead of `Compact`.
-
-**Files affected:** `internal/store/storev1/fs.go` (`Maintain`).
-
 ## Implement maintenance in the daemon
 
 This needs to run per account because the in case of WhatsApp the daemon may hold a setup lock, like the db lock is n needed.
@@ -38,12 +32,6 @@ When someone mentions inside a thread uh or I don't know if it in case of other 
 ## Send reactions to Claude Code sessions
 
 ## Dedup messages by last message id
-
-## GWS: no historical backfill on first run
-
-GWS pollers seed their cursors to "now" and only capture future changes. Unlike Slack (which backfills 90 days of history on first run), a fresh GWS setup starts with an empty view — existing emails, docs, sheets, and calendar events are not synced.
-
-**Files affected:** `internal/gws/poller/gmail.go`, `internal/gws/poller/calendar.go`, `internal/gws/poller/drive.go`, `internal/gws/calendar/client.go`.
 
 ## Daemon has no restart/recovery for crashed accounts
 
@@ -59,16 +47,6 @@ The Slack socket mode library handles network-level reconnection internally, but
 
 **Files affected:** `internal/daemon/slack_manager.go`, `internal/daemon/whatsapp_manager.go`, `internal/daemon/gws_manager.go`.
 
-## GWS Calendar: recurring events not expanded
-
-Sync tokens require `singleEvents=false` (the default), which returns parent recurring events with RRULEs instead of expanded individual instances. The `EventLine` model has no RRULE field, so a weekly standup is stored as a single event with just the first occurrence's start date. All future instances are invisible.
-
-This means: if someone has a recurring "Team Standup" every Monday, pigeon stores one event for the series but has no way to know it occurs every Monday. Querying "what meetings do I have next Tuesday" would miss it.
-
-Related edge cases that also need handling: modified instances (single occurrence rescheduled), cancelled instances (single occurrence deleted), and series cancellation (all instances removed).
-
-**Files affected:** `internal/gws/model/event.go`, `internal/gws/calendar/client.go`, `internal/gws/poller/calendar.go`.
-
 ## GWS Drive: comments re-fetched and duplicated on every poll
 
 `storeComments` fetches ALL comments for a file on every Drive change, not just new ones. Each comment and reply is appended to `comments.jsonl` unconditionally. If a doc has 200 comments and someone fixes a typo, all 200 comments are appended again as duplicates.
@@ -81,25 +59,26 @@ Dedup-on-read (keep last by ID) means the data is still correct, but the file gr
 
 When Pigeon sends a Slack message, @mentions are not resolved — they appear as raw text instead of being converted to Slack's mention format. Recipients see plain-text "@name" that doesn't ping or link to the mentioned user.
 
-## GWS Drive: removed files not cleaned up from disk
-
-When a Drive file is deleted or trashed, `changes.list` reports it with `removed=true`. The poller logs this at debug level and skips the file, but the local directory (`gdrive/{slug}-{fileID}/`) with its `.md`, `.csv`, `comments.jsonl`, and `meta.json` remains on disk indefinitely.
-
-During backfill, `files.list` uses `trashed=false` so trashed files are never fetched. But files that were backfilled and later deleted will leave stale directories behind.
-
 ## GWS: no maintenance/compaction for JSONL files
 
-The protocol spec describes dedup and compaction for GWS JSONL files (emails, comments, calendar events), and `gwsstore.Dedup` exists for read-time dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted.
+The protocol spec describes dedup and compaction for GWS JSONL files (emails, comments, calendar events), and `compact.DedupGWS` exists for dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted.
 
 Combined with the comments re-fetch bug above, this means `comments.jsonl` files grow without bound. Gmail and calendar JSONL files also accumulate duplicate event updates that are never cleaned up.
 
-**Files affected:** `internal/gws/gwsstore/jsonl.go`, `internal/gws/poller/`.
+This also needs to apply pending email deletes (`.pending-email-deletes`) as part of the gmail maintenance pass.
+
+**Files affected:** `internal/store/modelv1/compact/compact.go`, `internal/store/fs.go`.
+
+## GWS Gmail: email deletes should be applied during maintenance
+
+The poller writes deleted message IDs to `.pending-email-deletes` (#159). Maintenance needs to read this file, scan gmail date files, remove matching email lines, and delete the pending file. `FSStore.AppendPendingDelete` exists for the write side; the apply side is not yet implemented.
+
+**Files affected:** `internal/store/fs.go`.
 
 ## Validate date where calendar events are attributed
 
 Right now we used a start date. This can be particularly problematic for multi day events.
 We need to validate how exactly this works in practice.
-
 
 ## Setup commands need a revamp
 
@@ -244,10 +223,38 @@ The effect: even when GWS pollers are running and actively producing data,
 `pigeon daemon status` whether a GWS account is running, stopped, or
 crashed.
 
-## Separate out ConvMeta
-// MetaFile returns the path to the conversation's .meta.json sidecar.
-func (c ConversationDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
-}
-Rename the type here to be ConvMetaFile.
-use a constant for the .meta.json file name.
+---
+
+# Fixed
+
+## ~~Maintain() detects thread files by path substring~~ — fixed in #153
+
+Thread file detection now uses `paths.IsThreadFile` which checks filename format (date vs timestamp), not parent directory name. A conversation literally named `threads` is no longer misidentified.
+
+## ~~Separate out ConvMeta~~ — fixed in #151
+
+`MetaFile` type renamed to `ConvMetaFile`. `.meta.json` string literal replaced with `ConvMetaFilename` constant.
+
+## ~~GWS Drive: removed files not cleaned up from disk~~ — fixed in #154
+
+`FSStore.RemoveDriveFile` scans the gdrive directory by fileID and deletes matching local directories when Drive reports a file as removed.
+
+## ~~GWS: no historical backfill on first run~~ — fixed in #135, #136, #137
+
+Gmail, Calendar, and Drive pollers now backfill on first run.
+
+## ~~GWS Calendar: recurring events not expanded~~ — fixed in #135
+
+Calendar backfill expands recurring events.
+
+## ~~GWS Gmail: email-delete tombstones~~ — fixed in #159
+
+Tombstone (`email-delete`) lines replaced with a pending-deletes file. The poller writes deleted IDs to `.pending-email-deletes`; maintenance is responsible for applying them. `EmailDeleteLine` type removed.
+
+## ~~GWS Drive: removed files not cleaned up~~ — rejected approach in #152, fixed in #154
+
+#152 was rejected because it put filesystem IO (`os.ReadDir`, `os.RemoveAll`) in the `paths` package and had the poller doing storage bookkeeping directly. #154 moved the logic to `FSStore.RemoveDriveFile` in the store layer.
+
+## ~~GWS Gmail: hard delete at poll time~~ — rejected in #156
+
+Rejected: rewriting date files during sync is too expensive — the poller doesn't know the email's date, so it would scan all date files on every deletion. The correct design is to write deleted IDs to a pending-deletes file during sync and let maintenance handle the actual removal (#159).
