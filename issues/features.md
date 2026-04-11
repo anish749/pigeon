@@ -18,19 +18,36 @@ Handle incoming WhatsApp message edits and deletes. WhatsApp supports:
 
 The Slack listener already handles both (`message_changed` and `message_deleted` subtypes). The WhatsApp listener should follow the same pattern: extract the event, construct an `EditLine` or `DeleteLine`, and append to the correct date file.
 
-## GWS: `pigeon setup-gws` command
+## Revamp setup / onboarding
 
-Need an interactive setup command (like `setup-slack` and `setup-whatsapp`) that:
-- Authenticates with the `gws` CLI (or verifies existing auth)
-- Prompts for account display name and email
-- Writes a `GWSConfig` entry to the config file via `config.AddGWS`
-- Triggers daemon to pick up the new account via config watch
+The three setup commands (`setup-whatsapp`, `setup-slack`, `setup-gws`) have
+diverged in shape and UX, and the root help text is out of date now that GWS
+is a first-class platform.
 
-Currently you have to manually edit `~/.config/pigeon/config.yaml` to add a GWS account.
+Observable issues:
 
-## GWS: historical backfill on first run
+- **`pigeon` root help omits GWS.** `internal/cli/root.go`'s `Long` description
+  walks through WhatsApp and Slack under `WORKFLOW — FIRST-TIME SETUP`, and the
+  example `config.yaml` in the `CONFIG` section shows only `whatsapp:` and
+  `slack:` blocks. `setup-gws` is listed in the Setup group but never
+  documented alongside the others.
+- **Prompt libraries are inconsistent.** `setup-slack` uses `bufio.NewReader`
+  with hand-rolled `fmt.Print` prompts, `setup-whatsapp` drives its own
+  interactive flow around QR pairing, `setup-gws` uses `promptui`. Three
+  setup commands, three prompt styles.
+- **Output shapes diverge.** Each command has its own header banner
+  ("Slack Workspace Setup\n======"), its own confirmation footer, and its
+  own tone. There is no shared scaffolding for "detect state → prompt → save
+  → tell the user what to do next."
+- **Auth models are very different but that difference isn't surfaced.**
+  `setup-slack` runs an OAuth server in-process. `setup-whatsapp` pairs a
+  device via QR. `setup-gws` is a thin config writer because `gws` owns auth
+  externally. The help text doesn't prepare users for any of this, and the
+  commands themselves don't explain where auth lives relative to pigeon.
 
-GWS pollers seed cursors to "now" and only capture future changes. Need backfill support similar to Slack's 90-day history sync. See bugs.md for details and per-service approach. Rate limits need research before implementing.
+**Files affected:** `internal/cli/root.go`, `internal/cli/setup.go`,
+`internal/commands/setup_slack.go`, `internal/commands/setup_whatsapp.go`,
+`internal/commands/setup_gws.go`.
 
 ## GWS: `pigeon read` semantics
 

@@ -19,12 +19,6 @@ The whatsmeow library may support requesting a history re-sync via a specific pr
 
 **Files affected:** `internal/listener/whatsapp/listener.go`, `internal/listener/whatsapp/historysync.go`, `internal/daemon/whatsapp_manager.go`.
 
-## Maintain() detects thread files by path substring
-
-`FSStore.Maintain()` distinguishes thread files from date files using `strings.Contains(path, "/threads/")`. This is fragile — if a conversation name ever contained "threads" as a path segment (e.g. a Slack channel named `threads`), the path would be `…/threads/2026-04-06.txt` and a date file inside it would be misidentified as a thread file and compacted with `CompactThread` instead of `Compact`.
-
-**Files affected:** `internal/store/storev1/fs.go` (`Maintain`).
-
 ## Implement maintenance in the daemon
 
 This needs to run per account because the in case of WhatsApp the daemon may hold a setup lock, like the db lock is n needed.
@@ -38,12 +32,6 @@ When someone mentions inside a thread uh or I don't know if it in case of other 
 ## Send reactions to Claude Code sessions
 
 ## Dedup messages by last message id
-
-## GWS: no historical backfill on first run
-
-GWS pollers seed their cursors to "now" and only capture future changes. Unlike Slack (which backfills 90 days of history on first run), a fresh GWS setup starts with an empty view — existing emails, docs, sheets, and calendar events are not synced.
-
-**Files affected:** `internal/gws/poller/gmail.go`, `internal/gws/poller/calendar.go`, `internal/gws/poller/drive.go`, `internal/gws/calendar/client.go`.
 
 ## Daemon has no restart/recovery for crashed accounts
 
@@ -59,78 +47,29 @@ The Slack socket mode library handles network-level reconnection internally, but
 
 **Files affected:** `internal/daemon/slack_manager.go`, `internal/daemon/whatsapp_manager.go`, `internal/daemon/gws_manager.go`.
 
-## GWS Calendar: recurring events not expanded
-
-Sync tokens require `singleEvents=false` (the default), which returns parent recurring events with RRULEs instead of expanded individual instances. The `EventLine` model has no RRULE field, so a weekly standup is stored as a single event with just the first occurrence's start date. All future instances are invisible.
-
-This means: if someone has a recurring "Team Standup" every Monday, pigeon stores one event for the series but has no way to know it occurs every Monday. Querying "what meetings do I have next Tuesday" would miss it.
-
-Related edge cases that also need handling: modified instances (single occurrence rescheduled), cancelled instances (single occurrence deleted), and series cancellation (all instances removed).
-
-**Files affected:** `internal/gws/model/event.go`, `internal/gws/calendar/client.go`, `internal/gws/poller/calendar.go`.
-
-## GWS Drive: comments re-fetched and duplicated on every poll
-
-`storeComments` fetches ALL comments for a file on every Drive change, not just new ones. Each comment and reply is appended to `comments.jsonl` unconditionally. If a doc has 200 comments and someone fixes a typo, all 200 comments are appended again as duplicates.
-
-Dedup-on-read (keep last by ID) means the data is still correct, but the file grows unboundedly — every edit multiplies the comment count in the JSONL. A doc with 200 comments edited 50 times produces 10,000 lines where 200 are unique.
-
-**Files affected:** `internal/gws/poller/drive.go` (`storeComments`), `internal/gws/drive/client.go` (`ListComments`).
-
 ## Slack send does not resolve mentions
 
 When Pigeon sends a Slack message, @mentions are not resolved — they appear as raw text instead of being converted to Slack's mention format. Recipients see plain-text "@name" that doesn't ping or link to the mentioned user.
 
-## GWS Drive: removed files not cleaned up from disk
-
-When a Drive file is deleted or trashed, `changes.list` reports it with `removed=true`. The poller logs this at debug level and skips the file, but the local directory (`gdrive/{slug}-{fileID}/`) with its `.md`, `.csv`, `comments.jsonl`, and `meta.json` remains on disk indefinitely.
-
-During backfill, `files.list` uses `trashed=false` so trashed files are never fetched. But files that were backfilled and later deleted will leave stale directories behind.
-
 ## GWS: no maintenance/compaction for JSONL files
 
-The protocol spec describes dedup and compaction for GWS JSONL files (emails, comments, calendar events), and `gwsstore.Dedup` exists for read-time dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted.
+The protocol spec describes dedup and compaction for GWS JSONL files (emails, calendar events), and `compact.DedupGWS` exists for dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted. Gmail and calendar JSONL files accumulate duplicate event updates that are never cleaned up.
 
-Combined with the comments re-fetch bug above, this means `comments.jsonl` files grow without bound. Gmail and calendar JSONL files also accumulate duplicate event updates that are never cleaned up.
+This also needs to apply pending email deletes (`.pending-email-deletes`) as part of the gmail maintenance pass.
 
-**Files affected:** `internal/gws/gwsstore/jsonl.go`, `internal/gws/poller/`.
+**Files affected:** `internal/store/modelv1/compact/compact.go`, `internal/store/fs.go`.
+
+## GWS Gmail: email deletes should be applied during maintenance
+
+The poller writes deleted message IDs to `.pending-email-deletes` (#159). Maintenance needs to read this file, scan gmail date files, remove matching email lines, and delete the pending file. `FSStore.AppendPendingDelete` exists for the write side; the apply side is not yet implemented.
+
+**Files affected:** `internal/store/fs.go`.
 
 ## Validate date where calendar events are attributed
 
 Right now we used a start date. This can be particularly problematic for multi day events.
 We need to validate how exactly this works in practice.
 
-
-## Setup commands need a revamp
-
-The three setup commands (`setup-whatsapp`, `setup-slack`, `setup-gws`) have
-diverged in shape and UX, and the root help text is out of date now that GWS
-is a first-class platform.
-
-Observable issues:
-
-- **`pigeon` root help omits GWS.** `internal/cli/root.go`'s `Long` description
-  walks through WhatsApp and Slack under `WORKFLOW — FIRST-TIME SETUP`, and the
-  example `config.yaml` in the `CONFIG` section shows only `whatsapp:` and
-  `slack:` blocks. `setup-gws` is listed in the Setup group but never
-  documented alongside the others.
-- **Prompt libraries are inconsistent.** `setup-slack` uses `bufio.NewReader`
-  with hand-rolled `fmt.Print` prompts, `setup-whatsapp` drives its own
-  interactive flow around QR pairing, `setup-gws` uses `promptui`. Three
-  setup commands, three prompt styles.
-- **Output shapes diverge.** Each command has its own header banner
-  ("Slack Workspace Setup\n======"), its own confirmation footer, and its
-  own tone. There is no shared scaffolding for "detect state → prompt → save
-  → tell the user what to do next."
-- **Auth models are very different but that difference isn't surfaced.**
-  `setup-slack` runs an OAuth server in-process. `setup-whatsapp` pairs a
-  device via QR. `setup-gws` is a thin config writer because `gws` owns auth
-  externally. The help text doesn't prepare users for any of this, and the
-  commands themselves don't explain where auth lives relative to pigeon.
-
-**Files affected:** `internal/cli/root.go`, `internal/cli/setup.go`,
-`internal/commands/setup_slack.go`, `internal/commands/setup_whatsapp.go`,
-`internal/commands/setup_gws.go`.
 
 ## Thread files cannot be date-filtered without scanning content
 
@@ -244,10 +183,3 @@ The effect: even when GWS pollers are running and actively producing data,
 `pigeon daemon status` whether a GWS account is running, stopped, or
 crashed.
 
-## Separate out ConvMeta
-// MetaFile returns the path to the conversation's .meta.json sidecar.
-func (c ConversationDir) MetaFile() MetaFile {
-	return MetaFile(filepath.Join(c.Path(), ".meta.json"))
-}
-Rename the type here to be ConvMetaFile.
-use a constant for the .meta.json file name.
