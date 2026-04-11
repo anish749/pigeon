@@ -106,4 +106,3 @@ func RunSend(p SendParams) error {
 	}
 	return nil
 }
-
