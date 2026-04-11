@@ -18,29 +18,35 @@ func testService(t *testing.T) (*identity.Service, paths.IdentityDir) {
 	return identity.NewService(s, dir), dir
 }
 
+// lookup is a test helper that searches for a person by query and expects exactly one result.
+func lookup(t *testing.T, svc *identity.Service, query string) identity.Person {
+	t.Helper()
+	results, err := svc.SearchCandidates(query)
+	if err != nil {
+		t.Fatalf("SearchCandidates(%q): %v", query, err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("SearchCandidates(%q) returned %d results, want 1", query, len(results))
+	}
+	return results[0]
+}
+
 func TestObserve_NewPerson(t *testing.T) {
 	svc, _ := testService(t)
 
-	err := svc.Observe(identity.Signal{
+	if err := svc.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, err := svc.People()
-	if err != nil {
-		t.Fatal(err)
+	p := lookup(t, svc, "alice@company.com")
+	if p.Name != "Alice Smith" {
+		t.Errorf("name = %q, want %q", p.Name, "Alice Smith")
 	}
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1", len(people))
-	}
-	if people[0].Name != "Alice Smith" {
-		t.Errorf("name = %q, want %q", people[0].Name, "Alice Smith")
-	}
-	if len(people[0].Email) != 1 || people[0].Email[0] != "alice@company.com" {
-		t.Errorf("email = %v, want [alice@company.com]", people[0].Email)
+	if len(p.Email) != 1 || p.Email[0] != "alice@company.com" {
+		t.Errorf("email = %v, want [alice@company.com]", p.Email)
 	}
 }
 
@@ -63,15 +69,14 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 2 {
-		t.Fatalf("got %d people, want 2", len(people))
-	}
-
-	// Verify Alice has both email and Slack.
-	alice := people[0]
+	alice := lookup(t, svc, "U04ABCDEF")
 	if alice.Slack["acme"].ID != "U04ABCDEF" {
 		t.Errorf("alice slack ID = %q, want U04ABCDEF", alice.Slack["acme"].ID)
+	}
+
+	bob := lookup(t, svc, "U05BCDEFG")
+	if bob.Name != "Bob Jones" {
+		t.Errorf("bob name = %q, want Bob Jones", bob.Name)
 	}
 }
 
@@ -95,14 +100,12 @@ func TestMerge_EmailMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1 (should have merged)", len(people))
+	// Should find one person via email or Slack ID.
+	p := lookup(t, svc, "U04ABCDEF")
+	if p.Name != "Alice Smith" {
+		t.Errorf("name = %q, want %q (should have updated)", p.Name, "Alice Smith")
 	}
-	if people[0].Name != "Alice Smith" {
-		t.Errorf("name = %q, want %q (should have updated)", people[0].Name, "Alice Smith")
-	}
-	if people[0].Slack["acme"].ID != "U04ABCDEF" {
+	if p.Slack["acme"].ID != "U04ABCDEF" {
 		t.Error("slack identity should have been merged")
 	}
 }
@@ -110,7 +113,6 @@ func TestMerge_EmailMatch(t *testing.T) {
 func TestMerge_SlackIDMatch(t *testing.T) {
 	svc, _ := testService(t)
 
-	// First: Slack-only signal.
 	if err := svc.Observe(identity.Signal{
 		Name:  "Bob",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob"},
@@ -118,7 +120,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Second: signal with email + same Slack ID → merge.
+	// Signal with email + same Slack ID → merge.
 	if err := svc.Observe(identity.Signal{
 		Email: "bob@company.com",
 		Name:  "Bob Jones",
@@ -127,15 +129,12 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1", len(people))
+	p := lookup(t, svc, "U05BCDEFG")
+	if len(p.Email) != 1 || p.Email[0] != "bob@company.com" {
+		t.Errorf("email = %v, want [bob@company.com]", p.Email)
 	}
-	if len(people[0].Email) != 1 || people[0].Email[0] != "bob@company.com" {
-		t.Errorf("email = %v, want [bob@company.com]", people[0].Email)
-	}
-	if people[0].Slack["acme"].DisplayName != "Bob Jones" {
-		t.Errorf("displayName = %q, want %q", people[0].Slack["acme"].DisplayName, "Bob Jones")
+	if p.Slack["acme"].DisplayName != "Bob Jones" {
+		t.Errorf("displayName = %q, want %q", p.Slack["acme"].DisplayName, "Bob Jones")
 	}
 }
 
@@ -149,15 +148,12 @@ func TestMerge_PhoneMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1", len(people))
+	p := lookup(t, svc, "+15559876543")
+	if p.Name != "Dave Wilson" {
+		t.Errorf("name = %q, want %q", p.Name, "Dave Wilson")
 	}
-	if people[0].Name != "Dave Wilson" {
-		t.Errorf("name = %q, want %q", people[0].Name, "Dave Wilson")
-	}
-	if len(people[0].WhatsApp) != 1 {
-		t.Errorf("whatsapp = %v, want 1 entry", people[0].WhatsApp)
+	if len(p.WhatsApp) != 1 {
+		t.Errorf("whatsapp = %v, want 1 entry", p.WhatsApp)
 	}
 }
 
@@ -171,10 +167,9 @@ func TestMerge_NoMatchCreatesNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 2 {
-		t.Fatalf("got %d people, want 2 (no common identifier)", len(people))
-	}
+	// Both should exist as separate people.
+	_ = lookup(t, svc, "alice@company.com")
+	_ = lookup(t, svc, "+15559876543")
 }
 
 func TestMerge_DuplicateEmailNotAppended(t *testing.T) {
@@ -187,9 +182,9 @@ func TestMerge_DuplicateEmailNotAppended(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people[0].Email) != 1 {
-		t.Errorf("email count = %d, want 1 (should not duplicate)", len(people[0].Email))
+	p := lookup(t, svc, "alice@company.com")
+	if len(p.Email) != 1 {
+		t.Errorf("email count = %d, want 1 (should not duplicate)", len(p.Email))
 	}
 }
 
@@ -212,12 +207,9 @@ func TestMerge_MultipleEmails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1", len(people))
-	}
-	if len(people[0].Email) != 2 {
-		t.Errorf("email count = %d, want 2", len(people[0].Email))
+	p := lookup(t, svc, "U04ABCDEF")
+	if len(p.Email) != 2 {
+		t.Errorf("email count = %d, want 2", len(p.Email))
 	}
 }
 
@@ -239,15 +231,12 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
-	if len(people) != 1 {
-		t.Fatalf("got %d people, want 1", len(people))
+	p := lookup(t, svc, "carol@company.com")
+	if len(p.Slack) != 2 {
+		t.Errorf("slack workspaces = %d, want 2", len(p.Slack))
 	}
-	if len(people[0].Slack) != 2 {
-		t.Errorf("slack workspaces = %d, want 2", len(people[0].Slack))
-	}
-	if people[0].Slack["vendor-ws"].DisplayName != "Carol (Acme)" {
-		t.Errorf("vendor displayName = %q, want %q", people[0].Slack["vendor-ws"].DisplayName, "Carol (Acme)")
+	if p.Slack["vendor-ws"].DisplayName != "Carol (Acme)" {
+		t.Errorf("vendor displayName = %q, want %q", p.Slack["vendor-ws"].DisplayName, "Carol (Acme)")
 	}
 }
 
@@ -267,17 +256,14 @@ func TestPersistence_RoundTrip(t *testing.T) {
 
 	// Read with a fresh service instance (proves it went through disk).
 	svc2 := identity.NewService(s, dir)
-	people, err := svc2.People()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(people) != 2 {
-		t.Fatalf("got %d people, want 2", len(people))
-	}
-	if people[0].Slack["acme"].ID != "U04ABCDEF" {
+
+	alice := lookup(t, svc2, "U04ABCDEF")
+	if alice.Slack["acme"].ID != "U04ABCDEF" {
 		t.Error("alice slack ID not persisted")
 	}
-	if people[1].WhatsApp[0] != "+15559876543" {
+
+	dave := lookup(t, svc2, "+15559876543")
+	if dave.WhatsApp[0] != "+15559876543" {
 		t.Error("dave phone not persisted")
 	}
 }
@@ -287,12 +273,12 @@ func TestLoadPeople_MissingFile(t *testing.T) {
 	s := store.NewFSStore(root)
 	svc := identity.NewService(s, root.Identity("nonexistent"))
 
-	people, err := svc.People()
+	results, err := svc.SearchCandidates("anything")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(people) != 0 {
-		t.Errorf("got %d people from missing file, want 0", len(people))
+	if len(results) != 0 {
+		t.Errorf("got %d results from missing file, want 0", len(results))
 	}
 }
 
