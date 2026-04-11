@@ -10,10 +10,10 @@ var gmailDomains = map[string]bool{
 	"googlemail.com": true,
 }
 
-// NormalizeEmail returns a canonical form of an email address for identity
+// normalizeEmail returns a canonical form of an email address for identity
 // matching. The result is always lowercase. For Gmail addresses, dots in
 // the local part are removed and plus-addressed suffixes are stripped.
-func NormalizeEmail(email string) string {
+func normalizeEmail(email string) string {
 	local, domain, ok := strings.Cut(email, "@")
 	if !ok {
 		return strings.ToLower(email)

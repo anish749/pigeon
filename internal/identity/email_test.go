@@ -2,7 +2,7 @@ package identity
 
 import "testing"
 
-func TestNormalizeEmail(t *testing.T) {
+func Test_normalizeEmail(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -31,9 +31,9 @@ func TestNormalizeEmail(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := NormalizeEmail(tt.input)
+		got := normalizeEmail(tt.input)
 		if got != tt.want {
-			t.Errorf("NormalizeEmail(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("normalizeEmail(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

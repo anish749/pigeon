@@ -117,7 +117,7 @@ func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []
 
 	// Push identity signals as a batch after processing all messages.
 	if err := id.ObserveBatch(signals); err != nil {
-		slog.Warn("identity: gmail signal batch failed", "error", err)
+		errs = append(errs, fmt.Errorf("identity observe: %w", err))
 	}
 	return errs
 }

@@ -27,9 +27,9 @@ type PersonSlack struct {
 // Comparison is case-insensitive. For Gmail addresses, dots and plus
 // suffixes are ignored.
 func (p *Person) matchesEmail(email string) bool {
-	norm := NormalizeEmail(email)
+	norm := normalizeEmail(email)
 	return slices.ContainsFunc(p.Email, func(e string) bool {
-		return NormalizeEmail(e) == norm
+		return normalizeEmail(e) == norm
 	})
 }
 

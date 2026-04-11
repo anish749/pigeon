@@ -149,6 +149,33 @@ func TestIsThreadFile_ConversationNamedThreads(t *testing.T) {
 	}
 }
 
+func TestIdentityDir_Path(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	got := root.Identity("work").Path()
+	if got != "/tmp/test/identity/work" {
+		t.Errorf("Identity(work).Path() = %q, want /tmp/test/identity/work", got)
+	}
+}
+
+func TestIdentityDir_PeopleFile(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	got := root.Identity("personal").PeopleFile()
+	if got != "/tmp/test/identity/personal/people.jsonl" {
+		t.Errorf("PeopleFile() = %q, want /tmp/test/identity/personal/people.jsonl", got)
+	}
+}
+
+func TestIdentityDir_UsesConstants(t *testing.T) {
+	root := NewDataRoot("/data")
+	dir := root.Identity("ctx")
+	if dir.Path() != "/data/"+IdentitySubdir+"/ctx" {
+		t.Errorf("path should use IdentitySubdir constant")
+	}
+	if dir.PeopleFile() != "/data/"+IdentitySubdir+"/ctx/"+PeopleFilename {
+		t.Errorf("people file should use PeopleFilename constant")
+	}
+}
+
 func TestIsDateFile(t *testing.T) {
 	tests := []struct {
 		name string
