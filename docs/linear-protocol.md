@@ -49,18 +49,32 @@ Linear has no real-time event stream. All sync is poll-based, using the
 
 ### First-Run Backfill
 
-On first sync (no cursor), the poller fetches all issues:
+Linear issues are mutable entities — an issue created months ago may
+still be actively worked on, while a completed issue from last month is
+probably irrelevant. The backfill fetches two sets:
 
-```
-linear issue query -j --all-teams --all-states --limit=0
-```
+1. **All active issues** (any state except completed/canceled):
+
+   ```
+   linear issue query -j --all-teams -s triage -s backlog -s unstarted -s started --limit=0
+   ```
+
+2. **Recently closed issues** (completed or canceled in the last 90 days):
+
+   ```
+   linear issue query -j --all-teams -s completed -s canceled --updated-after=<now-90d> --limit=0
+   ```
 
 `--limit=0` disables the default 50-issue cap. The CLI handles
 pagination internally and returns all results.
 
+This gives complete visibility into open work plus recent history,
+without fetching issues that were closed long ago. The 90-day window
+matches the backfill depth used by GWS sources (Gmail, Drive, Calendar).
+
 For each issue returned, the poller also fetches the full issue view
 (which includes comments) and writes everything to disk. The cursor is
-then seeded with the maximum `updatedAt` from the batch.
+then seeded with the maximum `updatedAt` across both batches.
 
 Backfill writes data to disk before the cursor is saved. If interrupted,
 re-running starts over — idempotency comes from the keep-last-by-ID
@@ -99,13 +113,30 @@ Threaded comments have a `parent.id` field pointing to their parent
 comment. Top-level comments have `parent: null`. Thread structure is
 preserved on disk but is a display-time concern, not a storage concern.
 
-### Poll Interval
+### Poll Interval and Rate Limits
 
 The poller runs every 30 seconds — same order of magnitude as GWS (20s).
-Linear's API rate limits are generous for read operations but the poller
-should remain conservative. Each cycle makes 1 + N API calls (1 query +
-N issue views for changed issues). On a quiet workspace, N = 0 and the
-cycle is a single CLI call.
+
+Linear's API rate limits (per API key): **5,000 requests/hour** and
+**250,000 complexity points/hour**, using a leaky bucket that refills at
+~83 requests/min. Each poll cycle makes 1 + N API calls (1 query + N
+issue views for changed issues). Budget analysis:
+
+| Scenario | Calls/hr | % of request budget |
+|----------|---------|---------------------|
+| Quiet (0 changes) | 120 | 2.4% |
+| Normal (5 issues change) | 130 | 2.6% |
+| Active (20 issues change) | 160 | 3.2% |
+| Backfill (200 issues) | 201 | 4.0% |
+
+Steady-state polling uses well under 5% of the budget. The incremental
+cursor means quiet cycles are a single lightweight query. Even backfill
+of hundreds of issues stays within limits. The complexity point budget
+(250k/hr) is even less of a concern — a 10-issue query costs ~14 points.
+
+Linear recommends webhooks over polling, but since pigeon wraps the CLI
+(not a server), webhooks aren't an option. The polling footprint is
+negligible.
 
 ### Cursor Expiry
 
@@ -119,13 +150,13 @@ disk.
 
 ```
 ~/.local/share/pigeon/
-└── linear/                                 # platform
-    └── {workspace-slug}/                   # e.g. trudy
+└── linear-issues/                          # platform
+    └── {workspace-slug}/                   # e.g. my-team
         ├── .sync-cursors.yaml              # cursor state
         └── issues/
-            ├── TRU-253.jsonl               # all activity for TRU-253
-            ├── TRU-257.jsonl               # all activity for TRU-257
-            └── TRU-261.jsonl
+            ├── ENG-101.jsonl               # all activity for ENG-101
+            ├── ENG-142.jsonl               # all activity for ENG-142
+            └── ENG-205.jsonl
 ```
 
 ### Why Per-Issue Files, Not Date Files
@@ -143,28 +174,28 @@ is natural.
 Issues are more like Google Drive documents than messages — they have a
 stable identity and evolve over time. The natural organization is **one
 file per issue**, identified by the human-readable identifier (e.g.
-`TRU-253`), just as Drive uses one directory per document identified by
+`ENG-101`), just as Drive uses one directory per document identified by
 the slugified title.
 
-This makes `pigeon read linear TRU-253` a direct file read, and
+This makes `pigeon read linear ENG-101` a direct file read, and
 `pigeon grep "deploy" --source=linear` a recursive grep across all
 issue files.
 
 ### Multiple Workspaces
 
-Each Linear workspace is scoped under `linear/{workspace-slug}/` with
+Each Linear workspace is scoped under `linear-issues/{workspace-slug}/` with
 independent cursors. The poller iterates over all configured workspaces
 on each cycle.
 
 ### Workspace Slugs
 
 The workspace slug comes directly from Linear's workspace slug (e.g.
-`trudy`). It is used as-is without further slugification since Linear
+`my-team`). It is used as-is without further slugification since Linear
 slugs are already URL-safe.
 
 ### Cursor File
 
-Path: `linear/{workspace-slug}/.sync-cursors.yaml`
+Path: `linear-issues/{workspace-slug}/.sync-cursors.yaml`
 
 ```yaml
 issues:
@@ -179,11 +210,11 @@ A single cursor for all issue data. The timestamp is the maximum
 ### Issue Line
 
 Each line is the **raw `linear issue query` JSON for one issue** plus a
-`"type":"issue"` discriminator. Only the `type` key is injected by
+`"type":"linear-issue"` discriminator. Only the `type` key is injected by
 pigeon; every other field is verbatim from the CLI output.
 
 ```json
-{"type":"issue","id":"c610f566-fc1d-40db-b129-8070743f9559","identifier":"TRU-257","title":"Finalize Truly Free SLA","url":"https://linear.app/trudy/issue/TRU-257/finalize-truly-free-sla","priority":0,"priorityLabel":"No priority","estimate":null,"createdAt":"2026-04-02T15:14:52.509Z","updatedAt":"2026-04-05T09:44:15.076Z","state":{"id":"b9daaf2f-adae-4990-9c77-0a9170de7ef0","name":"In Progress","color":"#f2c94c","type":"started"},"assignee":{"id":"9a3fcead-a961-4dfd-9360-6b8b9b069b51","name":"Anish Chakravorty","displayName":"anish","initials":"AC"},"team":{"id":"faa02806-b9fa-424d-9a87-b18d52a64ef8","key":"TRU","name":"Trudy"},"project":{"id":"29916b1d-0dbc-457d-a9b3-dafb16615a72","name":"Trudy for Truly Free (not Truly Free Trudy)"},"projectMilestone":null,"cycle":null,"labels":{"nodes":[]}}
+{"type":"linear-issue","id":"c610f566-fc1d-40db-b129-8070743f9559","identifier":"ENG-142","title":"Fix login timeout on slow connections","url":"https://linear.app/my-team/issue/ENG-142/fix-login-timeout","priority":2,"priorityLabel":"High","estimate":null,"createdAt":"2026-04-02T15:14:52.509Z","updatedAt":"2026-04-05T09:44:15.076Z","state":{"id":"b9daaf2f-adae-4990-9c77-0a9170de7ef0","name":"In Progress","color":"#f2c94c","type":"started"},"assignee":{"id":"9a3fcead-a961-4dfd-9360-6b8b9b069b51","name":"Alice Smith","displayName":"alice","initials":"AS"},"team":{"id":"faa02806-b9fa-424d-9a87-b18d52a64ef8","key":"ENG","name":"Engineering"},"project":{"id":"29916b1d-0dbc-457d-a9b3-dafb16615a72","name":"Q2 Reliability"},"projectMilestone":null,"cycle":null,"labels":{"nodes":[]}}
 ```
 
 Fields callers commonly rely on (the rest are preserved but may or may
@@ -191,9 +222,9 @@ not be interesting):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `"issue"` | Storage discriminator (injected, not from CLI) |
+| `type` | `"linear-issue"` | Storage discriminator (injected, not from CLI) |
 | `id` | string | Linear issue UUID (dedup key) |
-| `identifier` | string | Human-readable identifier (e.g. `TRU-257`) — used as filename |
+| `identifier` | string | Human-readable identifier (e.g. `ENG-142`) — used as filename |
 | `title` | string | Issue title |
 | `url` | string | Linear web URL |
 | `createdAt` | RFC 3339 | When the issue was created |
@@ -201,7 +232,7 @@ not be interesting):
 | `state.name` | string | Current state (`Todo`, `In Progress`, `Done`, etc.) |
 | `state.type` | string | State category (`triage`, `backlog`, `unstarted`, `started`, `completed`, `canceled`) |
 | `assignee.name` | string | Assignee display name (null if unassigned) |
-| `team.key` | string | Team identifier (e.g. `TRU`) |
+| `team.key` | string | Team identifier (e.g. `ENG`) |
 | `project.name` | string | Project name (null if not in a project) |
 | `labels.nodes[]` | array | Labels with `name` and `color` |
 | `priority` | int | Priority (0 = no priority, 1 = urgent, 2 = high, 3 = medium, 4 = low) |
@@ -209,18 +240,18 @@ not be interesting):
 ### Comment Line
 
 Each line is the **raw comment JSON from `linear issue view`** plus a
-`"type":"comment"` discriminator. Only the `type` key is injected by
+`"type":"linear-comment"` discriminator. Only the `type` key is injected by
 pigeon; every other field is verbatim from the CLI output.
 
 ```json
-{"type":"comment","id":"0bb50b07-3f72-4412-ad63-e6aca4dd5dea","body":"@anish are you fine with below:\n\n1. Skill Files — Stay in the Repo...","createdAt":"2026-04-08T14:04:31.883Z","url":"https://linear.app/trudy/issue/TRU-253/deploy-the-recs-runner-to-the-cloud#comment-0bb50b07","resolvedAt":null,"user":{"name":"Magnus Hansson","displayName":"magnus"},"externalUser":null,"parent":null}
+{"type":"linear-comment","id":"0bb50b07-3f72-4412-ad63-e6aca4dd5dea","body":"Looks good — can we add a retry on timeout?","createdAt":"2026-04-08T14:04:31.883Z","url":"https://linear.app/my-team/issue/ENG-142/fix-login-timeout#comment-0bb50b07","resolvedAt":null,"user":{"name":"Bob Jones","displayName":"bob"},"externalUser":null,"parent":null}
 ```
 
 Fields callers commonly rely on:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `"comment"` | Storage discriminator (injected, not from CLI) |
+| `type` | `"linear-comment"` | Storage discriminator (injected, not from CLI) |
 | `id` | string | Linear comment UUID (dedup key) |
 | `body` | string | Comment text (markdown) |
 | `createdAt` | RFC 3339 | When the comment was posted |
@@ -236,13 +267,13 @@ Lines in an issue file are ordered chronologically by write time. A
 typical file looks like:
 
 ```jsonl
-{"type":"issue",...,"updatedAt":"2026-04-02T15:14:52Z",...}
-{"type":"comment",...,"createdAt":"2026-04-07T09:28:55Z",...}
-{"type":"comment",...,"createdAt":"2026-04-07T10:36:38Z",...}
-{"type":"comment",...,"createdAt":"2026-04-07T11:32:18Z",...}
-{"type":"issue",...,"updatedAt":"2026-04-08T14:37:10Z",...}
-{"type":"comment",...,"createdAt":"2026-04-08T14:04:31Z",...}
-{"type":"comment",...,"createdAt":"2026-04-08T14:37:10Z",...}
+{"type":"linear-issue",...,"updatedAt":"2026-04-02T15:14:52Z",...}
+{"type":"linear-comment",...,"createdAt":"2026-04-07T09:28:55Z",...}
+{"type":"linear-comment",...,"createdAt":"2026-04-07T10:36:38Z",...}
+{"type":"linear-comment",...,"createdAt":"2026-04-07T11:32:18Z",...}
+{"type":"linear-issue",...,"updatedAt":"2026-04-08T14:37:10Z",...}
+{"type":"linear-comment",...,"createdAt":"2026-04-08T14:04:31Z",...}
+{"type":"linear-comment",...,"createdAt":"2026-04-08T14:37:10Z",...}
 ```
 
 Issue snapshot lines appear whenever the poller detects a change (state
@@ -308,14 +339,14 @@ Linear appears as a new source in the read protocol:
 The selector is an issue identifier:
 
 ```
-pigeon read linear TRU-253            # specific issue + comments
+pigeon read linear ENG-101            # specific issue + comments
 pigeon read linear                    # recent issue activity (all issues)
 ```
 
 When no selector is given, the reader shows recently updated issues
 (equivalent to `pigeon list --source=linear --since=7d`).
 
-Selector matching is exact on the identifier prefix (e.g. `TRU-253`)
+Selector matching is exact on the identifier prefix (e.g. `ENG-101`)
 and fuzzy on the title. `pigeon read linear "deploy"` matches issues
 whose title contains "deploy".
 
@@ -331,9 +362,9 @@ Default when no filter: issues updated in the last 7 days.
 
 ### Read Algorithm
 
-**Single issue** (`pigeon read linear TRU-253`):
+**Single issue** (`pigeon read linear ENG-101`):
 
-1. Read `issues/TRU-253.jsonl`.
+1. Read `issues/ENG-101.jsonl`.
 2. Deduplicate by `id` (keep last) — reduces to latest issue snapshot +
    all unique comments.
 3. Display: issue metadata (title, state, assignee, project, labels),
@@ -357,7 +388,7 @@ contexts:
   work:
     gws: work@company.com
     slack: acme-corp
-    linear: trudy
+    linear: my-team
 ```
 
 ## Greppability
@@ -366,19 +397,19 @@ Standard text tools work directly on the JSONL files:
 
 ```bash
 # Find all issues mentioning "deploy"
-rg "deploy" ~/.local/share/pigeon/linear/
+rg "deploy" ~/.local/share/pigeon/linear-issues/
 
-# Find issues assigned to anish
-rg '"displayName":"anish"' ~/.local/share/pigeon/linear/trudy/issues/
+# Find issues assigned to alice
+rg '"displayName":"alice"' ~/.local/share/pigeon/linear-issues/my-team/issues/
 
 # Find all In Progress issues
-rg '"name":"In Progress"' ~/.local/share/pigeon/linear/trudy/issues/
+rg '"name":"In Progress"' ~/.local/share/pigeon/linear-issues/my-team/issues/
 
-# Find comments by Magnus
-rg '"name":"Magnus' ~/.local/share/pigeon/linear/trudy/issues/
+# Find comments by bob
+rg '"name":"Bob' ~/.local/share/pigeon/linear-issues/my-team/issues/
 
 # Count lines per issue (proxy for activity)
-wc -l ~/.local/share/pigeon/linear/trudy/issues/*.jsonl
+wc -l ~/.local/share/pigeon/linear-issues/my-team/issues/*.jsonl
 ```
 
 Because issues and comments are stored as raw CLI JSON, any field the
@@ -414,8 +445,8 @@ Linear workspaces are configured in `config.yaml`:
 
 ```yaml
 linear:
-  - workspace: trudy             # Linear workspace slug
-    account: trudy               # display name for pigeon
+  - workspace: my-team           # Linear workspace slug
+    account: my-team             # display name for pigeon
 ```
 
 The `workspace` field is the Linear workspace slug (used for

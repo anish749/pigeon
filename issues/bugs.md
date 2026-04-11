@@ -169,6 +169,12 @@ account it has gmail / gcalendar / gdrive subtrees with different contents
 list command currently shows GWS accounts but stops there — no way to see
 what's inside.
 
+## Linear and GWS cursor load/save should share a single read/write path
+
+`LoadLinearCursors`/`SaveLinearCursors` and `LoadGWSCursors`/`SaveGWSCursors` are near-identical: read YAML from `SyncCursorsPath()`, unmarshal into a typed struct, and the reverse for save. Each pair duplicates the file I/O, locking, directory creation, and error wrapping. There should be a single generic `loadCursors`/`saveCursors` helper that both call, so there's one function responsible for reading and one for writing the cursor file.
+
+**Files affected:** `internal/store/fs.go`.
+
 ## `pigeon daemon status` does not list GWS accounts
 
 `pigeon daemon status` calls the daemon's `GET /api/status` endpoint and

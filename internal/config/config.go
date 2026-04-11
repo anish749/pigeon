@@ -13,6 +13,13 @@ type Config struct {
 	WhatsApp []WhatsAppConfig `yaml:"whatsapp,omitempty"`
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
+	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+}
+
+// LinearConfig holds configuration for a single Linear workspace.
+type LinearConfig struct {
+	Workspace string `yaml:"workspace"` // Linear workspace slug
+	Account   string `yaml:"account"`   // display name for pigeon
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
@@ -101,6 +108,17 @@ func (c *Config) AddSlack(entry SlackConfig) {
 		}
 	}
 	c.Slack = append(c.Slack, entry)
+}
+
+// AddLinear upserts a Linear configuration entry by workspace.
+func (c *Config) AddLinear(entry LinearConfig) {
+	for i, existing := range c.Linear {
+		if existing.Workspace == entry.Workspace {
+			c.Linear[i] = entry
+			return
+		}
+	}
+	c.Linear = append(c.Linear, entry)
 }
 
 // AddGWS upserts a GWS configuration entry by email.

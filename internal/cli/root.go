@@ -36,7 +36,7 @@ func newRootCmd(version string) *cobra.Command {
 		Long: `pigeon — messaging data CLI for AI agents
 
 Reads locally-stored messaging and workspace data (WhatsApp, Slack,
-Google Workspace) and provides listeners/pollers that sync in real-time.
+Google Workspace, Linear) and provides listeners/pollers that sync in real-time.
 
 ─────────────────────────────────────────────────────────
 
@@ -64,6 +64,10 @@ CONFIG
     gws:
       - account: "work"
         email: "you@company.com"
+
+    linear:
+      - workspace: "my-team"
+        account: "my-team"
 
 ─────────────────────────────────────────────────────────
 
@@ -96,14 +100,21 @@ DATA LAYOUT
     │   │   └── gcalendar/
     │   │       └── primary/
     │   │           └── 2026-03-16.jsonl  # events by start date
+    ├── linear-issues/
+    │   ├── my-team/                       # workspace
+    │   │   └── issues/
+    │   │       ├── ENG-101.jsonl         # all activity for ENG-101
+    │   │       └── ENG-142.jsonl
 
   Messaging: platform / account / conversation / YYYY-MM-DD.jsonl
   GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
+  Linear:    linear-issues / workspace / issues / IDENTIFIER.jsonl
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
   All JSONL lines have a "type" field — use it with jq to filter:
     Messaging: "msg", "react", "unreact", "edit", "delete", "separator"
     GWS:       "email", "comment", "event"
+    Linear:    "linear-issue", "linear-comment"
 
   Common fields (messaging):
     ts, id, sender, from, text, via, emoji, attach, reply, replyTo
@@ -163,6 +174,12 @@ WORKFLOW — FIRST-TIME SETUP
 
     1. gws auth login                       # authenticate with Google
     2. pigeon setup-gws                     # register the account
+    3. pigeon daemon start                  # starts poller in background
+
+  Linear:
+
+    1. linear auth login                    # authenticate with Linear
+    2. pigeon setup-linear                  # register the workspace
     3. pigeon daemon start                  # starts poller in background
 
 ─────────────────────────────────────────────────────────
@@ -263,6 +280,7 @@ MAINTENANCE
 		newSetupWhatsAppCmd(),
 		newSetupSlackCmd(),
 		newSetupGWSCmd(),
+		newSetupLinearCmd(),
 
 		// Daemon
 		newDaemonCmd(version),
