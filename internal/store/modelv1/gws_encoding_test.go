@@ -331,6 +331,26 @@ func TestMarshalRaw_DoesNotMutateCaller(t *testing.T) {
 	}
 }
 
+func TestUnmarshalRaw_NoTypeKey(t *testing.T) {
+	// Input without a "type" key should still work — unmarshalRaw is
+	// tolerant of missing discriminators (the delete is a no-op).
+	data := []byte(`{"id":"x1","name":"hello"}`)
+	var runtime struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	serialized, err := unmarshalRaw(data, &runtime)
+	if err != nil {
+		t.Fatalf("unmarshalRaw: %v", err)
+	}
+	if runtime.ID != "x1" {
+		t.Errorf("runtime.ID = %q, want x1", runtime.ID)
+	}
+	if serialized["id"] != "x1" {
+		t.Errorf("serialized[id] = %v, want x1", serialized["id"])
+	}
+}
+
 func TestMarshalUnmarshalRaw_RoundTrip(t *testing.T) {
 	orig := map[string]any{
 		"id":   "x1",

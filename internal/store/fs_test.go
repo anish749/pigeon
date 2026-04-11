@@ -1002,6 +1002,16 @@ func TestDriveMetaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadDriveMetaNonExistent(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	mf := testGWSDriveFileDir(t, s).MetaFile("2026-04-07")
+	_, err := s.LoadDriveMeta(mf)
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
 func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
