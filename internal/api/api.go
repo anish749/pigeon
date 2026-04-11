@@ -41,15 +41,16 @@ type WhatsAppSender struct {
 
 // SlackSender holds everything needed to send a Slack message.
 type SlackSender struct {
-	BotAPI    *goslack.Client // bot token client (default for sends)
-	UserAPI   *goslack.Client // user token client (--as-user sends)
-	Resolver  *slacklistener.Resolver
-	Messages  *slacklistener.MessageStore
-	Acct      account.Account
-	BotName   string // the bot's display name
-	BotUserID string // the bot's Slack user ID
-	UserName  string // the authenticated user's display name
-	UserID    string // the authenticated user's Slack user ID
+	BotAPI      *goslack.Client // bot token client (default for sends)
+	UserAPI     *goslack.Client // user token client (--as-user sends)
+	Resolver    *slacklistener.Resolver
+	Messages    *slacklistener.MessageStore
+	Acct        account.Account
+	BotName     string          // the bot's display name
+	BotUserID   string          // the bot's Slack user ID
+	UserName    string          // the authenticated user's display name
+	UserID      string          // the authenticated user's Slack user ID
+	AutoApprove map[string]bool // user IDs that bypass outbox review
 }
 
 // Server is the daemon's HTTP API server.
@@ -230,8 +231,12 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	// literal backslash-bang that wasn't intended.
 	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
 
-	// When a session ID is present, queue for review instead of sending.
-	if req.SessionID != "" {
+	// When a session ID is present, queue for review — unless the target
+	// is a Slack DM to an auto-approved user.
+	if req.SessionID != "" && s.isAutoApproved(req) {
+		slog.Info("auto-approved send, bypassing outbox", "target", req.Target(), "session_id", req.SessionID)
+	}
+	if req.SessionID != "" && !s.isAutoApproved(req) {
 		payload, err := json.Marshal(req)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, SendResponse{Error: "marshal send request: " + err.Error()})
@@ -249,6 +254,22 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusInternalServerError
 	}
 	writeJSON(w, status, resp)
+}
+
+// isAutoApproved returns true when req targets a Slack DM whose user ID is
+// in the workspace's auto-approve list.
+func (s *Server) isAutoApproved(req SendRequest) bool {
+	if req.Platform != "slack" || req.Slack == nil || req.Slack.UserID == "" {
+		return false
+	}
+	acct := account.New(req.Platform, req.Account)
+	s.mu.RLock()
+	sender, ok := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	return sender.AutoApprove[req.Slack.UserID]
 }
 
 func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req SendRequest) SendResponse {

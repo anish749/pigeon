@@ -161,16 +161,22 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 
 	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
 
+	autoApprove := make(map[string]bool, len(sl.AutoApprove))
+	for _, uid := range sl.AutoApprove {
+		autoApprove[uid] = true
+	}
+
 	return &api.SlackSender{
-		BotAPI:    botAPI,
-		UserAPI:   userAPI,
-		Resolver:  resolver,
-		Messages:  messages,
-		Acct:      acct,
-		BotName:   botName,
-		BotUserID: botUserID,
-		UserName:  userName,
-		UserID:    userID,
+		BotAPI:      botAPI,
+		UserAPI:     userAPI,
+		Resolver:    resolver,
+		Messages:    messages,
+		Acct:        acct,
+		BotName:     botName,
+		BotUserID:   botUserID,
+		UserName:    userName,
+		UserID:      userID,
+		AutoApprove: autoApprove,
 	}
 }
 

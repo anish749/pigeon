@@ -44,6 +44,9 @@ type SlackConfig struct {
 	BotToken     string `yaml:"bot_token"`
 	UserToken    string `yaml:"user_token,omitempty"`
 	TeamID       string `yaml:"team_id"`
+	// AutoApprove lists Slack user IDs (U-prefixed) whose DMs bypass outbox
+	// review and are sent immediately, even within a Claude session.
+	AutoApprove []string `yaml:"auto_approve,omitempty"`
 }
 
 // Load reads the config file. Returns an empty Config if the file doesn't exist.

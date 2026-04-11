@@ -301,6 +301,7 @@ MAINTENANCE
 
 		// Slack
 		newGenerateManifestCmd(),
+		newAutoApproveCmd(),
 
 		// Maintenance
 		newResetCmd(),
