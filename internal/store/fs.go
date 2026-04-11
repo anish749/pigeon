@@ -567,6 +567,25 @@ func (s *FSStore) RemoveDriveFile(driveDir paths.DriveDir, fileID string) error 
 
 // cleanupStaleDriveMeta removes any drive-meta-*.json files in dir except
 // keepName. Called after writing a new meta file to remove previous versions.
+// AppendPendingDelete records an email ID for deferred deletion.
+// The poller calls this when history.list reports a message was deleted.
+// The actual removal from date files happens during maintenance.
+func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) error {
+	path := gmailDir.PendingDeletesPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create gmail dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open pending deletes: %w", err)
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintln(f, emailID); err != nil {
+		return fmt.Errorf("write pending delete: %w", err)
+	}
+	return nil
+}
+
 func cleanupStaleDriveMeta(dir, keepName string) error {
 	matches, err := filepath.Glob(filepath.Join(dir, paths.DriveMetaFileGlob))
 	if err != nil {

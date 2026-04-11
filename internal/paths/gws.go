@@ -20,6 +20,7 @@ const (
 	driveMetaFileExt    = ".json"
 	formulaCSVSuffix    = ".formulas.csv"
 	pollMetricsFile     = ".poll-metrics.jsonl"
+	pendingDeletesFile  = ".pending-email-deletes"
 )
 
 // Drive content file extensions. Drive file directories hold the exported
@@ -125,6 +126,11 @@ func (g GmailDir) Path() string {
 // DateFile returns the path to a daily email file.
 func (g GmailDir) DateFile(date string) DateFile {
 	return DateFile(filepath.Join(g.Path(), date+FileExt))
+}
+
+// PendingDeletesPath returns the path to the pending email deletes file.
+func (g GmailDir) PendingDeletesPath() string {
+	return filepath.Join(g.Path(), pendingDeletesFile)
 }
 
 // CalendarDir represents a calendar directory: <account>/gcalendar/<calID>/

@@ -781,16 +781,6 @@ func gwsEmailLine(id string) modelv1.Line {
 	}
 }
 
-func gwsEmailDeleteLine(id string) modelv1.Line {
-	return modelv1.Line{
-		Type: modelv1.LineEmailDelete,
-		EmailDelete: &modelv1.EmailDeleteLine{
-			ID: id,
-			Ts: ts(2026, 4, 7, 13, 0, 0),
-		},
-	}
-}
-
 func TestAppendLineAndReadLines(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
@@ -1124,5 +1114,26 @@ func TestLoadGWSCursors_NonExistent(t *testing.T) {
 	}
 	if got.Gmail.HistoryID != "" {
 		t.Errorf("Gmail.HistoryID = %q, want empty", got.Gmail.HistoryID)
+	}
+}
+
+func TestAppendPendingDelete(t *testing.T) {
+	s, _ := setup(t)
+	acct := paths.NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("test")
+	gmailDir := acct.Gmail()
+
+	for _, id := range []string{"msg-1", "msg-2", "msg-3"} {
+		if err := s.AppendPendingDelete(gmailDir, id); err != nil {
+			t.Fatalf("AppendPendingDelete(%s): %v", id, err)
+		}
+	}
+
+	data, err := os.ReadFile(gmailDir.PendingDeletesPath())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	want := "msg-1\nmsg-2\nmsg-3\n"
+	if string(data) != want {
+		t.Errorf("pending deletes = %q, want %q", data, want)
 	}
 }
