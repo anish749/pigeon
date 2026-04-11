@@ -28,10 +28,6 @@ Need an interactive setup command (like `setup-slack` and `setup-whatsapp`) that
 
 Currently you have to manually edit `~/.config/pigeon/config.yaml` to add a GWS account.
 
-## GWS: historical backfill on first run
-
-GWS pollers seed cursors to "now" and only capture future changes. Need backfill support similar to Slack's 90-day history sync. See bugs.md for details and per-service approach. Rate limits need research before implementing.
-
 ## GWS: `pigeon read` semantics
 
 `pigeon read` is conversation-centric (`--platform --account --contact
