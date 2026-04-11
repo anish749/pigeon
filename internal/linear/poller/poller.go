@@ -62,7 +62,7 @@ func (p *Poller) poll(ctx context.Context, cursors *store.LinearCursors) {
 	if ctx.Err() != nil {
 		return
 	}
-	n, err := PollIssues(p.store, p.account, p.workspace, cursors)
+	n, err := PollIssues(ctx, p.store, p.account, p.workspace, cursors)
 	if err != nil {
 		slog.Error("poll linear issues", "workspace", p.workspace, "err", err)
 	} else if n > 0 {

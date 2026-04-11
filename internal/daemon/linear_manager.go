@@ -70,7 +70,7 @@ func (m *LinearManager) reconcile(ctx context.Context, desired []config.LinearCo
 }
 
 func (m *LinearManager) startWorkspace(ctx context.Context, lc config.LinearConfig) {
-	acctDir := paths.DefaultDataRoot().AccountFor(account.New("linear", lc.Workspace))
+	acctDir := paths.DefaultDataRoot().AccountFor(account.New("linear-issues", lc.Workspace))
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[lc.Workspace] = &runningLinearWorkspace{cancel: cancel}

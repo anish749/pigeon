@@ -135,6 +135,18 @@ func (l Line) Ts() time.Time {
 		if l.Email != nil {
 			return l.Email.Ts
 		}
+	case LineIssue:
+		if l.Issue != nil {
+			if t, err := time.Parse(time.RFC3339, l.Issue.Runtime.UpdatedAt); err == nil {
+				return t
+			}
+		}
+	case LineLinearComment:
+		if l.LinearComment != nil {
+			if t, err := time.Parse(time.RFC3339, l.LinearComment.Runtime.CreatedAt); err == nil {
+				return t
+			}
+		}
 	}
 	return time.Time{}
 }

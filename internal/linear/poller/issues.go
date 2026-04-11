@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +15,10 @@ import (
 
 // PollIssues runs one sync cycle for Linear issues. Returns the number of
 // issues processed and any error.
-func PollIssues(s *store.FSStore, account paths.AccountDir, workspace string, cursors *store.LinearCursors) (int, error) {
+func PollIssues(ctx context.Context, s *store.FSStore, account paths.AccountDir, workspace string, cursors *store.LinearCursors) (int, error) {
 	cursor := cursors.Issues.UpdatedAfter
 
-	issues, err := queryIssues(workspace, cursor)
+	issues, err := queryIssues(ctx, workspace, cursor)
 	if err != nil {
 		return 0, fmt.Errorf("query issues: %w", err)
 	}
@@ -30,6 +31,10 @@ func PollIssues(s *store.FSStore, account paths.AccountDir, workspace string, cu
 	linearDir := account.Linear()
 
 	for _, issue := range issues {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+
 		identifier, _ := issue["identifier"].(string)
 		updatedAt, _ := issue["updatedAt"].(string)
 		if identifier == "" {
@@ -49,7 +54,7 @@ func PollIssues(s *store.FSStore, account paths.AccountDir, workspace string, cu
 		}
 
 		// Fetch the full issue view (includes comments).
-		comments, err := fetchComments(workspace, identifier)
+		comments, err := fetchComments(ctx, workspace, identifier)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fetch comments for %s: %w", identifier, err))
 		}
@@ -69,21 +74,24 @@ func PollIssues(s *store.FSStore, account paths.AccountDir, workspace string, cu
 		}
 	}
 
-	cursors.Issues.UpdatedAfter = maxUpdatedAt
+	// Only advance the cursor if every issue was processed without error.
+	// If any issue failed (write, comment fetch, etc.), the cursor stays
+	// put so the next poll retries the entire batch.
+	if len(errs) == 0 {
+		cursors.Issues.UpdatedAfter = maxUpdatedAt
+	}
 	return len(issues), errors.Join(errs...)
 }
 
 // queryIssues runs `linear issue query` and returns the list of issue objects.
-func queryIssues(workspace, cursor string) ([]map[string]any, error) {
-	args := []string{"issue", "query", "-j", "--all-teams", "--all-states", "--limit=0", "--no-pager"}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
-	}
+func queryIssues(ctx context.Context, workspace, cursor string) ([]map[string]any, error) {
+	args := []string{"issue", "query", "-j", "--all-teams", "--all-states", "--limit=0", "--no-pager",
+		"--workspace", workspace}
 	if cursor != "" {
 		args = append(args, "--updated-after="+cursor)
 	}
 
-	out, err := runLinear(args...)
+	out, err := runLinear(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,13 +106,11 @@ func queryIssues(workspace, cursor string) ([]map[string]any, error) {
 }
 
 // fetchComments runs `linear issue view` and extracts comments from the response.
-func fetchComments(workspace, identifier string) ([]map[string]any, error) {
-	args := []string{"issue", "view", identifier, "-j", "--no-download", "--no-pager"}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
-	}
+func fetchComments(ctx context.Context, workspace, identifier string) ([]map[string]any, error) {
+	args := []string{"issue", "view", identifier, "-j", "--no-download", "--no-pager",
+		"--workspace", workspace}
 
-	out, err := runLinear(args...)
+	out, err := runLinear(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +165,8 @@ func commentToLine(comment map[string]any) (modelv1.Line, error) {
 }
 
 // runLinear executes the linear CLI with the given arguments and returns stdout.
-func runLinear(args ...string) ([]byte, error) {
-	cmd := exec.Command("linear", args...)
+func runLinear(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "linear", args...)
 	cmd.Env = append(cmd.Environ(), "PAGER=cat")
 	out, err := cmd.Output()
 	if err != nil {
