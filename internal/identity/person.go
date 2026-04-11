@@ -58,6 +58,46 @@ func (p *Person) matchesPhone(phone string) bool {
 	return slices.Contains(p.WhatsApp, phone)
 }
 
+// matchesAnyExactID reports whether q equals this person's Slack user ID (any
+// workspace), a stored WhatsApp number, or an email address (email comparison
+// is case-insensitive).
+func (p *Person) matchesAnyExactID(q string) bool {
+	if q == "" {
+		return false
+	}
+	if p.matchesSlackID(q) {
+		return true
+	}
+	if p.matchesPhone(q) {
+		return true
+	}
+	return p.hasExactEmail(q)
+}
+
+// nameMatchesSubstring reports whether q matches Person.Name or any Slack
+// display name, real name, or username (case-insensitive substring).
+func (p *Person) nameMatchesSubstring(q string) bool {
+	if q == "" {
+		return false
+	}
+	ql := strings.ToLower(q)
+	if strings.Contains(strings.ToLower(p.Name), ql) {
+		return true
+	}
+	for _, s := range p.Slack {
+		if strings.Contains(strings.ToLower(s.DisplayName), ql) {
+			return true
+		}
+		if strings.Contains(strings.ToLower(s.RealName), ql) {
+			return true
+		}
+		if strings.Contains(strings.ToLower(s.Name), ql) {
+			return true
+		}
+	}
+	return false
+}
+
 // merge applies a signal's identifiers to this person, adding any new
 // information without removing existing data.
 func (p *Person) merge(sig Signal, today string) {

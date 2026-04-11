@@ -86,6 +86,120 @@ func TestMatchesPhone_NoPhones(t *testing.T) {
 	}
 }
 
+func TestMatchesAnyExactID(t *testing.T) {
+	cases := []struct {
+		name  string
+		p     Person
+		q     string
+		want  bool
+	}{
+		{
+			name: "empty query",
+			p:    Person{Email: []string{"a@b.c"}},
+			q:    "",
+			want: false,
+		},
+		{
+			name: "slack ID",
+			p: Person{Slack: map[string]PersonSlack{
+				"w": {ID: "U111"},
+			}},
+			q:    "U111",
+			want: true,
+		},
+		{
+			name: "phone",
+			p:    Person{WhatsApp: []string{"+15551234567"}},
+			q:    "+15551234567",
+			want: true,
+		},
+		{
+			name: "email hasExactEmail",
+			p:    Person{Email: []string{"Alice@Company.com"}},
+			q:    "alice@company.com",
+			want: true,
+		},
+		{
+			name: "no match",
+			p:    Person{Name: "Pat"},
+			q:    "Pat",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.matchesAnyExactID(tc.q); got != tc.want {
+				t.Errorf("matchesAnyExactID(%q) = %v, want %v", tc.q, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNameMatchesSubstring(t *testing.T) {
+	cases := []struct {
+		name string
+		p    Person
+		q    string
+		want bool
+	}{
+		{
+			name: "empty query",
+			p:    Person{Name: "Alice"},
+			q:    "",
+			want: false,
+		},
+		{
+			name: "person name",
+			p:    Person{Name: "Alice Smith"},
+			q:    "smith",
+			want: true,
+		},
+		{
+			name: "slack display name",
+			p: Person{Slack: map[string]PersonSlack{
+				"w": {DisplayName: "bobcat"},
+			}},
+			q:    "bob",
+			want: true,
+		},
+		{
+			name: "slack real name",
+			p: Person{Slack: map[string]PersonSlack{
+				"w": {RealName: "Robert Jones"},
+			}},
+			q:    "jones",
+			want: true,
+		},
+		{
+			name: "slack username",
+			p: Person{Slack: map[string]PersonSlack{
+				"w": {Name: "alice.dev"},
+			}},
+			q:    "alice",
+			want: true,
+		},
+		{
+			name: "case insensitive",
+			p:    Person{Name: "UPPERCASE"},
+			q:    "upper",
+			want: true,
+		},
+		{
+			name: "no match",
+			p:    Person{Name: "Zed"},
+			q:    "alice",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.nameMatchesSubstring(tc.q); got != tc.want {
+				t.Errorf("nameMatchesSubstring(%q) = %v, want %v", tc.q, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMerge_UpdatesName(t *testing.T) {
 	p := Person{Name: "Alice", Seen: "2026-01-01"}
 	p.merge(Signal{Name: "Alice Smith"}, "2026-04-11")

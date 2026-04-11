@@ -12,6 +12,7 @@ import (
 
 	goslack "github.com/slack-go/slack"
 
+	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -47,47 +48,50 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error)
 	return text, nil
 }
 
-// Resolver caches Slack user and channel name lookups and tracks
-// which channels the authenticated user is a member of.
+// Resolver resolves Slack user and channel names. User lookups are backed
+// by the identity service; channel and membership state is cached locally.
 type Resolver struct {
-	api      *goslack.Client
-	mu       sync.RWMutex
-	users    map[string]string // user ID → display name
-	channels map[string]string // channel ID → name
-	dmUsers  map[string]string // channel ID → DM partner's user ID
-	members  map[string]bool   // channel IDs the user has joined
+	api       *goslack.Client
+	identity  *identity.Service
+	workspace string
+	mu        sync.RWMutex
+	channels  map[string]string // channel ID → name
+	dmUsers   map[string]string // channel ID → DM partner's user ID
+	members   map[string]bool   // channel IDs the user has joined
 }
 
-// NewResolver creates a new Slack name resolver.
-func NewResolver(api *goslack.Client) *Resolver {
+// NewResolver creates a new Slack name resolver backed by the identity service.
+func NewResolver(api *goslack.Client, id *identity.Service, workspace string) *Resolver {
 	return &Resolver{
-		api:      api,
-		users:    make(map[string]string),
-		channels: make(map[string]string),
-		dmUsers:  make(map[string]string),
-		members:  make(map[string]bool),
+		api:       api,
+		identity:  id,
+		workspace: workspace,
+		channels:  make(map[string]string),
+		dmUsers:   make(map[string]string),
+		members:   make(map[string]bool),
 	}
 }
 
-// Load preloads user and channel name caches from the Slack API.
-// Returns the number of users and channels loaded.
+// Load fetches user profiles and channel lists from the Slack API. User
+// profiles are pushed to the identity service as signals. Channel names
+// are cached locally. Returns the number of users and channels loaded.
 func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error) {
 	userList, err := r.api.GetUsersContext(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
-	r.mu.Lock()
+
+	// Push all user profiles to identity as a single batch.
+	signals := make([]identity.Signal, 0, len(userList))
 	for _, u := range userList {
-		name := u.Profile.DisplayName
-		if name == "" {
-			name = u.RealName
+		if u.Deleted {
+			continue
 		}
-		if name == "" {
-			name = u.Name
-		}
-		r.users[u.ID] = name
+		signals = append(signals, r.createSignal(u))
 	}
-	r.mu.Unlock()
+	if err := r.identity.ObserveBatch(signals); err != nil {
+		return 0, 0, fmt.Errorf("observe Slack users: %w", err)
+	}
 
 	chanList, _, err := r.api.GetConversationsContext(ctx, &goslack.GetConversationsParameters{
 		Types:           []string{"public_channel", "private_channel", "mpim", "im"},
@@ -95,15 +99,14 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 		Limit:           1000,
 	})
 	if err != nil {
-		return 0, 0, err
+		return len(signals), 0, err
 	}
 	r.mu.Lock()
 	for _, ch := range chanList {
 		name := FormatChannelName(ch)
-		// Resolve IM user IDs to display names (we already hold the lock
-		// so read r.users directly instead of calling UserName).
 		if ch.IsIM {
-			if userName, ok := r.users[ch.User]; ok {
+			// Resolve IM user ID to display name via identity.
+			if userName, err := r.UserName(ctx, ch.User); err == nil {
 				name = "@" + userName
 			}
 		}
@@ -111,7 +114,7 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 	}
 	r.mu.Unlock()
 
-	return len(r.users), len(r.channels), nil
+	return len(signals), len(chanList), nil
 }
 
 // AddMember marks a channel as one the user has joined.
@@ -161,41 +164,49 @@ func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel)
 	return nil
 }
 
-// UserName resolves a Slack user ID to a display name. Falls back to API lookup on cache miss.
+// UserName resolves a Slack user ID to a display name. Looks up the identity
+// service first; on miss, falls back to the Slack API and pushes the result
+// as an identity signal for future lookups.
 func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) {
-	r.mu.RLock()
-	name, ok := r.users[userID]
-	r.mu.RUnlock()
-	if ok {
-		return name, nil
+	// Check identity service first.
+	person, err := r.identity.LookupBySlackID(r.workspace, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "identity lookup failed, falling back to API",
+			"user_id", userID, "error", err)
+	}
+	if person != nil {
+		return person.Name, nil
 	}
 
+	// Cache miss — fetch from Slack API and push signal.
 	user, err := r.api.GetUserInfoContext(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("resolve user %s: %w", userID, err)
 	}
-	name = user.Profile.DisplayName
-	if name == "" {
-		name = user.RealName
+
+	sig := r.createSignal(*user)
+	if err := r.identity.Observe(sig); err != nil {
+		slog.ErrorContext(ctx, "identity observe failed after API lookup",
+			"user_id", userID, "error", err)
 	}
-	if name == "" {
-		name = user.Name
-	}
-	r.mu.Lock()
-	r.users[userID] = name
-	r.mu.Unlock()
-	return name, nil
+
+	return sig.Name, nil
 }
 
-// botName resolves a Slack bot ID to a display name via cache or API lookup.
+// botName resolves a Slack bot ID to a display name. Checks identity first,
+// then falls back to the bot API and pushes a signal.
 func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
-	r.mu.RLock()
-	name, ok := r.users[botID]
-	r.mu.RUnlock()
-	if ok {
-		return name, nil
+	// Check identity service first.
+	person, err := r.identity.LookupBySlackID(r.workspace, botID)
+	if err != nil {
+		slog.WarnContext(ctx, "identity lookup failed for bot, falling back to API",
+			"bot_id", botID, "error", err)
+	}
+	if person != nil {
+		return person.Name, nil
 	}
 
+	// Cache miss — fetch from Slack API and push signal.
 	bot, err := r.api.GetBotInfoContext(ctx, goslack.GetBotInfoParameters{Bot: botID})
 	if err != nil {
 		return "", fmt.Errorf("resolve bot %s: %w", botID, err)
@@ -203,10 +214,14 @@ func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 	if bot.Name == "" {
 		return "", fmt.Errorf("resolve bot %s: API returned empty name", botID)
 	}
-	r.mu.Lock()
-	r.users[botID] = bot.Name
-	r.mu.Unlock()
-	return bot.Name, nil
+
+	sig := r.createBotSignal(botID, bot)
+	if err := r.identity.Observe(sig); err != nil {
+		slog.ErrorContext(ctx, "identity observe failed for bot",
+			"bot_id", botID, "error", err)
+	}
+
+	return sig.Name, nil
 }
 
 // SenderName resolves a message sender to (name, id). Tries the user ID first,
@@ -295,47 +310,43 @@ func (e *AmbiguousUserError) Error() string {
 	return b.String()
 }
 
-// FindUserID searches the user cache for a user matching the query.
-// Accepts exact user IDs (U...), or case-insensitive substring matches on display name.
-// Strips leading @ if present. On ambiguity, enriches matches with profile info via API.
+// FindUserID searches identity for a user matching the query.
+// Accepts exact user IDs (U...), or case-insensitive substring matches on
+// display name, real name, or username. Strips leading @ if present.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
-	q := strings.TrimPrefix(query, "@")
-
-	r.mu.RLock()
-
-	// Exact user ID match.
-	if name, ok := r.users[q]; ok {
-		r.mu.RUnlock()
-		return q, name, nil
+	candidates, err := r.identity.SearchCandidates(query)
+	if err != nil {
+		return "", "", fmt.Errorf("search identity: %w", err)
 	}
 
-	qLower := strings.ToLower(q)
+	// Filter to people with a Slack identity in this workspace.
 	var matches []UserMatch
-	for id, name := range r.users {
-		if strings.Contains(strings.ToLower(name), qLower) {
-			matches = append(matches, UserMatch{ID: id, DisplayName: name})
+	for _, p := range candidates {
+		ws, ok := p.Slack[r.workspace]
+		if !ok {
+			continue
 		}
+		var email string
+		if len(p.Email) > 0 {
+			email = p.Email[0]
+		}
+		matches = append(matches, UserMatch{
+			ID:          ws.ID,
+			DisplayName: ws.DisplayName,
+			RealName:    ws.RealName,
+			Email:       email,
+		})
 	}
-	r.mu.RUnlock()
 
-	if len(matches) == 0 {
+	switch len(matches) {
+	case 0:
 		return "", "", fmt.Errorf("no user matching %q", query)
-	}
-	if len(matches) == 1 {
+	case 1:
 		return matches[0].ID, matches[0].DisplayName, nil
+	default:
+		return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 	}
-
-	// Enrich with profile info for disambiguation.
-	for i, m := range matches {
-		user, err := r.api.GetUserInfoContext(context.Background(), m.ID)
-		if err == nil {
-			matches[i].RealName = user.RealName
-			matches[i].Email = user.Profile.Email
-		}
-	}
-	return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 }
-
 
 // FindChannelID resolves a channel for sending. Requires an exact match:
 // either a channel ID (e.g. "D1234567890") or an exact channel name
@@ -424,4 +435,38 @@ func ParseTimestamp(ts string) time.Time {
 		return time.Now()
 	}
 	return time.Unix(sec, 0)
+}
+
+// createSignal builds an identity signal from a Slack user API response.
+func (r *Resolver) createSignal(u goslack.User) identity.Signal { //nolint:gocritic // value receiver is fine for signal construction
+	name := u.Profile.DisplayName
+	if name == "" {
+		name = u.RealName
+	}
+	if name == "" {
+		name = u.Name
+	}
+	return identity.Signal{
+		Email: u.Profile.Email,
+		Name:  name,
+		Slack: &identity.SlackIdentity{
+			Workspace:   r.workspace,
+			ID:          u.ID,
+			DisplayName: u.Profile.DisplayName,
+			RealName:    u.RealName,
+			Name:        u.Name,
+		},
+	}
+}
+
+// createBotSignal builds an identity signal from a Slack bot API response.
+func (r *Resolver) createBotSignal(botID string, bot *goslack.Bot) identity.Signal {
+	return identity.Signal{
+		Name: bot.Name,
+		Slack: &identity.SlackIdentity{
+			Workspace:   r.workspace,
+			ID:          botID,
+			DisplayName: bot.Name,
+		},
+	}
 }

@@ -3,6 +3,10 @@ package slack
 import (
 	"context"
 	"testing"
+
+	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 func TestAllowedSubType(t *testing.T) {
@@ -24,8 +28,39 @@ func TestAllowedSubType(t *testing.T) {
 	}
 }
 
+func testIdentityService(t *testing.T, workspace string, signals []identity.Signal) *identity.Service {
+	t.Helper()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	svc := identity.NewService(s, root.Identity("test"))
+	if err := svc.ObserveBatch(signals); err != nil {
+		t.Fatal(err)
+	}
+	return svc
+}
+
 func TestSenderName(t *testing.T) {
-	r := &Resolver{users: map[string]string{"U123": "alice", "B789": "PagerDuty"}}
+	id := testIdentityService(t, "test-ws", []identity.Signal{
+		{
+			Name: "alice",
+			Slack: &identity.SlackIdentity{
+				Workspace: "test-ws", ID: "U123", DisplayName: "alice",
+			},
+		},
+		{
+			Name: "PagerDuty",
+			Slack: &identity.SlackIdentity{
+				Workspace: "test-ws", ID: "B789", DisplayName: "PagerDuty",
+			},
+		},
+	})
+	r := &Resolver{
+		identity:  id,
+		workspace: "test-ws",
+		channels:  make(map[string]string),
+		dmUsers:   make(map[string]string),
+		members:   make(map[string]bool),
+	}
 
 	tests := []struct {
 		name     string
@@ -50,7 +85,7 @@ func TestSenderName(t *testing.T) {
 			wantID:   "B456",
 		},
 		{
-			name:     "bot with name in cache",
+			name:     "bot with name in identity",
 			botID:    "B789",
 			wantName: "PagerDuty",
 			wantID:   "B789",

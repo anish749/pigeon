@@ -2,6 +2,7 @@ package identity_test
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/anish749/pigeon/internal/identity"
@@ -319,5 +320,117 @@ func TestAtomicWrite_TempFileCleanup(t *testing.T) {
 	// The actual file should exist.
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("people file should exist: %v", err)
+	}
+}
+
+func TestSearchCandidates(t *testing.T) {
+	cases := []struct {
+		name        string
+		signals     []identity.Signal
+		query       string
+		wantLen     int
+		wantName    string   // when len(got)==1, expected Person.Name
+		wantSlackID string   // when len(got)==1, expected Slack["w"].ID
+		wantNames   []string // when non-nil, expected Person.Name set (order-independent)
+	}{
+		{
+			name: "slack ID exact",
+			signals: []identity.Signal{
+				{Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U111", DisplayName: "alice"}},
+				{Name: "Bob", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U222", DisplayName: "bob"}},
+			},
+			query:       "U111",
+			wantLen:     1,
+			wantName:    "Alice",
+			wantSlackID: "U111",
+		},
+		{
+			name: "email exact",
+			signals: []identity.Signal{
+				{Name: "Alice", Email: "alice@company.com"},
+				{Name: "Bob", Email: "bob@company.com"},
+			},
+			query:    "Alice@Company.Com",
+			wantLen:  1,
+			wantName: "Alice",
+		},
+		{
+			name: "name substring single match",
+			signals: []identity.Signal{
+				{Name: "Alice Smith", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U1", DisplayName: "asmith"}},
+				{Name: "Bob Jones", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U2", DisplayName: "bjones"}},
+			},
+			query:    "smith",
+			wantLen:  1,
+			wantName: "Alice Smith",
+		},
+		{
+			name: "name substring ambiguous",
+			signals: []identity.Signal{
+				{Name: "Alex One", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U1", DisplayName: "Alex"}},
+				{Name: "Alex Two", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U2", DisplayName: "Alex"}},
+			},
+			query:     "Alex",
+			wantLen:   2,
+			wantNames: []string{"Alex One", "Alex Two"},
+		},
+		{
+			name: "ID precedence over shared name substring",
+			signals: []identity.Signal{
+				{Name: "Pat", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U99", DisplayName: "Pat"}},
+				{Name: "Pat Lee", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U88", DisplayName: "Pat"}},
+			},
+			query:       "U99",
+			wantLen:     1,
+			wantName:    "Pat",
+			wantSlackID: "U99",
+		},
+		{
+			name: "empty query",
+			signals: []identity.Signal{
+				{Name: "X", Email: "x@y.z"},
+			},
+			query:   "   ",
+			wantLen: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := testService(t)
+			if err := svc.ObserveBatch(tc.signals); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := svc.SearchCandidates(tc.query)
+			if err != nil {
+				t.Fatalf("SearchCandidates: %v", err)
+			}
+			if len(got) != tc.wantLen {
+				t.Fatalf("len(got) = %d, want %d (got %#v)", len(got), tc.wantLen, got)
+			}
+			if tc.wantNames != nil {
+				names := make([]string, len(got))
+				for i := range got {
+					names[i] = got[i].Name
+				}
+				slices.Sort(names)
+				want := slices.Clone(tc.wantNames)
+				slices.Sort(want)
+				if !slices.Equal(names, want) {
+					t.Fatalf("names = %v, want %v", names, want)
+				}
+			}
+			if tc.wantLen == 1 {
+				if tc.wantName != "" && got[0].Name != tc.wantName {
+					t.Errorf("Name = %q, want %q", got[0].Name, tc.wantName)
+				}
+				if tc.wantSlackID != "" {
+					if got[0].Slack["w"].ID != tc.wantSlackID {
+						t.Errorf("Slack[w].ID = %q, want %q", got[0].Slack["w"].ID, tc.wantSlackID)
+					}
+				}
+			}
+		})
 	}
 }

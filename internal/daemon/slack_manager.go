@@ -118,14 +118,11 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	smClient := socketmode.New(botAPI)
 
 	userAPI := goslack.New(sl.UserToken)
-	resolver := slacklistener.NewResolver(userAPI)
+	resolver := slacklistener.NewResolver(userAPI, id, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)
 	}
-
-	// Push identity signals from Slack user profiles.
-	go observeSlackUsers(ctx, userAPI, sl.Workspace, id)
 
 	var userName string
 	var userID string
@@ -172,49 +169,4 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		UserName:  userName,
 		UserID:    userID,
 	}
-}
-
-// observeSlackUsers fetches Slack user profiles and pushes identity signals.
-// Runs in a goroutine so it doesn't block listener startup.
-func observeSlackUsers(ctx context.Context, api *goslack.Client, workspace string, id *identity.Service) {
-	users, err := api.GetUsersContext(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "identity: failed to fetch Slack users", "workspace", workspace, "error", err)
-		return
-	}
-
-	signals := make([]identity.Signal, 0, len(users))
-	for _, u := range users {
-		if u.Deleted {
-			continue
-		}
-
-		// Use the best available name for the top-level person name.
-		name := u.Profile.DisplayName
-		if name == "" {
-			name = u.RealName
-		}
-		if name == "" {
-			name = u.Name
-		}
-
-		sig := identity.Signal{
-			Email: u.Profile.Email,
-			Name:  name,
-			Slack: &identity.SlackIdentity{
-				Workspace:   workspace,
-				ID:          u.ID,
-				DisplayName: u.Profile.DisplayName,
-				RealName:    u.RealName,
-				Name:        u.Name,
-			},
-		}
-		signals = append(signals, sig)
-	}
-
-	if err := id.ObserveBatch(signals); err != nil {
-		slog.ErrorContext(ctx, "identity: failed to observe Slack users", "workspace", workspace, "error", err)
-		return
-	}
-	slog.InfoContext(ctx, "identity: observed Slack users", "workspace", workspace, "count", len(signals))
 }
