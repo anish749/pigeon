@@ -2,6 +2,7 @@ package identity
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +107,43 @@ func (s *Service) People() ([]Person, error) {
 
 	out := make([]Person, len(s.people))
 	copy(out, s.people)
+	return out, nil
+}
+
+// SearchCandidates returns people matching the trimmed query. If the query
+// equals a stable identifier (Slack user ID in any workspace, WhatsApp number,
+// or email), at most one person is returned. Otherwise names are matched with
+// case-insensitive substring comparison against Person.Name and each Slack
+// display name, real name, and username. Zero, one, or many people may be
+// returned for name search; a single name match is still returned as a
+// one-element slice.
+func (s *Service) SearchCandidates(query string) ([]Person, error) {
+	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
+	if q == "" {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.loadLocked(); err != nil {
+		return nil, fmt.Errorf("load identity: %w", err)
+	}
+
+	for i := range s.people {
+		if s.people[i].matchesAnyExactID(q) {
+			p := s.people[i]
+			return []Person{p}, nil
+		}
+	}
+
+	var out []Person
+	for i := range s.people {
+		if s.people[i].nameMatchesSubstring(q) {
+			p := s.people[i]
+			out = append(out, p)
+		}
+	}
 	return out, nil
 }
 
