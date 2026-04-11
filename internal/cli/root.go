@@ -101,24 +101,17 @@ DATA LAYOUT
   GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
-  Messaging JSON fields:
-    type      "msg", "react", "unreact", "edit", "delete", "separator"
-    ts        timestamp (ISO 8601)
-    id        message ID
-    sender    display name
-    from      platform user ID
-    text      message body
-    via       "to-pigeon", "pigeon-as-user", "pigeon-as-bot"
-    emoji     reaction emoji (react/unreact)
-    attach    attachments [{id, type}]
-    reply     true if thread reply
-    replyTo   quoted message ID
+  All JSONL lines have a "type" field — use it with jq to filter:
+    Messaging: "msg", "react", "unreact", "edit", "delete", "separator"
+    GWS:       "email", "comment", "event"
 
-  GWS JSON fields:
-    type      "email", "comment", "event"
-    Emails:   id, threadId, ts, from, fromName, to, subject, text
-    Events:   full Google Calendar API response (id, summary, start, end, ...)
-    Comments: full Google Drive API response (id, author, content, replies, ...)
+  Common fields (messaging):
+    ts, id, sender, from, text, via, emoji, attach, reply, replyTo
+
+  Common fields (email):
+    id, threadId, ts, from, fromName, to, subject, text, labels
+
+  Events and comments store the full Google API response as the line.
 
 ─────────────────────────────────────────────────────────
 
@@ -141,7 +134,8 @@ DIRECT FILE ACCESS — rg and jq
   jq on a single file (no rg needed):
 
     jq 'select(.type == "msg")' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
-    jq -r 'select(.sender == "Alice") | .text' ~/.local/share/pigeon/slack/acme-corp/#general/2026-03-16.jsonl
+    jq -r 'select(.type == "email") | .subject' ~/.local/share/pigeon/gws/*/gmail/2026-03-16.jsonl
+    jq -r 'select(.type == "event") | .summary' ~/.local/share/pigeon/gws/*/gcalendar/*/2026-03-16.jsonl
 
 ─────────────────────────────────────────────────────────
 
