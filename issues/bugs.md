@@ -47,23 +47,13 @@ The Slack socket mode library handles network-level reconnection internally, but
 
 **Files affected:** `internal/daemon/slack_manager.go`, `internal/daemon/whatsapp_manager.go`, `internal/daemon/gws_manager.go`.
 
-## GWS Drive: comments re-fetched and duplicated on every poll
-
-`storeComments` fetches ALL comments for a file on every Drive change, not just new ones. Each comment and reply is appended to `comments.jsonl` unconditionally. If a doc has 200 comments and someone fixes a typo, all 200 comments are appended again as duplicates.
-
-Dedup-on-read (keep last by ID) means the data is still correct, but the file grows unboundedly — every edit multiplies the comment count in the JSONL. A doc with 200 comments edited 50 times produces 10,000 lines where 200 are unique.
-
-**Files affected:** `internal/gws/poller/drive.go` (`storeComments`), `internal/gws/drive/client.go` (`ListComments`).
-
 ## Slack send does not resolve mentions
 
 When Pigeon sends a Slack message, @mentions are not resolved — they appear as raw text instead of being converted to Slack's mention format. Recipients see plain-text "@name" that doesn't ping or link to the mentioned user.
 
 ## GWS: no maintenance/compaction for JSONL files
 
-The protocol spec describes dedup and compaction for GWS JSONL files (emails, comments, calendar events), and `compact.DedupGWS` exists for dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted.
-
-Combined with the comments re-fetch bug above, this means `comments.jsonl` files grow without bound. Gmail and calendar JSONL files also accumulate duplicate event updates that are never cleaned up.
+The protocol spec describes dedup and compaction for GWS JSONL files (emails, calendar events), and `compact.DedupGWS` exists for dedup. But the existing maintenance pass (`FSStore.Maintain`) only handles messaging data (`modelv1` lines). GWS JSONL files are never compacted. Gmail and calendar JSONL files accumulate duplicate event updates that are never cleaned up.
 
 This also needs to apply pending email deletes (`.pending-email-deletes`) as part of the gmail maintenance pass.
 
