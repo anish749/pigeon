@@ -38,6 +38,10 @@ type Store interface {
 	// ThreadExists checks if a thread file exists for the given thread timestamp.
 	ThreadExists(acct account.Account, conversation, threadTS string) bool
 
+	// MessageExists checks if a message with the given ID exists in any
+	// date file for the conversation.
+	MessageExists(acct account.Account, conversation, messageID string) bool
+
 	// ListPlatforms returns all platform directories (e.g. "slack", "whatsapp").
 	ListPlatforms() ([]string, error)
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +145,30 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS string) bool {
 	return fileExists(s.convDir(acct, conversation).ThreadFile(threadTS))
+}
+
+// MessageExists checks if a message with the given ID exists in any date file
+// for the conversation. This validates that a timestamp corresponds to an
+// actual message — used for thread validation since a valid thread parent may
+// not yet have a thread file.
+func (s *FSStore) MessageExists(acct account.Account, conversation, messageID string) bool {
+	conv := s.convDir(acct, conversation)
+	files, err := listDateFiles(conv.Path())
+	if err != nil || len(files) == 0 {
+		return false
+	}
+
+	needle := []byte(`"id":"` + messageID + `"`)
+	for i := len(files) - 1; i >= 0; i-- {
+		data, err := os.ReadFile(files[i])
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(data, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadThread loads a thread file, applying compaction and resolution.

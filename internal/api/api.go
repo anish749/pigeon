@@ -348,9 +348,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	}
 
-	// Validate thread exists locally before sending.
+	// Validate thread parent exists locally before sending. A valid thread
+	// target is any message that exists in the channel — it doesn't need
+	// to have replies yet (which is what ThreadExists checks).
 	if req.Thread != "" && !req.Force {
-		if !s.store.ThreadExists(sender.Acct, channelName, req.Thread) {
+		if !s.store.ThreadExists(sender.Acct, channelName, req.Thread) &&
+			!s.store.MessageExists(sender.Acct, channelName, req.Thread) {
 			return SendResponse{Error: fmt.Sprintf(
 				"thread %s not found in %s — check the timestamp with "+
 					"'pigeon search' or 'pigeon read'. "+
@@ -658,6 +661,7 @@ type ReactRequest struct {
 	MessageID string `json:"message_id"`
 	Emoji     string `json:"emoji"`
 	Remove    bool   `json:"remove,omitempty"`
+	Force     bool   `json:"force,omitempty"`
 }
 
 // ReactResponse is the daemon API response for /api/react.
@@ -714,6 +718,18 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 	channelID, channelName, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
 	if err != nil {
 		return ReactResponse{Error: err.Error()}
+	}
+
+	// Validate message exists locally before reacting.
+	if !req.Force {
+		if !s.store.MessageExists(sender.Acct, channelName, req.MessageID) &&
+			!s.store.ThreadExists(sender.Acct, channelName, req.MessageID) {
+			return ReactResponse{Error: fmt.Sprintf(
+				"message %s not found in %s — check the timestamp with "+
+					"'pigeon search' or 'pigeon read'. "+
+					"Use --force to react anyway.",
+				req.MessageID, channelName)}
+		}
 	}
 
 	// Reactions are always sent via the bot token.
