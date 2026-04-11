@@ -8,30 +8,30 @@ import (
 
 	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/calendar"
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // PollCalendar runs the calendar sync cycle: seed, incremental sync, and
 // window expansion for recurring events. Returns the number of changes
 // observed (events + recurring events changed) plus any error.
-func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
+func PollCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	const calID = "primary"
 
 	if cursors.Calendar == nil {
-		cursors.Calendar = make(gwsstore.CalendarCursors)
+		cursors.Calendar = make(store.GWSCalendarCursors)
 	}
 
 	cur := cursors.Calendar[calID]
 
 	// Phase 1: Seed — no cursor exists yet.
 	if cur == nil || cur.SyncToken == "" {
-		return seedCalendar(account, cursors, calID)
+		return seedCalendar(s, account, cursors, calID)
 	}
 
 	// Phase 2: Incremental sync.
-	changes, err := syncCalendar(account, cur, calID)
+	changes, err := syncCalendar(s, account, cur, calID)
 	if err != nil {
 		if gws.IsCursorExpired(err) {
 			slog.Warn("calendar sync token expired, will re-seed", "calendar", calID)
@@ -45,7 +45,7 @@ func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) (int, err
 	// expanded_until is within ExpansionThresholdDays of now. Window
 	// expansion writes events to disk but is not an observed "change"
 	// from Google's perspective, so we don't add it to the changes count.
-	if err := maybeExpandWindow(account, cur, calID); err != nil {
+	if err := maybeExpandWindow(s, account, cur, calID); err != nil {
 		return changes, err
 	}
 	return changes, nil
@@ -55,7 +55,7 @@ func PollCalendar(account paths.AccountDir, cursors *gwsstore.Cursors) (int, err
 // BackfillDays ago onward, expands recurring events within ±BackfillDays,
 // and writes everything to disk. Returns the number of seeded events
 // (one-off + instances) plus any error.
-func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID string) (int, error) {
+func seedCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, calID string) (int, error) {
 	slog.Info("seeding calendar", "calendar", calID)
 
 	result, err := calendar.SeedSyncToken(calID)
@@ -64,7 +64,7 @@ func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID str
 	}
 
 	// Write one-off events and exception instances to disk.
-	errs := writeEvents(account, calID, result.Events)
+	errs := writeEvents(s, account, calID, result.Events)
 
 	// Expand recurring events within the backfill window.
 	now := time.Now().UTC()
@@ -77,10 +77,10 @@ func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID str
 			errs = append(errs, fmt.Errorf("expand %s: %w", recurID, err))
 			continue
 		}
-		errs = append(errs, writeEvents(account, calID, instances)...)
+		errs = append(errs, writeEvents(s, account, calID, instances)...)
 	}
 
-	cursors.Calendar[calID] = &gwsstore.CalendarCursor{
+	cursors.Calendar[calID] = &store.GWSCalendarCursor{
 		SyncToken:       result.SyncToken,
 		ExpandedUntil:   timeMax,
 		RecurringEvents: result.RecurringIDs,
@@ -96,14 +96,14 @@ func seedCalendar(account paths.AccountDir, cursors *gwsstore.Cursors, calID str
 // syncCalendar performs an incremental sync: fetches changes since the last
 // sync token, writes events to disk, and re-expands any changed recurring parents.
 // Returns the number of changed events (one-off + recurring parents) plus any error.
-func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID string) (int, error) {
+func syncCalendar(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string) (int, error) {
 	result, err := calendar.ListEvents(calID, cur.SyncToken)
 	if err != nil {
 		return 0, fmt.Errorf("poll calendar %s: %w", calID, err)
 	}
 
 	// Write one-off events and changed instances to disk.
-	errs := writeEvents(account, calID, result.Events)
+	errs := writeEvents(s, account, calID, result.Events)
 
 	// Re-expand any recurring parents that changed.
 	now := time.Now().UTC()
@@ -114,7 +114,7 @@ func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID 
 			errs = append(errs, fmt.Errorf("expand %s: %w", recurID, err))
 			continue
 		}
-		errs = append(errs, writeEvents(account, calID, instances)...)
+		errs = append(errs, writeEvents(s, account, calID, instances)...)
 	}
 
 	// Track newly discovered recurring events and remove deleted ones.
@@ -135,7 +135,7 @@ func syncCalendar(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID 
 
 // maybeExpandWindow checks if the expansion window needs extending and, if so,
 // fetches new instances for all known recurring events.
-func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, calID string) error {
+func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string) error {
 	if cur.ExpandedUntil == "" || len(cur.RecurringEvents) == 0 {
 		return nil
 	}
@@ -164,7 +164,7 @@ func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, c
 			errs = append(errs, fmt.Errorf("expand window %s: %w", recurID, err))
 			continue
 		}
-		errs = append(errs, writeEvents(account, calID, instances)...)
+		errs = append(errs, writeEvents(s, account, calID, instances)...)
 	}
 
 	cur.ExpandedUntil = newTimeMax
@@ -172,12 +172,12 @@ func maybeExpandWindow(account paths.AccountDir, cur *gwsstore.CalendarCursor, c
 }
 
 // writeEvents appends events to their date-partitioned JSONL files.
-func writeEvents(account paths.AccountDir, calID string, events []*model.CalendarEvent) []error {
+func writeEvents(s *store.FSStore, account paths.AccountDir, calID string, events []*modelv1.CalendarEvent) []error {
 	var errs []error
 	for _, ev := range events {
 		datePath := account.Calendar(calID).DateFile(ev.DateForStorage())
-		line := model.Line{Type: "event", Event: ev}
-		if err := gwsstore.AppendLine(datePath, line); err != nil {
+		line := modelv1.Line{Type: modelv1.LineEvent, Event: ev}
+		if err := s.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append event %s: %w", ev.Runtime.Id, err))
 		}
 	}

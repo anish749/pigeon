@@ -3,18 +3,18 @@ package converter
 import (
 	"testing"
 
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func TestHeadingParagraph(t *testing.T) {
-	tab := model.Tab{
-		Body: model.Body{
-			Content: []model.Block{
-				{Paragraph: &model.Paragraph{
-					Elements: []model.Element{
-						{TextRun: &model.TextRun{Content: "Title\n"}},
+	tab := modelv1.Tab{
+		Body: modelv1.Body{
+			Content: []modelv1.Block{
+				{Paragraph: &modelv1.Paragraph{
+					Elements: []modelv1.Element{
+						{TextRun: &modelv1.TextRun{Content: "Title\n"}},
 					},
-					ParagraphStyle: model.ParagraphStyle{NamedStyleType: "HEADING_1"},
+					ParagraphStyle: modelv1.ParagraphStyle{NamedStyleType: "HEADING_1"},
 				}},
 			},
 		},
@@ -29,17 +29,17 @@ func TestHeadingParagraph(t *testing.T) {
 }
 
 func TestBoldItalicTextRun(t *testing.T) {
-	tab := model.Tab{
-		Body: model.Body{
-			Content: []model.Block{
-				{Paragraph: &model.Paragraph{
-					Elements: []model.Element{
-						{TextRun: &model.TextRun{
+	tab := modelv1.Tab{
+		Body: modelv1.Body{
+			Content: []modelv1.Block{
+				{Paragraph: &modelv1.Paragraph{
+					Elements: []modelv1.Element{
+						{TextRun: &modelv1.TextRun{
 							Content:   "text",
-							TextStyle: model.TextStyle{Bold: true, Italic: true},
+							TextStyle: modelv1.TextStyle{Bold: true, Italic: true},
 						}},
 					},
-					ParagraphStyle: model.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+					ParagraphStyle: modelv1.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
 				}},
 			},
 		},
@@ -54,14 +54,14 @@ func TestBoldItalicTextRun(t *testing.T) {
 }
 
 func TestBulletList(t *testing.T) {
-	tab := model.Tab{
-		Body: model.Body{
-			Content: []model.Block{
-				{Paragraph: &model.Paragraph{
-					Elements: []model.Element{
-						{TextRun: &model.TextRun{Content: "item"}},
+	tab := modelv1.Tab{
+		Body: modelv1.Body{
+			Content: []modelv1.Block{
+				{Paragraph: &modelv1.Paragraph{
+					Elements: []modelv1.Element{
+						{TextRun: &modelv1.TextRun{Content: "item"}},
 					},
-					Bullet: &model.Bullet{ListID: "list1", NestingLevel: 0},
+					Bullet: &modelv1.Bullet{ListID: "list1", NestingLevel: 0},
 				}},
 			},
 		},
@@ -76,27 +76,27 @@ func TestBulletList(t *testing.T) {
 }
 
 func TestTable(t *testing.T) {
-	tab := model.Tab{
-		Body: model.Body{
-			Content: []model.Block{
-				{Table: &model.Table{
+	tab := modelv1.Tab{
+		Body: modelv1.Body{
+			Content: []modelv1.Block{
+				{Table: &modelv1.Table{
 					Rows:    2,
 					Columns: 2,
-					TableRows: []model.TableRow{
-						{TableCells: []model.TableCell{
-							{Content: []model.Block{{Paragraph: &model.Paragraph{
-								Elements: []model.Element{{TextRun: &model.TextRun{Content: "A"}}},
+					TableRows: []modelv1.TableRow{
+						{TableCells: []modelv1.TableCell{
+							{Content: []modelv1.Block{{Paragraph: &modelv1.Paragraph{
+								Elements: []modelv1.Element{{TextRun: &modelv1.TextRun{Content: "A"}}},
 							}}}},
-							{Content: []model.Block{{Paragraph: &model.Paragraph{
-								Elements: []model.Element{{TextRun: &model.TextRun{Content: "B"}}},
+							{Content: []modelv1.Block{{Paragraph: &modelv1.Paragraph{
+								Elements: []modelv1.Element{{TextRun: &modelv1.TextRun{Content: "B"}}},
 							}}}},
 						}},
-						{TableCells: []model.TableCell{
-							{Content: []model.Block{{Paragraph: &model.Paragraph{
-								Elements: []model.Element{{TextRun: &model.TextRun{Content: "C"}}},
+						{TableCells: []modelv1.TableCell{
+							{Content: []modelv1.Block{{Paragraph: &modelv1.Paragraph{
+								Elements: []modelv1.Element{{TextRun: &modelv1.TextRun{Content: "C"}}},
 							}}}},
-							{Content: []model.Block{{Paragraph: &model.Paragraph{
-								Elements: []model.Element{{TextRun: &model.TextRun{Content: "D"}}},
+							{Content: []modelv1.Block{{Paragraph: &modelv1.Paragraph{
+								Elements: []modelv1.Element{{TextRun: &modelv1.TextRun{Content: "D"}}},
 							}}}},
 						}},
 					},
@@ -114,17 +114,17 @@ func TestTable(t *testing.T) {
 }
 
 func TestLink(t *testing.T) {
-	tab := model.Tab{
-		Body: model.Body{
-			Content: []model.Block{
-				{Paragraph: &model.Paragraph{
-					Elements: []model.Element{
-						{TextRun: &model.TextRun{
+	tab := modelv1.Tab{
+		Body: modelv1.Body{
+			Content: []modelv1.Block{
+				{Paragraph: &modelv1.Paragraph{
+					Elements: []modelv1.Element{
+						{TextRun: &modelv1.TextRun{
 							Content:   "click here",
-							TextStyle: model.TextStyle{Link: &model.Link{URL: "https://example.com"}},
+							TextStyle: modelv1.TextStyle{Link: &modelv1.Link{URL: "https://example.com"}},
 						}},
 					},
-					ParagraphStyle: model.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
+					ParagraphStyle: modelv1.ParagraphStyle{NamedStyleType: "NORMAL_TEXT"},
 				}},
 			},
 		},

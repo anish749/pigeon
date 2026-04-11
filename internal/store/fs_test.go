@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -670,5 +671,458 @@ func TestMaintain_ConversationNamedThreads(t *testing.T) {
 	}
 	if len(df.Messages) != 1 || df.Messages[0].ID != "M2" {
 		t.Errorf("after maintenance: messages = %+v, want [M2]", df.Messages)
+	}
+}
+
+func TestRemoveDriveFile_SluggedDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+
+	target := filepath.Join(driveDir.Path(), "my-doc-fileID123")
+	keep := filepath.Join(driveDir.Path(), "other-doc-fileID456")
+	for _, d := range []string{target, keep} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "content.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.RemoveDriveFile(driveDir, "fileID123"); err != nil {
+		t.Fatalf("RemoveDriveFile: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("target dir still exists: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("unrelated dir removed: %v", err)
+	}
+}
+
+func TestRemoveDriveFile_PlainIDDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	target := filepath.Join(driveDir.Path(), "fileID789")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RemoveDriveFile(driveDir, "fileID789"); err != nil {
+		t.Fatalf("RemoveDriveFile: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("target dir still exists: %v", err)
+	}
+}
+
+func TestRemoveDriveFile_NoMatch(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	keep := filepath.Join(driveDir.Path(), "unrelated-doc-fileIDAAA")
+	if err := os.MkdirAll(keep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RemoveDriveFile(driveDir, "fileIDZZZ"); err != nil {
+		t.Fatalf("RemoveDriveFile: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("unrelated dir removed: %v", err)
+	}
+}
+
+func TestRemoveDriveFile_IgnoresNonDirectories(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	if err := os.MkdirAll(driveDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(driveDir.Path(), "stray-fileID123")
+	if err := os.WriteFile(stray, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RemoveDriveFile(driveDir, "fileID123"); err != nil {
+		t.Fatalf("RemoveDriveFile: %v", err)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Errorf("stray file incorrectly removed: %v", err)
+	}
+}
+
+func TestRemoveDriveFile_MissingDriveDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	driveDir := root.Platform("gws").AccountFromSlug("neverbackfilled").Drive()
+
+	if err := s.RemoveDriveFile(driveDir, "fileIDXYZ"); err != nil {
+		t.Errorf("RemoveDriveFile on missing dir: %v", err)
+	}
+}
+
+// --- GWS persistence method tests ---
+
+func gwsEmailLine(id string) modelv1.Line {
+	return modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID:      id,
+			Subject: "Subject " + id,
+			Ts:      ts(2026, 4, 7, 12, 0, 0),
+			From:    "test@example.com",
+			To:      []string{"to@example.com"},
+			Labels:  []string{"INBOX"},
+		},
+	}
+}
+
+func gwsEmailDeleteLine(id string) modelv1.Line {
+	return modelv1.Line{
+		Type: modelv1.LineEmailDelete,
+		EmailDelete: &modelv1.EmailDeleteLine{
+			ID: id,
+			Ts: ts(2026, 4, 7, 13, 0, 0),
+		},
+	}
+}
+
+func TestAppendLineAndReadLines(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "test.jsonl")
+
+	for _, id := range []string{"a", "b", "c"} {
+		if err := s.AppendLine(paths.DateFile(path), gwsEmailLine(id)); err != nil {
+			t.Fatalf("AppendLine(%q): %v", id, err)
+		}
+	}
+
+	lines, err := s.ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3", len(lines))
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		if lines[i].Email.ID != want {
+			t.Errorf("lines[%d].ID = %q, want %q", i, lines[i].Email.ID, want)
+		}
+	}
+}
+
+func TestWriteLines_Overwrite(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "write.jsonl")
+
+	initial := []modelv1.Line{gwsEmailLine("a"), gwsEmailLine("b")}
+	if err := s.WriteLines(paths.DateFile(path), initial); err != nil {
+		t.Fatalf("WriteLines: %v", err)
+	}
+
+	lines, err := s.ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+
+	// Overwrite with fewer lines — verifies replacement, not append.
+	if err := s.WriteLines(paths.DateFile(path), []modelv1.Line{gwsEmailLine("c")}); err != nil {
+		t.Fatalf("WriteLines overwrite: %v", err)
+	}
+	lines, err = s.ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines after overwrite: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Email.ID != "c" {
+		t.Fatalf("got %v, want 1 line with ID=c", lines)
+	}
+}
+
+func TestWriteLines_Empty(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "empty.jsonl")
+
+	if err := s.WriteLines(paths.DateFile(path), []modelv1.Line{gwsEmailLine("a")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteLines(paths.DateFile(path), nil); err != nil {
+		t.Fatalf("WriteLines empty: %v", err)
+	}
+	lines, err := s.ReadLines(paths.DateFile(path))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("got %d lines, want 0", len(lines))
+	}
+}
+
+func TestReadLines_NonExistent(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	lines, err := s.ReadLines(paths.DateFile(filepath.Join(root.Path(), "nope.jsonl")))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if lines != nil {
+		t.Fatalf("got %v, want nil", lines)
+	}
+}
+
+func TestReadLines_CorruptLines(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "corrupt.jsonl")
+
+	if err := s.AppendLine(paths.DateFile(path), gwsEmailLine("good1")); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("not valid json\n")
+	f.Close()
+	if err := s.AppendLine(paths.DateFile(path), gwsEmailLine("good2")); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, err := s.ReadLines(paths.DateFile(path))
+	if err == nil {
+		t.Fatal("expected error for corrupt line")
+	}
+	if len(lines) != 2 {
+		t.Fatalf("got %d good lines, want 2", len(lines))
+	}
+	if lines[0].Email.ID != "good1" || lines[1].Email.ID != "good2" {
+		t.Errorf("lines = %v, want [good1, good2]", lines)
+	}
+}
+
+func TestWriteContent_RoundTrip(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "output.md")
+
+	content := []byte("# Hello\nWorld\n")
+	if err := s.WriteContent(paths.TabFile(path), content); err != nil {
+		t.Fatalf("WriteContent: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func TestWriteContent_Replaces(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "output.md")
+
+	if err := s.WriteContent(paths.TabFile(path), []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteContent(paths.TabFile(path), []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "new" {
+		t.Errorf("got %q, want %q", got, "new")
+	}
+}
+
+func TestWriteContent_CreatesParentDirs(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	path := filepath.Join(root.Path(), "a", "b", "c", "output.csv")
+
+	content := []byte("col1,col2\n1,2\n")
+	if err := s.WriteContent(paths.TabFile(path), content); err != nil {
+		t.Fatalf("WriteContent: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != string(content) {
+		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func testGWSDriveFileDir(t *testing.T, s *FSStore) paths.DriveFileDir {
+	t.Helper()
+	return paths.NewDataRoot(t.TempDir()).
+		Platform("gws").
+		AccountFromSlug("test").
+		Drive().
+		File("doc-abc")
+}
+
+func TestDriveMetaRoundTrip(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	fileDir := testGWSDriveFileDir(t, s)
+	mf := fileDir.MetaFile("2026-04-07")
+
+	orig := &modelv1.DocMeta{
+		FileID:       "file-123",
+		MimeType:     "application/vnd.google-apps.document",
+		Title:        "My Doc",
+		ModifiedTime: "2026-04-07T12:00:00Z",
+		SyncedAt:     "2026-04-07T12:01:00Z",
+		Tabs: []modelv1.TabMeta{
+			{ID: "tab-1", Title: "Main"},
+			{ID: "tab-2", Title: "Notes"},
+		},
+		Sheets: []string{"Sheet1", "Sheet2"},
+	}
+
+	if err := s.SaveDriveMeta(mf, orig); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
+	}
+	got, err := s.LoadDriveMeta(mf)
+	if err != nil {
+		t.Fatalf("LoadDriveMeta: %v", err)
+	}
+	if got.FileID != orig.FileID || got.Title != orig.Title {
+		t.Errorf("round trip mismatch: got %+v", got)
+	}
+	if len(got.Tabs) != 2 || len(got.Sheets) != 2 {
+		t.Errorf("Tabs=%d Sheets=%d, want 2/2", len(got.Tabs), len(got.Sheets))
+	}
+}
+
+func TestLoadDriveMetaNonExistent(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	mf := testGWSDriveFileDir(t, s).MetaFile("2026-04-07")
+	_, err := s.LoadDriveMeta(mf)
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
+func TestSaveDriveMetaCleansUpStaleFiles(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	fileDir := testGWSDriveFileDir(t, s)
+
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(fileDir.Path(), "drive-meta-2026-04-01.json")
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mf := fileDir.MetaFile("2026-04-07")
+	if err := s.SaveDriveMeta(mf, &modelv1.DocMeta{FileID: "f1"}); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
+	}
+
+	if _, err := os.Stat(mf.Path()); err != nil {
+		t.Errorf("new meta file missing: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("stale meta file not cleaned up: err=%v", err)
+	}
+}
+
+func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	fileDir := testGWSDriveFileDir(t, s)
+	if err := os.MkdirAll(fileDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated := []string{
+		filepath.Join(fileDir.Path(), "Tab1.md"),
+		filepath.Join(fileDir.Path(), "comments.jsonl"),
+	}
+	for _, p := range unrelated {
+		if err := os.WriteFile(p, []byte("keep me"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mf := fileDir.MetaFile("2026-04-07")
+	if err := s.SaveDriveMeta(mf, &modelv1.DocMeta{FileID: "f1"}); err != nil {
+		t.Fatalf("SaveDriveMeta: %v", err)
+	}
+	for _, p := range unrelated {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("unrelated file %s was removed: %v", p, err)
+		}
+	}
+}
+
+func TestGWSCursorsRoundTrip(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := root.Platform("gws").AccountFromSlug("test")
+
+	orig := &GWSCursors{
+		Gmail: GmailCursors{HistoryID: "12345"},
+		Drive: GWSDriveCursors{PageToken: "tok-abc"},
+		Calendar: GWSCalendarCursors{
+			"primary": {
+				SyncToken:       "sync-1",
+				ExpandedUntil:   "2026-07-07T00:00:00Z",
+				RecurringEvents: []string{"evt-a", "evt-b"},
+			},
+			"work@test.com": {SyncToken: "sync-2"},
+		},
+	}
+
+	if err := s.SaveGWSCursors(acct, orig); err != nil {
+		t.Fatalf("SaveGWSCursors: %v", err)
+	}
+	got, err := s.LoadGWSCursors(acct)
+	if err != nil {
+		t.Fatalf("LoadGWSCursors: %v", err)
+	}
+	if got.Gmail.HistoryID != "12345" {
+		t.Errorf("Gmail.HistoryID = %q, want 12345", got.Gmail.HistoryID)
+	}
+	if got.Drive.PageToken != "tok-abc" {
+		t.Errorf("Drive.PageToken = %q, want tok-abc", got.Drive.PageToken)
+	}
+	if len(got.Calendar) != 2 {
+		t.Fatalf("Calendar has %d entries, want 2", len(got.Calendar))
+	}
+	primary := got.Calendar["primary"]
+	if primary == nil || primary.SyncToken != "sync-1" {
+		t.Errorf("Calendar[primary] = %+v, want sync-1", primary)
+	}
+	if len(primary.RecurringEvents) != 2 {
+		t.Errorf("RecurringEvents = %d, want 2", len(primary.RecurringEvents))
+	}
+}
+
+func TestLoadGWSCursors_NonExistent(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := root.Platform("gws").AccountFromSlug("neversynced")
+
+	got, err := s.LoadGWSCursors(acct)
+	if err != nil {
+		t.Fatalf("LoadGWSCursors: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil GWSCursors")
+	}
+	if got.Gmail.HistoryID != "" {
+		t.Errorf("Gmail.HistoryID = %q, want empty", got.Gmail.HistoryID)
 	}
 }

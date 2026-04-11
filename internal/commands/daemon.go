@@ -147,7 +147,7 @@ func DaemonRun(version string) error {
 	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager()
+	gwsMgr := daemon.NewGWSManager(store)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
 	go apiServer.Start(ctx, paths.SocketPath())

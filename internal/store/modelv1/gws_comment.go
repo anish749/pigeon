@@ -1,4 +1,4 @@
-package model
+package modelv1
 
 import (
 	drive "google.golang.org/api/drive/v3"
@@ -9,7 +9,7 @@ import (
 // for disk storage.
 //
 // Runtime is the typed drive.Comment used by dedup and any code that needs
-// typed field access. Serialized is a JSON-shaped map that Marshal writes
+// typed field access. Serialized is a JSON-shaped map that MarshalGWS writes
 // verbatim to disk — it preserves every field the API returned, including
 // nested replies, even ones the generated SDK types don't know about.
 //

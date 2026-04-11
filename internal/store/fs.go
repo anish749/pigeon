@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
@@ -51,7 +54,7 @@ func (s *FSStore) Append(acct account.Account, conversation string, line modelv1
 		return fmt.Errorf("create conversation dir: %w", err)
 	}
 
-	return s.appendLine(conv.DateFile(ts.UTC().Format("2006-01-02")), line)
+	return s.AppendLine(conv.DateFile(ts.UTC().Format("2006-01-02")), line)
 }
 
 // AppendThread writes a single event line to a thread file.
@@ -60,7 +63,7 @@ func (s *FSStore) AppendThread(acct account.Account, conversation, threadTS stri
 	if err := os.MkdirAll(conv.ThreadsDir(), 0755); err != nil {
 		return fmt.Errorf("create threads dir: %w", err)
 	}
-	return s.appendLine(conv.ThreadFile(threadTS), line)
+	return s.AppendLine(conv.ThreadFile(threadTS), line)
 }
 
 // ReadConversation loads messages from a conversation, applying compaction
@@ -329,13 +332,22 @@ func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.
 
 // --- internal helpers ---
 
-func (s *FSStore) appendLine(df paths.LogFile, line modelv1.Line) error {
+// AppendLine appends a single JSONL line to the given log file, creating
+// parent directories and the file itself as needed. This is the low-level
+// primitive used by Append, AppendThread, and GWS pollers that compute their
+// own paths. File writes are serialised by a per-path mutex shared across
+// all callers on the same FSStore instance.
+func (s *FSStore) AppendLine(df paths.LogFile, line modelv1.Line) error {
 	filename := df.Path()
 	mu := s.fileMu(filename)
 	mu.Lock()
 	defer mu.Unlock()
 
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", filename, err)
+	}
+
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", filename, err)
 	}
@@ -352,6 +364,227 @@ func (s *FSStore) appendLine(df paths.LogFile, line modelv1.Line) error {
 	data = append(data, '\n')
 	_, err = f.Write(data)
 	return err
+}
+
+// WriteLines replaces the contents of the given log file with the supplied
+// lines, creating parent directories if needed. Used for data that is always
+// fetched as a full snapshot (e.g. Drive comments).
+func (s *FSStore) WriteLines(df paths.LogFile, lines []modelv1.Line) error {
+	filename := df.Path()
+	mu := s.fileMu(filename)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", filename, err)
+	}
+
+	var buf []byte
+	for _, line := range lines {
+		data, err := modelv1.Marshal(line)
+		if err != nil {
+			return fmt.Errorf("marshal line: %w", err)
+		}
+		buf = append(buf, data...)
+		buf = append(buf, '\n')
+	}
+
+	if err := os.WriteFile(filename, buf, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", filename, err)
+	}
+	return nil
+}
+
+// ReadLines reads all JSONL lines from the given log file. Returns nil, nil
+// if the file doesn't exist. Unparseable lines are collected into the error
+// but successfully parsed lines are still returned.
+func (s *FSStore) ReadLines(df paths.LogFile) ([]modelv1.Line, error) {
+	filename := df.Path()
+	f, err := os.Open(filename)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open %s: %w", filename, err)
+	}
+	defer f.Close()
+
+	var lines []modelv1.Line
+	var errs []error
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		text := scanner.Text()
+		if text == "" {
+			continue
+		}
+		l, err := modelv1.Parse(text)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if err := scanner.Err(); err != nil {
+		errs = append(errs, fmt.Errorf("scan %s: %w", filename, err))
+	}
+	return lines, errors.Join(errs...)
+}
+
+// WriteContent writes raw bytes to a content file (markdown, CSV) produced
+// during GWS ingestion. Replaces the file if it already exists.
+func (s *FSStore) WriteContent(cf paths.ContentFile, data []byte) error {
+	path := cf.Path()
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// LoadDriveMeta reads Google Drive file metadata from a JSON file.
+func (s *FSStore) LoadDriveMeta(mf paths.DriveMetaFile) (*modelv1.DocMeta, error) {
+	path := mf.Path()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read meta %s: %w", path, err)
+	}
+	var m modelv1.DocMeta
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse meta %s: %w", path, err)
+	}
+	return &m, nil
+}
+
+// SaveDriveMeta writes Google Drive file metadata to a JSON file, creating
+// parent directories. After a successful write it removes any stale
+// drive-meta-*.json files in the same directory. The write-then-delete order
+// ensures metadata is never lost on crash.
+func (s *FSStore) SaveDriveMeta(mf paths.DriveMetaFile, m *modelv1.DocMeta) error {
+	path := mf.Path()
+	dir := mf.Dir()
+
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal meta: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write meta %s: %w", path, err)
+	}
+
+	if err := cleanupStaleDriveMeta(dir, mf.Name()); err != nil {
+		return fmt.Errorf("cleanup stale meta in %s: %w", dir, err)
+	}
+	return nil
+}
+
+// LoadCursors reads GWS polling cursors for the given account.
+// Returns empty Cursors if the file does not exist yet (first-run case).
+func (s *FSStore) LoadGWSCursors(acct paths.AccountDir) (*GWSCursors, error) {
+	path := acct.SyncCursorsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &GWSCursors{}, nil
+		}
+		return nil, fmt.Errorf("read cursors %s: %w", path, err)
+	}
+	var c GWSCursors
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
+	}
+	return &c, nil
+}
+
+// SaveCursors writes GWS polling cursors for the given account.
+func (s *FSStore) SaveGWSCursors(acct paths.AccountDir, c *GWSCursors) error {
+	path := acct.SyncCursorsPath()
+
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal cursors: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write cursors %s: %w", path, err)
+	}
+	return nil
+}
+
+// RemoveDriveFile deletes any local Drive file directories whose names
+// match the given fileID. Drive file directories are named either exactly
+// "<fileID>" (empty-title fallback) or "<title-slug>-<fileID>", so a name
+// matches if it equals fileID or ends with "-<fileID>".
+//
+// A missing gdrive directory is not an error — a newly-set-up account
+// that hasn't backfilled yet has no local state to clean.
+func (s *FSStore) RemoveDriveFile(driveDir paths.DriveDir, fileID string) error {
+	entries, err := os.ReadDir(driveDir.Path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read drive dir %s: %w", driveDir.Path(), err)
+	}
+	suffix := "-" + fileID
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name != fileID && !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		path := driveDir.File(name).Path()
+		if err := os.RemoveAll(path); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// cleanupStaleDriveMeta removes any drive-meta-*.json files in dir except
+// keepName. Called after writing a new meta file to remove previous versions.
+func cleanupStaleDriveMeta(dir, keepName string) error {
+	matches, err := filepath.Glob(filepath.Join(dir, paths.DriveMetaFileGlob))
+	if err != nil {
+		return fmt.Errorf("glob stale meta: %w", err)
+	}
+	var errs []error
+	for _, match := range matches {
+		if filepath.Base(match) == keepName {
+			continue
+		}
+		if err := os.Remove(match); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", match, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("remove stale meta files: %w", errors.Join(errs...))
+	}
+	return nil
 }
 
 func (s *FSStore) maintainFile(path string) error {

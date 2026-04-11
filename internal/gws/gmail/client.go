@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws"
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // gmailProfile is the subset of users.getProfile we need.
@@ -152,7 +152,7 @@ func ListMessages(query string) ([]string, error) {
 }
 
 // GetMessage fetches a raw message by ID and parses it with enmime.
-func GetMessage(messageID string) (*model.EmailLine, error) {
+func GetMessage(messageID string) (*modelv1.EmailLine, error) {
 	params := gws.ParamsJSON(map[string]string{
 		"userId": "me",
 		"id":     messageID,
@@ -178,7 +178,7 @@ func GetMessage(messageID string) (*model.EmailLine, error) {
 			"messageId", messageID, "subject", parsed.subject, "warning", w)
 	}
 
-	return &model.EmailLine{
+	return &modelv1.EmailLine{
 		ID:       msg.ID,
 		ThreadID: msg.ThreadID,
 		Ts:       ts,

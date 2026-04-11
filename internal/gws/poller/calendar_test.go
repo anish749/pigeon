@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/paths"
 )
@@ -25,8 +25,9 @@ func TestCalendarBackfillLive(t *testing.T) {
 		t.Skip("set GWS_LIVE_TEST=1 to run live calendar test")
 	}
 
-	account := paths.NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("test")
-	cursorsPath := account.SyncCursorsPath()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create test events ---
 	oneoffID := createEvent(t, `{
@@ -50,15 +51,15 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed ---
 	t.Log("=== Phase 1: Seed ===")
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := s.LoadGWSCursors(account)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -84,7 +85,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// Verify events landed on disk.
 	calDir := account.Calendar("primary").Path()
-	allEvents := readAllEvents(t, calDir)
+	allEvents := readAllEvents(t, s, calDir)
 
 	if !hasEventWithSummary(allEvents, "pigeon-test-oneoff") {
 		t.Error("one-off event not found on disk")
@@ -104,22 +105,22 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := s.SaveGWSCursors(account, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
 	// Verify the modified instance is on disk.
-	allEvents = readAllEvents(t, calDir)
+	allEvents = readAllEvents(t, s, calDir)
 	if !hasEventWithSummary(allEvents, "pigeon-test-modified") {
 		t.Error("modified instance not found on disk after incremental sync")
 	}
 
 	// --- Phase 3: Second incremental poll (should be quiet) ---
 	t.Log("=== Phase 3: Quiet poll ===")
-	if _, err := poller.PollCalendar(account, cursors); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 
@@ -183,14 +184,14 @@ func patchInstance(t *testing.T, instanceID, body string) {
 	t.Logf("patched instance %s → %q", instanceID, resp.Summary)
 }
 
-func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
+func readAllEvents(t *testing.T, s *store.FSStore, calDir string) []*modelv1.CalendarEvent {
 	t.Helper()
-	var events []*model.CalendarEvent
+	var events []*modelv1.CalendarEvent
 	filepath.Walk(calDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
 		}
-		lines, readErr := gwsstore.ReadLines(paths.DateFile(path))
+		lines, readErr := s.ReadLines(paths.DateFile(path))
 		if readErr != nil {
 			t.Logf("warning: read %s: %v", path, readErr)
 		}
@@ -204,7 +205,7 @@ func readAllEvents(t *testing.T, calDir string) []*model.CalendarEvent {
 	return events
 }
 
-func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
+func hasEventWithSummary(events []*modelv1.CalendarEvent, summary string) bool {
 	for _, e := range events {
 		if e.Runtime.Summary == summary {
 			return true
@@ -213,8 +214,8 @@ func hasEventWithSummary(events []*model.CalendarEvent, summary string) bool {
 	return false
 }
 
-func eventsWithPrefix(events []*model.CalendarEvent, prefix string) []*model.CalendarEvent {
-	var matched []*model.CalendarEvent
+func eventsWithPrefix(events []*modelv1.CalendarEvent, prefix string) []*modelv1.CalendarEvent {
+	var matched []*modelv1.CalendarEvent
 	for _, e := range events {
 		if strings.HasPrefix(e.Runtime.Id, prefix) {
 			matched = append(matched, e)

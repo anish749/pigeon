@@ -8,17 +8,17 @@ import (
 
 	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/gmail"
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
-	"github.com/anish749/pigeon/internal/gws/model"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // PollGmail polls for new Gmail messages and stores them as JSONL.
 // Returns the number of changes observed (added + deleted) plus any error.
 // On initial seed it returns the backfilled message count.
-func PollGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
+func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	if cursors.Gmail.HistoryID == "" {
-		return seedGmail(account, cursors)
+		return seedGmail(s, account, cursors)
 	}
 
 	added, deleted, newHistoryID, err := gmail.ListHistory(cursors.Gmail.HistoryID)
@@ -31,18 +31,18 @@ func PollGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error)
 		return 0, fmt.Errorf("poll gmail history: %w", err)
 	}
 
-	errs := fetchAndStoreMessages(account, added)
+	errs := fetchAndStoreMessages(s, account, added)
 
 	// Record deleted messages.
 	now := time.Now()
 	for _, msgID := range deleted {
-		del := &model.EmailDeleteLine{
+		del := &modelv1.EmailDeleteLine{
 			ID: msgID,
 			Ts: now,
 		}
 		datePath := account.Gmail().DateFile(now.Format("2006-01-02"))
-		line := model.Line{Type: "email-delete", EmailDelete: del}
-		if err := gwsstore.AppendLine(datePath, line); err != nil {
+		line := modelv1.Line{Type: modelv1.LineEmailDelete, EmailDelete: del}
+		if err := s.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append delete %s: %w", msgID, err))
 		}
 	}
@@ -60,7 +60,7 @@ func PollGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error)
 // BackfillDays, then saves the cursor. The cursor is acquired BEFORE backfill
 // so that messages arriving during the (potentially slow) backfill are captured
 // by the first incremental poll.
-func seedGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error) {
+func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
 	slog.Info("seeding gmail with backfill")
 
 	// Get the history cursor first — backfill can take many minutes.
@@ -79,7 +79,7 @@ func seedGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error)
 
 	slog.Info("gmail backfill enumerated messages", "count", len(ids))
 
-	errs := fetchAndStoreMessages(account, ids)
+	errs := fetchAndStoreMessages(s, account, ids)
 
 	cursors.Gmail.HistoryID = historyID
 	slog.Info("seeded gmail with backfill", "messages", len(ids), "historyId", historyID)
@@ -88,7 +88,7 @@ func seedGmail(account paths.AccountDir, cursors *gwsstore.Cursors) (int, error)
 
 // fetchAndStoreMessages fetches each message by ID and writes it to disk.
 // Messages deleted between enumeration and fetch are skipped.
-func fetchAndStoreMessages(account paths.AccountDir, msgIDs []string) []error {
+func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []string) []error {
 	var errs []error
 	for i, msgID := range msgIDs {
 		email, err := gmail.GetMessage(msgID)
@@ -101,8 +101,8 @@ func fetchAndStoreMessages(account paths.AccountDir, msgIDs []string) []error {
 			continue
 		}
 		datePath := account.Gmail().DateFile(email.Ts.Format("2006-01-02"))
-		line := model.Line{Type: "email", Email: email}
-		if err := gwsstore.AppendLine(datePath, line); err != nil {
+		line := modelv1.Line{Type: modelv1.LineEmail, Email: email}
+		if err := s.AppendLine(datePath, line); err != nil {
 			errs = append(errs, fmt.Errorf("append message %s: %w", msgID, err))
 		}
 

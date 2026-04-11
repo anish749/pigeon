@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/gws"
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	gcal "google.golang.org/api/calendar/v3"
 )
 
 // EventsResult holds the categorized output from a calendar list or seed call.
 type EventsResult struct {
 	// Events contains one-off events and recurring instances, ready to write to disk.
-	Events []*model.CalendarEvent
+	Events []*modelv1.CalendarEvent
 	// RecurringIDs contains IDs of active parent recurring events that need instance expansion.
 	RecurringIDs []string
 	// CancelledRecurringIDs contains IDs of deleted recurring events to remove from tracking.
@@ -78,10 +78,10 @@ func extractItems(rawResp map[string]any, expected int) ([]map[string]any, error
 }
 
 // pairItems zips typed events with their per-item raw maps into CalendarEvents.
-func pairItems(items []*gcal.Event, raws []map[string]any) []*model.CalendarEvent {
-	result := make([]*model.CalendarEvent, len(items))
+func pairItems(items []*gcal.Event, raws []map[string]any) []*modelv1.CalendarEvent {
+	result := make([]*modelv1.CalendarEvent, len(items))
 	for i, item := range items {
-		result[i] = &model.CalendarEvent{
+		result[i] = &modelv1.CalendarEvent{
 			Runtime:    *item,
 			Serialized: raws[i],
 		}
@@ -91,7 +91,7 @@ func pairItems(items []*gcal.Event, raws []map[string]any) []*model.CalendarEven
 
 // classify separates events into writable events, active recurring parent IDs
 // (for expansion), and cancelled recurring parent IDs (for removal).
-func classify(items []*model.CalendarEvent) (events []*model.CalendarEvent, recurringIDs, cancelledRecurringIDs []string) {
+func classify(items []*modelv1.CalendarEvent) (events []*modelv1.CalendarEvent, recurringIDs, cancelledRecurringIDs []string) {
 	for _, item := range items {
 		if len(item.Runtime.Recurrence) > 0 {
 			if item.Runtime.Status == "cancelled" {
@@ -177,7 +177,7 @@ func SeedSyncToken(calendarID string) (*EventsResult, error) {
 }
 
 // ListInstances fetches expanded instances of a recurring event within a time window.
-func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*model.CalendarEvent, error) {
+func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*modelv1.CalendarEvent, error) {
 	params := map[string]string{
 		"calendarId": calendarID,
 		"eventId":    eventID,
@@ -185,7 +185,7 @@ func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*model.Calen
 		"timeMax":    timeMax,
 	}
 
-	var allEvents []*model.CalendarEvent
+	var allEvents []*modelv1.CalendarEvent
 	for {
 		resp, rawItems, err := fetchEvents("calendar", "events", "instances", "--params", gws.ParamsJSON(params))
 		if err != nil {

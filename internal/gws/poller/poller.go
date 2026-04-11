@@ -7,35 +7,39 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws/gwsstore"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // Poller runs periodic polls against GWS services.
 type Poller struct {
 	interval time.Duration
 	account  paths.AccountDir
+	store    *store.FSStore
 }
 
-// New creates a Poller with the given interval and account directory.
-func New(interval time.Duration, account paths.AccountDir) *Poller {
+// New creates a Poller with the given interval, account directory, and
+// store instance. The store is used for every persistence operation so
+// that file locking and filesystem layout stay consistent with the rest
+// of the daemon.
+func New(interval time.Duration, account paths.AccountDir, s *store.FSStore) *Poller {
 	return &Poller{
 		interval: interval,
 		account:  account,
+		store:    s,
 	}
 }
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) error {
-	cursorsPath := p.account.SyncCursorsPath()
-	cursors, err := gwsstore.LoadCursors(cursorsPath)
+	cursors, err := p.store.LoadGWSCursors(p.account)
 	if err != nil {
 		return fmt.Errorf("load cursors: %w", err)
 	}
 
 	// Initial poll.
 	p.pollAll(ctx, cursors)
-	if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+	if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
 		slog.Error("save cursors", "err", err)
 	}
 
@@ -48,25 +52,25 @@ func (p *Poller) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			p.pollAll(ctx, cursors)
-			if err := gwsstore.SaveCursors(cursorsPath, cursors); err != nil {
+			if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
 				slog.Error("save cursors", "err", err)
 			}
 		}
 	}
 }
 
-func (p *Poller) pollAll(ctx context.Context, cursors *gwsstore.Cursors) {
+func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	if ctx.Err() != nil {
 		return
 	}
 	p.runAndRecord("gmail", func() (int, error) {
-		return PollGmail(p.account, cursors)
+		return PollGmail(p.store, p.account, cursors)
 	})
 	p.runAndRecord("calendar", func() (int, error) {
-		return PollCalendar(p.account, cursors)
+		return PollCalendar(p.store, p.account, cursors)
 	})
 	p.runAndRecord("drive", func() (int, error) {
-		return PollDrive(p.account, cursors)
+		return PollDrive(p.store, p.account, cursors)
 	})
 }
 

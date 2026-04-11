@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anish749/pigeon/internal/gws/model"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 // MarkdownConverter converts Google Docs tab content to markdown.
@@ -30,7 +30,7 @@ type ConvertResult struct {
 
 // Convert renders a tab as markdown and collects inline image references.
 // The caller is responsible for downloading images listed in Images.
-func (c *MarkdownConverter) Convert(tab model.Tab) ConvertResult {
+func (c *MarkdownConverter) Convert(tab modelv1.Tab) ConvertResult {
 	ctx := &convertContext{
 		lists:         tab.Lists,
 		inlineObjects: tab.InlineObjects,
@@ -49,12 +49,12 @@ func (c *MarkdownConverter) Convert(tab model.Tab) ConvertResult {
 
 // convertContext carries per-tab state through the conversion.
 type convertContext struct {
-	lists         map[string]model.List
-	inlineObjects map[string]model.InlineObject
+	lists         map[string]modelv1.List
+	inlineObjects map[string]modelv1.InlineObject
 	images        []ImageRef
 }
 
-func (ctx *convertContext) writeParagraph(sb *strings.Builder, p *model.Paragraph) {
+func (ctx *convertContext) writeParagraph(sb *strings.Builder, p *modelv1.Paragraph) {
 	text := ctx.extractText(p)
 	if text == "" {
 		sb.WriteString("\n")
@@ -91,7 +91,7 @@ func (ctx *convertContext) writeParagraph(sb *strings.Builder, p *model.Paragrap
 	}
 }
 
-func (ctx *convertContext) extractText(p *model.Paragraph) string {
+func (ctx *convertContext) extractText(p *modelv1.Paragraph) string {
 	var parts []string
 	for _, elem := range p.Elements {
 		if elem.TextRun != nil {
@@ -138,7 +138,7 @@ func (ctx *convertContext) renderInlineObject(objectID string) string {
 	return fmt.Sprintf("![%s](attachments/%s)", alt, filename)
 }
 
-func applyTextStyle(text string, style model.TextStyle) string {
+func applyTextStyle(text string, style modelv1.TextStyle) string {
 	if style.Link != nil && style.Link.URL != "" {
 		text = fmt.Sprintf("[%s](%s)", text, style.Link.URL)
 	}
@@ -154,7 +154,7 @@ func applyTextStyle(text string, style model.TextStyle) string {
 	return text
 }
 
-func (ctx *convertContext) isOrderedList(bullet *model.Bullet) bool {
+func (ctx *convertContext) isOrderedList(bullet *modelv1.Bullet) bool {
 	if ctx.lists == nil {
 		return false
 	}
@@ -170,7 +170,7 @@ func (ctx *convertContext) isOrderedList(bullet *model.Bullet) bool {
 	return gl == "DECIMAL" || gl == "ALPHA" || gl == "ROMAN"
 }
 
-func (ctx *convertContext) writeTable(sb *strings.Builder, t *model.Table) {
+func (ctx *convertContext) writeTable(sb *strings.Builder, t *modelv1.Table) {
 	if len(t.TableRows) == 0 {
 		return
 	}
@@ -194,7 +194,7 @@ func (ctx *convertContext) writeTable(sb *strings.Builder, t *model.Table) {
 	sb.WriteString("\n")
 }
 
-func (ctx *convertContext) extractCellText(cell model.TableCell) string {
+func (ctx *convertContext) extractCellText(cell modelv1.TableCell) string {
 	var parts []string
 	for _, block := range cell.Content {
 		if block.Paragraph != nil {
