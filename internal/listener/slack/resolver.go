@@ -314,57 +314,38 @@ func (e *AmbiguousUserError) Error() string {
 // Accepts exact user IDs (U...), or case-insensitive substring matches on
 // display name, real name, or username. Strips leading @ if present.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
-	q := strings.TrimPrefix(query, "@")
-	qLower := strings.ToLower(q)
-
-	people, err := r.identity.People()
+	candidates, err := r.identity.SearchCandidates(query)
 	if err != nil {
-		return "", "", fmt.Errorf("load identity for user search: %w", err)
+		return "", "", fmt.Errorf("search identity: %w", err)
 	}
 
+	// Filter to people with a Slack identity in this workspace.
 	var matches []UserMatch
-	for _, p := range people {
+	for _, p := range candidates {
 		ws, ok := p.Slack[r.workspace]
 		if !ok {
 			continue
 		}
-
-		// Exact user ID match.
-		if ws.ID == q {
-			return ws.ID, p.Name, nil
+		var email string
+		if len(p.Email) > 0 {
+			email = p.Email[0]
 		}
-
-		// Substring match on any name variant.
-		if strings.Contains(strings.ToLower(ws.DisplayName), qLower) ||
-			strings.Contains(strings.ToLower(ws.RealName), qLower) ||
-			strings.Contains(strings.ToLower(ws.Name), qLower) {
-			matches = append(matches, UserMatch{
-				ID:          ws.ID,
-				DisplayName: ws.DisplayName,
-				RealName:    ws.RealName,
-			})
-		}
+		matches = append(matches, UserMatch{
+			ID:          ws.ID,
+			DisplayName: ws.DisplayName,
+			RealName:    ws.RealName,
+			Email:       email,
+		})
 	}
 
-	if len(matches) == 0 {
+	switch len(matches) {
+	case 0:
 		return "", "", fmt.Errorf("no user matching %q", query)
-	}
-	if len(matches) == 1 {
+	case 1:
 		return matches[0].ID, matches[0].DisplayName, nil
+	default:
+		return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 	}
-
-	// Enrich with email from identity for disambiguation.
-	for i, m := range matches {
-		for _, p := range people {
-			if ws, ok := p.Slack[r.workspace]; ok && ws.ID == m.ID {
-				if len(p.Email) > 0 {
-					matches[i].Email = p.Email[0]
-				}
-				break
-			}
-		}
-	}
-	return "", "", &AmbiguousUserError{Query: query, Matches: matches}
 }
 
 // FindChannelID resolves a channel for sending. Requires an exact match:
