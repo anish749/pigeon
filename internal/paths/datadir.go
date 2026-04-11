@@ -29,6 +29,12 @@ const ConvMetaFilename = ".meta.json"
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
+// IdentitySubdir is the top-level directory under the data root for identity files.
+const IdentitySubdir = "identity"
+
+// PeopleFilename is the filename for the per-context identity JSONL file.
+const PeopleFilename = "people.jsonl"
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -53,6 +59,11 @@ func (r DataRoot) Path() string { return r.base }
 // Platform returns a PlatformDir for the given platform.
 func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
+}
+
+// Identity returns an IdentityDir for the given context name.
+func (r DataRoot) Identity(context string) IdentityDir {
+	return IdentityDir{root: r, context: context}
 }
 
 // AccountFor returns an AccountDir from an account.Account.
@@ -166,4 +177,20 @@ func (c ConversationDir) ThreadsDir() string {
 // ThreadFile returns the path to a specific thread file.
 func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
+}
+
+// IdentityDir represents the identity directory for a context: <base>/identity/<context>/
+type IdentityDir struct {
+	root    DataRoot
+	context string
+}
+
+// Path returns the identity directory path.
+func (i IdentityDir) Path() string {
+	return filepath.Join(i.root.base, IdentitySubdir, i.context)
+}
+
+// PeopleFile returns the path to the people.jsonl file for this context.
+func (i IdentityDir) PeopleFile() string {
+	return filepath.Join(i.Path(), PeopleFilename)
 }

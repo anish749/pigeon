@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -16,17 +17,19 @@ type Poller struct {
 	interval time.Duration
 	account  paths.AccountDir
 	store    *store.FSStore
+	identity *identity.Service
 }
 
-// New creates a Poller with the given interval, account directory, and
-// store instance. The store is used for every persistence operation so
-// that file locking and filesystem layout stay consistent with the rest
-// of the daemon.
-func New(interval time.Duration, account paths.AccountDir, s *store.FSStore) *Poller {
+// New creates a Poller with the given interval, account directory, store
+// instance, and identity service. The store is used for every persistence
+// operation so that file locking and filesystem layout stay consistent with
+// the rest of the daemon. The identity service may be nil.
+func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id *identity.Service) *Poller {
 	return &Poller{
 		interval: interval,
 		account:  account,
 		store:    s,
+		identity: id,
 	}
 }
 
@@ -64,13 +67,13 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 		return
 	}
 	p.runAndRecord("gmail", func() (int, error) {
-		return PollGmail(p.store, p.account, cursors)
+		return PollGmail(p.store, p.account, cursors, p.identity)
 	})
 	p.runAndRecord("calendar", func() (int, error) {
-		return PollCalendar(p.store, p.account, cursors)
+		return PollCalendar(p.store, p.account, cursors, p.identity)
 	})
 	p.runAndRecord("drive", func() (int, error) {
-		return PollDrive(p.store, p.account, cursors)
+		return PollDrive(p.store, p.account, cursors, p.identity)
 	})
 }
 

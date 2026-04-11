@@ -8,6 +8,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/gmail"
+	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
@@ -16,9 +17,9 @@ import (
 // PollGmail polls for new Gmail messages and stores them as JSONL.
 // Returns the number of changes observed (added + deleted) plus any error.
 // On initial seed it returns the backfilled message count.
-func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
+func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
 	if cursors.Gmail.HistoryID == "" {
-		return seedGmail(s, account, cursors)
+		return seedGmail(s, account, cursors, id)
 	}
 
 	added, deleted, newHistoryID, err := gmail.ListHistory(cursors.Gmail.HistoryID)
@@ -31,7 +32,7 @@ func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 		return 0, fmt.Errorf("poll gmail history: %w", err)
 	}
 
-	errs := fetchAndStoreMessages(s, account, added)
+	errs := fetchAndStoreMessages(s, account, added, id)
 
 	// Record deleted messages for deferred removal during maintenance.
 	for _, msgID := range deleted {
@@ -53,7 +54,7 @@ func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 // BackfillDays, then saves the cursor. The cursor is acquired BEFORE backfill
 // so that messages arriving during the (potentially slow) backfill are captured
 // by the first incremental poll.
-func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors) (int, error) {
+func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
 	slog.Info("seeding gmail with backfill")
 
 	// Get the history cursor first — backfill can take many minutes.
@@ -72,7 +73,7 @@ func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 
 	slog.Info("gmail backfill enumerated messages", "count", len(ids))
 
-	errs := fetchAndStoreMessages(s, account, ids)
+	errs := fetchAndStoreMessages(s, account, ids, id)
 
 	cursors.Gmail.HistoryID = historyID
 	slog.Info("seeded gmail with backfill", "messages", len(ids), "historyId", historyID)
@@ -81,8 +82,9 @@ func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 
 // fetchAndStoreMessages fetches each message by ID and writes it to disk.
 // Messages deleted between enumeration and fetch are skipped.
-func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []string) []error {
+func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []string, id *identity.Service) []error {
 	var errs []error
+	var signals []identity.Signal
 	for i, msgID := range msgIDs {
 		email, err := gmail.GetMessage(msgID)
 		if err != nil {
@@ -99,10 +101,23 @@ func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []
 			errs = append(errs, fmt.Errorf("append message %s: %w", msgID, err))
 		}
 
+		// Collect identity signals from email participants.
+		if email.From != "" {
+			signals = append(signals, identity.Signal{
+				Email: email.From,
+				Name:  email.FromName,
+			})
+		}
+
 		// Log progress every 100 messages during large backfills.
 		if (i+1)%100 == 0 {
 			slog.Info("gmail backfill progress", "fetched", i+1, "total", len(msgIDs))
 		}
+	}
+
+	// Push identity signals as a batch after processing all messages.
+	if err := id.ObserveBatch(signals); err != nil {
+		errs = append(errs, fmt.Errorf("identity observe: %w", err))
 	}
 	return errs
 }

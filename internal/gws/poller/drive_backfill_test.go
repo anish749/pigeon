@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/gws/poller"
+	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // TestDriveBackfillLive verifies that existing Docs and Sheets are picked up
@@ -25,6 +26,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
+	id := identity.NewService(s, root.Identity("test"))
 	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create a test doc BEFORE seeding ---
@@ -43,7 +45,7 @@ func TestDriveBackfillLive(t *testing.T) {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollDrive(s, account, cursors); err != nil {
+	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
 		// Partial errors (e.g. formula parsing on specific sheets) are expected —
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
@@ -79,7 +81,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 2: Quiet incremental poll ---
 	t.Log("=== Phase 2: Quiet poll ===")
-	if _, err := poller.PollDrive(s, account, cursors); err != nil {
+	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

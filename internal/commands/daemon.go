@@ -17,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
@@ -130,7 +131,11 @@ func DaemonRun(version string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	store := store.NewFSStore(paths.DefaultDataRoot())
+	dataRoot := paths.DefaultDataRoot()
+	store := store.NewFSStore(dataRoot)
+
+	// Identity service — uses "default" context until the context system is built.
+	identitySvc := identity.NewService(store, dataRoot.Identity("default"))
 
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {
@@ -141,13 +146,13 @@ func DaemonRun(version string) error {
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route)
+	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, identitySvc)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store)
+	gwsMgr := daemon.NewGWSManager(store, identitySvc)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
 	go apiServer.Start(ctx, paths.SocketPath())
