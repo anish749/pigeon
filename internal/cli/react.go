@@ -64,7 +64,6 @@ Use --remove to remove a reaction.`,
 			if err != nil {
 				return err
 			}
-
 			switch platform {
 			case "slack":
 				if contact != "" {

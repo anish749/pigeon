@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // slackTarget returns a *SlackTarget if either field is set, or nil.
@@ -35,6 +37,22 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
+	// Validate thread parent exists locally before sending.
+	if p.Thread != "" && !p.Force {
+		accountDir := paths.DefaultDataRoot().AccountFor(account.New(p.Platform, p.Account)).Path()
+		found, err := messageExists(accountDir, p.Thread)
+		if err != nil {
+			return fmt.Errorf("validate thread %s: %w", p.Thread, err)
+		}
+		if !found {
+			return fmt.Errorf(
+				"thread %s not found — check the timestamp with "+
+					"'pigeon search' or 'pigeon read'. "+
+					"Use --force to send anyway (Slack will post as a top-level message if the thread doesn't exist).",
+				p.Thread)
+		}
+	}
+
 	req := api.SendRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
