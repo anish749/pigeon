@@ -51,7 +51,10 @@ func ReadMessaging(s store.Store, acct account.Account, selector string, filters
 		return nil, err
 	}
 
-	meta, _ := s.ReadMeta(acct, conv.dirName)
+	meta, err := s.ReadMeta(acct, conv.dirName)
+	if err != nil {
+		return nil, fmt.Errorf("read metadata for %s: %w", conv.dirName, err)
+	}
 
 	return &MessagingResult{
 		Account:      acct,

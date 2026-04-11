@@ -2,8 +2,8 @@ package reader
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,12 +39,14 @@ func ReadGmail(dir paths.GmailDir, filters Filters) (*GmailResult, error) {
 		return &GmailResult{}, nil
 	}
 
-	// Parse all emails from selected files.
+	// Parse all emails from selected files. Collect parse errors so the
+	// caller knows about partial failures.
 	var allEmails []modelv1.EmailLine
+	var errs []error
 	for _, f := range selected {
 		emails, err := parseEmailFile(f)
 		if err != nil {
-			slog.Warn("parse gmail file", "file", f, "error", err)
+			errs = append(errs, err)
 			continue
 		}
 		allEmails = append(allEmails, emails...)
@@ -54,7 +56,10 @@ func ReadGmail(dir paths.GmailDir, filters Filters) (*GmailResult, error) {
 	allEmails = dedupEmails(allEmails)
 
 	// Apply pending deletes.
-	deleteIDs := loadPendingDeletes(dir.PendingDeletesPath())
+	deleteIDs, err := loadPendingDeletes(dir.PendingDeletesPath())
+	if err != nil {
+		return nil, fmt.Errorf("load pending deletes: %w", err)
+	}
 	if len(deleteIDs) > 0 {
 		allEmails = applyEmailDeletes(allEmails, deleteIDs)
 	}
@@ -85,10 +90,12 @@ func ReadGmail(dir paths.GmailDir, filters Filters) (*GmailResult, error) {
 		allEmails = allEmails[len(allEmails)-last:]
 	}
 
-	return &GmailResult{Emails: allEmails}, nil
+	return &GmailResult{Emails: allEmails}, errors.Join(errs...)
 }
 
-// parseEmailFile reads a JSONL file and returns all email lines.
+// parseEmailFile reads a JSONL file and returns all email lines. Parse
+// errors for individual lines are collected and returned alongside
+// successfully parsed emails.
 func parseEmailFile(path string) ([]modelv1.EmailLine, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -96,17 +103,18 @@ func parseEmailFile(path string) ([]modelv1.EmailLine, error) {
 	}
 
 	var emails []modelv1.EmailLine
+	var errs []error
 	for _, rawLine := range splitLines(data) {
 		line, err := modelv1.Parse(rawLine)
 		if err != nil {
-			slog.Warn("skip unparseable line", "file", path, "error", err)
+			errs = append(errs, fmt.Errorf("parse line in %s: %w", filepath.Base(path), err))
 			continue
 		}
 		if line.Type == modelv1.LineEmail && line.Email != nil {
 			emails = append(emails, *line.Email)
 		}
 	}
-	return emails, nil
+	return emails, errors.Join(errs...)
 }
 
 // dedupEmails deduplicates emails by ID, keeping the last occurrence.
@@ -125,11 +133,15 @@ func dedupEmails(emails []modelv1.EmailLine) []modelv1.EmailLine {
 }
 
 // loadPendingDeletes reads the pending email deletes file and returns
-// a set of message IDs to exclude.
-func loadPendingDeletes(path string) map[string]bool {
+// a set of message IDs to exclude. Returns nil, nil when the file does
+// not exist (no pending deletes is a normal state).
+func loadPendingDeletes(path string) (map[string]bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil // file doesn't exist or can't be read — no deletes
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open pending deletes %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -141,7 +153,10 @@ func loadPendingDeletes(path string) map[string]bool {
 			ids[id] = true
 		}
 	}
-	return ids
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan pending deletes %s: %w", path, err)
+	}
+	return ids, nil
 }
 
 // applyEmailDeletes removes emails whose IDs are in the delete set.
@@ -158,13 +173,14 @@ func applyEmailDeletes(emails []modelv1.EmailLine, deleteIDs map[string]bool) []
 // --- shared helpers ---
 
 // listSortedJSONL returns sorted JSONL file paths in a directory.
+// Returns nil, nil when the directory does not exist.
 func listSortedJSONL(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("list %s: %w", dir, err)
 	}
 	var files []string
 	for _, e := range entries {

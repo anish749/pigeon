@@ -68,8 +68,14 @@ func runRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	contextFlag, _ := cmd.Flags().GetString("context")
-	accountFlag, _ := cmd.Flags().GetString("account")
+	contextFlag, err := cmd.Flags().GetString("context")
+	if err != nil {
+		return fmt.Errorf("get context flag: %w", err)
+	}
+	accountFlag, err := cmd.Flags().GetString("account")
+	if err != nil {
+		return fmt.Errorf("get account flag: %w", err)
+	}
 
 	resolved, err := pctx.Resolve(cfg, src, pctx.ResolveOpts{
 		Context: contextFlag,
@@ -100,7 +106,10 @@ func runRead(cmd *cobra.Command, args []string) error {
 		return nil
 
 	case pctx.SourceCalendar:
-		calID, _ := cmd.Flags().GetString("calendar")
+		calID, err := cmd.Flags().GetString("calendar")
+		if err != nil {
+			return fmt.Errorf("get calendar flag: %w", err)
+		}
 		if calID == "" {
 			calID = "primary"
 		}
@@ -180,13 +189,22 @@ func runRead(cmd *cobra.Command, args []string) error {
 func parseFilters(cmd *cobra.Command) (reader.Filters, error) {
 	var filters reader.Filters
 
-	date, _ := cmd.Flags().GetString("date")
+	date, err := cmd.Flags().GetString("date")
+	if err != nil {
+		return filters, fmt.Errorf("get date flag: %w", err)
+	}
 	filters.Date = date
 
-	last, _ := cmd.Flags().GetInt("last")
+	last, err := cmd.Flags().GetInt("last")
+	if err != nil {
+		return filters, fmt.Errorf("get last flag: %w", err)
+	}
 	filters.Last = last
 
-	since, _ := cmd.Flags().GetString("since")
+	since, err := cmd.Flags().GetString("since")
+	if err != nil {
+		return filters, fmt.Errorf("get since flag: %w", err)
+	}
 	if since != "" {
 		d, err := timeutil.ParseDuration(since)
 		if err != nil {
