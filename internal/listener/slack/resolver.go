@@ -87,18 +87,7 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 		if u.Deleted {
 			continue
 		}
-		name := bestName(u.Profile.DisplayName, u.RealName, u.Name)
-		signals = append(signals, identity.Signal{
-			Email: u.Profile.Email,
-			Name:  name,
-			Slack: &identity.SlackIdentity{
-				Workspace:   r.workspace,
-				ID:          u.ID,
-				DisplayName: u.Profile.DisplayName,
-				RealName:    u.RealName,
-				Name:        u.Name,
-			},
-		})
+		signals = append(signals, r.createSignal(u))
 	}
 	if err := r.identity.ObserveBatch(signals); err != nil {
 		return 0, 0, fmt.Errorf("observe Slack users: %w", err)
@@ -117,7 +106,7 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 		name := FormatChannelName(ch)
 		if ch.IsIM {
 			// Resolve IM user ID to display name via identity.
-			if userName, err := r.userNameLocked(ctx, ch.User); err == nil {
+			if userName, err := r.UserName(ctx, ch.User); err == nil {
 				name = "@" + userName
 			}
 		}
@@ -179,12 +168,6 @@ func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel)
 // service first; on miss, falls back to the Slack API and pushes the result
 // as an identity signal for future lookups.
 func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) {
-	return r.userNameLocked(ctx, userID)
-}
-
-// userNameLocked is the inner implementation of UserName. It does NOT acquire
-// r.mu, so callers holding r.mu can use it without deadlocking.
-func (r *Resolver) userNameLocked(ctx context.Context, userID string) (string, error) {
 	// Check identity service first.
 	person, err := r.identity.LookupBySlackID(r.workspace, userID)
 	if err != nil {
@@ -200,24 +183,14 @@ func (r *Resolver) userNameLocked(ctx context.Context, userID string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("resolve user %s: %w", userID, err)
 	}
-	name := bestName(user.Profile.DisplayName, user.RealName, user.Name)
 
-	if err := r.identity.Observe(identity.Signal{
-		Email: user.Profile.Email,
-		Name:  name,
-		Slack: &identity.SlackIdentity{
-			Workspace:   r.workspace,
-			ID:          user.ID,
-			DisplayName: user.Profile.DisplayName,
-			RealName:    user.RealName,
-			Name:        user.Name,
-		},
-	}); err != nil {
+	sig := r.createSignal(*user)
+	if err := r.identity.Observe(sig); err != nil {
 		slog.ErrorContext(ctx, "identity observe failed after API lookup",
 			"user_id", userID, "error", err)
 	}
 
-	return name, nil
+	return sig.Name, nil
 }
 
 // botName resolves a Slack bot ID to a display name. Checks identity first,
@@ -242,19 +215,13 @@ func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 		return "", fmt.Errorf("resolve bot %s: API returned empty name", botID)
 	}
 
-	if err := r.identity.Observe(identity.Signal{
-		Name: bot.Name,
-		Slack: &identity.SlackIdentity{
-			Workspace:   r.workspace,
-			ID:          botID,
-			DisplayName: bot.Name,
-		},
-	}); err != nil {
+	sig := r.createBotSignal(botID, bot)
+	if err := r.identity.Observe(sig); err != nil {
 		slog.ErrorContext(ctx, "identity observe failed for bot",
 			"bot_id", botID, "error", err)
 	}
 
-	return bot.Name, nil
+	return sig.Name, nil
 }
 
 // SenderName resolves a message sender to (name, id). Tries the user ID first,
@@ -489,13 +456,36 @@ func ParseTimestamp(ts string) time.Time {
 	return time.Unix(sec, 0)
 }
 
-// bestName returns the first non-empty name from the given candidates.
-func bestName(displayName, realName, name string) string {
-	if displayName != "" {
-		return displayName
+// createSignal builds an identity signal from a Slack user API response.
+func (r *Resolver) createSignal(u goslack.User) identity.Signal { //nolint:gocritic // value receiver is fine for signal construction
+	name := u.Profile.DisplayName
+	if name == "" {
+		name = u.RealName
 	}
-	if realName != "" {
-		return realName
+	if name == "" {
+		name = u.Name
 	}
-	return name
+	return identity.Signal{
+		Email: u.Profile.Email,
+		Name:  name,
+		Slack: &identity.SlackIdentity{
+			Workspace:   r.workspace,
+			ID:          u.ID,
+			DisplayName: u.Profile.DisplayName,
+			RealName:    u.RealName,
+			Name:        u.Name,
+		},
+	}
+}
+
+// createBotSignal builds an identity signal from a Slack bot API response.
+func (r *Resolver) createBotSignal(botID string, bot *goslack.Bot) identity.Signal {
+	return identity.Signal{
+		Name: bot.Name,
+		Slack: &identity.SlackIdentity{
+			Workspace:   r.workspace,
+			ID:          botID,
+			DisplayName: bot.Name,
+		},
+	}
 }
