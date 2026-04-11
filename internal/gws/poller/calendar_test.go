@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/gws/poller"
+	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/gws/poller"
-	"github.com/anish749/pigeon/internal/paths"
 )
 
 // TestCalendarBackfillLive runs a full calendar sync lifecycle against the
@@ -27,6 +28,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
+	id := identity.NewService(root.Identity("test").PeopleFile())
 	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create test events ---
@@ -56,7 +58,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollCalendar(s, account, cursors, nil); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
 	if err := s.SaveGWSCursors(account, cursors); err != nil {
@@ -105,7 +107,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	if _, err := poller.PollCalendar(s, account, cursors, nil); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
 	if err := s.SaveGWSCursors(account, cursors); err != nil {
@@ -120,7 +122,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 3: Second incremental poll (should be quiet) ---
 	t.Log("=== Phase 3: Quiet poll ===")
-	if _, err := poller.PollCalendar(s, account, cursors, nil); err != nil {
+	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 
