@@ -983,4 +983,3 @@ func TestDedupGWS_KeepsLast(t *testing.T) {
 		t.Errorf("kept subject %q, want %q", deduped[0].Email.Subject, "version-2")
 	}
 }
-

@@ -26,15 +26,15 @@ const (
 type LineType string
 
 const (
-	LineMessage     LineType = "msg"
-	LineReaction    LineType = "react"
-	LineUnreaction  LineType = "unreact"
-	LineEdit        LineType = "edit"
-	LineDelete      LineType = "delete"
-	LineSeparator   LineType = "separator"
-	LineEmail   LineType = "email"
-	LineComment LineType = "comment"
-	LineEvent       LineType = "event"
+	LineMessage    LineType = "msg"
+	LineReaction   LineType = "react"
+	LineUnreaction LineType = "unreact"
+	LineEdit       LineType = "edit"
+	LineDelete     LineType = "delete"
+	LineSeparator  LineType = "separator"
+	LineEmail      LineType = "email"
+	LineComment    LineType = "comment"
+	LineEvent      LineType = "event"
 )
 
 // MsgLine represents a message event.

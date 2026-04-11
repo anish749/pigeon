@@ -25,4 +25,3 @@ type EmailAttachment struct {
 	Type string `json:"type"` // MIME type
 	Name string `json:"name"` // filename
 }
-
