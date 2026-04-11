@@ -64,11 +64,6 @@ Use --remove to remove a reaction.`,
 			if err != nil {
 				return err
 			}
-			force, err := cmd.Flags().GetBool("force")
-			if err != nil {
-				return err
-			}
-
 			switch platform {
 			case "slack":
 				if contact != "" {
@@ -89,7 +84,6 @@ Use --remove to remove a reaction.`,
 				MessageID: messageID,
 				Emoji:     emoji,
 				Remove:    remove,
-				Force:     force,
 			})
 		},
 	}
@@ -105,7 +99,6 @@ Use --remove to remove a reaction.`,
 	cmd.Flags().StringP("message-id", "m", "", "message ID (Slack timestamp or WhatsApp message key)")
 	cmd.Flags().StringP("emoji", "e", "", "emoji (name for Slack, Unicode for WhatsApp)")
 	cmd.Flags().Bool("remove", false, "remove the reaction instead of adding it")
-	cmd.Flags().Bool("force", false, "skip local message validation")
 	cmd.MarkFlagRequired("platform")
 	cmd.MarkFlagRequired("account")
 	cmd.MarkFlagRequired("message-id")

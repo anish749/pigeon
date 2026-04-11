@@ -157,42 +157,6 @@ func TestReadThread_NotFound(t *testing.T) {
 	}
 }
 
-// --- MessageExists ---
-
-func TestMessageExists(t *testing.T) {
-	s, acct := setup(t)
-
-	m1 := msgLine("1711568940.789012", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
-	s.Append(acct, "#general", m1)
-
-	if !s.MessageExists(acct, "#general", "1711568940.789012") {
-		t.Error("MessageExists returned false for existing message")
-	}
-	if s.MessageExists(acct, "#general", "9999999999.000000") {
-		t.Error("MessageExists returned true for nonexistent message")
-	}
-	if s.MessageExists(acct, "#other", "1711568940.789012") {
-		t.Error("MessageExists returned true for wrong conversation")
-	}
-}
-
-func TestMessageExists_ThreadParentWithoutReplies(t *testing.T) {
-	s, acct := setup(t)
-
-	// A message exists in the channel but has no thread file yet.
-	m1 := msgLine("1711568940.789012", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "start a thread here")
-	s.Append(acct, "#general", m1)
-
-	// ThreadExists should be false — no thread file.
-	if s.ThreadExists(acct, "#general", "1711568940.789012") {
-		t.Error("ThreadExists should be false for message without replies")
-	}
-	// But MessageExists should be true — the message is in the channel.
-	if !s.MessageExists(acct, "#general", "1711568940.789012") {
-		t.Error("MessageExists should be true for message without thread replies")
-	}
-}
-
 // --- List ---
 
 func TestListPlatformsAndAccounts(t *testing.T) {

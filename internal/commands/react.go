@@ -19,7 +19,6 @@ type ReactParams struct {
 	MessageID string
 	Emoji     string
 	Remove    bool
-	Force     bool
 }
 
 func RunReact(p ReactParams) error {
@@ -31,7 +30,6 @@ func RunReact(p ReactParams) error {
 		MessageID: p.MessageID,
 		Emoji:     p.Emoji,
 		Remove:    p.Remove,
-		Force:     p.Force,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
