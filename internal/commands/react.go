@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 type ReactParams struct {
@@ -22,6 +24,20 @@ type ReactParams struct {
 }
 
 func RunReact(p ReactParams) error {
+	// Validate the target message exists locally before reacting (Slack only).
+	if p.Platform == "slack" {
+		accountDir := paths.DefaultDataRoot().AccountFor(account.New(p.Platform, p.Account)).Path()
+		found, err := messageExists(accountDir, p.MessageID)
+		if err != nil {
+			return fmt.Errorf("validate message %s: %w", p.MessageID, err)
+		}
+		if !found {
+			return fmt.Errorf(
+				"message %s not found — check the ID with 'pigeon search' or 'pigeon read'.",
+				p.MessageID)
+		}
+	}
+
 	body, err := json.Marshal(api.ReactRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
