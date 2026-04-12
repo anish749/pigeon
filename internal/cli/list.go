@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -9,7 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/pctx"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
@@ -17,13 +20,13 @@ import (
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "List platforms, accounts, or conversations",
+		Short:   "List sources and conversations",
 		GroupID: groupReading,
 		Example: `  pigeon list
-  pigeon list --platform=slack
-  pigeon list --platform=whatsapp --account=+14155551234
+  pigeon list --context=work
   pigeon list --since=2h
-  pigeon list --since=7d --platform=slack`,
+  pigeon list --platform=slack
+  pigeon list --platform=whatsapp --account=+14155551234`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			platform, err := cmd.Flags().GetString("platform")
@@ -38,17 +41,64 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get since flag: %w", err)
 			}
+			contextFlag, err := cmd.Flags().GetString("context")
+			if err != nil {
+				return fmt.Errorf("get context flag: %w", err)
+			}
 
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			ctxName := pctx.ResolveContextName(contextFlag, os.Getenv("PIGEON_CONTEXT"), cfg)
+
+			// Context-aware listing.
+			if ctxName != "" {
+				return runListContext(cfg, ctxName)
+			}
+
+			// No context — list all accounts, optionally filtered by --since.
 			if since != "" {
 				return runListSince(platform, account, since)
 			}
 			return commands.RunList(platform, account)
 		},
 	}
-	cmd.Flags().StringP("platform", "p", "", "filter by platform (e.g. whatsapp, slack)")
-	cmd.Flags().StringP("account", "a", "", "filter by account (e.g. +14155551234, acme-corp)")
-	cmd.Flags().String("since", "", "only show conversations with recent activity (e.g. 2h, 7d)")
+	cmd.Flags().StringP("platform", "p", "", "filter by platform")
+	cmd.Flags().StringP("account", "a", "", "filter by account")
+	cmd.Flags().String("since", "", "only show sources with recent activity (e.g. 2h, 7d)")
+	cmd.Flags().String("context", "", "override active context")
 	return cmd
+}
+
+// runListContext lists sources for the active context. The context name
+// is already resolved by the caller — this function never reads env vars.
+func runListContext(cfg *config.Config, ctxName pctx.ContextName) error {
+	ctx, ok := cfg.Contexts[string(ctxName)]
+	if !ok {
+		return fmt.Errorf("unknown context %q", ctxName)
+	}
+
+	fmt.Printf("Sources for %s:\n\n", ctxName)
+
+	type sourceEntry struct {
+		source string
+		ids    []string
+	}
+	entries := []sourceEntry{
+		{"gmail", ctx.GWS},
+		{"calendar", ctx.GWS},
+		{"drive", ctx.GWS},
+		{"slack", ctx.Slack},
+		{"whatsapp", ctx.WhatsApp},
+	}
+	for _, e := range entries {
+		for _, id := range e.ids {
+			fmt.Printf("  %-36s %s\n", e.source, id)
+		}
+	}
+	return nil
 }
 
 // runListSince uses read.Glob to find active files, then extracts unique
