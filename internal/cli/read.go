@@ -14,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/pctx"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/compact"
@@ -150,20 +151,36 @@ const DefaultGmailLast = 25
 // readGWSDateFiles reads JSONL date files from a directory (gmail or calendar),
 // deduplicates, filters, and prints raw JSON lines to stdout.
 func readGWSDateFiles(s *store.FSStore, dir string, since time.Duration, date string, last int, defaultLast int) error {
-	files, err := listDateFilesInDir(dir)
-	if err != nil {
-		return err
+	// For a specific date, construct the path directly.
+	// For --since or all files, use read.Glob.
+	var files []string
+	switch {
+	case date != "":
+		p := filepath.Join(dir, date+paths.FileExt)
+		if _, err := os.Stat(p); err == nil {
+			files = []string{p}
+		}
+	case since > 0:
+		var err error
+		files, err = read.Glob(dir, since)
+		if err != nil {
+			return fmt.Errorf("glob %s: %w", dir, err)
+		}
+	default:
+		var err error
+		files, err = read.Glob(dir, 0)
+		if err != nil {
+			return fmt.Errorf("glob %s: %w", dir, err)
+		}
 	}
 	if len(files) == 0 {
 		return nil
 	}
 
-	selected := selectDateFiles(dir, files, since, date)
-
-	// Read and parse all selected files.
+	// Read and parse all files.
 	var allLines []modelv1.Line
 	var errs []error
-	for _, f := range selected {
+	for _, f := range files {
 		lines, err := s.ReadLines(paths.DateFile(f))
 		if err != nil {
 			errs = append(errs, err)
@@ -180,7 +197,14 @@ func readGWSDateFiles(s *store.FSStore, dir string, since time.Duration, date st
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if since > 0 {
 		cutoff := time.Now().Add(-since)
-		allLines = filterLinesByTime(allLines, cutoff)
+		var filtered []modelv1.Line
+		for _, l := range allLines {
+			ts := l.Ts()
+			if ts.IsZero() || !ts.Before(cutoff) {
+				filtered = append(filtered, l)
+			}
+		}
+		allLines = filtered
 	}
 
 	// Sort by timestamp.
@@ -356,67 +380,12 @@ func parseTimeFilters(cmd *cobra.Command) (since time.Duration, date string, las
 	return sinceDur, dateStr, lastN, nil
 }
 
-// listDateFilesInDir returns sorted JSONL date file paths in a directory.
-func listDateFilesInDir(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list %s: %w", dir, err)
-	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && paths.IsDateFile(e.Name()) {
-			files = append(files, filepath.Join(dir, e.Name()))
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-// selectDateFiles picks which date files to read based on time filters.
-func selectDateFiles(dir string, files []string, since time.Duration, date string) []string {
-	switch {
-	case date != "":
-		target := filepath.Join(dir, date+paths.FileExt)
-		for _, f := range files {
-			if f == target {
-				return []string{f}
-			}
-		}
-		return nil
-	case since > 0:
-		cutoffDate := time.Now().Add(-since).Truncate(24 * time.Hour).Format("2006-01-02")
-		cutoffPath := filepath.Join(dir, cutoffDate+paths.FileExt)
-		i := sort.SearchStrings(files, cutoffPath)
-		return files[i:]
-	default:
-		return files
-	}
-}
-
 // filterCancelled removes cancelled calendar events. No-op for non-event lines.
 func filterCancelled(lines []modelv1.Line) []modelv1.Line {
 	var out []modelv1.Line
 	for _, l := range lines {
 		if l.Type == modelv1.LineEvent && l.Event != nil && l.Event.Runtime.Status == "cancelled" {
 			continue
-		}
-		out = append(out, l)
-	}
-	return out
-}
-
-// filterLinesByTime keeps lines with timestamp at or after cutoff.
-// Lines without a meaningful timestamp (comments, events with nested times)
-// are kept.
-func filterLinesByTime(lines []modelv1.Line, cutoff time.Time) []modelv1.Line {
-	var out []modelv1.Line
-	for _, l := range lines {
-		ts := l.Ts()
-		if ts.IsZero() || !ts.Before(cutoff) {
-			out = append(out, l)
 		}
 		out = append(out, l)
 	}
@@ -449,7 +418,7 @@ func fuzzyMatchConversation(convs []string, query string) (string, error) {
 }
 
 // printLines marshals lines to JSON and prints to stdout. Parse errors
-// are appended after the data.
+// are printed to stderr so they don't pollute the JSON output.
 func printLines(lines []modelv1.Line, parseErrs []error) error {
 	var errs []error
 	for _, l := range lines {
@@ -461,12 +430,9 @@ func printLines(lines []modelv1.Line, parseErrs []error) error {
 		fmt.Println(string(data))
 	}
 	errs = append(errs, parseErrs...)
-	if len(errs) > 0 {
-		// Print warnings to stderr so they don't pollute the JSON output.
-		for _, e := range errs {
-			if e != nil {
-				fmt.Fprintf(os.Stderr, "⚠ %s\n", e)
-			}
+	for _, e := range errs {
+		if e != nil {
+			fmt.Fprintf(os.Stderr, "⚠ %s\n", e)
 		}
 	}
 	return nil
