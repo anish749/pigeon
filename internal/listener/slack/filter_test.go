@@ -56,7 +56,6 @@ func TestSenderName(t *testing.T) {
 	})
 	r := &Resolver{
 		writer:    writer,
-		reader:    identity.NewReader(store.NewFSStore(paths.NewDataRoot(t.TempDir())), paths.NewDataRoot(t.TempDir())),
 		workspace: "test-ws",
 		channels:  make(map[string]string),
 		dmUsers:   make(map[string]string),

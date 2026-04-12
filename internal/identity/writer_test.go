@@ -325,12 +325,12 @@ func TestAtomicWrite_TempFileCleanup(t *testing.T) {
 	path := dir.PeopleFile()
 
 	// The .tmp file should not exist after a successful write.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(string(path) + ".tmp"); !os.IsNotExist(err) {
 		t.Error("temp file should not exist after successful write")
 	}
 
 	// The actual file should exist.
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(string(path)); err != nil {
 		t.Errorf("people file should exist: %v", err)
 	}
 }

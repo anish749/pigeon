@@ -9,21 +9,23 @@ import (
 	"path/filepath"
 
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // LoadPeople reads a people.jsonl file into memory. Returns an empty slice
 // if the file does not exist (first-run case).
-func (s *FSStore) LoadPeople(path string) ([]identity.Person, error) {
-	mu := s.fileMu(path)
+func (s *FSStore) LoadPeople(path paths.PeopleFile) ([]identity.Person, error) {
+	p := string(path)
+	mu := s.fileMu(p)
 	mu.Lock()
 	defer mu.Unlock()
 
-	f, err := os.Open(path)
+	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("open %s: %w", p, err)
 	}
 	defer f.Close()
 
@@ -36,39 +38,40 @@ func (s *FSStore) LoadPeople(path string) ([]identity.Person, error) {
 		if len(line) == 0 {
 			continue
 		}
-		var p identity.Person
-		if err := json.Unmarshal(line, &p); err != nil {
+		var person identity.Person
+		if err := json.Unmarshal(line, &person); err != nil {
 			slog.Warn("identity: skipping malformed line",
-				"file", path, "line", lineNum, "error", err)
+				"file", p, "line", lineNum, "error", err)
 			continue
 		}
-		people = append(people, p)
+		people = append(people, person)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", p, err)
 	}
 	return people, nil
 }
 
 // SavePeople atomically writes people to a JSONL file (write to temp, rename).
-func (s *FSStore) SavePeople(path string, people []identity.Person) error {
-	mu := s.fileMu(path)
+func (s *FSStore) SavePeople(path paths.PeopleFile, people []identity.Person) error {
+	p := string(path)
+	mu := s.fileMu(p)
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return fmt.Errorf("create identity dir: %w", err)
 	}
 
-	tmp := path + ".tmp"
+	tmp := p + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 
 	w := bufio.NewWriter(f)
-	for _, p := range people {
-		data, err := json.Marshal(p)
+	for _, person := range people {
+		data, err := json.Marshal(person)
 		if err != nil {
 			f.Close()
 			os.Remove(tmp)
@@ -87,7 +90,7 @@ func (s *FSStore) SavePeople(path string, people []identity.Person) error {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmp, path); err != nil {
+	if err := os.Rename(tmp, p); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("rename: %w", err)
 	}

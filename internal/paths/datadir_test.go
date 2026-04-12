@@ -161,7 +161,7 @@ func TestIdentityDir_Path(t *testing.T) {
 func TestIdentityDir_PeopleFile(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
 	got := root.Platform("slack").AccountFromSlug("acme-corp").Identity().PeopleFile()
-	want := "/tmp/test/slack/acme-corp/identity/people.jsonl"
+	want := PeopleFile("/tmp/test/slack/acme-corp/identity/people.jsonl")
 	if got != want {
 		t.Errorf("PeopleFile() = %q, want %q", got, want)
 	}

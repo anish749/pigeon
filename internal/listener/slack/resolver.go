@@ -49,14 +49,13 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error)
 }
 
 // Resolver resolves Slack user and channel names. User lookups are backed
-// by the per-workspace identity writer (hot path: same-workspace user IDs
-// only ever live in that workspace's own file) and the merged identity
-// reader (for cross-source name searches). Channel and membership state
-// is cached locally.
+// by the per-workspace identity writer — both hot-path ID lookups (UserName)
+// and name-based searches (FindUserID) hit only this workspace's own file,
+// since a Slack user ID only ever lives in the workspace that discovered it.
+// Channel and membership state is cached locally.
 type Resolver struct {
 	api       *goslack.Client
 	writer    *identity.Writer
-	reader    identity.Resolver
 	workspace string
 	mu        sync.RWMutex
 	channels  map[string]string // channel ID → name
@@ -64,14 +63,12 @@ type Resolver struct {
 	members   map[string]bool   // channel IDs the user has joined
 }
 
-// NewResolver creates a new Slack name resolver. The writer owns this
-// workspace's identity signals; the reader provides a merged cross-source
-// view used for name-based searches.
-func NewResolver(api *goslack.Client, writer *identity.Writer, reader identity.Resolver, workspace string) *Resolver {
+// NewResolver creates a new Slack name resolver backed by the per-workspace
+// identity writer.
+func NewResolver(api *goslack.Client, writer *identity.Writer, workspace string) *Resolver {
 	return &Resolver{
 		api:       api,
 		writer:    writer,
-		reader:    reader,
 		workspace: workspace,
 		channels:  make(map[string]string),
 		dmUsers:   make(map[string]string),
@@ -321,7 +318,7 @@ func (e *AmbiguousUserError) Error() string {
 // Accepts exact user IDs (U...), or case-insensitive substring matches on
 // display name, real name, or username. Strips leading @ if present.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
-	candidates, err := r.reader.SearchCandidates(query)
+	candidates, err := r.writer.SearchCandidates(query)
 	if err != nil {
 		return "", "", fmt.Errorf("search identity: %w", err)
 	}

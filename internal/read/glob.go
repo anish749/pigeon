@@ -9,15 +9,11 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// GlobPeopleFiles returns absolute paths to all people.jsonl identity files
-// under dir, discovered via the pattern **/identity/people.jsonl.
-// Returns nil (not an error) when no identity data exists yet.
-func GlobPeopleFiles(dir string) ([]string, error) {
-	files, err := rgFiles(dir, []string{"**/identity/" + paths.PeopleFilename})
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
+// GlobFiles returns absolute paths to files under dir matching the given glob
+// patterns, sorted by modification time (most recent first).
+// Returns nil (not an error) when no files match.
+func GlobFiles(dir string, globs []string) ([]string, error) {
+	return rgFiles(dir, globs)
 }
 
 // Glob returns absolute paths to data files under dir, sorted by modification

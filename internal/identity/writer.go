@@ -2,6 +2,7 @@ package identity
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 
 // Store is the persistence interface for identity data.
 type Store interface {
-	LoadPeople(path string) ([]Person, error)
-	SavePeople(path string, people []Person) error
+	LoadPeople(path paths.PeopleFile) ([]Person, error)
+	SavePeople(path paths.PeopleFile, people []Person) error
 }
 
 // Writer owns identity observations for a single source (one platform +
@@ -21,7 +22,7 @@ type Store interface {
 // A Writer is safe for concurrent use by multiple goroutines.
 type Writer struct {
 	store  Store
-	path   string
+	path   paths.PeopleFile
 	mu     sync.Mutex
 	people []Person
 	loaded bool
@@ -95,6 +96,40 @@ func (w *Writer) LookupBySlackID(workspace, userID string) (*Person, error) {
 		}
 	}
 	return nil, nil
+}
+
+// SearchCandidates returns people in this source matching the trimmed query.
+// If the query equals a stable identifier (Slack user ID, email, or phone),
+// at most one person is returned. Otherwise names are matched
+// case-insensitively.
+func (w *Writer) SearchCandidates(query string) ([]Person, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := w.loadLocked(); err != nil {
+		return nil, fmt.Errorf("load identity: %w", err)
+	}
+
+	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
+	if q == "" {
+		return nil, nil
+	}
+
+	for i := range w.people {
+		if w.people[i].matchesAnyExactID(q) {
+			p := w.people[i]
+			return []Person{p}, nil
+		}
+	}
+
+	var out []Person
+	for i := range w.people {
+		if w.people[i].nameMatchesSubstring(q) {
+			p := w.people[i]
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // loadLocked loads people from disk if not already loaded. Must be called

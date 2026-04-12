@@ -35,6 +35,10 @@ const IdentitySubdir = "identity"
 // PeopleFilename is the filename for the per-context identity JSONL file.
 const PeopleFilename = "people.jsonl"
 
+// PeopleFileGlob is the rg --glob pattern that matches all people.jsonl
+// identity files under a data root.
+const PeopleFileGlob = "**/" + IdentitySubdir + "/" + PeopleFilename
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -182,6 +186,9 @@ func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
 }
 
+// PeopleFile is the absolute path to a people.jsonl identity file.
+type PeopleFile string
+
 // IdentityDir represents the identity directory for an account:
 //
 //	<base>/<platform>/<account-slug>/identity/
@@ -195,6 +202,6 @@ func (i IdentityDir) Path() string {
 }
 
 // PeopleFile returns the path to the people.jsonl file for this account.
-func (i IdentityDir) PeopleFile() string {
-	return filepath.Join(i.Path(), PeopleFilename)
+func (i IdentityDir) PeopleFile() PeopleFile {
+	return PeopleFile(filepath.Join(i.Path(), PeopleFilename))
 }

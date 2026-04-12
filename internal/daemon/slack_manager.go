@@ -26,7 +26,6 @@ type SlackManager struct {
 	onReaction hub.ReactionNotifyFunc
 	store      store.Store
 	idStore    identity.Store
-	reader     identity.Resolver
 	dataRoot   paths.DataRoot
 	running    map[string]*runningWorkspace // teamID → workspace
 }
@@ -41,16 +40,14 @@ type runningWorkspace struct {
 // a reaction or unreaction event arrives. Either may be nil.
 //
 // Each workspace gets its own identity.Writer scoped to
-// slack/<workspace>/identity/people.jsonl. The shared reader provides a
-// merged cross-source view for name-based searches.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, reader identity.Resolver, dataRoot paths.DataRoot) *SlackManager {
+// slack/<workspace>/identity/people.jsonl.
+func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *SlackManager {
 	return &SlackManager{
 		apiServer:  apiServer,
 		onMessage:  onMessage,
 		onReaction: onReaction,
 		store:      s,
 		idStore:    idStore,
-		reader:     reader,
 		dataRoot:   dataRoot,
 		running:    make(map[string]*runningWorkspace),
 	}
@@ -112,7 +109,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 	wsCtx, cancel := context.WithCancel(ctx)
 
 	writer := identity.NewWriter(m.idStore, m.dataRoot.Platform("slack").AccountFromSlug(sl.Workspace).Identity())
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer, m.reader)
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer)
 	if sender == nil {
 		cancel()
 		return
@@ -124,14 +121,14 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer, reader identity.Resolver) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
 	userAPI := goslack.New(sl.UserToken)
-	resolver := slacklistener.NewResolver(userAPI, writer, reader, sl.Workspace)
+	resolver := slacklistener.NewResolver(userAPI, writer, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)

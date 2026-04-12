@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/read"
 )
 
 // Reader merges per-source identity files into a unified view at read time.
@@ -24,8 +23,8 @@ import (
 // name searches (LookupBySlackID, SearchCandidates, People).
 type Reader struct {
 	store Store
-	base  string   // data root path for glob discovery; empty if paths is set
-	paths []string // if non-nil, limit to these people.jsonl paths; else discover
+	base  string              // data root path for glob discovery; empty if paths is set
+	paths []paths.PeopleFile  // if non-nil, limit to these people.jsonl paths; else discover
 }
 
 // NewReader creates a Reader that discovers all identity files under the
@@ -37,7 +36,7 @@ func NewReader(store Store, dataRoot paths.DataRoot) *Reader {
 // NewReaderForDirs creates a Reader that only merges the given identity
 // dirs. Used for context-scoped lookups.
 func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
-	pp := make([]string, len(dirs))
+	pp := make([]paths.PeopleFile, len(dirs))
 	for i, d := range dirs {
 		pp[i] = d.PeopleFile()
 	}
@@ -49,7 +48,7 @@ func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
 func (r *Reader) load() ([]Person, error) {
 	pp := r.paths
 	if pp == nil {
-		found, err := read.GlobPeopleFiles(r.base)
+		found, err := GlobPeopleFiles(r.base)
 		if err != nil {
 			return nil, fmt.Errorf("discover identity files: %w", err)
 		}

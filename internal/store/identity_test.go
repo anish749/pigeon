@@ -38,7 +38,7 @@ func TestSavePeople_CreatesDir(t *testing.T) {
 	}
 
 	// Verify file exists.
-	if _, err := os.Stat(dir.PeopleFile()); err != nil {
+	if _, err := os.Stat(string(dir.PeopleFile())); err != nil {
 		t.Errorf("people file should exist: %v", err)
 	}
 }
@@ -54,7 +54,7 @@ func TestSavePeople_AtomicWrite(t *testing.T) {
 	}
 
 	// No .tmp file should remain.
-	if _, err := os.Stat(dir.PeopleFile() + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(string(dir.PeopleFile()) + ".tmp"); !os.IsNotExist(err) {
 		t.Error("temp file should not exist after successful write")
 	}
 }
@@ -115,7 +115,7 @@ func TestLoadPeople_SkipsMalformedLines(t *testing.T) {
 this is not json
 {"name":"Bob","seen":"2026-04-11"}
 `
-	if err := os.WriteFile(dir.PeopleFile(), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(string(dir.PeopleFile()),[]byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +142,7 @@ func TestSavePeople_EmptyList(t *testing.T) {
 	}
 
 	// File should exist but be empty.
-	data, err := os.ReadFile(dir.PeopleFile())
+	data, err := os.ReadFile(string(dir.PeopleFile()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestLoadPeople_SkipsEmptyLines(t *testing.T) {
 
 {"name":"Bob","seen":"2026-04-11"}
 `
-	if err := os.WriteFile(dir.PeopleFile(), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(string(dir.PeopleFile()),[]byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
