@@ -84,9 +84,6 @@ func DaemonStatus() error {
 		fmt.Println("  sync:")
 		for key, ss := range status.SyncStatus {
 			kind := string(ss.Kind)
-			if kind == "" {
-				kind = "sync"
-			}
 			if ss.Syncing {
 				elapsed := time.Since(*ss.StartedAt).Truncate(time.Second)
 				if ss.Detail != "" {
