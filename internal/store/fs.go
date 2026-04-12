@@ -256,6 +256,9 @@ func (s *FSStore) Maintain(acct account.Account) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
 			return nil
 		}
+		if paths.IsIdentityFile(path) {
+			return nil
+		}
 		rel, relErr := filepath.Rel(dir, path)
 		if relErr != nil {
 			errs = append(errs, fmt.Errorf("rel path %s: %w", path, relErr))

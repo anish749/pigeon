@@ -258,6 +258,103 @@ func TestMaintain_SkipsUnchangedFiles(t *testing.T) {
 	}
 }
 
+// Regression: a date file with unparseable lines must not be compacted —
+// the file is left untouched to prevent silently dropping data.
+func TestMaintain_SkipsDateFileWithParseError(t *testing.T) {
+	s, acct := setup(t)
+	conv := s.convDir(acct, "#general")
+	datePath := conv.DateFile("2026-03-16").Path()
+
+	// Write one valid line followed by garbage.
+	if err := s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	original, _ := os.ReadFile(datePath)
+	os.WriteFile(datePath, append(original, []byte("this is garbage\n")...), 0644)
+	original = append(original, []byte("this is garbage\n")...)
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	got, _ := os.ReadFile(datePath)
+	if string(got) != string(original) {
+		t.Errorf("date file was modified despite parse error\ngot:  %q\nwant: %q", got, original)
+	}
+}
+
+// Regression: a thread file with unparseable lines must not be compacted.
+func TestMaintain_SkipsThreadFileWithParseError(t *testing.T) {
+	s, acct := setup(t)
+	conv := s.convDir(acct, "#general")
+
+	// Seed a valid thread file, then corrupt it.
+	parent := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "thread start")
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread: %v", err)
+	}
+	threadPath := string(conv.ThreadFile("P1"))
+	original, _ := os.ReadFile(threadPath)
+	corrupted := append(original, []byte("this is garbage\n")...)
+	os.WriteFile(threadPath, corrupted, 0644)
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	got, _ := os.ReadFile(threadPath)
+	if string(got) != string(corrupted) {
+		t.Errorf("thread file was modified despite parse error\ngot:  %q\nwant: %q", got, corrupted)
+	}
+}
+
+// Regression: if compaction would produce an empty file, the original must
+// be left untouched.
+func TestMaintain_SkipsFileIfCompactionWouldEmpty(t *testing.T) {
+	s, acct := setup(t)
+	m := msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "hello")
+	del := modelv1.Line{
+		Type:   modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{Ts: ts(2026, 3, 16, 9, 1, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1"},
+	}
+	if err := s.Append(acct, "#general", m); err != nil {
+		t.Fatalf("Append msg: %v", err)
+	}
+	if err := s.Append(acct, "#general", del); err != nil {
+		t.Fatalf("Append delete: %v", err)
+	}
+
+	datePath := s.convDir(acct, "#general").DateFile("2026-03-16").Path()
+	original, _ := os.ReadFile(datePath)
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	got, _ := os.ReadFile(datePath)
+	if string(got) != string(original) {
+		t.Errorf("file was modified despite compaction emptying it\ngot:  %q\nwant: %q", got, original)
+	}
+}
+
+// Regression: files under the identity/ subdirectory must not be compacted.
+func TestMaintain_SkipsIdentityFiles(t *testing.T) {
+	s, acct := setup(t)
+	identityPath := string(s.root.AccountFor(acct).Identity().PeopleFile())
+	original := []byte(`{"type":"person","id":"U1","name":"Alice"}` + "\n")
+	os.MkdirAll(filepath.Dir(identityPath), 0755)
+	os.WriteFile(identityPath, original, 0644)
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	got, _ := os.ReadFile(identityPath)
+	if string(got) != string(original) {
+		t.Errorf("identity file was modified during maintenance")
+	}
+}
+
 // --- ReadConversation with empty store ---
 
 func TestReadConversation_Empty(t *testing.T) {
