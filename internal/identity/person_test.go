@@ -205,54 +205,6 @@ func TestNameMatchesSubstring(t *testing.T) {
 	}
 }
 
-func TestFindMatch_EmailFirst(t *testing.T) {
-	people := []Person{
-		{Email: []string{"alice@company.com"}},
-		{WhatsApp: []string{"+15551234567"}},
-	}
-	idx := findMatch(people, Signal{Email: "alice@company.com", Phone: "+15551234567"})
-	if idx != 0 {
-		t.Errorf("findMatch = %d, want 0 (email match takes priority)", idx)
-	}
-}
-
-func TestFindMatch_SlackID(t *testing.T) {
-	people := []Person{
-		{Slack: map[string]PersonSlack{"acme": {ID: "U04ABCDEF"}}},
-	}
-	idx := findMatch(people, Signal{Slack: &SlackIdentity{ID: "U04ABCDEF"}})
-	if idx != 0 {
-		t.Errorf("findMatch = %d, want 0", idx)
-	}
-}
-
-func TestFindMatch_Phone(t *testing.T) {
-	people := []Person{
-		{WhatsApp: []string{"+15551234567"}},
-	}
-	idx := findMatch(people, Signal{Phone: "+15551234567"})
-	if idx != 0 {
-		t.Errorf("findMatch = %d, want 0", idx)
-	}
-}
-
-func TestFindMatch_NoMatch(t *testing.T) {
-	people := []Person{
-		{Email: []string{"alice@company.com"}},
-	}
-	idx := findMatch(people, Signal{Phone: "+15551234567"})
-	if idx != -1 {
-		t.Errorf("findMatch = %d, want -1", idx)
-	}
-}
-
-func TestFindMatch_EmptyPeople(t *testing.T) {
-	idx := findMatch(nil, Signal{Email: "alice@company.com"})
-	if idx != -1 {
-		t.Errorf("findMatch on nil = %d, want -1", idx)
-	}
-}
-
 func TestNewPerson_AllFields(t *testing.T) {
 	sig := Signal{
 		Email: "alice@company.com",
@@ -291,6 +243,13 @@ func TestFindPersonMatch(t *testing.T) {
 			people:  []Person{{Name: "Alice", Email: []string{"alice@company.com"}}, {Name: "Bob", Email: []string{"bob@company.com"}}},
 			q:       Person{Email: []string{"bob@company.com"}},
 			wantIdx: 1,
+		},
+		{
+			// Email is checked before phone, so person 0 matches first.
+			name:    "email takes priority over phone",
+			people:  []Person{{Email: []string{"alice@company.com"}}, {WhatsApp: []string{"+15551234567"}}},
+			q:       Person{Email: []string{"alice@company.com"}, WhatsApp: []string{"+15551234567"}},
+			wantIdx: 0,
 		},
 		{
 			// matchesEmail is used (not hasExactEmail), so Gmail dot-normalization applies.

@@ -123,24 +123,6 @@ func searchCandidates(people []Person, query string) []Person {
 	return out
 }
 
-// findMatch returns the index of the first person that matches the signal
-// by a stable identifier (email, Slack user ID, or phone). Returns -1 if
-// no match.
-func findMatch(people []Person, sig Signal) int {
-	for i := range people {
-		if sig.Email != "" && people[i].matchesEmail(sig.Email) {
-			return i
-		}
-		if sig.Slack != nil && people[i].matchesSlackID(sig.Slack.ID) {
-			return i
-		}
-		if sig.Phone != "" && people[i].matchesPhone(sig.Phone) {
-			return i
-		}
-	}
-	return -1
-}
-
 // findPersonMatch returns the index of the first person in `people` that
 // shares any stable identifier (email, Slack ID in any workspace, or phone)
 // with `q`. Used by the Reader to merge across per-source files.

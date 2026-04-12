@@ -59,7 +59,7 @@ func (w *Writer) ObserveBatch(signals []Signal) error {
 
 	for _, sig := range signals {
 		person := newPerson(sig, today)
-		idx := findMatch(w.people, sig)
+		idx := findPersonMatch(w.people, person)
 		if idx >= 0 {
 			w.people[idx] = mergePerson(w.people[idx], person)
 		} else {
