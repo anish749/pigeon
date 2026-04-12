@@ -80,6 +80,7 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 		t.Fatalf("got %d people, want 2", len(people))
 	}
 
+	// Verify Alice has both email and Slack.
 	alice := people[0]
 	if alice.Slack["acme"].ID != "U04ABCDEF" {
 		t.Errorf("alice slack ID = %q, want U04ABCDEF", alice.Slack["acme"].ID)
@@ -89,6 +90,7 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 func TestMerge_EmailMatch(t *testing.T) {
 	w, r, _ := testWriterAndReader(t)
 
+	// First: email-only person from Gmail.
 	if err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice S",
@@ -96,6 +98,7 @@ func TestMerge_EmailMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Second: Slack signal with the same email → should merge.
 	if err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
@@ -119,6 +122,7 @@ func TestMerge_EmailMatch(t *testing.T) {
 func TestMerge_SlackIDMatch(t *testing.T) {
 	w, r, _ := testWriterAndReader(t)
 
+	// First: Slack-only signal.
 	if err := w.Observe(identity.Signal{
 		Name:  "Bob",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob"},
@@ -126,6 +130,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Second: signal with email + same Slack ID → merge.
 	if err := w.Observe(identity.Signal{
 		Email: "bob@company.com",
 		Name:  "Bob Jones",
@@ -211,6 +216,7 @@ func TestMerge_MultipleEmails(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Different email, same Slack ID → merge, add second email.
 	if err := w.Observe(identity.Signal{
 		Email: "alice.personal@gmail.com",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
@@ -262,6 +268,7 @@ func TestPersistence_RoundTrip(t *testing.T) {
 	s := store.NewFSStore(root)
 	dir := root.Platform("test").AccountFromSlug("acct").Identity()
 
+	// Write with one writer instance.
 	w1 := identity.NewWriter(s, dir)
 	if err := w1.ObserveBatch([]identity.Signal{
 		{Email: "alice@company.com", Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"}},
@@ -317,10 +324,12 @@ func TestAtomicWrite_TempFileCleanup(t *testing.T) {
 
 	path := dir.PeopleFile()
 
+	// The .tmp file should not exist after a successful write.
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Error("temp file should not exist after successful write")
 	}
 
+	// The actual file should exist.
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("people file should exist: %v", err)
 	}
@@ -363,9 +372,9 @@ func TestSearchCandidates(t *testing.T) {
 		signals     []identity.Signal
 		query       string
 		wantLen     int
-		wantName    string
-		wantSlackID string
-		wantNames   []string
+		wantName    string   // when len(got)==1, expected Person.Name
+		wantSlackID string   // when len(got)==1, expected Slack["w"].ID
+		wantNames   []string // when non-nil, expected Person.Name set (order-independent)
 	}{
 		{
 			name: "slack ID exact",
