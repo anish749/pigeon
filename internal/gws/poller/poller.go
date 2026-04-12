@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
@@ -16,21 +17,20 @@ import (
 // Poller runs periodic polls against GWS services.
 type Poller struct {
 	interval    time.Duration
-	account     paths.AccountDir
-	accountName string // display name (email) for tracker keys
+	acct        account.Account
+	accountDir  paths.AccountDir
 	store       *store.FSStore
 	identity    identity.Observer
 	syncTracker *syncstatus.Tracker
 }
 
-// New creates a Poller with the given interval, account directory, store
-// instance, and identity observer. accountName is used to build per-service
-// tracker keys (e.g. "gmail/user@example.com").
-func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker, accountName string) *Poller {
+// New creates a Poller with the given interval, account, account directory,
+// store instance, and identity observer.
+func New(interval time.Duration, acct account.Account, accountDir paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker) *Poller {
 	return &Poller{
 		interval:    interval,
-		account:     account,
-		accountName: accountName,
+		acct:        acct,
+		accountDir:  accountDir,
 		store:       s,
 		identity:    id,
 		syncTracker: syncTracker,
@@ -39,14 +39,14 @@ func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id 
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) error {
-	cursors, err := p.store.LoadGWSCursors(p.account)
+	cursors, err := p.store.LoadGWSCursors(p.accountDir)
 	if err != nil {
 		return fmt.Errorf("load cursors: %w", err)
 	}
 
 	// Initial poll.
 	p.pollAll(ctx, cursors)
-	if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
+	if err := p.store.SaveGWSCursors(p.accountDir, cursors); err != nil {
 		slog.Error("save cursors", "err", err)
 	}
 
@@ -59,7 +59,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			p.pollAll(ctx, cursors)
-			if err := p.store.SaveGWSCursors(p.account, cursors); err != nil {
+			if err := p.store.SaveGWSCursors(p.accountDir, cursors); err != nil {
 				slog.Error("save cursors", "err", err)
 			}
 		}
@@ -71,13 +71,13 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 		return
 	}
 	p.runAndRecord("gmail", func() (int, error) {
-		return PollGmail(p.store, p.account, cursors, p.identity)
+		return PollGmail(p.store, p.accountDir, cursors, p.identity)
 	})
 	p.runAndRecord("calendar", func() (int, error) {
-		return PollCalendar(p.store, p.account, cursors, p.identity)
+		return PollCalendar(p.store, p.accountDir, cursors, p.identity)
 	})
 	p.runAndRecord("drive", func() (int, error) {
-		return PollDrive(p.store, p.account, cursors, p.identity)
+		return PollDrive(p.store, p.accountDir, cursors, p.identity)
 	})
 }
 
@@ -86,7 +86,7 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 // failures are logged but never propagated — telemetry should not break
 // the poll loop.
 func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
-	key := service + "/" + p.accountName
+	key := p.acct.Display() + "/" + service
 	p.syncTracker.Start(key)
 	start := time.Now()
 	n, err := fn()
@@ -101,7 +101,7 @@ func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
 		m.Err = err.Error()
 		slog.Error("poll "+service, "err", err)
 	}
-	if writeErr := appendMetric(p.account.PollMetricsPath(), m); writeErr != nil {
+	if writeErr := appendMetric(p.accountDir.PollMetricsPath(), m); writeErr != nil {
 		slog.Error("append poll metric", "service", service, "err", writeErr)
 	}
 }
