@@ -11,9 +11,9 @@ import (
 
 // GWS directory and file naming constants.
 const (
-	gmailSubdir         = "gmail"
-	gcalendarSubdir     = "gcalendar"
-	gdriveSubdir        = "gdrive"
+	GmailSubdir         = "gmail"
+	GcalendarSubdir     = "gcalendar"
+	GdriveSubdir        = "gdrive"
 	attachSubdir        = "attachments"
 	commentsFile        = "comments"
 	driveMetaFilePrefix = "drive-meta-"
@@ -22,6 +22,9 @@ const (
 	pollMetricsFile     = ".poll-metrics.jsonl"
 	pendingDeletesFile  = ".pending-email-deletes"
 )
+
+// GWSServices lists the GWS service subdirectory names.
+var GWSServices = []string{GmailSubdir, GcalendarSubdir, GdriveSubdir}
 
 // Drive content file extensions. Drive file directories hold the exported
 // content of a single Google Doc or Sheet: markdown per tab, CSV per sheet,
@@ -132,7 +135,7 @@ type GmailDir struct {
 
 // Path returns the gmail directory path.
 func (g GmailDir) Path() string {
-	return filepath.Join(g.account.Path(), gmailSubdir)
+	return filepath.Join(g.account.Path(), GmailSubdir)
 }
 
 // DateFile returns the path to a daily email file.
@@ -153,7 +156,7 @@ type CalendarDir struct {
 
 // Path returns the calendar directory path.
 func (c CalendarDir) Path() string {
-	return filepath.Join(c.account.Path(), gcalendarSubdir, c.calID)
+	return filepath.Join(c.account.Path(), GcalendarSubdir, c.calID)
 }
 
 // DateFile returns the path to a daily events file.
@@ -168,7 +171,7 @@ type DriveDir struct {
 
 // Path returns the gdrive directory path.
 func (d DriveDir) Path() string {
-	return filepath.Join(d.account.Path(), gdriveSubdir)
+	return filepath.Join(d.account.Path(), GdriveSubdir)
 }
 
 // File returns a DriveFileDir for the given slug.

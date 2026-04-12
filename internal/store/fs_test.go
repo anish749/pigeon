@@ -1440,3 +1440,68 @@ func TestInterleaveThreads_ParentNotInDateFiles(t *testing.T) {
 		t.Errorf("thread reply R1 not found in output, got IDs: %v", ids)
 	}
 }
+
+func TestListGWSServices(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	ad := root.AccountFor(acct)
+
+	// Create gmail with 3 date files.
+	gmailDir := ad.Gmail().Path()
+	if err := os.MkdirAll(gmailDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"2026-04-10.jsonl", "2026-04-11.jsonl", "2026-04-12.jsonl"} {
+		if err := os.WriteFile(filepath.Join(gmailDir, d), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create gcalendar with 2 calendar subdirs.
+	calDir := filepath.Join(ad.Path(), paths.GcalendarSubdir)
+	for _, cal := range []string{"primary", "work"} {
+		if err := os.MkdirAll(filepath.Join(calDir, cal), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create gdrive with 1 file subdir.
+	driveDir := ad.Drive().Path()
+	if err := os.MkdirAll(filepath.Join(driveDir, "my-doc-abc123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := s.ListGWSServices(acct)
+	if err != nil {
+		t.Fatalf("ListGWSServices: %v", err)
+	}
+	if len(infos) != 3 {
+		t.Fatalf("got %d services, want 3", len(infos))
+	}
+
+	want := map[string]int{
+		paths.GmailSubdir:     3,
+		paths.GcalendarSubdir: 2,
+		paths.GdriveSubdir:    1,
+	}
+	for _, info := range infos {
+		if info.Items != want[info.Service] {
+			t.Errorf("%s: got %d items, want %d", info.Service, info.Items, want[info.Service])
+		}
+	}
+}
+
+func TestListGWSServices_Empty(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+
+	infos, err := s.ListGWSServices(acct)
+	if err != nil {
+		t.Fatalf("ListGWSServices: %v", err)
+	}
+	if len(infos) != 0 {
+		t.Errorf("got %d services, want 0", len(infos))
+	}
+}

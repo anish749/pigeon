@@ -16,6 +16,13 @@ func RunList(platform, accountName string) error {
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {
 		acct := account.New(platform, accountName)
+
+		// GWS accounts have services (gmail, gcalendar, gdrive) instead
+		// of conversations. Show a per-service summary.
+		if acct.Platform == "gws" {
+			return listGWSAccount(s, acct)
+		}
+
 		convs, err := s.ListConversations(acct)
 		if err != nil {
 			return err
@@ -83,6 +90,44 @@ func RunList(platform, accountName string) error {
 	return nil
 }
 
+// listGWSAccount prints the services and item counts for a GWS account.
+func listGWSAccount(s *store.FSStore, acct account.Account) error {
+	infos, err := s.ListGWSServices(acct)
+	if err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		fmt.Println("No services found.")
+		return nil
+	}
+	fmt.Printf("Services in %s:\n\n", acct.Display())
+	for _, info := range infos {
+		fmt.Printf("  %s  %s\n", info.Service, gwsItemLabel(info.Service, info.Items))
+	}
+	return nil
+}
+
+// gwsItemLabel returns a human-readable count label for a GWS service.
+func gwsItemLabel(service string, n int) string {
+	switch service {
+	case paths.GmailSubdir:
+		return pluralize(n, "day", "days")
+	case paths.GcalendarSubdir:
+		return pluralize(n, "calendar", "calendars")
+	case paths.GdriveSubdir:
+		return pluralize(n, "file", "files")
+	default:
+		return pluralize(n, "item", "items")
+	}
+}
+
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
 // canonicalAccountNames replaces filesystem directory names (slugs) with
 // display names from config.
 func canonicalAccountNames(platform string, dirNames []string) []string {
@@ -102,6 +147,11 @@ func canonicalAccountNames(platform string, dirNames []string) []string {
 		for _, wa := range cfg.WhatsApp {
 			acct := account.New("whatsapp", wa.Account)
 			canonical[acct.NameSlug()] = wa.Account
+		}
+	case "gws":
+		for _, g := range cfg.GWS {
+			acct := account.New("gws", g.Email)
+			canonical[acct.NameSlug()] = g.Email
 		}
 	default:
 		return dirNames
