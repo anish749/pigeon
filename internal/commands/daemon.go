@@ -149,7 +149,7 @@ func DaemonRun(version string) error {
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, identitySvc)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, identitySvc)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	gwsMgr := daemon.NewGWSManager(store, identitySvc)
