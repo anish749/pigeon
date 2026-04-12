@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -205,6 +206,7 @@ func findPersonMatch(people []Person, q Person) int {
 // the more recently-seen record wins.
 func mergePerson(dst, src Person) Person {
 	srcNewer := src.Seen > dst.Seen
+	dst.Slack = maps.Clone(dst.Slack)
 
 	if src.Name != "" && (dst.Name == "" || srcNewer) {
 		dst.Name = src.Name
