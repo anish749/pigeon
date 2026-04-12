@@ -653,6 +653,10 @@ func (s *FSStore) maintainFile(path string) error {
 		if err != nil {
 			return fmt.Errorf("marshal thread: %w", err)
 		}
+		if len(newData) == 0 {
+			slog.Warn("skipping compaction: would empty file", "file", path)
+			return nil
+		}
 		if string(newData) == string(data) {
 			return nil
 		}
@@ -668,6 +672,10 @@ func (s *FSStore) maintainFile(path string) error {
 	newData, err := modelv1.MarshalDateFile(compacted)
 	if err != nil {
 		return fmt.Errorf("marshal date file: %w", err)
+	}
+	if len(newData) == 0 {
+		slog.Warn("skipping compaction: would empty file", "file", path)
+		return nil
 	}
 	if string(newData) == string(data) {
 		return nil
