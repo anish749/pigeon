@@ -6,10 +6,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anish749/pigeon/internal/account"
 )
 
 func acctDir() AccountDir {
-	return NewDataRoot("/tmp/test").Platform("gws").AccountFromSlug("user-at-gmail-com")
+	return NewDataRoot("/tmp/test").AccountFor(account.New("gws", "user-at-gmail-com"))
 }
 
 func TestGmailDir_Path(t *testing.T) {
@@ -154,7 +156,7 @@ func TestDriveMetaFile_ContentFiles(t *testing.T) {
 	// Use a temp dir because ContentFiles does a real os.ReadDir.
 	dir := t.TempDir()
 	root := NewDataRoot(dir)
-	driveFile := root.Platform("gws").AccountFromSlug("user").Drive().File("doc-abc")
+	driveFile := root.AccountFor(account.New("gws", "user")).Drive().File("doc-abc")
 	meta := driveFile.MetaFile("2026-04-07")
 
 	// Create the meta file and sibling content files.

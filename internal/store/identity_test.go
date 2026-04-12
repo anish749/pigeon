@@ -6,6 +6,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -13,7 +14,7 @@ func testIdentityStore(t *testing.T) (*store.FSStore, paths.IdentityDir) {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	return s, root.Platform("test").AccountFromSlug("acct").Identity()
+	return s, root.AccountFor(account.New("test", "acct")).Identity()
 }
 
 func TestLoadPeople_MissingFile(t *testing.T) {

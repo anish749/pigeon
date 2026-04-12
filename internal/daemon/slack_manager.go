@@ -111,7 +111,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	writer := identity.NewWriter(m.idStore, m.dataRoot.Platform("slack").AccountFromSlug(sl.Workspace).Identity())
+	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("slack", sl.Workspace)).Identity())
 	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer, m.syncTracker)
 	if sender == nil {
 		cancel()

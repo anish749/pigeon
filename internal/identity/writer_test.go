@@ -6,6 +6,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -17,7 +18,7 @@ func testWriterAndReader(t *testing.T) (*identity.Writer, *identity.Reader, path
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.Platform("test").AccountFromSlug("acct").Identity()
+	dir := root.AccountFor(account.New("test", "acct")).Identity()
 	w := identity.NewWriter(s, dir)
 	r := identity.NewReaderForDirs(s, []paths.IdentityDir{dir})
 	return w, r, dir
@@ -265,7 +266,7 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 func TestPersistence_RoundTrip(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.Platform("test").AccountFromSlug("acct").Identity()
+	dir := root.AccountFor(account.New("test", "acct")).Identity()
 
 	// Write with one writer instance.
 	w1 := identity.NewWriter(s, dir)
@@ -296,7 +297,7 @@ func TestPersistence_RoundTrip(t *testing.T) {
 func TestLoadPeople_MissingFile(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	r := identity.NewReaderForDirs(s, []paths.IdentityDir{root.Platform("nonexistent").AccountFromSlug("acct").Identity()})
+	r := identity.NewReaderForDirs(s, []paths.IdentityDir{root.AccountFor(account.New("nonexistent", "acct")).Identity()})
 
 	people, err := r.People()
 	if err != nil {

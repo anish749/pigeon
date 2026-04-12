@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
@@ -32,7 +33,7 @@ func testIdentityWriter(t *testing.T, workspace string, signals []identity.Signa
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	w := identity.NewWriter(s, root.Platform("slack").AccountFromSlug(workspace).Identity())
+	w := identity.NewWriter(s, root.AccountFor(account.New("slack", workspace)).Identity())
 	if err := w.ObserveBatch(signals); err != nil {
 		t.Fatal(err)
 	}
