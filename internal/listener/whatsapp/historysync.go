@@ -29,6 +29,10 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 	l.syncing.Store(true)
 	defer l.syncing.Store(false)
 
+	statusKey := l.acct.Display()
+	l.syncTracker.Start(statusKey)
+	defer func() { l.syncTracker.Done(statusKey, nil) }()
+
 	syncType := data.GetSyncType().String()
 
 	slog.InfoContext(ctx, "whatsapp: history sync received",

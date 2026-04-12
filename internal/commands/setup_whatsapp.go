@@ -21,6 +21,7 @@ import (
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
@@ -72,7 +73,7 @@ func RunSetupWhatsApp(dbPath string) error {
 			// guarantees the daemon is not running, so there is no concurrent
 			// access to the data directory.
 			setupStore := store.NewFSStore(paths.DefaultDataRoot())
-			listener := walistener.New(client, acct, setupStore, nil, nil)
+			listener := walistener.New(client, acct, setupStore, nil, nil, syncstatus.NewTracker())
 			client.AddEventHandler(listener.EventHandler(ctx))
 
 			// Track sync activity so we can detect completion.

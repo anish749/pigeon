@@ -19,6 +19,7 @@ import (
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
@@ -26,12 +27,13 @@ import (
 // It starts initial accounts, watches for config changes, and
 // starts/stops accounts as they are added or removed.
 type WhatsAppManager struct {
-	apiServer *api.Server
-	onMessage hub.MessageNotifyFunc
-	store     store.Store
-	idStore   identity.Store
-	dataRoot  paths.DataRoot
-	running   map[string]*runningWAAccount // account → state
+	apiServer   *api.Server
+	onMessage   hub.MessageNotifyFunc
+	store       store.Store
+	idStore     identity.Store
+	dataRoot    paths.DataRoot
+	syncTracker *syncstatus.Tracker
+	running     map[string]*runningWAAccount // account → state
 }
 
 type runningWAAccount struct {
@@ -44,14 +46,15 @@ type runningWAAccount struct {
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
 // whatsapp/<account-slug>/identity/people.jsonl.
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *WhatsAppManager {
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
 	return &WhatsAppManager{
-		apiServer: apiServer,
-		onMessage: onMessage,
-		store:     s,
-		idStore:   idStore,
-		dataRoot:  dataRoot,
-		running:   make(map[string]*runningWAAccount),
+		apiServer:   apiServer,
+		onMessage:   onMessage,
+		store:       s,
+		idStore:     idStore,
+		dataRoot:    dataRoot,
+		syncTracker: syncTracker,
+		running:     make(map[string]*runningWAAccount),
 	}
 }
 
@@ -131,7 +134,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 			config.Save(cfg)
 		}
 	}
-	listener := walistener.New(client, acct, m.store, onLogout, m.onMessage)
+	listener := walistener.New(client, acct, m.store, onLogout, m.onMessage, m.syncTracker)
 	client.AddEventHandler(listener.EventHandler(acctCtx))
 
 	if err := client.Connect(); err != nil {
