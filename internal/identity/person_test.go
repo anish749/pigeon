@@ -523,13 +523,13 @@ func TestMergePerson(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dstName := tc.dst.Name
+			dstBefore := tc.dst // snapshot before call
 			got := mergePerson(tc.dst, tc.src)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("mergePerson mismatch (-want +got):\n%s", diff)
 			}
-			if tc.dst.Name != dstName {
-				t.Errorf("dst was mutated: name changed from %q to %q", dstName, tc.dst.Name)
+			if diff := cmp.Diff(dstBefore, tc.dst); diff != "" {
+				t.Errorf("dst was mutated (-before +after):\n%s", diff)
 			}
 		})
 	}
