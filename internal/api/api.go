@@ -23,13 +23,13 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-
-	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // WhatsAppSender holds everything needed to send a WhatsApp message.
@@ -54,26 +54,28 @@ type SlackSender struct {
 
 // Server is the daemon's HTTP API server.
 type Server struct {
-	mu        sync.RWMutex
-	whatsapp  map[string]*WhatsAppSender // account slug → sender
-	slack     map[string]*SlackSender    // account slug → sender
-	hub       *hub.Hub
-	outbox    *outbox.Outbox
-	store     store.Store
-	version   string
-	startedAt time.Time
+	mu          sync.RWMutex
+	whatsapp    map[string]*WhatsAppSender // account slug → sender
+	slack       map[string]*SlackSender    // account slug → sender
+	hub         *hub.Hub
+	outbox      *outbox.Outbox
+	store       store.Store
+	syncTracker *syncstatus.Tracker
+	version     string
+	startedAt   time.Time
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
 	return &Server{
-		whatsapp:  make(map[string]*WhatsAppSender),
-		slack:     make(map[string]*SlackSender),
-		hub:       h,
-		outbox:    ob,
-		store:     s,
-		version:   version,
-		startedAt: time.Now(),
+		whatsapp:    make(map[string]*WhatsAppSender),
+		slack:       make(map[string]*SlackSender),
+		hub:         h,
+		outbox:      ob,
+		store:       s,
+		syncTracker: syncTracker,
+		version:     version,
+		startedAt:   time.Now(),
 	}
 }
 
@@ -425,13 +427,14 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 
 // StatusResponse is the daemon API response for GET /api/status.
 type StatusResponse struct {
-	Version                 string              `json:"version"`
-	PID                     int                 `json:"pid"`
-	Executable              string              `json:"executable"`
-	StartedAt               time.Time           `json:"started_at"`
-	LogFile                 string              `json:"log_file"`
-	Listeners               map[string][]string `json:"listeners"`
-	ConnectedClaudeSessions []ClaudeSessionInfo `json:"connected_claude_sessions"`
+	Version                 string                      `json:"version"`
+	PID                     int                         `json:"pid"`
+	Executable              string                      `json:"executable"`
+	StartedAt               time.Time                   `json:"started_at"`
+	LogFile                 string                      `json:"log_file"`
+	Listeners               map[string][]string         `json:"listeners"`
+	SyncStatus              map[string]syncstatus.Info   `json:"sync_status,omitempty"`
+	ConnectedClaudeSessions []ClaudeSessionInfo          `json:"connected_claude_sessions"`
 }
 
 // ClaudeSessionInfo describes a connected Claude Code session in the status response.
@@ -477,6 +480,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		StartedAt:               s.startedAt,
 		LogFile:                 paths.DaemonLogPath(),
 		Listeners:               listeners,
+		SyncStatus:              s.syncTracker.All(),
 		ConnectedClaudeSessions: claudeSessions,
 	})
 }

@@ -15,19 +15,21 @@ import (
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // SlackManager owns the lifecycle of all Slack workspace listeners.
 // It starts initial workspaces, watches for config changes, and
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
-	apiServer  *api.Server
-	onMessage  hub.MessageNotifyFunc
-	onReaction hub.ReactionNotifyFunc
-	store      store.Store
-	idStore    identity.Store
-	dataRoot   paths.DataRoot
-	running    map[string]*runningWorkspace // teamID → workspace
+	apiServer   *api.Server
+	onMessage   hub.MessageNotifyFunc
+	onReaction  hub.ReactionNotifyFunc
+	store       store.Store
+	idStore     identity.Store
+	dataRoot    paths.DataRoot
+	syncTracker *syncstatus.Tracker
+	running     map[string]*runningWorkspace // teamID → workspace
 }
 
 type runningWorkspace struct {
@@ -41,15 +43,16 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
 	return &SlackManager{
-		apiServer:  apiServer,
-		onMessage:  onMessage,
-		onReaction: onReaction,
-		store:      s,
-		idStore:    idStore,
-		dataRoot:   dataRoot,
-		running:    make(map[string]*runningWorkspace),
+		apiServer:   apiServer,
+		onMessage:   onMessage,
+		onReaction:  onReaction,
+		store:       s,
+		idStore:     idStore,
+		dataRoot:    dataRoot,
+		syncTracker: syncTracker,
+		running:     make(map[string]*runningWorkspace),
 	}
 }
 
@@ -109,7 +112,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 	wsCtx, cancel := context.WithCancel(ctx)
 
 	writer := identity.NewWriter(m.idStore, m.dataRoot.Platform("slack").AccountFromSlug(sl.Workspace).Identity())
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer)
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer, m.syncTracker)
 	if sender == nil {
 		cancel()
 		return
@@ -121,7 +124,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer, syncTracker *syncstatus.Tracker) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
@@ -157,7 +160,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	}
 
 	messages := slacklistener.NewMessageStore(acct, s)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage, onReaction)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage, onReaction, syncTracker)
 	go listener.Run(ctx)
 
 	go func() {

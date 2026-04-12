@@ -9,23 +9,28 @@ import (
 
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // Poller runs periodic polls against the Linear API via the linear CLI.
 type Poller struct {
-	interval  time.Duration
-	workspace string
-	account   paths.AccountDir
-	store     *store.FSStore
+	interval    time.Duration
+	workspace   string
+	account     paths.AccountDir
+	store       *store.FSStore
+	syncTracker *syncstatus.Tracker
+	statusKey   string
 }
 
 // New creates a Poller that syncs issues for the given workspace.
-func New(interval time.Duration, workspace string, account paths.AccountDir, s *store.FSStore) *Poller {
+func New(interval time.Duration, workspace string, account paths.AccountDir, s *store.FSStore, syncTracker *syncstatus.Tracker, statusKey string) *Poller {
 	return &Poller{
-		interval:  interval,
-		workspace: workspace,
-		account:   account,
-		store:     s,
+		interval:    interval,
+		workspace:   workspace,
+		account:     account,
+		store:       s,
+		syncTracker: syncTracker,
+		statusKey:   statusKey,
 	}
 }
 
@@ -62,7 +67,9 @@ func (p *Poller) poll(ctx context.Context, cursors *store.LinearCursors) {
 	if ctx.Err() != nil {
 		return
 	}
+	p.syncTracker.Start(p.statusKey)
 	n, err := PollIssues(ctx, p.store, p.account, p.workspace, cursors)
+	p.syncTracker.Done(p.statusKey, err)
 	if err != nil {
 		slog.Error("poll linear issues", "workspace", p.workspace, "err", err)
 	} else if n > 0 {

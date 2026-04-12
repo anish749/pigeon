@@ -10,14 +10,16 @@ import (
 	linearpoller "github.com/anish749/pigeon/internal/linear/poller"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 const linearPollInterval = 30 * time.Second
 
 // LinearManager owns the lifecycle of Linear pollers.
 type LinearManager struct {
-	store   *store.FSStore
-	running map[string]*runningLinearWorkspace // workspace → cancel
+	store       *store.FSStore
+	syncTracker *syncstatus.Tracker
+	running     map[string]*runningLinearWorkspace // workspace → cancel
 }
 
 type runningLinearWorkspace struct {
@@ -25,10 +27,11 @@ type runningLinearWorkspace struct {
 }
 
 // NewLinearManager creates a new LinearManager.
-func NewLinearManager(s *store.FSStore) *LinearManager {
+func NewLinearManager(s *store.FSStore, syncTracker *syncstatus.Tracker) *LinearManager {
 	return &LinearManager{
-		store:   s,
-		running: make(map[string]*runningLinearWorkspace),
+		store:       s,
+		syncTracker: syncTracker,
+		running:     make(map[string]*runningLinearWorkspace),
 	}
 }
 
@@ -70,12 +73,13 @@ func (m *LinearManager) reconcile(ctx context.Context, desired []config.LinearCo
 }
 
 func (m *LinearManager) startWorkspace(ctx context.Context, lc config.LinearConfig) {
-	acctDir := paths.DefaultDataRoot().AccountFor(account.New("linear-issues", lc.Workspace))
+	acct := account.New("linear-issues", lc.Workspace)
+	acctDir := paths.DefaultDataRoot().AccountFor(acct)
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[lc.Workspace] = &runningLinearWorkspace{cancel: cancel}
 
-	p := linearpoller.New(linearPollInterval, lc.Workspace, acctDir, m.store)
+	p := linearpoller.New(linearPollInterval, lc.Workspace, acctDir, m.store, m.syncTracker, acct.Display())
 	go func() {
 		slog.Info("linear poller started", "workspace", lc.Workspace, "account_dir", acctDir.Path())
 		if err := p.Run(child); err != nil && child.Err() == nil {

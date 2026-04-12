@@ -22,6 +22,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 func DaemonStart() error {
@@ -77,6 +78,24 @@ func DaemonStatus() error {
 	for platform, accounts := range status.Listeners {
 		if len(accounts) > 0 {
 			fmt.Printf("  %s: %s\n", platform, strings.Join(accounts, ", "))
+		}
+	}
+	if len(status.SyncStatus) > 0 {
+		fmt.Println("  sync:")
+		for key, ss := range status.SyncStatus {
+			if ss.Syncing {
+				elapsed := time.Since(*ss.StartedAt).Truncate(time.Second)
+				if ss.Detail != "" {
+					fmt.Printf("    %-30s syncing  %s  %s\n", key, elapsed, ss.Detail)
+				} else {
+					fmt.Printf("    %-30s syncing  %s\n", key, elapsed)
+				}
+			} else if ss.CompletedAt != nil {
+				ago := time.Since(*ss.CompletedAt).Truncate(time.Second)
+				fmt.Printf("    %-30s idle     synced %s ago\n", key, ago)
+			} else {
+				fmt.Printf("    %-30s idle     last sync: unknown\n", key)
+			}
 		}
 	}
 	if len(status.ConnectedClaudeSessions) > 0 {
@@ -143,18 +162,19 @@ func DaemonRun(version string) error {
 	defer msgHub.Stop()
 
 	ob := outbox.New()
-	apiServer := api.NewServer(msgHub, ob, store, version)
+	tracker := syncstatus.NewTracker()
+	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot)
+	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, store, dataRoot)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, store, dataRoot, tracker)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store, store, dataRoot)
+	gwsMgr := daemon.NewGWSManager(store, store, dataRoot, tracker)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
-	linearMgr := daemon.NewLinearManager(store)
+	linearMgr := daemon.NewLinearManager(store, tracker)
 	go linearMgr.Run(ctx, cfg.Linear)
 
 	go apiServer.Start(ctx, paths.SocketPath())

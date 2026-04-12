@@ -14,32 +14,35 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // Listener receives WhatsApp events and writes messages to local text files.
 type Listener struct {
-	client    *whatsmeow.Client
-	acct      account.Account
-	resolver  *Resolver
-	store     store.Store
-	syncing   atomic.Bool           // true while history sync is in progress
-	onLogout  func()                // called when device is unpaired remotely
-	onMessage hub.MessageNotifyFunc // called when a message is received
+	client      *whatsmeow.Client
+	acct        account.Account
+	resolver    *Resolver
+	store       store.Store
+	syncing     atomic.Bool           // true while history sync is in progress
+	onLogout    func()                // called when device is unpaired remotely
+	onMessage   hub.MessageNotifyFunc // called when a message is received
+	syncTracker *syncstatus.Tracker
 }
 
 // New creates a WhatsApp listener for the given client and account.
 // onLogout is called when the device is unpaired from the phone (may be nil).
 // onMessage is called when a message is received and written to disk (may be nil).
-func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.MessageNotifyFunc) *Listener {
+func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.MessageNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
-		client:    client,
-		acct:      acct,
-		resolver:  NewResolver(client),
-		store:     s,
-		onLogout:  onLogout,
-		onMessage: onMessage,
+		client:      client,
+		acct:        acct,
+		resolver:    NewResolver(client),
+		store:       s,
+		onLogout:    onLogout,
+		onMessage:   onMessage,
+		syncTracker: syncTracker,
 	}
 }
 

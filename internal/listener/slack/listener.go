@@ -13,6 +13,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
@@ -20,16 +21,17 @@ import (
 // On every Socket Mode connect (including reconnects), it runs a sync to backfill
 // any messages missed while disconnected.
 type Listener struct {
-	client     *socketmode.Client
-	resolver   *Resolver
-	messages   *MessageStore
-	userToken  string
-	botToken   string
-	acct       account.Account
-	teamID     string
-	botUserID  string // bot's Slack user ID, used to detect @mentions
-	onMessage  hub.MessageNotifyFunc
-	onReaction hub.ReactionNotifyFunc
+	client      *socketmode.Client
+	resolver    *Resolver
+	messages    *MessageStore
+	userToken   string
+	botToken    string
+	acct        account.Account
+	teamID      string
+	botUserID   string // bot's Slack user ID, used to detect @mentions
+	onMessage   hub.MessageNotifyFunc
+	onReaction  hub.ReactionNotifyFunc
+	syncTracker *syncstatus.Tracker
 }
 
 // NewListener creates a Slack listener for a single workspace.
@@ -37,18 +39,19 @@ type Listener struct {
 // onMessage is called (if non-nil) when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called (if non-nil) when a reaction or unreaction event arrives.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
-		client:     client,
-		resolver:   resolver,
-		messages:   messages,
-		userToken:  userToken,
-		botToken:   botToken,
-		acct:       acct,
-		teamID:     teamID,
-		botUserID:  botUserID,
-		onMessage:  onMessage,
-		onReaction: onReaction,
+		client:      client,
+		resolver:    resolver,
+		messages:    messages,
+		userToken:   userToken,
+		botToken:    botToken,
+		acct:        acct,
+		teamID:      teamID,
+		botUserID:   botUserID,
+		onMessage:   onMessage,
+		onReaction:  onReaction,
+		syncTracker: syncTracker,
 	}
 }
 
@@ -66,7 +69,7 @@ func (l *Listener) Run(ctx context.Context) {
 			case socketmode.EventTypeConnected:
 				slog.InfoContext(ctx, "slack: connected, triggering sync", "account", l.acct)
 				go func() {
-					if err := Sync(ctx, l.userToken, l.botToken, l.resolver, l.acct, l.messages); err != nil {
+					if err := Sync(ctx, l.userToken, l.botToken, l.resolver, l.acct, l.messages, l.syncTracker); err != nil {
 						slog.ErrorContext(ctx, "slack sync failed", "account", l.acct, "error", err)
 					}
 				}()

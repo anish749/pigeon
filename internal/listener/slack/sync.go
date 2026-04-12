@@ -15,8 +15,9 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 const (
@@ -186,7 +187,11 @@ func (ms *MessageStore) Cursor(channelID string) (string, bool) {
 // runs, picks up from where it left off using stored cursors per channel.
 // Syncs both user conversations (via user token) and bot DM conversations
 // (via bot token), interleaving them into the same contact directories.
-func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore) error {
+func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore, tracker *syncstatus.Tracker) (retErr error) {
+	statusKey := acct.Display()
+	tracker.Start(statusKey)
+	defer func() { tracker.Done(statusKey, retErr) }()
+
 	api := goslack.New(userToken)
 	gate := &rateLimitGate{workspace: acct.Name}
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
@@ -278,6 +283,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		gate.channel = channelName
 		gate.progress = fmt.Sprintf("dms: %d/%d | group_ims: %d/%d | private: %d/%d | public: %d/%d",
 			doneDMs, totalDMs, doneMpIMs, totalMpIMs, donePrivate, totalPrivate, donePublic, totalPublic)
+		tracker.Update(statusKey, gate.progress)
 
 		// Use cursor if resuming, otherwise go back 90 days.
 		oldest := defaultOldest
