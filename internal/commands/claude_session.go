@@ -32,11 +32,17 @@ const (
 )
 
 type ClaudeSessionParams struct {
-	Platform string
-	Account  string
+	Platform  string
+	Account   string
+	SessionID string
 }
 
 func RunClaudeSession(p ClaudeSessionParams) error {
+	// Session ID path: find and resume the session by its Claude Code session ID.
+	if p.SessionID != "" {
+		return runSessionByID(p.SessionID)
+	}
+
 	// Non-interactive path: platform+account provided via flags.
 	if p.Platform != "" && p.Account != "" {
 		acct := account.New(p.Platform, p.Account)
@@ -60,6 +66,66 @@ func RunClaudeSession(p ClaudeSessionParams) error {
 		}
 		return err
 	}
+}
+
+func runSessionByID(sessionID string) error {
+	sessions, err := claude.ListAllSessions()
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
+	var found *claude.Session
+	for _, s := range sessions {
+		if s.SessionID == sessionID {
+			found = s
+			break
+		}
+	}
+
+	if found == nil {
+		return fmt.Errorf("session %s not found — use 'pigeon claude' to list or create sessions", sessionID)
+	}
+
+	// Already active in another window — resume directly, no prompts needed.
+	if isSessionConnected(sessionID) {
+		return launchClaude(sessionID, found.Name, found.CWD, true)
+	}
+
+	// Not currently connected — show details and ask to confirm.
+	acct := account.New(found.Platform, found.Account)
+	fmt.Printf("\n%sResume session for %s%s%s\n", bold, cyan, acct.Display(), reset)
+	fmt.Printf("  Claude Code session ID: %s%s%s\n", dim, sessionID, reset)
+	fmt.Printf("  Directory:              %s%s%s\n", dim, found.CWD, reset)
+	fmt.Printf("  Created:                %s%s%s\n", dim, found.CreatedAt.Format("2006-01-02 15:04"), reset)
+	fmt.Println()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	if cwd != found.CWD {
+		fmt.Printf("  %s⚠  Your current directory is %s%s\n", yellow, cwd, reset)
+		fmt.Printf("  %s   Resuming will change your working directory to %s%s\n\n", yellow, found.CWD, reset)
+	}
+
+	prompt := promptui.Select{
+		Label: "What would you like to do",
+		Items: []string{
+			"Resume this session",
+			"Exit",
+		},
+		Size: 2,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return nil // ctrl-c / escape
+	}
+
+	if idx == 0 {
+		return launchClaude(sessionID, found.Name, found.CWD, true)
+	}
+	return nil
 }
 
 func runSessionForAccount(acct account.Account) error {
