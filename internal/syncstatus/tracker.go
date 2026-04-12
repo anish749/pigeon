@@ -7,8 +7,18 @@ import (
 	"time"
 )
 
+// Kind describes what type of sync this is, so the CLI can label it.
+type Kind string
+
+const (
+	KindBackfill Kind = "backfill" // Slack: catches up on connect, then real-time takes over
+	KindHistory  Kind = "history"  // WhatsApp: one-time on device link, then real-time takes over
+	KindPoll     Kind = "poll"     // GWS/Linear: periodic polling is the only data path
+)
+
 // Info is the JSON-serializable snapshot of one account's sync state.
 type Info struct {
+	Kind        Kind       `json:"kind"`
 	Syncing     bool       `json:"syncing"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
@@ -17,6 +27,7 @@ type Info struct {
 }
 
 type entry struct {
+	kind        Kind
 	syncing     bool
 	startedAt   time.Time
 	completedAt time.Time
@@ -36,10 +47,11 @@ func NewTracker() *Tracker {
 }
 
 // Start marks an account as syncing.
-func (t *Tracker) Start(key string) {
+func (t *Tracker) Start(key string, kind Kind) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.getOrCreate(key)
+	e.kind = kind
 	e.syncing = true
 	e.startedAt = time.Now()
 	e.detail = ""
@@ -75,6 +87,7 @@ func (t *Tracker) All() map[string]Info {
 	result := make(map[string]Info, len(t.entries))
 	for k, e := range t.entries {
 		info := Info{
+			Kind:    e.kind,
 			Syncing: e.syncing,
 			Detail:  e.detail,
 			Error:   e.lastErr,

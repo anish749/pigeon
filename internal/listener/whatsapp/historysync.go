@@ -13,6 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // handleHistorySync processes a history sync event from whatsmeow, writing all
@@ -32,7 +33,7 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 	defer l.syncing.Store(false)
 
 	statusKey := l.acct.Display()
-	l.syncTracker.Start(statusKey)
+	l.syncTracker.Start(statusKey, syncstatus.KindHistory)
 	var syncErr error
 	defer func() { l.syncTracker.Done(statusKey, syncErr) }()
 
