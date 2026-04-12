@@ -58,11 +58,12 @@ func (w *Writer) ObserveBatch(signals []Signal) error {
 	today := time.Now().UTC().Format("2006-01-02")
 
 	for _, sig := range signals {
+		person := newPerson(sig, today)
 		idx := findMatch(w.people, sig)
 		if idx >= 0 {
-			w.people[idx].merge(sig, today)
+			w.people[idx] = mergePerson(w.people[idx], person)
 		} else {
-			w.people = append(w.people, newPerson(sig, today))
+			w.people = append(w.people, person)
 		}
 		w.dirty = true
 	}

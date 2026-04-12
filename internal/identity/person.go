@@ -99,42 +99,6 @@ func (p *Person) nameMatchesSubstring(q string) bool {
 	return false
 }
 
-// merge applies a signal's identifiers to this person, adding any new
-// information without removing existing data.
-func (p *Person) merge(sig Signal, today string) {
-	// Update name if the signal provides one and this person has none,
-	// or if the signal comes from a richer source. For simplicity we
-	// always take a non-empty name — the caller controls signal
-	// priority by ordering.
-	if sig.Name != "" {
-		p.Name = sig.Name
-	}
-
-	if sig.Email != "" && !p.hasExactEmail(sig.Email) {
-		p.Email = append(p.Email, sig.Email)
-	}
-
-	if sig.Slack != nil {
-		if p.Slack == nil {
-			p.Slack = make(map[string]PersonSlack)
-		}
-		p.Slack[sig.Slack.Workspace] = PersonSlack{
-			ID:          sig.Slack.ID,
-			DisplayName: sig.Slack.DisplayName,
-			RealName:    sig.Slack.RealName,
-			Name:        sig.Slack.Name,
-		}
-	}
-
-	if sig.Phone != "" && !p.matchesPhone(sig.Phone) {
-		p.WhatsApp = append(p.WhatsApp, sig.Phone)
-	}
-
-	if today > p.Seen {
-		p.Seen = today
-	}
-}
-
 // searchCandidates returns people matching the trimmed query. If the query
 // equals a stable identifier (Slack user ID, email, or phone), at most one
 // person is returned. Otherwise names are matched case-insensitively.
@@ -205,7 +169,7 @@ func findPersonMatch(people []Person, q Person) int {
 // identifiers; on conflicting fields (name, same-workspace Slack entry),
 // the more recently-seen record wins.
 func mergePerson(dst, src Person) Person {
-	srcNewer := src.Seen > dst.Seen
+	srcNewer := src.Seen >= dst.Seen
 	dst.Slack = maps.Clone(dst.Slack)
 
 	if src.Name != "" && (dst.Name == "" || srcNewer) {
