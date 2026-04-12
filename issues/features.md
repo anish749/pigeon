@@ -2,7 +2,25 @@
 
 ## Elicitation protocol
 
-Define a decision tree for when pigeon should interrupt the user to ask a question — covering the four surfaces (TUI prompt, bash stdin, Claude's built-in `AskUserQuestion` guardrail, and Slack DM) with clear rules for which to use based on session context (interactive vs. headless) and urgency.
+### Owner
+
+The owner is the person running pigeon. No explicit configuration is needed — pigeon already knows who the owner is on each connected platform from the credentials used during setup.
+
+### Elicitation
+
+Pigeon runs in the background. When an agent decides it needs input from the owner, it reaches out to the owner directly via one of the connected platforms (Slack, WhatsApp, etc.) and waits.
+
+The owner replies to that message. Pigeon routes the reply back to the right agent and resumes. Thread replies are used for correlation, so multiple agents can have open questions simultaneously without confusion.
+
+The agent waits indefinitely. There is no timeout and no default action. The agent may choose to follow up if the matter is urgent, but otherwise it simply waits.
+
+### Outreach to non-owners
+
+When pigeon wants to contact someone other than the owner — scheduling a meeting, asking availability, gathering information — it does not send that message on its own. It first asks the owner for approval.
+
+The owner can approve from wherever is convenient: the terminal or directly from Slack. Both are equivalent.
+
+The agent can also batch this upfront: it tells the owner "here's what I'm planning to do and who I need to contact" and the owner approves the whole plan at once before anything is sent.
 
 ## Attachments
 
