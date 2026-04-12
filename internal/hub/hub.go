@@ -35,6 +35,19 @@ type RouteResult struct {
 // written to disk.
 type MessageNotifyFunc func(acct account.Account, conversation string) RouteResult
 
+// ReactionInfo describes a single reaction or unreaction event to be routed
+// to a connected session.
+type ReactionInfo struct {
+	MsgID    string
+	Sender   string
+	SenderID string
+	Emoji    string
+	Remove   bool
+}
+
+// ReactionNotifyFunc is called by listeners when a reaction event arrives.
+type ReactionNotifyFunc func(acct account.Account, conversation string, r ReactionInfo) RouteResult
+
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
 // next drain since it reads all messages since last_delivered.
@@ -63,7 +76,8 @@ type channel struct {
 
 type deliverySignal struct {
 	kind         signalKind
-	conversation string // only set for signalNewMessage
+	conversation string        // only set for signalNewMessage and signalReaction
+	reaction     *ReactionInfo // only set for signalReaction
 }
 
 type signalKind int
@@ -71,6 +85,7 @@ type signalKind int
 const (
 	signalNewMessage signalKind = iota // a specific conversation has a new message
 	signalConnected                    // session just connected — send hello and drain all
+	signalReaction                     // a reaction event on a specific conversation
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -270,6 +285,32 @@ func (h *Hub) Route(acct account.Account, conversation string) RouteResult {
 	return RouteResult{State: RouteOK}
 }
 
+// RouteReaction signals that a reaction (or unreaction) event has arrived for
+// the given account and conversation. Non-blocking — returns immediately.
+func (h *Hub) RouteReaction(acct account.Account, conversation string, r ReactionInfo) RouteResult {
+	key := acct.String()
+
+	h.mu.RLock()
+	ch, exists := h.channels[key]
+	h.mu.RUnlock()
+
+	if !exists {
+		slog.Warn("no session configured, reaction not routed",
+			"account", acct, "conversation", conversation)
+		return RouteResult{State: RouteNoSession}
+	}
+
+	rc := r
+	select {
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &rc}:
+	default:
+		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
+			"account", acct, "conversation", conversation,
+			"buffer_size", signalBufferSize)
+	}
+	return RouteResult{State: RouteOK}
+}
+
 // Sessions returns the number of active (connected) sessions.
 func (h *Hub) Sessions() int {
 	h.mu.RLock()
@@ -360,6 +401,10 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 				lastDelivered = h.drainAllConversations(ch, lastDelivered)
 			case signalNewMessage:
 				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
+			case signalReaction:
+				if sig.reaction != nil {
+					h.deliverReaction(ch, sig.conversation, *sig.reaction)
+				}
 			}
 		}
 	}
@@ -453,6 +498,39 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 			"session_id", ch.sessionID, "error", err)
 	}
 	return now
+}
+
+// deliverReaction sends a reaction (or unreaction) event to the connected
+// session. Reactions are delivered out-of-band: they are not gated by the
+// last_delivered cursor since reactions often target older messages.
+func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) {
+	h.mu.RLock()
+	session := h.sessions[ch.sessionID]
+	h.mu.RUnlock()
+
+	if session == nil {
+		slog.Warn("session not connected, reaction dropped",
+			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
+		return
+	}
+
+	verb := "reacted with"
+	if r.Remove {
+		verb = "removed reaction"
+	}
+	head := fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
+	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
+
+	msg := &IncomingMsg{
+		Platform:     ch.acct.Platform,
+		Account:      ch.acct.Name,
+		Conversation: conversation,
+		MsgLines:     []string{head, meta},
+	}
+	if err := session.Send(h.ctx, msg); err != nil {
+		slog.Error("failed to deliver reaction",
+			"session_id", ch.sessionID, "account", ch.acct, "error", err)
+	}
 }
 
 // RegistrationError is returned when session registration fails.

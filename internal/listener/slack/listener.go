@@ -20,32 +20,35 @@ import (
 // On every Socket Mode connect (including reconnects), it runs a sync to backfill
 // any messages missed while disconnected.
 type Listener struct {
-	client    *socketmode.Client
-	resolver  *Resolver
-	messages  *MessageStore
-	userToken string
-	botToken  string
-	acct      account.Account
-	teamID    string
-	botUserID string // bot's Slack user ID, used to detect @mentions
-	onMessage hub.MessageNotifyFunc
+	client     *socketmode.Client
+	resolver   *Resolver
+	messages   *MessageStore
+	userToken  string
+	botToken   string
+	acct       account.Account
+	teamID     string
+	botUserID  string // bot's Slack user ID, used to detect @mentions
+	onMessage  hub.MessageNotifyFunc
+	onReaction hub.ReactionNotifyFunc
 }
 
 // NewListener creates a Slack listener for a single workspace.
 // botUserID is the bot's Slack user ID (used to detect @mentions).
 // onMessage is called (if non-nil) when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc) *Listener {
+// onReaction is called (if non-nil) when a reaction or unreaction event arrives.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc) *Listener {
 	return &Listener{
-		client:    client,
-		resolver:  resolver,
-		messages:  messages,
-		userToken: userToken,
-		botToken:  botToken,
-		acct:      acct,
-		teamID:    teamID,
-		botUserID: botUserID,
-		onMessage: onMessage,
+		client:     client,
+		resolver:   resolver,
+		messages:   messages,
+		userToken:  userToken,
+		botToken:   botToken,
+		acct:       acct,
+		teamID:     teamID,
+		botUserID:  botUserID,
+		onMessage:  onMessage,
+		onReaction: onReaction,
 	}
 }
 
@@ -286,6 +289,20 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 
 	slog.InfoContext(ctx, "slack reaction saved",
 		"emoji", emoji, "from", userName, "channel", channelName, "remove", remove, "account", l.acct)
+
+	// Route the reaction to the connected session. The listener only sees
+	// reactions for channels the bot has visibility into (DMs/MPDMs and
+	// channels it's a member of), so there is no additional filter here.
+	if l.onReaction == nil {
+		return
+	}
+	l.onReaction(l.acct, channelName, hub.ReactionInfo{
+		MsgID:    item.Timestamp,
+		Sender:   userName,
+		SenderID: userID,
+		Emoji:    emoji,
+		Remove:   remove,
+	})
 }
 
 // handleEdit stores a message edit event.

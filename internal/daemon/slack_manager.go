@@ -20,11 +20,12 @@ import (
 // It starts initial workspaces, watches for config changes, and
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
-	apiServer *api.Server
-	onMessage hub.MessageNotifyFunc
-	store     store.Store
-	identity  *identity.Service
-	running   map[string]*runningWorkspace // teamID → workspace
+	apiServer  *api.Server
+	onMessage  hub.MessageNotifyFunc
+	onReaction hub.ReactionNotifyFunc
+	store      store.Store
+	identity   *identity.Service
+	running    map[string]*runningWorkspace // teamID → workspace
 }
 
 type runningWorkspace struct {
@@ -33,14 +34,16 @@ type runningWorkspace struct {
 
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onMessage is called when a routable message arrives
-// (DMs, MPDMs, private channels, bot mentions). May be nil.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *SlackManager {
+// (DMs, MPDMs, private channels, bot mentions). onReaction is called when
+// a reaction or unreaction event arrives. Either may be nil.
+func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *SlackManager {
 	return &SlackManager{
-		apiServer: apiServer,
-		onMessage: onMessage,
-		store:     s,
-		identity:  id,
-		running:   make(map[string]*runningWorkspace),
+		apiServer:  apiServer,
+		onMessage:  onMessage,
+		onReaction: onReaction,
+		store:      s,
+		identity:   id,
+		running:    make(map[string]*runningWorkspace),
 	}
 }
 
@@ -99,7 +102,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.identity)
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, m.identity)
 	if sender == nil {
 		cancel()
 		return
@@ -111,7 +114,7 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
@@ -147,7 +150,7 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 	}
 
 	messages := slacklistener.NewMessageStore(acct, s)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage, onReaction)
 	go listener.Run(ctx)
 
 	go func() {
