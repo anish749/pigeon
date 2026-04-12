@@ -40,159 +40,141 @@ func testConfig() *config.Config {
 	}
 }
 
-// --- ResolveContextName tests ---
-
-func TestResolveContextNameFlagWins(t *testing.T) {
-	cfg := testConfig()
-	got := ResolveContextName("work", "personal", cfg)
-	if got != "work" {
-		t.Errorf("got %q, want %q", got, "work")
+func TestResolveContextName(t *testing.T) {
+	tests := []struct {
+		name       string
+		flag       string
+		envContext string
+		cfg        *config.Config
+		want       ContextName
+	}{
+		{"flag wins over env and default", "work", "personal", testConfig(), "work"},
+		{"env overrides default", "", "work", testConfig(), "work"},
+		{"falls back to default", "", "", testConfig(), "personal"},
+		{"empty when no default", "", "", &config.Config{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveContextName(tt.flag, tt.envContext, tt.cfg)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestResolveContextNameEnvOverridesDefault(t *testing.T) {
-	cfg := testConfig()
-	got := ResolveContextName("", "work", cfg)
-	if got != "work" {
-		t.Errorf("got %q, want %q", got, "work")
-	}
-}
-
-func TestResolveContextNameFallsBackToDefault(t *testing.T) {
-	cfg := testConfig()
-	got := ResolveContextName("", "", cfg)
-	if got != "personal" {
-		t.Errorf("got %q, want %q", got, "personal")
-	}
-}
-
-func TestResolveContextNameEmpty(t *testing.T) {
-	cfg := &config.Config{}
-	got := ResolveContextName("", "", cfg)
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-// --- Resolve tests ---
-
-func TestResolveWithContext(t *testing.T) {
-	cfg := testConfig()
-
-	res, err := Resolve(cfg, SourceGmail, ResolveOpts{Context: "work"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "work" {
-		t.Errorf("context = %q, want %q", res.ContextName, "work")
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "work@company.com" {
-		t.Errorf("accounts = %v, want [work@company.com]", res.Accounts)
-	}
-}
-
-func TestResolveWithDefaultContext(t *testing.T) {
-	cfg := testConfig()
-
-	// Simulate what the CLI does: resolve context name first, then pass it.
-	ctxName := ResolveContextName("", "", cfg)
-	res, err := Resolve(cfg, SourceSlack, ResolveOpts{Context: ctxName})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "personal" {
-		t.Errorf("context = %q, want %q", res.ContextName, "personal")
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "side-project" {
-		t.Errorf("accounts = %v, want [side-project]", res.Accounts)
-	}
-}
-
-func TestResolveAccountBypass(t *testing.T) {
-	cfg := testConfig()
-
-	res, err := Resolve(cfg, SourceGmail, ResolveOpts{Account: "work@company.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "" {
-		t.Errorf("context = %q, want empty", res.ContextName)
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "work@company.com" {
-		t.Errorf("accounts = %v, want [work@company.com]", res.Accounts)
-	}
-}
-
-func TestResolveMultipleAccounts(t *testing.T) {
-	cfg := testConfig()
-
-	res, err := Resolve(cfg, SourceSlack, ResolveOpts{Context: "all-slack"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Accounts) != 2 {
-		t.Fatalf("got %d accounts, want 2", len(res.Accounts))
-	}
-}
-
-func TestResolveNoAccountForSource(t *testing.T) {
-	cfg := testConfig()
-
-	_, err := Resolve(cfg, SourceWhatsApp, ResolveOpts{Context: "work"})
-	if err == nil {
-		t.Fatal("expected error for missing whatsapp in work context")
-	}
-}
-
-func TestResolveUnknownContext(t *testing.T) {
-	cfg := testConfig()
-
-	_, err := Resolve(cfg, SourceGmail, ResolveOpts{Context: "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for unknown context")
-	}
-}
-
-func TestResolveWithoutContextSingleAccount(t *testing.T) {
-	cfg := &config.Config{
-		GWS: []config.GWSConfig{
-			{Account: "work", Email: "work@company.com"},
+func TestResolve(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         *config.Config
+		src         Source
+		opts        ResolveOpts
+		wantCtx     ContextName
+		wantAccts   []string // expected account names
+		wantErr     bool
+	}{
+		{
+			name:      "context selects accounts for source platform",
+			cfg:       testConfig(),
+			src:       SourceGmail,
+			opts:      ResolveOpts{Context: "work"},
+			wantCtx:   "work",
+			wantAccts: []string{"work@company.com"},
+		},
+		{
+			name: "default context via ResolveContextName",
+			cfg:  testConfig(),
+			src:  SourceSlack,
+			// Simulate CLI: resolve context name first, then pass it.
+			opts:      ResolveOpts{Context: ResolveContextName("", "", testConfig())},
+			wantCtx:   "personal",
+			wantAccts: []string{"side-project"},
+		},
+		{
+			name:      "account flag bypasses context",
+			cfg:       testConfig(),
+			src:       SourceGmail,
+			opts:      ResolveOpts{Account: "work@company.com"},
+			wantCtx:   "",
+			wantAccts: []string{"work@company.com"},
+		},
+		{
+			name:      "multiple accounts in context",
+			cfg:       testConfig(),
+			src:       SourceSlack,
+			opts:      ResolveOpts{Context: "all-slack"},
+			wantCtx:   "all-slack",
+			wantAccts: []string{"acme-corp", "side-project"},
+		},
+		{
+			name:      "whatsapp matched by phone",
+			cfg:       testConfig(),
+			src:       SourceWhatsApp,
+			opts:      ResolveOpts{Context: "personal"},
+			wantCtx:   "personal",
+			wantAccts: []string{"+15551234567"},
+		},
+		{
+			name: "single account inferred without context",
+			cfg: &config.Config{
+				GWS: []config.GWSConfig{{Account: "work", Email: "work@company.com"}},
+			},
+			src:       SourceGmail,
+			opts:      ResolveOpts{},
+			wantAccts: []string{"work@company.com"},
+		},
+		{
+			name:    "no account for source in context",
+			cfg:     testConfig(),
+			src:     SourceWhatsApp,
+			opts:    ResolveOpts{Context: "work"},
+			wantErr: true,
+		},
+		{
+			name:    "unknown context",
+			cfg:     testConfig(),
+			src:     SourceGmail,
+			opts:    ResolveOpts{Context: "nonexistent"},
+			wantErr: true,
+		},
+		{
+			name: "ambiguous without context",
+			cfg: &config.Config{
+				GWS: []config.GWSConfig{
+					{Account: "work", Email: "work@company.com"},
+					{Account: "personal", Email: "user@gmail.com"},
+				},
+			},
+			src:     SourceGmail,
+			opts:    ResolveOpts{},
+			wantErr: true,
 		},
 	}
 
-	// No context passed, only one GWS account — infer.
-	res, err := Resolve(cfg, SourceGmail, ResolveOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "work@company.com" {
-		t.Errorf("accounts = %v, want [work@company.com]", res.Accounts)
-	}
-}
-
-func TestResolveWithoutContextAmbiguous(t *testing.T) {
-	cfg := &config.Config{
-		GWS: []config.GWSConfig{
-			{Account: "work", Email: "work@company.com"},
-			{Account: "personal", Email: "user@gmail.com"},
-		},
-	}
-
-	_, err := Resolve(cfg, SourceGmail, ResolveOpts{})
-	if err == nil {
-		t.Fatal("expected error for ambiguous accounts without context")
-	}
-}
-
-func TestResolveWhatsAppByPhone(t *testing.T) {
-	cfg := testConfig()
-
-	res, err := Resolve(cfg, SourceWhatsApp, ResolveOpts{Context: "personal"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "+15551234567" {
-		t.Errorf("accounts = %v, want [+15551234567]", res.Accounts)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := Resolve(tt.cfg, tt.src, tt.opts)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.ContextName != tt.wantCtx {
+				t.Errorf("context = %q, want %q", res.ContextName, tt.wantCtx)
+			}
+			if len(res.Accounts) != len(tt.wantAccts) {
+				t.Fatalf("got %d accounts, want %d", len(res.Accounts), len(tt.wantAccts))
+			}
+			for i, want := range tt.wantAccts {
+				if res.Accounts[i].Name != want {
+					t.Errorf("account[%d] = %q, want %q", i, res.Accounts[i].Name, want)
+				}
+			}
+		})
 	}
 }
 
@@ -214,20 +196,25 @@ func TestMatchWhatsAppPhone(t *testing.T) {
 }
 
 func TestParseSource(t *testing.T) {
-	for _, name := range []string{"gmail", "calendar", "drive", "slack", "whatsapp", "linear"} {
-		src, err := ParseSource(name)
-		if err != nil {
-			t.Errorf("ParseSource(%q) error: %v", name, err)
-		}
-		if string(src) != name {
-			t.Errorf("ParseSource(%q) = %q", name, src)
-		}
+	valid := []string{"gmail", "calendar", "drive", "slack", "whatsapp", "linear"}
+	for _, name := range valid {
+		t.Run(name, func(t *testing.T) {
+			src, err := ParseSource(name)
+			if err != nil {
+				t.Fatalf("ParseSource(%q) error: %v", name, err)
+			}
+			if string(src) != name {
+				t.Errorf("ParseSource(%q) = %q", name, src)
+			}
+		})
 	}
 
-	_, err := ParseSource("gcalendar")
-	if err == nil {
-		t.Error("expected error for unknown source")
-	}
+	t.Run("unknown", func(t *testing.T) {
+		_, err := ParseSource("gcalendar")
+		if err == nil {
+			t.Error("expected error for unknown source")
+		}
+	})
 }
 
 func TestSourcePlatform(t *testing.T) {
@@ -243,8 +230,10 @@ func TestSourcePlatform(t *testing.T) {
 		{SourceLinear, PlatformLinear},
 	}
 	for _, tt := range tests {
-		if got := tt.src.Platform(); got != tt.want {
-			t.Errorf("%s.Platform() = %q, want %q", tt.src, got, tt.want)
-		}
+		t.Run(string(tt.src), func(t *testing.T) {
+			if got := tt.src.Platform(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
