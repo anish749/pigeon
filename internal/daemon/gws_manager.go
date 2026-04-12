@@ -90,7 +90,7 @@ func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
 	writer := identity.NewWriter(m.idStore, acctDir.Identity())
-	p := poller.New(gwsPollInterval, acctDir, m.store, writer, m.syncTracker, acct.Display())
+	p := poller.New(gwsPollInterval, acctDir, m.store, writer, m.syncTracker, g.Email)
 	go func() {
 		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
 		if err := p.Run(child); err != nil && child.Err() == nil {

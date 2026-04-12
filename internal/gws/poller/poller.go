@@ -17,24 +17,23 @@ import (
 type Poller struct {
 	interval    time.Duration
 	account     paths.AccountDir
+	accountName string // display name (email) for tracker keys
 	store       *store.FSStore
 	identity    identity.Observer
 	syncTracker *syncstatus.Tracker
-	statusKey   string
 }
 
 // New creates a Poller with the given interval, account directory, store
-// instance, and identity observer. The store is used for every persistence
-// operation so that file locking and filesystem layout stay consistent with
-// the rest of the daemon.
-func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker, statusKey string) *Poller {
+// instance, and identity observer. accountName is used to build per-service
+// tracker keys (e.g. "gmail/user@example.com").
+func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker, accountName string) *Poller {
 	return &Poller{
 		interval:    interval,
 		account:     account,
+		accountName: accountName,
 		store:       s,
 		identity:    id,
 		syncTracker: syncTracker,
-		statusKey:   statusKey,
 	}
 }
 
@@ -71,7 +70,6 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	if ctx.Err() != nil {
 		return
 	}
-	p.syncTracker.Start(p.statusKey)
 	p.runAndRecord("gmail", func() (int, error) {
 		return PollGmail(p.store, p.account, cursors, p.identity)
 	})
@@ -81,7 +79,6 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	p.runAndRecord("drive", func() (int, error) {
 		return PollDrive(p.store, p.account, cursors, p.identity)
 	})
-	p.syncTracker.Done(p.statusKey, nil)
 }
 
 // runAndRecord times a single service poll, logs any error, and appends a
@@ -89,8 +86,11 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 // failures are logged but never propagated — telemetry should not break
 // the poll loop.
 func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
+	key := service + "/" + p.accountName
+	p.syncTracker.Start(key)
 	start := time.Now()
 	n, err := fn()
+	p.syncTracker.Done(key, err)
 	m := PollMetric{
 		Ts:         start.UTC(),
 		Service:    service,
