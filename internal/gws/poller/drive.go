@@ -29,7 +29,7 @@ const (
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
 // Returns the number of changes observed plus any error. On initial seed
 // it returns the backfilled file count.
-func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
+func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
 	if cursors.Drive.PageToken == "" {
 		return seedDrive(s, account, cursors, id)
 	}
@@ -75,7 +75,7 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 // modified within BackfillDays, then saves the cursor. The cursor is acquired
 // BEFORE backfill so that changes made during the (potentially slow) backfill
 // are captured by the first incremental poll.
-func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
+func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
 	slog.Info("seeding drive with backfill")
 
 	// Get the changes cursor first — backfill can take minutes.
@@ -109,7 +109,7 @@ func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 	return len(files), errors.Join(errs...)
 }
 
-func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id *identity.Service) error {
+func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id identity.Observer) error {
 	doc, err := drive.GetDocument(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
@@ -178,7 +178,7 @@ func driveModifiedDate(modifiedTime string) (string, error) {
 	return t.UTC().Format("2006-01-02"), nil
 }
 
-func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id *identity.Service) error {
+func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id identity.Observer) error {
 	sheetNames, err := drive.GetSheetNames(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
@@ -303,7 +303,7 @@ func driveSlug(title, fileID string) string {
 // Drive Comments API has no incremental sync — every call returns the full
 // snapshot. Overwrite ensures deleted comments disappear and resolved status
 // stays current.
-func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, id *identity.Service) error {
+func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, id identity.Observer) error {
 	comments, err := drive.ListComments(fileID)
 	if err != nil {
 		return fmt.Errorf("list comments for %s: %w", fileID, err)

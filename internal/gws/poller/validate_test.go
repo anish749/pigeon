@@ -25,7 +25,7 @@ func TestLiveSmoke(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewService(s, root.Identity("test"))
+	id := identity.NewWriter(s, root.ServiceIdentity("gws", "test"))
 	account := root.Platform("gws").AccountFromSlug("test")
 	accountDir := account.Path()
 
