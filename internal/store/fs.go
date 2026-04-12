@@ -256,6 +256,9 @@ func (s *FSStore) Maintain(acct account.Account) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
 			return nil
 		}
+		if paths.IsIdentityFile(path) {
+			return nil
+		}
 		rel, relErr := filepath.Rel(dir, path)
 		if relErr != nil {
 			errs = append(errs, fmt.Errorf("rel path %s: %w", path, relErr))
@@ -642,7 +645,8 @@ func (s *FSStore) maintainFile(path string) error {
 	if paths.IsThreadFile(path) {
 		tf, parseErr := modelv1.ParseThreadFile(data)
 		if parseErr != nil {
-			slog.Warn("parse thread file: some lines skipped", "file", path, "error", parseErr)
+			slog.Warn("skipping compaction: parse thread file failed", "file", path, "error", parseErr)
+			return nil
 		}
 		compacted := compact.CompactThread(tf)
 		if compacted == nil {
@@ -652,6 +656,10 @@ func (s *FSStore) maintainFile(path string) error {
 		if err != nil {
 			return fmt.Errorf("marshal thread: %w", err)
 		}
+		if len(newData) == 0 {
+			slog.Warn("skipping compaction: would empty file", "file", path)
+			return nil
+		}
 		if string(newData) == string(data) {
 			return nil
 		}
@@ -660,12 +668,17 @@ func (s *FSStore) maintainFile(path string) error {
 
 	df, parseErr := modelv1.ParseDateFile(data)
 	if parseErr != nil {
-		slog.Warn("parse date file: some lines skipped", "file", path, "error", parseErr)
+		slog.Warn("skipping compaction: parse date file failed", "file", path, "error", parseErr)
+		return nil
 	}
 	compacted := compact.Compact(df)
 	newData, err := modelv1.MarshalDateFile(compacted)
 	if err != nil {
 		return fmt.Errorf("marshal date file: %w", err)
+	}
+	if len(newData) == 0 {
+		slog.Warn("skipping compaction: would empty file", "file", path)
+		return nil
 	}
 	if string(newData) == string(data) {
 		return nil

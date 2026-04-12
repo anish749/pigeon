@@ -186,6 +186,11 @@ func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
 }
 
+// IsIdentityFile reports whether the given file path lives under the identity subdirectory.
+func IsIdentityFile(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == IdentitySubdir
+}
+
 // PeopleFile is the absolute path to a people.jsonl identity file.
 type PeopleFile string
 

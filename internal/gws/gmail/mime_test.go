@@ -251,3 +251,41 @@ func TestParseAddresses(t *testing.T) {
 		t.Errorf("emails = %v", emails)
 	}
 }
+
+// Regression: some mailers emit "Name <email >" with a trailing space inside
+// the angle brackets. net/mail rejects this as "unclosed angle-addr".
+func TestParseAddress_TrailingSpaceInAngleAddr(t *testing.T) {
+	name, email := parseAddress("Sender Name <sender@example.com >")
+	if name != "Sender Name" {
+		t.Errorf("name = %q, want %q", name, "Sender Name")
+	}
+	if email != "sender@example.com" {
+		t.Errorf("email = %q, want %q", email, "sender@example.com")
+	}
+}
+
+// Regression: net/mail returns "mail: header not in message" for an empty
+// string, so we must skip empty values rather than passing them to ParseAddressList.
+func TestParseAddresses_EmptyValue(t *testing.T) {
+	emails := parseAddresses([]string{""})
+	if len(emails) != 0 {
+		t.Errorf("emails = %v, want empty", emails)
+	}
+}
+
+func TestSanitizeAddrHeader(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"no angle brackets", "no angle brackets"},
+		{"Name <user@example.com>", "Name <user@example.com>"},
+		{"Name <user@example.com >", "Name <user@example.com>"},
+		{"Name < user@example.com >", "Name <user@example.com>"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := sanitizeAddrHeader(tc.in); got != tc.want {
+			t.Errorf("sanitizeAddrHeader(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

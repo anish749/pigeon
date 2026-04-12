@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/jhillyerd/enmime"
@@ -94,8 +95,28 @@ type parsedMessage struct {
 	warnings    []string
 }
 
+// angleAddrRe matches angle-addr tokens including their content.
+var angleAddrRe = regexp.MustCompile(`<[^>]*>`)
+
+// sanitizeAddrHeader trims whitespace inside angle-addr brackets.
+// Some mailers emit "Name <email >" with a trailing space before the closing
+// angle, which net/mail rejects as "unclosed angle-addr". We normalise these
+// before parsing so well-known broken senders don't produce noisy errors.
+func sanitizeAddrHeader(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	return angleAddrRe.ReplaceAllStringFunc(s, func(m string) string {
+		return "<" + strings.TrimSpace(m[1:len(m)-1]) + ">"
+	})
+}
+
 // parseAddress extracts display name and email from a single address header.
 func parseAddress(header string) (name, email string) {
+	header = sanitizeAddrHeader(strings.TrimSpace(header))
+	if header == "" {
+		return "", ""
+	}
 	list, err := enmime.ParseAddressList(header)
 	if err != nil || len(list) == 0 {
 		slog.Error("parse From header failed", "header", header, "error", err)
@@ -108,6 +129,10 @@ func parseAddress(header string) (name, email string) {
 func parseAddresses(values []string) []string {
 	var emails []string
 	for _, v := range values {
+		v = sanitizeAddrHeader(strings.TrimSpace(v))
+		if v == "" {
+			continue
+		}
 		list, err := enmime.ParseAddressList(v)
 		if err != nil {
 			slog.Error("parse address list failed", "value", v, "error", err)
