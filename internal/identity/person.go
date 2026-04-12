@@ -152,6 +152,70 @@ func findMatch(people []Person, sig Signal) int {
 	return -1
 }
 
+// findPersonMatch returns the index of the first person in `people` that
+// shares any stable identifier (email, Slack ID in any workspace, or phone)
+// with `q`. Used by the Reader to merge across per-source files.
+func findPersonMatch(people []Person, q Person) int {
+	for i := range people {
+		for _, e := range q.Email {
+			if people[i].matchesEmail(e) {
+				return i
+			}
+		}
+		for _, s := range q.Slack {
+			if s.ID != "" && people[i].matchesSlackID(s.ID) {
+				return i
+			}
+		}
+		for _, p := range q.WhatsApp {
+			if people[i].matchesPhone(p) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// mergePerson folds src into dst and returns the result. Union of all
+// identifiers; on conflicting fields (name, same-workspace Slack entry),
+// the more recently-seen record wins.
+func mergePerson(dst, src Person) Person {
+	srcNewer := src.Seen > dst.Seen
+
+	if src.Name != "" && (dst.Name == "" || srcNewer) {
+		dst.Name = src.Name
+	}
+
+	for _, e := range src.Email {
+		if !dst.hasExactEmail(e) {
+			dst.Email = append(dst.Email, e)
+		}
+	}
+
+	if src.Slack != nil {
+		if dst.Slack == nil {
+			dst.Slack = make(map[string]PersonSlack)
+		}
+		for ws, s := range src.Slack {
+			if _, exists := dst.Slack[ws]; !exists || srcNewer {
+				dst.Slack[ws] = s
+			}
+		}
+	}
+
+	for _, p := range src.WhatsApp {
+		if !dst.matchesPhone(p) {
+			dst.WhatsApp = append(dst.WhatsApp, p)
+		}
+	}
+
+	if src.Seen > dst.Seen {
+		dst.Seen = src.Seen
+	}
+
+	return dst
+}
+
 // newPerson creates a new Person from a signal.
 func newPerson(sig Signal, today string) Person {
 	p := Person{

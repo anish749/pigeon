@@ -17,7 +17,7 @@ import (
 // PollGmail polls for new Gmail messages and stores them as JSONL.
 // Returns the number of changes observed (added + deleted) plus any error.
 // On initial seed it returns the backfilled message count.
-func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
+func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
 	if cursors.Gmail.HistoryID == "" {
 		return seedGmail(s, account, cursors, id)
 	}
@@ -54,7 +54,7 @@ func PollGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 // BackfillDays, then saves the cursor. The cursor is acquired BEFORE backfill
 // so that messages arriving during the (potentially slow) backfill are captured
 // by the first incremental poll.
-func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
+func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
 	slog.Info("seeding gmail with backfill")
 
 	// Get the history cursor first — backfill can take many minutes.
@@ -82,7 +82,7 @@ func seedGmail(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 
 // fetchAndStoreMessages fetches each message by ID and writes it to disk.
 // Messages deleted between enumeration and fetch are skipped.
-func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []string, id *identity.Service) []error {
+func fetchAndStoreMessages(s *store.FSStore, account paths.AccountDir, msgIDs []string, id identity.Observer) []error {
 	var errs []error
 	var signals []identity.Signal
 	for i, msgID := range msgIDs {

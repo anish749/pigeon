@@ -134,8 +134,10 @@ func DaemonRun(version string) error {
 	dataRoot := paths.DefaultDataRoot()
 	store := store.NewFSStore(dataRoot)
 
-	// Identity service — uses "default" context until the context system is built.
-	identitySvc := identity.NewService(store, dataRoot.Identity("default"))
+	// Identity: per-service writers (owned by each manager, one per account)
+	// flush signals to identity/<platform>/<account>/people.jsonl. The shared
+	// reader merges all those files at read time for cross-source lookups.
+	identityReader := identity.NewReader(store, dataRoot)
 
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {
@@ -146,13 +148,13 @@ func DaemonRun(version string) error {
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
+	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, identitySvc)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, store, identityReader, dataRoot)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store, identitySvc)
+	gwsMgr := daemon.NewGWSManager(store, store, dataRoot)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
 	linearMgr := daemon.NewLinearManager(store)

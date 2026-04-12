@@ -14,6 +14,39 @@ type Config struct {
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
 	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+
+	// Contexts define named account groupings. When a context is active,
+	// identity resolution and reads are scoped to that context's accounts.
+	// When no context is set, all accounts are visible and identity is
+	// merged across every known source.
+	Contexts       map[string]ContextConfig `yaml:"contexts,omitempty"`
+	DefaultContext string                   `yaml:"default_context,omitempty"`
+}
+
+// ContextConfig lists the accounts that belong to a named context. Each
+// field holds account slugs (the same slug used in storage paths:
+// workspace slug for Slack, email slug for GWS, account slug for WhatsApp).
+type ContextConfig struct {
+	Slack    []string `yaml:"slack,omitempty"`
+	GWS      []string `yaml:"gws,omitempty"`
+	WhatsApp []string `yaml:"whatsapp,omitempty"`
+}
+
+// IdentityDirs returns the identity directories for every account in this
+// context, expressed relative to the given data root. The result is the
+// input to identity.NewReaderForDirs for context-scoped reads.
+func (c ContextConfig) IdentityDirs(root paths.DataRoot) []paths.IdentityDir {
+	var dirs []paths.IdentityDir
+	for _, w := range c.Slack {
+		dirs = append(dirs, root.ServiceIdentity("slack", w))
+	}
+	for _, e := range c.GWS {
+		dirs = append(dirs, root.ServiceIdentity("gws", e))
+	}
+	for _, a := range c.WhatsApp {
+		dirs = append(dirs, root.ServiceIdentity("whatsapp", a))
+	}
+	return dirs
 }
 
 // LinearConfig holds configuration for a single Linear workspace.

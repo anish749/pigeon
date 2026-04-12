@@ -6,34 +6,53 @@ known identifiers across platforms — email addresses, Slack user IDs
 and mention names, WhatsApp phone numbers — so that a single query
 like `--from=alice` resolves to the right identifier in every source.
 
-Identity files are scoped to a context (see `read-protocol.md`). Each
-context has its own identity file. When a context is active, identity
-resolution only sees people within that context's boundary.
+Identity is stored **per source** at write time and **merged across
+sources** at read time. Each listener or poller writes to its own account's
+identity file; a read component loads the relevant files and merges them
+in memory using stable identifiers (email, Slack ID, phone).
+
+Contexts (see `read-protocol.md`) scope which accounts' files are merged.
+When a context is active, reads only see identities from that context's
+accounts. When no context is active, reads merge every known source.
 
 ## Storage Philosophy
 
+Split writes, merged reads:
+
+- **Write path**: each service owns its own `people.jsonl`. A Slack
+  listener writing about a user never touches the GWS or WhatsApp files.
+  Within a single source, signals still merge on stable identifier, so the
+  per-source file stays deduplicated.
+- **Read path**: a reader loads all the per-source files, merges them in
+  memory via the same stable-identifier matching (email, Slack ID,
+  phone), and returns a unified view.
+
 One JSONL line per person, all identifiers on that line. This means a
 single grep on any identifier — a name, an email, a Slack user ID, a
-phone number — returns the complete person in one hit. No joins, no
-cross-file references.
+phone number — returns the complete (per-source) person in one hit. No
+joins, no cross-file references for querying a single file.
 
-The identity file is small (hundreds to low thousands of lines) and
-rewritten on update, not append-only. The identity service loads it
-into memory on startup, merges new signals as they arrive, and rewrites
-the file. No maintenance or compaction needed — the file is always
-clean.
+Per-source files are small (hundreds to low thousands of lines) and
+rewritten on update, not append-only. The per-source writer loads its
+file into memory, merges new signals as they arrive, and rewrites
+atomically (temp file + rename).
 
 ## Directory Layout
 
 ```
 ~/.local/share/pigeon/
 ├── identity/
-│   ├── work/
-│   │   └── people.jsonl              # people in the work context
-│   ├── personal/
-│   │   └── people.jsonl              # people in the personal context
-│   └── project-x/
-│       └── people.jsonl              # people in the project-x context
+│   ├── slack/
+│   │   ├── acme-corp/
+│   │   │   └── people.jsonl          # signals from the acme-corp workspace
+│   │   └── vendor-ws/
+│   │       └── people.jsonl
+│   ├── gws/
+│   │   └── alice-at-company-com/
+│   │       └── people.jsonl          # signals from Gmail/Calendar/Drive
+│   └── whatsapp/
+│       └── 15551234567/
+│           └── people.jsonl          # signals from the WhatsApp contact book
 ├── slack/
 │   └── ...
 ├── whatsapp/
@@ -42,13 +61,12 @@ clean.
     └── ...
 ```
 
-Each context directory under `identity/` corresponds to a named context
-in `config.yaml`. The identity file is created when the first person is
-discovered within that context.
+Each `identity/<platform>/<account-slug>/` directory corresponds to one
+configured account. Files are created on first write.
 
-When no context is active, identity resolution is unavailable — there
-is no global identity file. This is intentional: identity is scoped to
-a workspace boundary.
+When no context is active, **all** identity files are merged — the reader
+discovers every `identity/*/*/people.jsonl` under the data root. When a
+context is active, only the accounts listed in that context are merged.
 
 ## Line Format
 
@@ -212,13 +230,20 @@ The identity service handles matching and merging internally.
 
 ## Merge Rules
 
-When a signal arrives, the identity service resolves it against the
-current identity file:
+Merging happens in two places with the same rules applied at different
+times:
+
+- **Write-time (per-source)**: when a signal arrives for a particular
+  source, the per-source writer matches it against that source's own
+  people file.
+- **Read-time (cross-source)**: when a read is requested, the reader
+  loads every relevant per-source file and merges them using the same
+  matching rules.
 
 ### Matching
 
-Signals are matched to existing people by **stable identifiers only**,
-in this order:
+Signals (or persons, at read time) are matched to existing entries by
+**stable identifiers only**, in this order:
 
 1. **Email match**: signal's email matches any email in an existing
    person's `email` array.
