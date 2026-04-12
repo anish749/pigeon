@@ -2,6 +2,8 @@ package whatsapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -31,7 +33,8 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 
 	statusKey := l.acct.Display()
 	l.syncTracker.Start(statusKey)
-	defer func() { l.syncTracker.Done(statusKey, nil) }()
+	var syncErr error
+	defer func() { l.syncTracker.Done(statusKey, syncErr) }()
 
 	syncType := data.GetSyncType().String()
 
@@ -47,12 +50,18 @@ func (l *Listener) handleHistorySync(ctx context.Context, evt *events.HistorySyn
 
 	// Phase 2: Process messages using the shared resolver.
 	var totalMessages int
+	var errs []error
 	for _, conv := range data.GetConversations() {
 		if conv.GetID() == "" {
 			continue
 		}
-		totalMessages += l.syncConversation(ctx, conv)
+		n, err := l.syncConversation(ctx, conv)
+		totalMessages += n
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
+	syncErr = errors.Join(errs...)
 
 	slog.InfoContext(ctx, "whatsapp: history sync complete",
 		"account", l.acct,
@@ -120,12 +129,10 @@ func (l *Listener) saveNamesFromSync(ctx context.Context, data *waHistorySync.Hi
 }
 
 // syncConversation writes all messages from a single history-sync conversation.
-func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Conversation) int {
+func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Conversation) (int, error) {
 	chatJID, err := types.ParseJID(conv.GetID())
 	if err != nil {
-		slog.WarnContext(ctx, "whatsapp: history sync: invalid JID",
-			"jid", conv.GetID(), "error", err)
-		return 0
+		return 0, fmt.Errorf("parse JID %s: %w", conv.GetID(), err)
 	}
 
 	// If conversation JID is a LID, resolve to phone JID.
@@ -140,7 +147,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	// Skip broadcasts (including status) and newsletters.
 	switch chatJID.Server {
 	case types.BroadcastServer, types.NewsletterServer:
-		return 0
+		return 0, nil
 	}
 
 	isGroup := chatJID.Server == types.GroupServer
@@ -158,6 +165,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 	}
 
 	var written int
+	var errs []error
 	for _, hsMsg := range conv.GetMessages() {
 		wmi := hsMsg.GetMessage()
 		if wmi == nil || wmi.GetMessage() == nil {
@@ -190,6 +198,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 		if err := l.store.Append(l.acct, convDir, line); err != nil {
 			slog.ErrorContext(ctx, "whatsapp: history sync: write failed",
 				"error", err, "account", l.acct, "conv", convDir)
+			errs = append(errs, err)
 			continue
 		}
 		written++
@@ -200,7 +209,7 @@ func (l *Listener) syncConversation(ctx context.Context, conv *waHistorySync.Con
 			"conv", convDir, "messages", written, "account", l.acct)
 	}
 
-	return written
+	return written, errors.Join(errs...)
 }
 
 // resolveHistorySender returns the display name for a history sync message sender.
