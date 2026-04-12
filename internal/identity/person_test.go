@@ -1,6 +1,9 @@
 package identity
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestMatchesEmail_Exact(t *testing.T) {
 	p := Person{Email: []string{"alice@company.com"}}
@@ -582,5 +585,105 @@ func TestNewPerson_MinimalSignal(t *testing.T) {
 	}
 	if p.WhatsApp != nil {
 		t.Error("whatsapp should be nil for email-only signal")
+	}
+}
+
+func TestSearchCandidates(t *testing.T) {
+	cases := []struct {
+		name        string
+		people      []Person
+		query       string
+		wantLen     int
+		wantName    string   // when len(got)==1, expected Person.Name
+		wantSlackID string   // when len(got)==1, expected Slack["w"].ID
+		wantNames   []string // when non-nil, expected Person.Name set (order-independent)
+	}{
+		{
+			name: "slack ID exact",
+			people: []Person{
+				{Name: "Alice", Slack: map[string]PersonSlack{"w": {ID: "U111", DisplayName: "alice"}}},
+				{Name: "Bob", Slack: map[string]PersonSlack{"w": {ID: "U222", DisplayName: "bob"}}},
+			},
+			query:       "U111",
+			wantLen:     1,
+			wantName:    "Alice",
+			wantSlackID: "U111",
+		},
+		{
+			name: "email exact",
+			people: []Person{
+				{Name: "Alice", Email: []string{"alice@company.com"}},
+				{Name: "Bob", Email: []string{"bob@company.com"}},
+			},
+			query:    "Alice@Company.Com",
+			wantLen:  1,
+			wantName: "Alice",
+		},
+		{
+			name: "name substring single match",
+			people: []Person{
+				{Name: "Alice Smith", Slack: map[string]PersonSlack{"w": {ID: "U1", DisplayName: "asmith"}}},
+				{Name: "Bob Jones", Slack: map[string]PersonSlack{"w": {ID: "U2", DisplayName: "bjones"}}},
+			},
+			query:    "smith",
+			wantLen:  1,
+			wantName: "Alice Smith",
+		},
+		{
+			name: "name substring ambiguous",
+			people: []Person{
+				{Name: "Alex One", Slack: map[string]PersonSlack{"w": {ID: "U1", DisplayName: "Alex"}}},
+				{Name: "Alex Two", Slack: map[string]PersonSlack{"w": {ID: "U2", DisplayName: "Alex"}}},
+			},
+			query:     "Alex",
+			wantLen:   2,
+			wantNames: []string{"Alex One", "Alex Two"},
+		},
+		{
+			name: "ID precedence over shared name substring",
+			people: []Person{
+				{Name: "Pat", Slack: map[string]PersonSlack{"w": {ID: "U99", DisplayName: "Pat"}}},
+				{Name: "Pat Lee", Slack: map[string]PersonSlack{"w": {ID: "U88", DisplayName: "Pat"}}},
+			},
+			query:       "U99",
+			wantLen:     1,
+			wantName:    "Pat",
+			wantSlackID: "U99",
+		},
+		{
+			name:    "empty query",
+			people:  []Person{{Name: "X", Email: []string{"x@y.z"}}},
+			query:   "   ",
+			wantLen: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := searchCandidates(tc.people, tc.query)
+			if len(got) != tc.wantLen {
+				t.Fatalf("len(got) = %d, want %d (got %#v)", len(got), tc.wantLen, got)
+			}
+			if tc.wantNames != nil {
+				names := make([]string, len(got))
+				for i := range got {
+					names[i] = got[i].Name
+				}
+				slices.Sort(names)
+				want := slices.Clone(tc.wantNames)
+				slices.Sort(want)
+				if !slices.Equal(names, want) {
+					t.Fatalf("names = %v, want %v", names, want)
+				}
+			}
+			if tc.wantLen == 1 {
+				if tc.wantName != "" && got[0].Name != tc.wantName {
+					t.Errorf("Name = %q, want %q", got[0].Name, tc.wantName)
+				}
+				if tc.wantSlackID != "" && got[0].Slack["w"].ID != tc.wantSlackID {
+					t.Errorf("Slack[w].ID = %q, want %q", got[0].Slack["w"].ID, tc.wantSlackID)
+				}
+			}
+		})
 	}
 }
