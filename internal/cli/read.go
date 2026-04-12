@@ -2,17 +2,21 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/pctx"
-	"github.com/anish749/pigeon/internal/reader"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/store/modelv1/compact"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
 
@@ -50,19 +54,16 @@ the source's platform, it is used automatically.`,
 }
 
 func runRead(cmd *cobra.Command, args []string) error {
-	// Parse source.
 	src, err := pctx.ParseSource(args[0])
 	if err != nil {
 		return err
 	}
 
-	// Optional selector.
 	selector := ""
 	if len(args) > 1 {
 		selector = args[1]
 	}
 
-	// Load config and resolve context.
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -77,33 +78,27 @@ func runRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get account flag: %w", err)
 	}
 
+	ctxName := pctx.ResolveContextName(contextFlag, os.Getenv("PIGEON_CONTEXT"), cfg)
 	resolved, err := pctx.Resolve(cfg, src, pctx.ResolveOpts{
-		Context: contextFlag,
+		Context: ctxName,
 		Account: accountFlag,
 	})
 	if err != nil {
 		return err
 	}
 
-	// Parse filters.
-	filters, err := parseFilters(cmd)
+	root := paths.DefaultDataRoot()
+	s := store.NewFSStore(root)
+	acct := resolved.Accounts[0]
+
+	since, date, last, err := parseTimeFilters(cmd)
 	if err != nil {
 		return err
 	}
 
-	// Dispatch to source-specific reader.
-	root := paths.DefaultDataRoot()
-	acct := resolved.Accounts[0] // use first resolved account
-
 	switch src {
 	case pctx.SourceGmail:
-		gmailDir := root.AccountFor(acct).Gmail()
-		result, err := reader.ReadGmail(gmailDir, filters)
-		if err != nil {
-			return err
-		}
-		fmt.Print(reader.FormatGmail(result))
-		return nil
+		return readGWSDateFiles(s, root.AccountFor(acct).Gmail().Path(), since, date, last, DefaultGmailLast)
 
 	case pctx.SourceCalendar:
 		calID, err := cmd.Flags().GetString("calendar")
@@ -113,118 +108,366 @@ func runRead(cmd *cobra.Command, args []string) error {
 		if calID == "" {
 			calID = "primary"
 		}
-		calDir := root.AccountFor(acct).Calendar(calID)
-		result, err := reader.ReadCalendar(calDir, filters)
-		if err != nil {
-			return err
+		// Calendar defaults to today when no filter specified.
+		if since == 0 && date == "" && last == 0 {
+			date = time.Now().Format("2006-01-02")
 		}
-		fmt.Print(reader.FormatCalendar(result))
-		return nil
+		return readGWSDateFiles(s, root.AccountFor(acct).Calendar(calID).Path(), since, date, last, 0)
 
 	case pctx.SourceDrive:
 		if selector == "" {
 			return fmt.Errorf("pigeon read drive requires a document name")
 		}
-		driveDir := root.AccountFor(acct).Drive()
-		fileDir, err := reader.FindDriveFile(driveDir, selector)
-		if err != nil {
-			return err
-		}
-		result, err := reader.ReadDrive(fileDir)
-		if err != nil {
-			return err
-		}
-		fmt.Print(reader.FormatDrive(result))
-		return nil
+		return readDrive(s, root.AccountFor(acct).Drive(), selector)
 
 	case pctx.SourceSlack:
 		if selector == "" {
 			return fmt.Errorf("pigeon read slack requires a channel or DM (e.g. #engineering, @alice)")
 		}
-		s := store.NewFSStore(root)
-		result, err := reader.ReadMessaging(s, acct, selector, filters)
-		if err != nil {
-			return err
-		}
-		return printMessagingResult(result)
+		return readMessaging(s, acct, selector, since, date, last)
 
 	case pctx.SourceWhatsApp:
 		if selector == "" {
 			return fmt.Errorf("pigeon read whatsapp requires a contact or group name")
 		}
-		s := store.NewFSStore(root)
-		result, err := reader.ReadMessaging(s, acct, selector, filters)
-		if err != nil {
-			return err
-		}
-		return printMessagingResult(result)
+		return readMessaging(s, acct, selector, since, date, last)
 
 	case pctx.SourceLinear:
-		accountDir := root.AccountFor(acct)
-		if selector != "" {
-			// Try exact identifier first, then fuzzy.
-			identifier, err := reader.FindLinearIssue(accountDir, selector)
-			if err != nil {
-				return err
-			}
-			result, err := reader.ReadLinearIssue(accountDir, identifier)
-			if err != nil {
-				return err
-			}
-			fmt.Print(reader.FormatLinearIssue(result))
-		} else {
-			result, err := reader.ListLinearIssues(accountDir, filters)
-			if err != nil {
-				return err
-			}
-			fmt.Print(reader.FormatLinearList(result))
+		if selector == "" {
+			return fmt.Errorf("pigeon read linear requires an issue identifier")
 		}
-		return nil
+		issuesDir := filepath.Join(root.AccountFor(acct).Path(), "issues")
+		return readLinearIssue(s, issuesDir, selector)
 
 	default:
 		return fmt.Errorf("source %q not yet implemented", src)
 	}
 }
 
-func parseFilters(cmd *cobra.Command) (reader.Filters, error) {
-	var filters reader.Filters
+// DefaultGmailLast is the default number of emails when no filter is specified.
+const DefaultGmailLast = 25
 
-	date, err := cmd.Flags().GetString("date")
+// readGWSDateFiles reads JSONL date files from a directory (gmail or calendar),
+// deduplicates, filters, and prints raw JSON lines to stdout.
+func readGWSDateFiles(s *store.FSStore, dir string, since time.Duration, date string, last int, defaultLast int) error {
+	files, err := listDateFilesInDir(dir)
 	if err != nil {
-		return filters, fmt.Errorf("get date flag: %w", err)
+		return err
 	}
-	filters.Date = date
+	if len(files) == 0 {
+		return nil
+	}
 
-	last, err := cmd.Flags().GetInt("last")
-	if err != nil {
-		return filters, fmt.Errorf("get last flag: %w", err)
-	}
-	filters.Last = last
+	selected := selectDateFiles(dir, files, since, date)
 
-	since, err := cmd.Flags().GetString("since")
-	if err != nil {
-		return filters, fmt.Errorf("get since flag: %w", err)
-	}
-	if since != "" {
-		d, err := timeutil.ParseDuration(since)
+	// Read and parse all selected files.
+	var allLines []modelv1.Line
+	var errs []error
+	for _, f := range selected {
+		lines, err := s.ReadLines(paths.DateFile(f))
 		if err != nil {
-			return filters, fmt.Errorf("invalid --since value %q: %w", since, err)
+			errs = append(errs, err)
 		}
-		filters.Since = d
+		allLines = append(allLines, lines...)
 	}
 
-	return filters, nil
+	// Dedup by ID, keep last occurrence.
+	allLines = compact.DedupGWS(allLines)
+
+	// Exclude cancelled calendar events.
+	allLines = filterCancelled(allLines)
+
+	// Apply --since precise cutoff (file selection is coarse by date).
+	if since > 0 {
+		cutoff := time.Now().Add(-since)
+		allLines = filterLinesByTime(allLines, cutoff)
+	}
+
+	// Sort by timestamp.
+	sort.SliceStable(allLines, func(i, j int) bool {
+		return allLines[i].Ts().Before(allLines[j].Ts())
+	})
+
+	// Apply --last=N (or default).
+	n := last
+	if n == 0 && since == 0 && date == "" {
+		n = defaultLast
+	}
+	if n > 0 && len(allLines) > n {
+		allLines = allLines[len(allLines)-n:]
+	}
+
+	return printLines(allLines, errs)
 }
 
-func printMessagingResult(result *reader.MessagingResult) error {
-	if result.Messages == nil || len(result.Messages.Messages) == 0 {
+// readDrive finds a drive file directory by fuzzy match and prints its
+// content files (markdown/CSV) and comments to stdout.
+func readDrive(s *store.FSStore, driveDir paths.DriveDir, selector string) error {
+	entries, err := os.ReadDir(driveDir.Path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no drive data for this account")
+		}
+		return fmt.Errorf("read drive dir: %w", err)
+	}
+
+	q := strings.ToLower(selector)
+	var matches []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.Contains(strings.ToLower(e.Name()), q) {
+			matches = append(matches, e.Name())
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return fmt.Errorf("no drive document matching %q", selector)
+	case 1:
+		// ok
+	default:
+		return fmt.Errorf("ambiguous drive document %q — matches: %s", selector, strings.Join(matches, ", "))
+	}
+
+	fileDir := driveDir.File(matches[0])
+
+	// Print content files (markdown or CSV).
+	contentEntries, err := os.ReadDir(fileDir.Path())
+	if err != nil {
+		return fmt.Errorf("read drive file dir: %w", err)
+	}
+	for _, e := range contentEntries {
+		if e.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(e.Name())
+		if ext == paths.MarkdownExt || ext == paths.CSVExt {
+			data, err := os.ReadFile(filepath.Join(fileDir.Path(), e.Name()))
+			if err != nil {
+				return fmt.Errorf("read %s: %w", e.Name(), err)
+			}
+			fmt.Print(string(data))
+		}
+	}
+
+	// Print comments as raw JSONL.
+	lines, err := s.ReadLines(fileDir.CommentsFile())
+	if err != nil {
+		return fmt.Errorf("read comments: %w", err)
+	}
+	lines = compact.DedupGWS(lines)
+	return printLines(lines, nil)
+}
+
+// readMessaging reads a messaging conversation (slack or whatsapp) using
+// the existing store layer and formatters.
+func readMessaging(s *store.FSStore, acct account.Account, selector string, since time.Duration, date string, last int) error {
+	convs, err := s.ListConversations(acct)
+	if err != nil {
+		return err
+	}
+
+	conv, err := fuzzyMatchConversation(convs, selector)
+	if err != nil {
+		return fmt.Errorf("%s: %w", acct.Display(), err)
+	}
+
+	opts := store.ReadOpts{Date: date, Last: last, Since: since}
+	df, readErr := s.ReadConversation(acct, conv, opts)
+	if df == nil || len(df.Messages) == 0 {
+		if readErr != nil {
+			return readErr
+		}
 		fmt.Println("No messages found.")
 		return nil
 	}
 
-	lines := modelv1.FormatDateFile(result.Messages, time.Local)
-	header := fmt.Sprintf("--- %s/%s ---", result.Account.Display(), result.DisplayName)
-	fmt.Println(header)
+	lines := modelv1.FormatDateFile(df, time.Local, readErr)
 	fmt.Println(strings.Join(lines, "\n"))
+	return nil
+}
+
+// readLinearIssue reads a single linear issue file, deduplicates, and
+// prints raw JSON lines to stdout.
+func readLinearIssue(s *store.FSStore, issuesDir, selector string) error {
+	// Find the issue file by exact or fuzzy match on filename.
+	entries, err := os.ReadDir(issuesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no linear issue data")
+		}
+		return fmt.Errorf("read issues dir: %w", err)
+	}
+
+	q := strings.ToLower(selector)
+	var matched string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != paths.FileExt {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), paths.FileExt)
+		if strings.EqualFold(name, selector) {
+			matched = e.Name()
+			break
+		}
+		if strings.Contains(strings.ToLower(name), q) {
+			if matched != "" {
+				return fmt.Errorf("ambiguous linear issue %q", selector)
+			}
+			matched = e.Name()
+		}
+	}
+	if matched == "" {
+		return fmt.Errorf("no linear issue matching %q", selector)
+	}
+
+	lines, err := s.ReadLines(paths.DateFile(filepath.Join(issuesDir, matched)))
+	if err != nil {
+		return fmt.Errorf("read issue %s: %w", matched, err)
+	}
+	lines = compact.DedupGWS(lines)
+	return printLines(lines, nil)
+}
+
+// --- helpers ---
+
+func parseTimeFilters(cmd *cobra.Command) (since time.Duration, date string, last int, err error) {
+	dateStr, err := cmd.Flags().GetString("date")
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("get date flag: %w", err)
+	}
+	lastN, err := cmd.Flags().GetInt("last")
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("get last flag: %w", err)
+	}
+	sinceStr, err := cmd.Flags().GetString("since")
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("get since flag: %w", err)
+	}
+	var sinceDur time.Duration
+	if sinceStr != "" {
+		sinceDur, err = timeutil.ParseDuration(sinceStr)
+		if err != nil {
+			return 0, "", 0, fmt.Errorf("invalid --since value %q: %w", sinceStr, err)
+		}
+	}
+	return sinceDur, dateStr, lastN, nil
+}
+
+// listDateFilesInDir returns sorted JSONL date file paths in a directory.
+func listDateFilesInDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list %s: %w", dir, err)
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && paths.IsDateFile(e.Name()) {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// selectDateFiles picks which date files to read based on time filters.
+func selectDateFiles(dir string, files []string, since time.Duration, date string) []string {
+	switch {
+	case date != "":
+		target := filepath.Join(dir, date+paths.FileExt)
+		for _, f := range files {
+			if f == target {
+				return []string{f}
+			}
+		}
+		return nil
+	case since > 0:
+		cutoffDate := time.Now().Add(-since).Truncate(24 * time.Hour).Format("2006-01-02")
+		cutoffPath := filepath.Join(dir, cutoffDate+paths.FileExt)
+		i := sort.SearchStrings(files, cutoffPath)
+		return files[i:]
+	default:
+		return files
+	}
+}
+
+// filterCancelled removes cancelled calendar events. No-op for non-event lines.
+func filterCancelled(lines []modelv1.Line) []modelv1.Line {
+	var out []modelv1.Line
+	for _, l := range lines {
+		if l.Type == modelv1.LineEvent && l.Event != nil && l.Event.Runtime.Status == "cancelled" {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// filterLinesByTime keeps lines with timestamp at or after cutoff.
+// Lines without a meaningful timestamp (comments, events with nested times)
+// are kept.
+func filterLinesByTime(lines []modelv1.Line, cutoff time.Time) []modelv1.Line {
+	var out []modelv1.Line
+	for _, l := range lines {
+		ts := l.Ts()
+		if ts.IsZero() || !ts.Before(cutoff) {
+			out = append(out, l)
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// fuzzyMatchConversation finds a conversation directory by substring match.
+func fuzzyMatchConversation(convs []string, query string) (string, error) {
+	q := strings.ToLower(query)
+	var matches []string
+	for _, c := range convs {
+		if strings.Contains(strings.ToLower(c), q) {
+			matches = append(matches, c)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no conversation matching %q", query)
+	case 1:
+		return matches[0], nil
+	default:
+		// Check for exact match.
+		for _, m := range matches {
+			if strings.EqualFold(m, query) {
+				return m, nil
+			}
+		}
+		return "", fmt.Errorf("ambiguous conversation %q — matches: %s", query, strings.Join(matches, ", "))
+	}
+}
+
+// printLines marshals lines to JSON and prints to stdout. Parse errors
+// are appended after the data.
+func printLines(lines []modelv1.Line, parseErrs []error) error {
+	var errs []error
+	for _, l := range lines {
+		data, err := modelv1.Marshal(l)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("marshal line: %w", err))
+			continue
+		}
+		fmt.Println(string(data))
+	}
+	errs = append(errs, parseErrs...)
+	if len(errs) > 0 {
+		// Print warnings to stderr so they don't pollute the JSON output.
+		for _, e := range errs {
+			if e != nil {
+				fmt.Fprintf(os.Stderr, "⚠ %s\n", e)
+			}
+		}
+	}
 	return nil
 }

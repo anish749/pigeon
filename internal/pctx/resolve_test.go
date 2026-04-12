@@ -94,6 +94,7 @@ func TestResolveWithContext(t *testing.T) {
 func TestResolveWithDefaultContext(t *testing.T) {
 	cfg := testConfig()
 
+	// Simulate what the CLI does: resolve context name first, then pass it.
 	ctxName := ResolveContextName("", "", cfg)
 	res, err := Resolve(cfg, SourceSlack, ResolveOpts{Context: ctxName})
 	if err != nil {
@@ -159,6 +160,7 @@ func TestResolveWithoutContextSingleAccount(t *testing.T) {
 		},
 	}
 
+	// No context passed, only one GWS account — infer.
 	res, err := Resolve(cfg, SourceGmail, ResolveOpts{})
 	if err != nil {
 		t.Fatal(err)

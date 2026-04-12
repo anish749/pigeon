@@ -5,7 +5,11 @@
 // determines which account(s) to operate on. See docs/read-protocol.md.
 package pctx
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anish749/pigeon/internal/config"
+)
 
 // Source identifies a data type for the read protocol. It is always the
 // first positional argument to "pigeon read".
@@ -71,4 +75,28 @@ func (s Source) Platform() Platform {
 // This is the key used to look up account identifiers in a context.
 func (s Source) ContextKey() string {
 	return string(s.Platform())
+}
+
+// ContextName is a named context from config.yaml. The empty string means
+// no context is active. Use ResolveContextName to compute this from the
+// CLI flag, environment, and config — callers below the CLI layer receive
+// this as an already-resolved value and never read env vars directly.
+type ContextName string
+
+// ResolveContextName determines the active context name. Resolution order:
+//  1. flag (--context CLI flag, highest precedence)
+//  2. envContext (PIGEON_CONTEXT, read by the caller)
+//  3. cfg.DefaultContext from config.yaml
+//  4. Empty string (no context)
+//
+// Call this once at the outermost CLI layer. Pass the result into all
+// downstream code so env vars are never re-read.
+func ResolveContextName(flag, envContext string, cfg *config.Config) ContextName {
+	if flag != "" {
+		return ContextName(flag)
+	}
+	if envContext != "" {
+		return ContextName(envContext)
+	}
+	return ContextName(cfg.DefaultContext)
 }
