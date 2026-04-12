@@ -52,6 +52,13 @@ type SlackSender struct {
 	UserID    string // the authenticated user's Slack user ID
 }
 
+// ListenerLister lets the status endpoint report the full set of
+// supervised listeners without the api package needing to import the
+// lifecycle package. The daemon wires its Supervisor in via SetSupervisor.
+type ListenerLister interface {
+	IDsByKind(kind string) []string
+}
+
 // Server is the daemon's HTTP API server.
 type Server struct {
 	mu        sync.RWMutex
@@ -62,6 +69,7 @@ type Server struct {
 	store     store.Store
 	version   string
 	startedAt time.Time
+	lister    ListenerLister
 }
 
 // NewServer creates a new API server.
@@ -84,10 +92,35 @@ func (s *Server) RegisterWhatsApp(sender *WhatsAppSender) {
 	s.mu.Unlock()
 }
 
+// UnregisterWhatsApp removes a previously-registered WhatsApp sender.
+// Called when a listener stops (config removal, supervisor restart).
+func (s *Server) UnregisterWhatsApp(slug string) {
+	s.mu.Lock()
+	delete(s.whatsapp, slug)
+	s.mu.Unlock()
+}
+
 // RegisterSlack registers a Slack client for sending.
 func (s *Server) RegisterSlack(sender *SlackSender) {
 	s.mu.Lock()
 	s.slack[sender.Acct.NameSlug()] = sender
+	s.mu.Unlock()
+}
+
+// UnregisterSlack removes a previously-registered Slack sender.
+// Called when a listener stops (config removal, supervisor restart).
+func (s *Server) UnregisterSlack(slug string) {
+	s.mu.Lock()
+	delete(s.slack, slug)
+	s.mu.Unlock()
+}
+
+// SetSupervisor registers the lifecycle supervisor with the API server so
+// the /status endpoint can report the full supervised set (including GWS
+// and Linear listeners, which do not register senders).
+func (s *Server) SetSupervisor(l ListenerLister) {
+	s.mu.Lock()
+	s.lister = l
 	s.mu.Unlock()
 }
 
@@ -443,17 +476,30 @@ type ClaudeSessionInfo struct {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
-	listeners := make(map[string][]string, 2)
-	for slug := range s.slack {
-		listeners["slack"] = append(listeners["slack"], slug)
-	}
-	for slug := range s.whatsapp {
-		listeners["whatsapp"] = append(listeners["whatsapp"], slug)
-	}
+	lister := s.lister
 	s.mu.RUnlock()
 
-	sort.Strings(listeners["slack"])
-	sort.Strings(listeners["whatsapp"])
+	listeners := make(map[string][]string, 4)
+	if lister != nil {
+		// Supervisor is the source of truth for every platform, including
+		// the poll-based ones (GWS, Linear) that don't register senders.
+		for _, kind := range []string{"slack", "whatsapp", "gws", "linear"} {
+			if ids := lister.IDsByKind(kind); len(ids) > 0 {
+				listeners[kind] = ids
+			}
+		}
+	} else {
+		s.mu.RLock()
+		for slug := range s.slack {
+			listeners["slack"] = append(listeners["slack"], slug)
+		}
+		for slug := range s.whatsapp {
+			listeners["whatsapp"] = append(listeners["whatsapp"], slug)
+		}
+		s.mu.RUnlock()
+		sort.Strings(listeners["slack"])
+		sort.Strings(listeners["whatsapp"])
+	}
 
 	connected := s.hub.ConnectedClaudeSessions()
 	claudeSessions := make([]ClaudeSessionInfo, len(connected))

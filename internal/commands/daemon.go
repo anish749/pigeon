@@ -18,6 +18,7 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/lifecycle"
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
@@ -146,17 +147,16 @@ func DaemonRun(version string) error {
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
-	go waMgr.Run(ctx, cfg.WhatsApp)
+	// Single supervisor drives every per-account listener (Slack,
+	// WhatsApp, GWS, Linear). The orchestrator translates config →
+	// factories; the supervisor runs them, restarts them on crash, and
+	// stops them on Shutdown.
+	supervisor := lifecycle.New(ctx, lifecycle.DefaultPolicy)
+	defer supervisor.Shutdown()
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, identitySvc)
-	go slackMgr.Run(ctx, cfg.Slack)
-
-	gwsMgr := daemon.NewGWSManager(store, identitySvc)
-	go gwsMgr.Run(ctx, cfg.GWS)
-
-	linearMgr := daemon.NewLinearManager(store)
-	go linearMgr.Run(ctx, cfg.Linear)
+	orch := daemon.NewOrchestrator(supervisor, apiServer, store, identitySvc, msgHub.Route)
+	apiServer.SetSupervisor(supervisor)
+	go orch.Run(ctx, cfg)
 
 	go apiServer.Start(ctx, paths.SocketPath())
 
