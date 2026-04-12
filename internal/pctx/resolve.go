@@ -2,7 +2,6 @@ package pctx
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -11,9 +10,10 @@ import (
 
 // ResolveOpts controls context resolution.
 type ResolveOpts struct {
-	// Context overrides the active context. Takes precedence over env var
-	// and config default. Corresponds to the --context flag.
-	Context string
+	// Context is the already-resolved context name. Computed by
+	// ResolveContextName at the CLI boundary — the resolver never
+	// reads env vars or config defaults itself.
+	Context ContextName
 
 	// Account bypasses context entirely and selects a specific account.
 	// Corresponds to the -a flag.
@@ -24,7 +24,7 @@ type ResolveOpts struct {
 // operate on for a given source.
 type Resolved struct {
 	// ContextName is the name of the active context, or empty if none.
-	ContextName string
+	ContextName ContextName
 
 	// Accounts is the resolved set of accounts for the requested source.
 	// Always at least one element when error is nil.
@@ -33,16 +33,12 @@ type Resolved struct {
 
 // Resolve determines which accounts to use for a given source.
 //
-// Resolution order:
+// Resolution:
 //  1. If opts.Account is set, bypass context and match directly.
-//  2. Otherwise, determine the active context:
-//     a. opts.Context flag
-//     b. PIGEON_CONTEXT env var
-//     c. cfg.DefaultContext
-//     d. No context
-//  3. With a context: look up accounts for the source's platform.
-//  4. Without a context: infer if only one account exists for the
-//     platform, otherwise error.
+//  2. If opts.Context is non-empty, look up accounts for the source's
+//     platform within that context.
+//  3. If no context, infer if only one account exists for the platform,
+//     otherwise error.
 func Resolve(cfg *config.Config, src Source, opts ResolveOpts) (*Resolved, error) {
 	platform := src.Platform()
 
@@ -55,25 +51,16 @@ func Resolve(cfg *config.Config, src Source, opts ResolveOpts) (*Resolved, error
 		return &Resolved{Accounts: []account.Account{acct}}, nil
 	}
 
-	// Determine the active context name.
-	ctxName := opts.Context
-	if ctxName == "" {
-		ctxName = os.Getenv("PIGEON_CONTEXT")
-	}
-	if ctxName == "" {
-		ctxName = cfg.DefaultContext
-	}
-
-	if ctxName != "" {
-		return resolveWithContext(cfg, src, platform, ctxName)
+	if opts.Context != "" {
+		return resolveWithContext(cfg, src, platform, opts.Context)
 	}
 	return resolveWithoutContext(cfg, src, platform)
 }
 
 // resolveWithContext looks up the named context and finds accounts for the
 // source's platform.
-func resolveWithContext(cfg *config.Config, src Source, platform Platform, ctxName string) (*Resolved, error) {
-	ctx, ok := cfg.Contexts[ctxName]
+func resolveWithContext(cfg *config.Config, src Source, platform Platform, ctxName ContextName) (*Resolved, error) {
+	ctx, ok := cfg.Contexts[string(ctxName)]
 	if !ok {
 		return nil, fmt.Errorf("unknown context %q — check contexts in config.yaml", ctxName)
 	}

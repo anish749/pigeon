@@ -40,6 +40,42 @@ func testConfig() *config.Config {
 	}
 }
 
+// --- ResolveContextName tests ---
+
+func TestResolveContextNameFlagWins(t *testing.T) {
+	cfg := testConfig()
+	got := ResolveContextName("work", "personal", cfg)
+	if got != "work" {
+		t.Errorf("got %q, want %q", got, "work")
+	}
+}
+
+func TestResolveContextNameEnvOverridesDefault(t *testing.T) {
+	cfg := testConfig()
+	got := ResolveContextName("", "work", cfg)
+	if got != "work" {
+		t.Errorf("got %q, want %q", got, "work")
+	}
+}
+
+func TestResolveContextNameFallsBackToDefault(t *testing.T) {
+	cfg := testConfig()
+	got := ResolveContextName("", "", cfg)
+	if got != "personal" {
+		t.Errorf("got %q, want %q", got, "personal")
+	}
+}
+
+func TestResolveContextNameEmpty(t *testing.T) {
+	cfg := &config.Config{} // no default
+	got := ResolveContextName("", "", cfg)
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+// --- Resolve tests ---
+
 func TestResolveWithContext(t *testing.T) {
 	cfg := testConfig()
 
@@ -55,10 +91,12 @@ func TestResolveWithContext(t *testing.T) {
 	}
 }
 
-func TestResolveDefaultContext(t *testing.T) {
+func TestResolveWithDefaultContext(t *testing.T) {
 	cfg := testConfig()
 
-	res, err := Resolve(cfg, SourceSlack, ResolveOpts{})
+	// Simulate what the CLI does: resolve context name first, then pass it.
+	ctxName := ResolveContextName("", "", cfg)
+	res, err := Resolve(cfg, SourceSlack, ResolveOpts{Context: ctxName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,49 +105,6 @@ func TestResolveDefaultContext(t *testing.T) {
 	}
 	if len(res.Accounts) != 1 || res.Accounts[0].Name != "side-project" {
 		t.Errorf("accounts = %v, want [side-project]", res.Accounts)
-	}
-}
-
-func TestResolveEnvContext(t *testing.T) {
-	cfg := testConfig()
-	t.Setenv("PIGEON_CONTEXT", "work")
-
-	res, err := Resolve(cfg, SourceGmail, ResolveOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "work" {
-		t.Errorf("context = %q, want %q", res.ContextName, "work")
-	}
-}
-
-func TestResolveEnvOverridesDefault(t *testing.T) {
-	cfg := testConfig()
-	t.Setenv("PIGEON_CONTEXT", "work")
-
-	// Default is "personal", but PIGEON_CONTEXT=work should win.
-	res, err := Resolve(cfg, SourceSlack, ResolveOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "work" {
-		t.Errorf("context = %q, want %q", res.ContextName, "work")
-	}
-	if len(res.Accounts) != 1 || res.Accounts[0].Name != "acme-corp" {
-		t.Errorf("accounts = %v, want [acme-corp]", res.Accounts)
-	}
-}
-
-func TestResolveFlagOverridesEnv(t *testing.T) {
-	cfg := testConfig()
-	t.Setenv("PIGEON_CONTEXT", "personal")
-
-	res, err := Resolve(cfg, SourceSlack, ResolveOpts{Context: "work"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ContextName != "work" {
-		t.Errorf("context = %q, want %q", res.ContextName, "work")
 	}
 }
 
@@ -167,7 +162,7 @@ func TestResolveWithoutContextSingleAccount(t *testing.T) {
 		},
 	}
 
-	// No contexts, no default — but only one GWS account, so infer.
+	// No context passed, only one GWS account — infer.
 	res, err := Resolve(cfg, SourceGmail, ResolveOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -194,12 +189,10 @@ func TestResolveWithoutContextAmbiguous(t *testing.T) {
 func TestResolveWhatsAppByPhone(t *testing.T) {
 	cfg := testConfig()
 
-	// WhatsApp matched by phone in context.
 	res, err := Resolve(cfg, SourceWhatsApp, ResolveOpts{Context: "personal"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The account name is the display name from config, not the phone.
 	if len(res.Accounts) != 1 || res.Accounts[0].Name != "+15551234567" {
 		t.Errorf("accounts = %v, want [+15551234567]", res.Accounts)
 	}

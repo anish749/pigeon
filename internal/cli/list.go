@@ -46,9 +46,16 @@ func newListCmd() *cobra.Command {
 				return fmt.Errorf("get context flag: %w", err)
 			}
 
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			ctxName := pctx.ResolveContextName(contextFlag, os.Getenv("PIGEON_CONTEXT"), cfg)
+
 			// Context-aware listing.
-			if contextFlag != "" || hasActiveContext() {
-				return runListContext(contextFlag)
+			if ctxName != "" {
+				return runListContext(cfg, ctxName)
 			}
 
 			// Legacy listing (no context).
@@ -65,44 +72,16 @@ func newListCmd() *cobra.Command {
 	return cmd
 }
 
-// hasActiveContext checks if a context is active via env or config default.
-func hasActiveContext() bool {
-	if os.Getenv("PIGEON_CONTEXT") != "" {
-		return true
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return false
-	}
-	return cfg.DefaultContext != ""
-}
-
-// runListContext lists sources for the active context.
-func runListContext(contextFlag string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	ctxName := contextFlag
-	if ctxName == "" {
-		ctxName = os.Getenv("PIGEON_CONTEXT")
-	}
-	if ctxName == "" {
-		ctxName = cfg.DefaultContext
-	}
-	if ctxName == "" {
-		return fmt.Errorf("no context active — use --context or set default_context in config")
-	}
-
-	ctx, ok := cfg.Contexts[ctxName]
+// runListContext lists sources for the active context. The context name
+// is already resolved by the caller — this function never reads env vars.
+func runListContext(cfg *config.Config, ctxName pctx.ContextName) error {
+	ctx, ok := cfg.Contexts[string(ctxName)]
 	if !ok {
 		return fmt.Errorf("unknown context %q", ctxName)
 	}
 
 	fmt.Printf("Sources for %s:\n\n", ctxName)
 
-	// List each platform's sources in the context.
 	for _, src := range pctx.AllSources {
 		platform := src.ContextKey()
 		identifiers := ctx.Accounts(platform)
