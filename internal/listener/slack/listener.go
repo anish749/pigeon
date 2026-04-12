@@ -123,14 +123,24 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	// Skip system events (channel_join, channel_topic, etc.) and messages with
-	// empty text. Allow bot_message and thread_broadcast subtypes through —
+	// Skip system events (channel_join, channel_topic, etc.).
+	// Allow bot_message and thread_broadcast subtypes through —
 	// bot messages contain valuable info (alerts, CI, integrations).
-	if msg.Text == "" || !allowedSubType(msg.SubType) {
-		slog.WarnContext(ctx, "slack: skipping message",
-			"channel", msg.Channel, "ts", msg.TimeStamp,
-			"botID", msg.BotID, "subType", msg.SubType,
-			"emptyText", msg.Text == "", "account", l.acct)
+	if !allowedSubType(msg.SubType) {
+		return
+	}
+
+	// Extract text from the message body, falling back to blocks and
+	// attachments when the top-level Text field is empty. msg.Message is
+	// always populated by the custom JSON unmarshaler on MessageEvent.
+	var blocks goslack.Blocks
+	var attachments []goslack.Attachment
+	if msg.Message != nil {
+		blocks = msg.Message.Blocks
+		attachments = msg.Message.Attachments
+	}
+	msgText := extractText(msg.Text, blocks, attachments)
+	if msgText == "" {
 		return
 	}
 
@@ -162,7 +172,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		userName = "sent to pigeon by " + userName
 		via = modelv1.ViaToPigeon
 	}
-	text, err := l.resolver.ResolveText(ctx, msg.Text)
+	text, err := l.resolver.ResolveText(ctx, msgText)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
 			"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
@@ -245,7 +255,8 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 		return
 	}
 	parent := msgs[0]
-	if parent.Text == "" {
+	parentText := extractText(parent.Text, parent.Blocks, parent.Attachments)
+	if parentText == "" {
 		return
 	}
 	userName, userID, err := l.resolver.SenderName(ctx, parent.User, parent.BotID, parent.Username)
@@ -254,7 +265,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 			"account", l.acct, "thread_ts", threadTS)
 		return
 	}
-	text, err := l.resolver.ResolveText(ctx, parent.Text)
+	text, err := l.resolver.ResolveText(ctx, parentText)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to resolve thread parent text", "error", err,
 			"account", l.acct, "thread_ts", threadTS)

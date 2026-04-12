@@ -309,14 +309,17 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Skip system events (channel_join, channel_topic, etc.) and messages
-			// with empty text. Allow bot messages through — they contain valuable
-			// info (alerts, CI, integrations).
-			if msg.Text == "" || !allowedSubType(msg.SubType) {
-				slog.WarnContext(ctx, "slack sync: skipping message",
-					"channel", channelName, "ts", msg.Timestamp,
-					"botID", msg.BotID, "subType", msg.SubType,
-					"emptyText", msg.Text == "")
+			// Skip system events (channel_join, channel_topic, etc.).
+			// Allow bot messages through — they contain valuable info
+			// (alerts, CI, integrations).
+			if !allowedSubType(msg.SubType) {
+				continue
+			}
+
+			// Extract text from the message body, falling back to blocks
+			// and attachments when the top-level Text field is empty.
+			msgText := extractText(msg.Text, msg.Blocks, msg.Attachments)
+			if msgText == "" {
 				continue
 			}
 
@@ -326,7 +329,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}
-			text, err := resolver.ResolveText(ctx, msg.Text)
+			text, err := resolver.ResolveText(ctx, msgText)
 			if err != nil {
 				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve text",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
@@ -486,11 +489,16 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		for _, msg := range msgs {
 			lastTS = msg.Timestamp
 
-			if (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+			if msg.SubType != "" && msg.SubType != "thread_broadcast" {
 				continue
 			}
 
-			text, err := resolver.ResolveText(ctx, msg.Text)
+			msgText := extractText(msg.Text, msg.Blocks, msg.Attachments)
+			if msgText == "" {
+				continue
+			}
+
+			text, err := resolver.ResolveText(ctx, msgText)
 			if err != nil {
 				slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve text",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
@@ -662,7 +670,11 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.Text == "" || !allowedSubType(reply.SubType) {
+			if !allowedSubType(reply.SubType) {
+				continue
+			}
+			replyText := extractText(reply.Text, reply.Blocks, reply.Attachments)
+			if replyText == "" {
 				continue
 			}
 			userName, userID, err := resolver.SenderName(ctx, reply.User, reply.BotID, reply.Username)
@@ -671,7 +683,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 				continue
 			}
-			text, err := resolver.ResolveText(ctx, reply.Text)
+			text, err := resolver.ResolveText(ctx, replyText)
 			if err != nil {
 				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve text",
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
@@ -703,7 +715,11 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
+					if !allowedSubType(ctxMsg.SubType) {
+						continue
+					}
+					ctxText := extractText(ctxMsg.Text, ctxMsg.Blocks, ctxMsg.Attachments)
+					if ctxText == "" {
 						continue
 					}
 					userName, userID, err := resolver.SenderName(ctx, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
@@ -712,7 +728,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 						continue
 					}
-					text, err := resolver.ResolveText(ctx, ctxMsg.Text)
+					text, err := resolver.ResolveText(ctx, ctxText)
 					if err != nil {
 						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve text",
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
