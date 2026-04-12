@@ -10,26 +10,31 @@ import (
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // Poller runs periodic polls against GWS services.
 type Poller struct {
-	interval time.Duration
-	account  paths.AccountDir
-	store    *store.FSStore
-	identity identity.Observer
+	interval    time.Duration
+	account     paths.AccountDir
+	store       *store.FSStore
+	identity    identity.Observer
+	syncTracker *syncstatus.Tracker
+	statusKey   string
 }
 
 // New creates a Poller with the given interval, account directory, store
 // instance, and identity observer. The store is used for every persistence
 // operation so that file locking and filesystem layout stay consistent with
 // the rest of the daemon.
-func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer) *Poller {
+func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker, statusKey string) *Poller {
 	return &Poller{
-		interval: interval,
-		account:  account,
-		store:    s,
-		identity: id,
+		interval:    interval,
+		account:     account,
+		store:       s,
+		identity:    id,
+		syncTracker: syncTracker,
+		statusKey:   statusKey,
 	}
 }
 
@@ -66,6 +71,7 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	if ctx.Err() != nil {
 		return
 	}
+	p.syncTracker.Start(p.statusKey)
 	p.runAndRecord("gmail", func() (int, error) {
 		return PollGmail(p.store, p.account, cursors, p.identity)
 	})
@@ -75,6 +81,7 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 	p.runAndRecord("drive", func() (int, error) {
 		return PollDrive(p.store, p.account, cursors, p.identity)
 	})
+	p.syncTracker.Done(p.statusKey, nil)
 }
 
 // runAndRecord times a single service poll, logs any error, and appends a

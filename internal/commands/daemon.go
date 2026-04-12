@@ -171,10 +171,10 @@ func DaemonRun(version string) error {
 	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, store, dataRoot, tracker)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store, store, dataRoot)
+	gwsMgr := daemon.NewGWSManager(store, store, dataRoot, tracker)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
-	linearMgr := daemon.NewLinearManager(store)
+	linearMgr := daemon.NewLinearManager(store, tracker)
 	go linearMgr.Run(ctx, cfg.Linear)
 
 	go apiServer.Start(ctx, paths.SocketPath())
