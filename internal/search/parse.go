@@ -14,7 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// Match is a message extracted from rg/grep output with its file location.
+// Match is a line extracted from rg/grep output with its file location.
 type Match struct {
 	Platform     string
 	Account      string
@@ -22,7 +22,7 @@ type Match struct {
 	Date         string // date filename (YYYY-MM-DD) or thread timestamp
 	Thread       bool   // true if match came from a thread file
 	FilePath     string // absolute path to the source file
-	Msg          modelv1.MsgLine
+	Line         modelv1.Line
 }
 
 // rgJSONLine represents a single line of rg --json output.
@@ -40,20 +40,21 @@ type rgJSONLine struct {
 // structured JSON with path and content as separate fields — no
 // ambiguous delimiter parsing needed.
 //
-// Only message events are returned; reactions, edits, deletes, and
+// Displayable events (messages, emails, comments, calendar events,
+// Linear issues/comments) are returned; reactions, edits, deletes, and
 // non-match/context lines are skipped. Lines that fail to parse are
 // collected into the returned error, but successfully parsed matches
 // are still returned.
 func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 	var matches []Match
 	var errs []error
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		if len(line) == 0 {
+	for _, raw := range bytes.Split(output, []byte("\n")) {
+		if len(raw) == 0 {
 			continue
 		}
 
 		var rg rgJSONLine
-		if err := json.Unmarshal(line, &rg); err != nil {
+		if err := json.Unmarshal(raw, &rg); err != nil {
 			errs = append(errs, fmt.Errorf("parse rg json: %w", err))
 			continue
 		}
@@ -62,20 +63,16 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 		}
 
 		content := strings.TrimRight(rg.Data.Lines.Text, "\n")
-		var envelope struct {
-			Type modelv1.LineType `json:"type"`
-		}
-		if err := json.Unmarshal([]byte(content), &envelope); err != nil {
-			errs = append(errs, fmt.Errorf("parse grep line: %w", err))
+		line, parseErr := modelv1.Parse(content)
+		if parseErr != nil {
+			errs = append(errs, fmt.Errorf("parse grep line: %w", parseErr))
 			continue
 		}
-		if envelope.Type != modelv1.LineMessage {
-			continue
-		}
-
-		var msg modelv1.MsgLine
-		if err := json.Unmarshal([]byte(content), &msg); err != nil {
-			errs = append(errs, fmt.Errorf("parse msg line: %w", err))
+		switch line.Type {
+		case modelv1.LineMessage, modelv1.LineEmail, modelv1.LineComment,
+			modelv1.LineEvent, modelv1.LineLinearIssue, modelv1.LineLinearComment:
+			// displayable line types
+		default:
 			continue
 		}
 
@@ -91,7 +88,7 @@ func ParseGrepOutput(output []byte, searchDir string) ([]Match, error) {
 			Date:         date,
 			Thread:       thread,
 			FilePath:     rg.Data.Path.Text,
-			Msg:          msg,
+			Line:         line,
 		})
 	}
 	return matches, errors.Join(errs...)
@@ -114,7 +111,7 @@ func FilterThreadsBySince(matches []Match, since time.Duration) []Match {
 		if !m.Thread {
 			continue
 		}
-		if !m.Msg.Ts.Before(cutoff) {
+		if !m.Line.Ts().Before(cutoff) {
 			k := threadKey{m.Platform, m.Account, m.Conversation, m.Date}
 			alive[k] = true
 		}

@@ -93,11 +93,11 @@ func TestParseGrepOutput_BasicMessages(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("matches = %d, want 2", len(matches))
 	}
-	if matches[0].Msg.ID != "M1" {
-		t.Errorf("match[0].Msg.ID = %q, want M1", matches[0].Msg.ID)
+	if matches[0].Line.Msg.ID != "M1" {
+		t.Errorf("match[0].Msg.ID = %q, want M1", matches[0].Line.Msg.ID)
 	}
-	if matches[0].Msg.Sender != "Alice" {
-		t.Errorf("match[0].Msg.Sender = %q, want Alice", matches[0].Msg.Sender)
+	if matches[0].Line.Msg.Sender != "Alice" {
+		t.Errorf("match[0].Msg.Sender = %q, want Alice", matches[0].Line.Msg.Sender)
 	}
 	if matches[0].Platform != "slack" {
 		t.Errorf("match[0].Platform = %q, want slack", matches[0].Platform)
@@ -165,8 +165,8 @@ func TestParseGrepOutput_TextWithBraces(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	if matches[0].Msg.Text != "meeting at {office} tomorrow" {
-		t.Errorf("text = %q, want 'meeting at {office} tomorrow'", matches[0].Msg.Text)
+	if matches[0].Line.Msg.Text != "meeting at {office} tomorrow" {
+		t.Errorf("text = %q, want 'meeting at {office} tomorrow'", matches[0].Line.Msg.Text)
 	}
 }
 
@@ -253,7 +253,7 @@ func TestParseGrepOutput_PreservesMessageFields(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	m := matches[0].Msg
+	m := matches[0].Line.Msg
 	if m.Via != modelv1.ViaPigeonAsUser {
 		t.Errorf("Via = %q, want pigeon-as-user", m.Via)
 	}
@@ -327,13 +327,13 @@ func TestFilterThreadsBySince_KeepsAliveThreads(t *testing.T) {
 	now := time.Now()
 	matches := []Match{
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
-			Msg: modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}},
+			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}}},
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "1711568940", Thread: true,
-			Msg: modelv1.MsgLine{ID: "T1", Ts: now.Add(-30 * time.Minute)}},
+			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "T1", Ts: now.Add(-30 * time.Minute)}}},
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "1711568940", Thread: true,
-			Msg: modelv1.MsgLine{ID: "T2", Ts: now.Add(-48 * time.Hour)}},
+			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "T2", Ts: now.Add(-48 * time.Hour)}}},
 		{Platform: "slack", Account: "acme", Conversation: "#random", Date: "9999999999", Thread: true,
-			Msg: modelv1.MsgLine{ID: "D1", Ts: now.Add(-72 * time.Hour)}},
+			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "D1", Ts: now.Add(-72 * time.Hour)}}},
 	}
 
 	filtered := FilterThreadsBySince(matches, 24*time.Hour)
@@ -343,7 +343,7 @@ func TestFilterThreadsBySince_KeepsAliveThreads(t *testing.T) {
 	}
 	ids := map[string]bool{}
 	for _, m := range filtered {
-		ids[m.Msg.ID] = true
+		ids[m.Line.Msg.ID] = true
 	}
 	if !ids["M1"] || !ids["T1"] || !ids["T2"] {
 		t.Errorf("expected M1, T1, T2; got %v", ids)
@@ -356,8 +356,8 @@ func TestFilterThreadsBySince_KeepsAliveThreads(t *testing.T) {
 func TestFilterThreadsBySince_KeepsAllNonThread(t *testing.T) {
 	now := time.Now()
 	matches := []Match{
-		{Date: "2026-03-16", Msg: modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}},
-		{Date: "2026-03-15", Msg: modelv1.MsgLine{ID: "M2", Ts: now.Add(-48 * time.Hour)}},
+		{Date: "2026-03-16", Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: now.Add(-1 * time.Hour)}}},
+		{Date: "2026-03-15", Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: now.Add(-48 * time.Hour)}}},
 	}
 	filtered := FilterThreadsBySince(matches, 24*time.Hour)
 	if len(filtered) != 2 {
