@@ -771,6 +771,64 @@ func TestMaintain_ConversationNamedThreads(t *testing.T) {
 	}
 }
 
+func TestMaintain_GWSDedup(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+	gmailDir := root.AccountFor(acct).Gmail()
+	dateFile := gmailDir.DateFile("2026-04-07")
+
+	// Write three email lines, two with the same ID (simulating a re-sync).
+	e1 := modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID: "email1", Subject: "First", Ts: ts(2026, 4, 7, 10, 0, 0),
+			From: "a@example.com", To: []string{"b@example.com"}, Labels: []string{"INBOX"},
+		},
+	}
+	e2old := modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID: "email2", Subject: "Old subject", Ts: ts(2026, 4, 7, 11, 0, 0),
+			From: "a@example.com", To: []string{"b@example.com"}, Labels: []string{"INBOX"},
+		},
+	}
+	e2new := modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID: "email2", Subject: "Updated subject", Ts: ts(2026, 4, 7, 11, 0, 0),
+			From: "a@example.com", To: []string{"b@example.com"}, Labels: []string{"INBOX", "STARRED"},
+		},
+	}
+
+	for _, line := range []modelv1.Line{e1, e2old, e2new} {
+		if err := s.AppendLine(dateFile, line); err != nil {
+			t.Fatalf("AppendLine: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	lines, err := s.ReadLines(dateFile)
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("after maintenance: got %d lines, want 2 (deduped)", len(lines))
+	}
+	if lines[0].Email.ID != "email1" {
+		t.Errorf("lines[0].ID = %q, want %q", lines[0].Email.ID, "email1")
+	}
+	if lines[1].Email.ID != "email2" {
+		t.Errorf("lines[1].ID = %q, want %q", lines[1].Email.ID, "email2")
+	}
+	if lines[1].Email.Subject != "Updated subject" {
+		t.Errorf("lines[1].Subject = %q, want %q (last occurrence kept)", lines[1].Email.Subject, "Updated subject")
+	}
+}
+
 func TestRemoveDriveFile_SluggedDir(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
