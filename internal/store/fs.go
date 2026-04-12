@@ -642,7 +642,8 @@ func (s *FSStore) maintainFile(path string) error {
 	if paths.IsThreadFile(path) {
 		tf, parseErr := modelv1.ParseThreadFile(data)
 		if parseErr != nil {
-			slog.Warn("parse thread file: some lines skipped", "file", path, "error", parseErr)
+			slog.Warn("skipping compaction: parse thread file failed", "file", path, "error", parseErr)
+			return nil
 		}
 		compacted := compact.CompactThread(tf)
 		if compacted == nil {
@@ -660,7 +661,8 @@ func (s *FSStore) maintainFile(path string) error {
 
 	df, parseErr := modelv1.ParseDateFile(data)
 	if parseErr != nil {
-		slog.Warn("parse date file: some lines skipped", "file", path, "error", parseErr)
+		slog.Warn("skipping compaction: parse date file failed", "file", path, "error", parseErr)
+		return nil
 	}
 	compacted := compact.Compact(df)
 	newData, err := modelv1.MarshalDateFile(compacted)
