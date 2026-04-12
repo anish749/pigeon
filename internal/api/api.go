@@ -350,6 +350,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		}
 	}
 
+	// Resolve @mentions in the message text to Slack's <@USER_ID> format.
+	req.Message = sender.Resolver.ResolveMentions(req.Message)
+
 	// Build message options.
 	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
 	if req.Thread != "" {
