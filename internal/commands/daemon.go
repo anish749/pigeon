@@ -18,6 +18,7 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/lifecycle"
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
@@ -146,16 +147,22 @@ func DaemonRun(version string) error {
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
+	// One Supervisor owns the lifetime of every per-account listener.
+	// Each platform manager translates config into Listener values and hands
+	// them to the Supervisor; restart, backoff, and panic recovery live
+	// there, not in the managers.
+	sup := lifecycle.New(ctx)
+
+	waMgr := daemon.NewWhatsAppManager(sup, apiServer, store, msgHub.Route, identitySvc)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, identitySvc)
+	slackMgr := daemon.NewSlackManager(sup, apiServer, store, msgHub.Route, msgHub.RouteReaction, identitySvc)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store, identitySvc)
+	gwsMgr := daemon.NewGWSManager(sup, store, identitySvc)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
-	linearMgr := daemon.NewLinearManager(store)
+	linearMgr := daemon.NewLinearManager(sup, store)
 	go linearMgr.Run(ctx, cfg.Linear)
 
 	go apiServer.Start(ctx, paths.SocketPath())
@@ -179,9 +186,11 @@ func DaemonRun(version string) error {
 	select {
 	case <-ctx.Done():
 		slog.Info("shutting down")
+		sup.Wait()
 		return nil
 	case <-reexec:
 		cancel()
+		sup.Wait()
 		return daemonReexec()
 	}
 }

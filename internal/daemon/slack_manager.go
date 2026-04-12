@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	goslack "github.com/slack-go/slack"
@@ -12,128 +13,106 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/lifecycle"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	"github.com/anish749/pigeon/internal/store"
 )
 
-// SlackManager owns the lifecycle of all Slack workspace listeners.
-// It starts initial workspaces, watches for config changes, and
-// starts/stops workspaces as they are added or removed.
+// SlackManager translates Slack config entries into supervised Listeners.
+// Actual lifetime, restarts, and backoff live in the Supervisor.
 type SlackManager struct {
+	sup        *lifecycle.Supervisor
 	apiServer  *api.Server
 	onMessage  hub.MessageNotifyFunc
 	onReaction hub.ReactionNotifyFunc
 	store      store.Store
 	identity   *identity.Service
-	running    map[string]*runningWorkspace // teamID → workspace
-}
-
-type runningWorkspace struct {
-	cancel context.CancelFunc
 }
 
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onMessage is called when a routable message arrives
 // (DMs, MPDMs, private channels, bot mentions). onReaction is called when
 // a reaction or unreaction event arrives. Either may be nil.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *SlackManager {
+func NewSlackManager(sup *lifecycle.Supervisor, apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *SlackManager {
 	return &SlackManager{
+		sup:        sup,
 		apiServer:  apiServer,
 		onMessage:  onMessage,
 		onReaction: onReaction,
 		store:      s,
 		identity:   id,
-		running:    make(map[string]*runningWorkspace),
 	}
 }
 
-// Run starts listeners for the initial config, then watches for changes.
-// Blocks until ctx is cancelled.
+// Run applies the initial config and reconciles on every change.
 func (m *SlackManager) Run(ctx context.Context, initial []config.SlackConfig) {
-	for _, sl := range initial {
-		m.startWorkspace(ctx, sl)
-	}
-
+	m.reconcile(ctx, initial)
 	for updated := range config.Watch(ctx) {
 		m.reconcile(ctx, updated.Slack)
 	}
 }
 
-// Count returns the number of running workspaces.
-func (m *SlackManager) Count() int {
-	return len(m.running)
-}
-
-// reconcile diffs the desired config against running workspaces,
-// starting new ones and stopping removed ones.
 func (m *SlackManager) reconcile(ctx context.Context, desired []config.SlackConfig) {
-	desiredIDs := make(map[string]config.SlackConfig)
+	listeners := make([]lifecycle.Listener, 0, len(desired))
 	for _, sl := range desired {
-		desiredIDs[sl.TeamID] = sl
+		listeners = append(listeners, &slackListenerAdapter{
+			cfg:        sl,
+			apiServer:  m.apiServer,
+			store:      m.store,
+			identity:   m.identity,
+			onMessage:  m.onMessage,
+			onReaction: m.onReaction,
+		})
 	}
-
-	// Stop workspaces that were removed from config.
-	for teamID, ws := range m.running {
-		if _, ok := desiredIDs[teamID]; !ok {
-			slog.InfoContext(ctx, "slack workspace removed from config, stopping", "team_id", teamID)
-			ws.cancel()
-			delete(m.running, teamID)
-		}
-	}
-
-	// Start workspaces that are new in config.
-	for _, sl := range desired {
-		if _, ok := m.running[sl.TeamID]; ok {
-			continue
-		}
-		m.startWorkspace(ctx, sl)
+	if err := m.sup.Reconcile(listeners); err != nil {
+		slog.ErrorContext(ctx, "slack reconcile failed", "error", err)
 	}
 }
 
-func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig) {
+// slackListenerAdapter builds a Slack Socket Mode stack for one workspace
+// and runs it until ctx is cancelled or the socket mode client exits with
+// an error (which bubbles up to the Supervisor for restart).
+type slackListenerAdapter struct {
+	cfg        config.SlackConfig
+	apiServer  *api.Server
+	store      store.Store
+	identity   *identity.Service
+	onMessage  hub.MessageNotifyFunc
+	onReaction hub.ReactionNotifyFunc
+}
+
+func (l *slackListenerAdapter) ID() string { return "slack/" + l.cfg.TeamID }
+
+func (l *slackListenerAdapter) Run(ctx context.Context) error {
+	sl := l.cfg
 	if sl.AppToken == "" || sl.BotToken == "" || sl.UserToken == "" {
+		// Misconfiguration — restarting won't help, so exit cleanly.
 		slog.ErrorContext(ctx, "slack workspace missing required token(s), skipping",
 			"workspace", sl.Workspace,
 			"has_app_token", sl.AppToken != "",
 			"has_bot_token", sl.BotToken != "",
 			"has_user_token", sl.UserToken != "")
-		return
+		return nil
 	}
 
-	wsCtx, cancel := context.WithCancel(ctx)
-
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, m.identity)
-	if sender == nil {
-		cancel()
-		return
-	}
-
-	m.apiServer.RegisterSlack(sender)
-	m.running[sl.TeamID] = &runningWorkspace{cancel: cancel}
-}
-
-// startSlackListener creates an independent Socket Mode connection, resolver,
-// listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
 	userAPI := goslack.New(sl.UserToken)
-	resolver := slacklistener.NewResolver(userAPI, id, sl.Workspace)
+	resolver := slacklistener.NewResolver(userAPI, l.identity, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)
 	}
 
-	var userName string
-	var userID string
+	var userName, userID string
 	if authResp, err := userAPI.AuthTestContext(ctx); err == nil {
 		userID = authResp.UserID
-		name, err := resolver.UserName(ctx, userID)
-		if err != nil {
-			slog.WarnContext(ctx, "failed to resolve Slack user name", "account", acct, "user_id", userID, "error", err)
+		name, nerr := resolver.UserName(ctx, userID)
+		if nerr != nil {
+			slog.WarnContext(ctx, "failed to resolve Slack user name", "account", acct, "user_id", userID, "error", nerr)
 		} else {
 			userName = name
 		}
@@ -149,19 +128,10 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages := slacklistener.NewMessageStore(acct, s)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage, onReaction)
-	go listener.Run(ctx)
+	messages := slacklistener.NewMessageStore(acct, l.store)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, l.onMessage, l.onReaction)
 
-	go func() {
-		if err := smClient.RunContext(ctx); err != nil {
-			slog.ErrorContext(ctx, "slack socket mode error", "account", acct, "error", err)
-		}
-	}()
-
-	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
-
-	return &api.SlackSender{
+	l.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:    botAPI,
 		UserAPI:   userAPI,
 		Resolver:  resolver,
@@ -171,5 +141,29 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		BotUserID: botUserID,
 		UserName:  userName,
 		UserID:    userID,
+	})
+	defer l.apiServer.UnregisterSlack(acct)
+
+	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
+
+	// Event loop reads from smClient.Events; it exits when the events channel
+	// closes (which happens after socket mode's RunContext returns).
+	listenerDone := make(chan struct{})
+	go func() {
+		defer close(listenerDone)
+		listener.Run(ctx)
+	}()
+
+	runErr := smClient.RunContext(ctx)
+	<-listenerDone
+
+	if ctx.Err() != nil {
+		return nil
 	}
+	if runErr != nil {
+		return fmt.Errorf("slack socket mode %s: %w", acct.Display(), runErr)
+	}
+	// Socket mode returned without ctx cancellation and without an error —
+	// treat this as an unexpected exit so the Supervisor restarts us.
+	return fmt.Errorf("slack socket mode %s exited unexpectedly", acct.Display())
 }

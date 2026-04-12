@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -9,82 +10,69 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/lifecycle"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
 
 const gwsPollInterval = 20 * time.Second
 
-// GWSManager owns the lifecycle of GWS pollers.
+// GWSManager translates GWS config entries into supervised Listeners. Actual
+// restart / backoff / lifetime is handled by the lifecycle.Supervisor.
 type GWSManager struct {
+	sup      *lifecycle.Supervisor
 	store    *store.FSStore
 	identity *identity.Service
-	running  map[string]*runningGWSAccount // email → account
-}
-
-type runningGWSAccount struct {
-	cancel context.CancelFunc
 }
 
 // NewGWSManager creates a new GWSManager. The store is shared with the rest
 // of the daemon so that GWS persistence uses the same per-file locks and
 // filesystem layout as messaging.
-func NewGWSManager(s *store.FSStore, id *identity.Service) *GWSManager {
-	return &GWSManager{
-		store:    s,
-		identity: id,
-		running:  make(map[string]*runningGWSAccount),
-	}
+func NewGWSManager(sup *lifecycle.Supervisor, s *store.FSStore, id *identity.Service) *GWSManager {
+	return &GWSManager{sup: sup, store: s, identity: id}
 }
 
-// Run starts pollers for configured GWS accounts and watches for config changes.
+// Run applies the initial config and then reconciles the supervised set on
+// every config change. Blocks until ctx is cancelled.
 func (m *GWSManager) Run(ctx context.Context, initial []config.GWSConfig) {
-	for _, g := range initial {
-		m.startAccount(ctx, g)
-	}
-
+	m.reconcile(ctx, initial)
 	for updated := range config.Watch(ctx) {
 		m.reconcile(ctx, updated.GWS)
 	}
 }
 
-// Count returns the number of running GWS accounts.
-func (m *GWSManager) Count() int {
-	return len(m.running)
-}
-
 func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) {
-	desiredEmails := make(map[string]config.GWSConfig)
+	listeners := make([]lifecycle.Listener, 0, len(desired))
 	for _, g := range desired {
-		desiredEmails[g.Email] = g
+		listeners = append(listeners, &gwsListener{
+			cfg:      g,
+			store:    m.store,
+			identity: m.identity,
+		})
 	}
-
-	for email, acct := range m.running {
-		if _, ok := desiredEmails[email]; !ok {
-			slog.Info("gws account removed, stopping", "email", email)
-			acct.cancel()
-			delete(m.running, email)
-		}
-	}
-
-	for _, g := range desired {
-		if _, ok := m.running[g.Email]; !ok {
-			m.startAccount(ctx, g)
-		}
+	if err := m.sup.Reconcile(listeners); err != nil {
+		slog.ErrorContext(ctx, "gws reconcile failed", "error", err)
 	}
 }
 
-func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
-	acctDir := paths.DefaultDataRoot().AccountFor(account.New("gws", g.Email))
+// gwsListener wraps a single GWS poller in the Listener interface.
+type gwsListener struct {
+	cfg      config.GWSConfig
+	store    *store.FSStore
+	identity *identity.Service
+}
 
-	child, cancel := context.WithCancel(ctx)
-	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
+func (l *gwsListener) ID() string { return "gws/" + l.cfg.Email }
 
-	p := poller.New(gwsPollInterval, acctDir, m.store, m.identity)
-	go func() {
-		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
-		if err := p.Run(child); err != nil && child.Err() == nil {
-			slog.Error("gws poller exited", "email", g.Email, "error", err)
+func (l *gwsListener) Run(ctx context.Context) error {
+	acctDir := paths.DefaultDataRoot().AccountFor(account.New("gws", l.cfg.Email))
+	slog.InfoContext(ctx, "gws poller started", "email", l.cfg.Email, "account_dir", acctDir.Path())
+	p := poller.New(gwsPollInterval, acctDir, l.store, l.identity)
+	if err := p.Run(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
 		}
-	}()
+		return fmt.Errorf("gws poller %s: %w", l.cfg.Email, err)
+	}
+	return nil
 }

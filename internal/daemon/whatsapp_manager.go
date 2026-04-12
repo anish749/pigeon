@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -16,136 +15,132 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/lifecycle"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/walog"
 )
 
-// WhatsAppManager owns the lifecycle of all WhatsApp account listeners.
-// It starts initial accounts, watches for config changes, and
-// starts/stops accounts as they are added or removed.
+// WhatsAppManager translates WhatsApp config entries into supervised
+// Listeners. Actual lifetime, restarts, and backoff live in the Supervisor.
 type WhatsAppManager struct {
+	sup       *lifecycle.Supervisor
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
 	store     store.Store
 	identity  *identity.Service
-	running   map[string]*runningWAAccount // account → state
-}
-
-type runningWAAccount struct {
-	cancel context.CancelFunc
-	lock   *os.File
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
 // the given API server. onMessage is called when a message is received (may be nil).
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *WhatsAppManager {
+func NewWhatsAppManager(sup *lifecycle.Supervisor, apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *WhatsAppManager {
 	return &WhatsAppManager{
+		sup:       sup,
 		apiServer: apiServer,
 		onMessage: onMessage,
 		store:     s,
 		identity:  id,
-		running:   make(map[string]*runningWAAccount),
 	}
 }
 
-// Run starts listeners for the initial config, then watches for changes.
-// Blocks until ctx is cancelled.
+// Run applies the initial config and reconciles on every change.
 func (m *WhatsAppManager) Run(ctx context.Context, initial []config.WhatsAppConfig) {
-	for _, wa := range initial {
-		m.startAccount(ctx, wa)
-	}
-
+	m.reconcile(ctx, initial)
 	for updated := range config.Watch(ctx) {
 		m.reconcile(ctx, updated.WhatsApp)
 	}
 }
 
-// Count returns the number of running accounts.
-func (m *WhatsAppManager) Count() int {
-	return len(m.running)
-}
-
-// reconcile diffs the desired config against running accounts,
-// starting new ones and stopping removed ones.
 func (m *WhatsAppManager) reconcile(ctx context.Context, desired []config.WhatsAppConfig) {
-	desiredAccounts := make(map[string]config.WhatsAppConfig)
+	listeners := make([]lifecycle.Listener, 0, len(desired))
 	for _, wa := range desired {
-		desiredAccounts[wa.Account] = wa
+		listeners = append(listeners, &whatsappListener{
+			cfg:       wa,
+			apiServer: m.apiServer,
+			store:     m.store,
+			identity:  m.identity,
+			onMessage: m.onMessage,
+		})
 	}
-
-	// Stop accounts that were removed from config.
-	for account, ra := range m.running {
-		if _, ok := desiredAccounts[account]; !ok {
-			slog.InfoContext(ctx, "whatsapp account removed from config, stopping", "account", account)
-			ra.cancel()
-			ra.lock.Close()
-			delete(m.running, account)
-		}
-	}
-
-	// Start accounts that are new in config.
-	for _, wa := range desired {
-		if _, ok := m.running[wa.Account]; ok {
-			continue
-		}
-		m.startAccount(ctx, wa)
+	if err := m.sup.Reconcile(listeners); err != nil {
+		slog.ErrorContext(ctx, "whatsapp reconcile failed", "error", err)
 	}
 }
 
-func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppConfig) {
-	jid, err := types.ParseJID(wa.DeviceJID)
+// whatsappListener encapsulates all per-account setup and teardown for a
+// single WhatsApp device. Every resource it acquires (device flock, whatsmeow
+// client) is released via defer so that Remove / restart cannot leak state.
+type whatsappListener struct {
+	cfg       config.WhatsAppConfig
+	apiServer *api.Server
+	store     store.Store
+	identity  *identity.Service
+	onMessage hub.MessageNotifyFunc
+}
+
+func (l *whatsappListener) ID() string { return "whatsapp/" + l.cfg.Account }
+
+func (l *whatsappListener) Run(ctx context.Context) error {
+	jid, err := types.ParseJID(l.cfg.DeviceJID)
 	if err != nil {
-		slog.ErrorContext(ctx, "invalid WhatsApp device JID, skipping", "jid", wa.DeviceJID, "error", err)
-		return
+		return fmt.Errorf("parse device JID %q: %w", l.cfg.DeviceJID, err)
 	}
 
 	lock, err := LockDevice()
 	if err != nil {
-		slog.ErrorContext(ctx, "could not lock WhatsApp device, skipping", "account", wa.Account, "error", err)
-		return
+		return fmt.Errorf("lock whatsapp device %s: %w", l.cfg.Account, err)
 	}
+	defer lock.Close()
 
-	acctCtx, cancel := context.WithCancel(ctx)
-
-	client, err := ConnectWhatsApp(acctCtx, wa.DB, jid)
+	client, err := ConnectWhatsApp(ctx, l.cfg.DB, jid)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to create WhatsApp client, skipping", "account", wa.Account, "error", err)
-		cancel()
-		lock.Close()
-		return
+		return fmt.Errorf("create whatsapp client %s: %w", l.cfg.Account, err)
 	}
 
-	acct := account.New("whatsapp", wa.Account)
+	acct := account.New("whatsapp", l.cfg.Account)
+
+	// loggedOut is set when the WhatsApp server has logged this device out.
+	// In that case we must not ask the supervisor to restart us: the account
+	// has been pulled from config already, and a restart would just repeat
+	// the failed login. Return nil to signal clean exit.
+	var loggedOut bool
 	onLogout := func() {
 		slog.InfoContext(ctx, "removing logged-out account from config", "account", acct)
-		cfg, err := config.Load()
-		if err == nil {
-			cfg.RemoveWhatsApp(wa.Account)
-			config.Save(cfg)
+		cfg, cerr := config.Load()
+		if cerr == nil {
+			cfg.RemoveWhatsApp(l.cfg.Account)
+			if serr := config.Save(cfg); serr != nil {
+				slog.ErrorContext(ctx, "save config after logout failed", "account", acct, "error", serr)
+			}
 		}
+		loggedOut = true
 	}
-	listener := walistener.New(client, acct, m.store, onLogout, m.onMessage)
-	client.AddEventHandler(listener.EventHandler(acctCtx))
+
+	listener := walistener.New(client, acct, l.store, onLogout, l.onMessage)
+	client.AddEventHandler(listener.EventHandler(ctx))
 
 	if err := client.Connect(); err != nil {
-		slog.ErrorContext(ctx, "failed to connect WhatsApp, skipping", "account", wa.Account, "error", err)
-		cancel()
-		lock.Close()
-		return
+		return fmt.Errorf("connect whatsapp %s: %w", l.cfg.Account, err)
 	}
+	defer client.Disconnect()
 
-	// Push identity signals from WhatsApp contacts.
-	go observeWhatsAppContacts(acctCtx, client, m.identity)
+	// Push identity signals from WhatsApp contacts (non-blocking).
+	go observeWhatsAppContacts(ctx, client, l.identity)
 
-	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
+	l.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
 		Acct:     acct,
 		Resolver: listener.Resolver(),
 	})
+	defer l.apiServer.UnregisterWhatsApp(acct)
 
-	m.running[wa.Account] = &runningWAAccount{cancel: cancel, lock: lock}
-	slog.InfoContext(ctx, "whatsapp listener started", "account", wa.Account, "device", wa.DeviceJID)
+	slog.InfoContext(ctx, "whatsapp listener started", "account", l.cfg.Account, "device", l.cfg.DeviceJID)
+	<-ctx.Done()
+
+	if loggedOut {
+		slog.InfoContext(ctx, "whatsapp listener stopping after logout", "account", l.cfg.Account)
+	}
+	return nil
 }
 
 // ConnectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
@@ -206,3 +201,4 @@ func observeWhatsAppContacts(ctx context.Context, client *whatsmeow.Client, id *
 	}
 	slog.InfoContext(ctx, "identity: observed WhatsApp contacts", "count", len(signals))
 }
+

@@ -84,10 +84,25 @@ func (s *Server) RegisterWhatsApp(sender *WhatsAppSender) {
 	s.mu.Unlock()
 }
 
+// UnregisterWhatsApp removes a WhatsApp client. Called by lifecycle-managed
+// listeners when they exit so that /api/send stops routing to a stale client.
+func (s *Server) UnregisterWhatsApp(acct account.Account) {
+	s.mu.Lock()
+	delete(s.whatsapp, acct.NameSlug())
+	s.mu.Unlock()
+}
+
 // RegisterSlack registers a Slack client for sending.
 func (s *Server) RegisterSlack(sender *SlackSender) {
 	s.mu.Lock()
 	s.slack[sender.Acct.NameSlug()] = sender
+	s.mu.Unlock()
+}
+
+// UnregisterSlack removes a Slack client. See UnregisterWhatsApp.
+func (s *Server) UnregisterSlack(acct account.Account) {
+	s.mu.Lock()
+	delete(s.slack, acct.NameSlug())
 	s.mu.Unlock()
 }
 
