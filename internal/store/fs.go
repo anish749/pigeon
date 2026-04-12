@@ -493,67 +493,48 @@ func (s *FSStore) SaveDriveMeta(mf paths.DriveMetaFile, m *modelv1.DocMeta) erro
 	return nil
 }
 
-// LoadCursors reads GWS polling cursors for the given account.
-// Returns empty Cursors if the file does not exist yet (first-run case).
+// LoadGWSCursors reads GWS polling cursors for the given account.
+// Returns empty cursors if the file does not exist yet (first-run case).
 func (s *FSStore) LoadGWSCursors(acct paths.AccountDir) (*GWSCursors, error) {
-	path := acct.SyncCursorsPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &GWSCursors{}, nil
-		}
-		return nil, fmt.Errorf("read cursors %s: %w", path, err)
-	}
-	var c GWSCursors
-	if err := yaml.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
-	}
-	return &c, nil
+	return loadCursors[GWSCursors](acct.SyncCursorsPath())
 }
 
-// SaveCursors writes GWS polling cursors for the given account.
+// SaveGWSCursors writes GWS polling cursors for the given account.
 func (s *FSStore) SaveGWSCursors(acct paths.AccountDir, c *GWSCursors) error {
-	path := acct.SyncCursorsPath()
-
-	mu := s.fileMu(path)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create parent dirs for %s: %w", path, err)
-	}
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return fmt.Errorf("marshal cursors: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write cursors %s: %w", path, err)
-	}
-	return nil
+	return s.saveCursors(acct.SyncCursorsPath(), c)
 }
 
 // LoadLinearCursors reads Linear polling cursors for the given account.
 // Returns empty cursors if the file does not exist yet (first-run case).
 func (s *FSStore) LoadLinearCursors(acct paths.AccountDir) (*LinearCursors, error) {
-	path := acct.SyncCursorsPath()
+	return loadCursors[LinearCursors](acct.SyncCursorsPath())
+}
+
+// SaveLinearCursors writes Linear polling cursors for the given account.
+func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) error {
+	return s.saveCursors(acct.SyncCursorsPath(), c)
+}
+
+// loadCursors reads a YAML cursor file into a typed struct. Returns a zero
+// value of T if the file does not exist yet (first-run case).
+func loadCursors[T any](path string) (*T, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &LinearCursors{}, nil
+			return new(T), nil
 		}
 		return nil, fmt.Errorf("read cursors %s: %w", path, err)
 	}
-	var c LinearCursors
+	var c T
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
 	}
 	return &c, nil
 }
 
-// SaveLinearCursors writes Linear polling cursors for the given account.
-func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) error {
-	path := acct.SyncCursorsPath()
-
+// saveCursors writes a YAML cursor file, creating parent directories and
+// serialising writes to the same path via the per-file mutex.
+func (s *FSStore) saveCursors(path string, c any) error {
 	mu := s.fileMu(path)
 	mu.Lock()
 	defer mu.Unlock()
