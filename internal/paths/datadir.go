@@ -32,7 +32,7 @@ const FileExt = ".jsonl"
 // IdentitySubdir is the subdirectory name for identity files within an account directory.
 const IdentitySubdir = "identity"
 
-// PeopleFilename is the filename for the per-context identity JSONL file.
+// PeopleFilename is the filename for the per-account identity JSONL file.
 const PeopleFilename = "people.jsonl"
 
 // PeopleFileGlob is the rg --glob pattern that matches all people.jsonl

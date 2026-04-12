@@ -3,6 +3,8 @@ package identity
 import (
 	"slices"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestMatchesEmail_Exact(t *testing.T) {
@@ -360,221 +362,176 @@ func TestNewPerson_AllFields(t *testing.T) {
 	}
 }
 
-func TestFindPersonMatch_ByEmail(t *testing.T) {
-	people := []Person{
-		{Name: "Alice", Email: []string{"alice@company.com"}},
-		{Name: "Bob", Email: []string{"bob@company.com"}},
+func TestFindPersonMatch(t *testing.T) {
+	cases := []struct {
+		name    string
+		people  []Person
+		q       Person
+		wantIdx int
+	}{
+		{
+			name:    "by email",
+			people:  []Person{{Name: "Alice", Email: []string{"alice@company.com"}}, {Name: "Bob", Email: []string{"bob@company.com"}}},
+			q:       Person{Email: []string{"bob@company.com"}},
+			wantIdx: 1,
+		},
+		{
+			// matchesEmail is used (not hasExactEmail), so Gmail dot-normalization applies.
+			name:    "by email normalized",
+			people:  []Person{{Name: "Alice", Email: []string{"alice@gmail.com"}}},
+			q:       Person{Email: []string{"a.l.i.c.e@gmail.com"}},
+			wantIdx: 0,
+		},
+		{
+			name:    "by slack ID",
+			people:  []Person{{Name: "Alice", Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}, {Name: "Bob", Slack: map[string]PersonSlack{"acme": {ID: "U04BBBBB"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}},
+			wantIdx: 0,
+		},
+		{
+			// q has the same ID in a different workspace name — should still match by ID.
+			name:    "by slack ID any workspace",
+			people:  []Person{{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"other": {ID: "U04AAAA"}}},
+			wantIdx: 0,
+		},
+		{
+			name:    "skips empty slack ID",
+			people:  []Person{{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"acme": {ID: ""}}},
+			wantIdx: -1,
+		},
+		{
+			name:    "by phone",
+			people:  []Person{{Name: "Alice", WhatsApp: []string{"+15551234567"}}},
+			q:       Person{WhatsApp: []string{"+15551234567"}},
+			wantIdx: 0,
+		},
+		{
+			name:    "no match",
+			people:  []Person{{Email: []string{"alice@company.com"}}},
+			q:       Person{Email: []string{"nobody@example.com"}},
+			wantIdx: -1,
+		},
+		{
+			name:    "empty people",
+			people:  nil,
+			q:       Person{Email: []string{"alice@company.com"}},
+			wantIdx: -1,
+		},
+		{
+			name:    "empty query",
+			people:  []Person{{Email: []string{"alice@company.com"}}},
+			q:       Person{},
+			wantIdx: -1,
+		},
 	}
-	idx := findPersonMatch(people, Person{Email: []string{"bob@company.com"}})
-	if idx != 1 {
-		t.Errorf("findPersonMatch = %d, want 1", idx)
-	}
-}
-
-func TestFindPersonMatch_ByEmailNormalized(t *testing.T) {
-	// matchesEmail is used (not hasExactEmail), so Gmail dot-normalization applies.
-	people := []Person{
-		{Name: "Alice", Email: []string{"alice@gmail.com"}},
-	}
-	idx := findPersonMatch(people, Person{Email: []string{"a.l.i.c.e@gmail.com"}})
-	if idx != 0 {
-		t.Errorf("findPersonMatch with normalized email = %d, want 0", idx)
-	}
-}
-
-func TestFindPersonMatch_BySlackID(t *testing.T) {
-	people := []Person{
-		{Name: "Alice", Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}},
-		{Name: "Bob", Slack: map[string]PersonSlack{"acme": {ID: "U04BBBBB"}}},
-	}
-	idx := findPersonMatch(people, Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}})
-	if idx != 0 {
-		t.Errorf("findPersonMatch = %d, want 0", idx)
-	}
-}
-
-func TestFindPersonMatch_BySlackIDAnyWorkspace(t *testing.T) {
-	people := []Person{
-		{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}},
-	}
-	// q has the same ID in a different workspace name — should still match by ID.
-	idx := findPersonMatch(people, Person{Slack: map[string]PersonSlack{"other": {ID: "U04AAAA"}}})
-	if idx != 0 {
-		t.Errorf("findPersonMatch across workspace = %d, want 0", idx)
-	}
-}
-
-func TestFindPersonMatch_SkipsEmptySlackID(t *testing.T) {
-	people := []Person{
-		{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}},
-	}
-	idx := findPersonMatch(people, Person{Slack: map[string]PersonSlack{"acme": {ID: ""}}})
-	if idx != -1 {
-		t.Errorf("empty slack ID should not match; got %d", idx)
-	}
-}
-
-func TestFindPersonMatch_ByPhone(t *testing.T) {
-	people := []Person{
-		{Name: "Alice", WhatsApp: []string{"+15551234567"}},
-	}
-	idx := findPersonMatch(people, Person{WhatsApp: []string{"+15551234567"}})
-	if idx != 0 {
-		t.Errorf("findPersonMatch by phone = %d, want 0", idx)
-	}
-}
-
-func TestFindPersonMatch_NoMatch(t *testing.T) {
-	people := []Person{
-		{Email: []string{"alice@company.com"}},
-	}
-	idx := findPersonMatch(people, Person{Email: []string{"nobody@example.com"}})
-	if idx != -1 {
-		t.Errorf("findPersonMatch with no match = %d, want -1", idx)
-	}
-}
-
-func TestFindPersonMatch_EmptyPeople(t *testing.T) {
-	idx := findPersonMatch(nil, Person{Email: []string{"alice@company.com"}})
-	if idx != -1 {
-		t.Errorf("findPersonMatch on nil = %d, want -1", idx)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := findPersonMatch(tc.people, tc.q); got != tc.wantIdx {
+				t.Errorf("findPersonMatch = %d, want %d", got, tc.wantIdx)
+			}
+		})
 	}
 }
 
-func TestFindPersonMatch_EmptyQuery(t *testing.T) {
-	people := []Person{
-		{Email: []string{"alice@company.com"}},
+func TestMergePerson(t *testing.T) {
+	cases := []struct {
+		name string
+		dst  Person
+		src  Person
+		want Person
+	}{
+		{
+			name: "name: src newer wins",
+			dst:  Person{Name: "alice", Seen: "2026-01-01"},
+			src:  Person{Name: "Alice Smith", Seen: "2026-04-11"},
+			want: Person{Name: "Alice Smith", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: dst kept when src older",
+			dst:  Person{Name: "Alice Smith", Seen: "2026-04-11"},
+			src:  Person{Name: "alice", Seen: "2026-01-01"},
+			want: Person{Name: "Alice Smith", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: src fills empty dst",
+			dst:  Person{Name: "", Seen: "2026-04-11"},
+			src:  Person{Name: "Alice", Seen: "2026-01-01"},
+			want: Person{Name: "Alice", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: empty src does not clear",
+			dst:  Person{Name: "Alice", Seen: "2026-01-01"},
+			src:  Person{Name: "", Seen: "2026-04-11"},
+			want: Person{Name: "Alice", Seen: "2026-04-11"},
+		},
+		{
+			name: "email: union of distinct addresses",
+			dst:  Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"},
+			src:  Person{Email: []string{"alice@personal.com"}, Seen: "2026-04-11"},
+			want: Person{Email: []string{"alice@company.com", "alice@personal.com"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "email: case-insensitive dedup",
+			dst:  Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"},
+			src:  Person{Email: []string{"Alice@Company.com"}, Seen: "2026-04-11"},
+			want: Person{Email: []string{"alice@company.com"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: new workspace added",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}, Seen: "2026-01-01"},
+			src:  Person{Slack: map[string]PersonSlack{"vendor": {ID: "U09BBBBB"}}, Seen: "2026-04-11"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}, "vendor": {ID: "U09BBBBB"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: src newer wins for existing workspace",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "old"}}, Seen: "2026-01-01"},
+			src:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "new"}}, Seen: "2026-04-11"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "new"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: dst kept when src older",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "current"}}, Seen: "2026-04-11"},
+			src:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "stale"}}, Seen: "2026-01-01"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "current"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "phone: union of distinct numbers",
+			dst:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"},
+			src:  Person{WhatsApp: []string{"+15559876543"}, Seen: "2026-04-11"},
+			want: Person{WhatsApp: []string{"+15551234567", "+15559876543"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "phone: dedup",
+			dst:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"},
+			src:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-04-11"},
+			want: Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "seen: takes max",
+			dst:  Person{Seen: "2026-01-01"},
+			src:  Person{Seen: "2026-04-11"},
+			want: Person{Seen: "2026-04-11"},
+		},
+		{
+			name: "seen: does not regress",
+			dst:  Person{Seen: "2026-04-11"},
+			src:  Person{Seen: "2026-01-01"},
+			want: Person{Seen: "2026-04-11"},
+		},
 	}
-	idx := findPersonMatch(people, Person{})
-	if idx != -1 {
-		t.Errorf("findPersonMatch with empty query = %d, want -1", idx)
-	}
-}
-
-func TestMergePerson_NameSrcNewerWins(t *testing.T) {
-	dst := Person{Name: "alice", Seen: "2026-01-01"}
-	src := Person{Name: "Alice Smith", Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if got.Name != "Alice Smith" {
-		t.Errorf("name = %q, want %q", got.Name, "Alice Smith")
-	}
-}
-
-func TestMergePerson_NameDstKeptWhenSrcOlder(t *testing.T) {
-	dst := Person{Name: "Alice Smith", Seen: "2026-04-11"}
-	src := Person{Name: "alice", Seen: "2026-01-01"}
-	got := mergePerson(dst, src)
-	if got.Name != "Alice Smith" {
-		t.Errorf("name = %q, want Alice Smith (dst is newer)", got.Name)
-	}
-}
-
-func TestMergePerson_NameSrcFillsEmpty(t *testing.T) {
-	dst := Person{Name: "", Seen: "2026-04-11"}
-	src := Person{Name: "Alice", Seen: "2026-01-01"}
-	got := mergePerson(dst, src)
-	if got.Name != "Alice" {
-		t.Errorf("name = %q, want Alice (dst had no name)", got.Name)
-	}
-}
-
-func TestMergePerson_NameEmptySrcDoesNotClear(t *testing.T) {
-	dst := Person{Name: "Alice", Seen: "2026-01-01"}
-	src := Person{Name: "", Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if got.Name != "Alice" {
-		t.Errorf("name = %q, want Alice (src name is empty)", got.Name)
-	}
-}
-
-func TestMergePerson_EmailUnion(t *testing.T) {
-	dst := Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"}
-	src := Person{Email: []string{"alice@personal.com"}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if len(got.Email) != 2 {
-		t.Errorf("email count = %d, want 2", len(got.Email))
-	}
-}
-
-func TestMergePerson_EmailNoDuplicates(t *testing.T) {
-	dst := Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"}
-	src := Person{Email: []string{"Alice@Company.com"}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if len(got.Email) != 1 {
-		t.Errorf("email count = %d, want 1 (case-insensitive dedup)", len(got.Email))
-	}
-}
-
-func TestMergePerson_SlackNewWorkspace(t *testing.T) {
-	dst := Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}, Seen: "2026-01-01"}
-	src := Person{Slack: map[string]PersonSlack{"vendor": {ID: "U09BBBBB"}}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if len(got.Slack) != 2 {
-		t.Errorf("slack workspace count = %d, want 2", len(got.Slack))
-	}
-}
-
-func TestMergePerson_SlackExistingWorkspaceSrcNewerWins(t *testing.T) {
-	dst := Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "old"}}, Seen: "2026-01-01"}
-	src := Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "new"}}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if got.Slack["acme"].DisplayName != "new" {
-		t.Errorf("display name = %q, want new (src is newer)", got.Slack["acme"].DisplayName)
-	}
-}
-
-func TestMergePerson_SlackExistingWorkspaceDstKeptWhenSrcOlder(t *testing.T) {
-	dst := Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "current"}}, Seen: "2026-04-11"}
-	src := Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "stale"}}, Seen: "2026-01-01"}
-	got := mergePerson(dst, src)
-	if got.Slack["acme"].DisplayName != "current" {
-		t.Errorf("display name = %q, want current (dst is newer)", got.Slack["acme"].DisplayName)
-	}
-}
-
-func TestMergePerson_PhoneUnion(t *testing.T) {
-	dst := Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"}
-	src := Person{WhatsApp: []string{"+15559876543"}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if len(got.WhatsApp) != 2 {
-		t.Errorf("phone count = %d, want 2", len(got.WhatsApp))
-	}
-}
-
-func TestMergePerson_PhoneNoDuplicates(t *testing.T) {
-	dst := Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"}
-	src := Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if len(got.WhatsApp) != 1 {
-		t.Errorf("phone count = %d, want 1 (dedup)", len(got.WhatsApp))
-	}
-}
-
-func TestMergePerson_SeenTakesMax(t *testing.T) {
-	dst := Person{Seen: "2026-01-01"}
-	src := Person{Seen: "2026-04-11"}
-	got := mergePerson(dst, src)
-	if got.Seen != "2026-04-11" {
-		t.Errorf("seen = %q, want 2026-04-11", got.Seen)
-	}
-}
-
-func TestMergePerson_SeenDoesNotRegress(t *testing.T) {
-	dst := Person{Seen: "2026-04-11"}
-	src := Person{Seen: "2026-01-01"}
-	got := mergePerson(dst, src)
-	if got.Seen != "2026-04-11" {
-		t.Errorf("seen = %q, want 2026-04-11 (should not regress)", got.Seen)
-	}
-}
-
-func TestMergePerson_DstUnmodified(t *testing.T) {
-	// mergePerson must not mutate dst — it returns a new value.
-	dst := Person{Name: "Alice", Seen: "2026-01-01"}
-	src := Person{Name: "Alice Smith", Seen: "2026-04-11"}
-	_ = mergePerson(dst, src)
-	if dst.Name != "Alice" {
-		t.Errorf("dst was mutated; name = %q", dst.Name)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dstName := tc.dst.Name
+			got := mergePerson(tc.dst, tc.src)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mergePerson mismatch (-want +got):\n%s", diff)
+			}
+			if tc.dst.Name != dstName {
+				t.Errorf("dst was mutated: name changed from %q to %q", dstName, tc.dst.Name)
+			}
+		})
 	}
 }
 
