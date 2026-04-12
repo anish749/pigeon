@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
 )
 
 // setupGWSFixture creates a data tree with all GWS file types (gmail JSONL,
@@ -20,7 +21,7 @@ func setupGWSFixture(t *testing.T) string {
 	old := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
 
 	root := paths.NewDataRoot(dir)
-	account := root.Platform("gws").AccountFromSlug("user-at-example-com")
+	account := root.AccountFor(account.New("gws", "user-at-example-com"))
 
 	// Gmail JSONL files (date-partitioned).
 	writeFile(t,
@@ -261,14 +262,14 @@ func TestGlob_GWS_Mixed(t *testing.T) {
 	root := paths.NewDataRoot(dir)
 
 	// Messaging data.
-	slackAccount := root.Platform("slack").AccountFromSlug("acme")
+	slackAccount := root.AccountFor(account.New("slack", "acme"))
 	writeFile(t,
 		slackAccount.Conversation("#general").DateFile(today).Path(),
 		`{"type":"msg","ts":"`+today+`T09:00:00Z","id":"M1","sender":"Alice","from":"U1","text":"hello"}`+"\n",
 	)
 
 	// Gmail JSONL.
-	gwsAccount := root.Platform("gws").AccountFromSlug("user-at-example-com")
+	gwsAccount := root.AccountFor(account.New("gws", "user-at-example-com"))
 	writeFile(t,
 		gwsAccount.Gmail().DateFile(today).Path(),
 		`{"type":"email","id":"E1","subject":"hello"}`+"\n",
@@ -343,7 +344,7 @@ func TestExpandDriveMetaMatches_PartialFailure(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 
 	root := paths.NewDataRoot(dir)
-	account := root.Platform("gws").AccountFromSlug("test")
+	account := root.AccountFor(account.New("gws", "test"))
 
 	// Good meta — directory exists with content.
 	goodFile := account.Drive().File("good-doc")
@@ -377,7 +378,7 @@ func TestExpandDriveMetaMatches(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 
 	root := paths.NewDataRoot(dir)
-	driveFile := root.Platform("gws").AccountFromSlug("test").Drive().File("my-doc-FILEID")
+	driveFile := root.AccountFor(account.New("gws", "test")).Drive().File("my-doc-FILEID")
 	writeFile(t, driveFile.MetaFile(today).Path(), `{"fileId":"FILEID"}`)
 	writeFile(t, driveFile.TabFile("Tab1").Path(), "content")
 	writeFile(t, driveFile.SheetFile("Sheet1").Path(), "a,b,c")

@@ -5,6 +5,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -16,8 +17,8 @@ func TestReader_MergesAcrossSources(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
 
-	slackDir := root.Platform("slack").AccountFromSlug("acme-corp").Identity()
-	gwsDir := root.Platform("gws").AccountFromSlug("alice-at-company-com").Identity()
+	slackDir := root.AccountFor(account.New("slack", "acme-corp")).Identity()
+	gwsDir := root.AccountFor(account.New("gws", "alice-at-company-com")).Identity()
 
 	slackW := identity.NewWriter(s, slackDir)
 	if err := slackW.Observe(identity.Signal{
@@ -59,7 +60,7 @@ func TestReader_TransitiveMergeThroughEmail(t *testing.T) {
 	s := store.NewFSStore(root)
 
 	// Slack knows: ID + email
-	slackW := identity.NewWriter(s, root.Platform("slack").AccountFromSlug("acme-corp").Identity())
+	slackW := identity.NewWriter(s, root.AccountFor(account.New("slack", "acme-corp")).Identity())
 	if err := slackW.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
@@ -69,7 +70,7 @@ func TestReader_TransitiveMergeThroughEmail(t *testing.T) {
 	}
 
 	// WhatsApp knows: phone only, no email.
-	waW := identity.NewWriter(s, root.Platform("whatsapp").AccountFromSlug("15551234567").Identity())
+	waW := identity.NewWriter(s, root.AccountFor(account.New("whatsapp", "15551234567")).Identity())
 	if err := waW.Observe(identity.Signal{
 		Phone: "+15559876543",
 		Name:  "Alice W",
@@ -94,8 +95,8 @@ func TestReader_ContextFiltering(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
 
-	slackDir := root.Platform("slack").AccountFromSlug("acme-corp").Identity()
-	gwsDir := root.Platform("gws").AccountFromSlug("alice-at-company-com").Identity()
+	slackDir := root.AccountFor(account.New("slack", "acme-corp")).Identity()
+	gwsDir := root.AccountFor(account.New("gws", "alice-at-company-com")).Identity()
 
 	// Populate both dirs with distinct people.
 	if err := identity.NewWriter(s, slackDir).Observe(identity.Signal{
@@ -141,13 +142,13 @@ func TestReader_LookupBySlackID(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
 
-	if err := identity.NewWriter(s, root.Platform("slack").AccountFromSlug("acme-corp").Identity()).Observe(identity.Signal{
+	if err := identity.NewWriter(s, root.AccountFor(account.New("slack", "acme-corp")).Identity()).Observe(identity.Signal{
 		Name:  "Alice",
 		Slack: &identity.SlackIdentity{Workspace: "acme-corp", ID: "U04ABCDEF"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := identity.NewWriter(s, root.Platform("slack").AccountFromSlug("vendor-ws").Identity()).Observe(identity.Signal{
+	if err := identity.NewWriter(s, root.AccountFor(account.New("slack", "vendor-ws")).Identity()).Observe(identity.Signal{
 		Name:  "Bob",
 		Slack: &identity.SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZ"},
 	}); err != nil {
@@ -206,7 +207,7 @@ func TestReader_SearchCandidatesCrossSource(t *testing.T) {
 	s := store.NewFSStore(root)
 
 	// Slack: full name + email + Slack ID.
-	if err := identity.NewWriter(s, root.Platform("slack").AccountFromSlug("acme-corp").Identity()).Observe(identity.Signal{
+	if err := identity.NewWriter(s, root.AccountFor(account.New("slack", "acme-corp")).Identity()).Observe(identity.Signal{
 		Name:  "Alice Smith",
 		Email: "alice@company.com",
 		Slack: &identity.SlackIdentity{Workspace: "acme-corp", ID: "U04ABCDEF", DisplayName: "Alice Smith"},
@@ -214,7 +215,7 @@ func TestReader_SearchCandidatesCrossSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	// GWS: same email, name absent.
-	if err := identity.NewWriter(s, root.Platform("gws").AccountFromSlug("alice").Identity()).Observe(identity.Signal{
+	if err := identity.NewWriter(s, root.AccountFor(account.New("gws", "alice")).Identity()).Observe(identity.Signal{
 		Email: "alice@company.com",
 	}); err != nil {
 		t.Fatal(err)

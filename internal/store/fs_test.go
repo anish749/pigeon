@@ -774,7 +774,7 @@ func TestMaintain_ConversationNamedThreads(t *testing.T) {
 func TestRemoveDriveFile_SluggedDir(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	driveDir := root.AccountFor(account.New("gws", "test")).Drive()
 
 	target := filepath.Join(driveDir.Path(), "my-doc-fileID123")
 	keep := filepath.Join(driveDir.Path(), "other-doc-fileID456")
@@ -801,7 +801,7 @@ func TestRemoveDriveFile_SluggedDir(t *testing.T) {
 func TestRemoveDriveFile_PlainIDDir(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	driveDir := root.AccountFor(account.New("gws", "test")).Drive()
 	target := filepath.Join(driveDir.Path(), "fileID789")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
@@ -818,7 +818,7 @@ func TestRemoveDriveFile_PlainIDDir(t *testing.T) {
 func TestRemoveDriveFile_NoMatch(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	driveDir := root.AccountFor(account.New("gws", "test")).Drive()
 	keep := filepath.Join(driveDir.Path(), "unrelated-doc-fileIDAAA")
 	if err := os.MkdirAll(keep, 0o755); err != nil {
 		t.Fatal(err)
@@ -835,7 +835,7 @@ func TestRemoveDriveFile_NoMatch(t *testing.T) {
 func TestRemoveDriveFile_IgnoresNonDirectories(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	driveDir := root.Platform("gws").AccountFromSlug("test").Drive()
+	driveDir := root.AccountFor(account.New("gws", "test")).Drive()
 	if err := os.MkdirAll(driveDir.Path(), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -855,7 +855,7 @@ func TestRemoveDriveFile_IgnoresNonDirectories(t *testing.T) {
 func TestRemoveDriveFile_MissingDriveDir(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	driveDir := root.Platform("gws").AccountFromSlug("neverbackfilled").Drive()
+	driveDir := root.AccountFor(account.New("gws", "neverbackfilled")).Drive()
 
 	if err := s.RemoveDriveFile(driveDir, "fileIDXYZ"); err != nil {
 		t.Errorf("RemoveDriveFile on missing dir: %v", err)
@@ -1049,8 +1049,7 @@ func TestWriteContent_CreatesParentDirs(t *testing.T) {
 func testGWSDriveFileDir(t *testing.T, s *FSStore) paths.DriveFileDir {
 	t.Helper()
 	return paths.NewDataRoot(t.TempDir()).
-		Platform("gws").
-		AccountFromSlug("test").
+		AccountFor(account.New("gws", "test")).
 		Drive().
 		File("doc-abc")
 }
@@ -1157,7 +1156,7 @@ func TestSaveDriveMetaLeavesUnrelatedFiles(t *testing.T) {
 func TestGWSCursorsRoundTrip(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	acct := root.Platform("gws").AccountFromSlug("test")
+	acct := root.AccountFor(account.New("gws", "test"))
 
 	orig := &GWSCursors{
 		Gmail: GmailCursors{HistoryID: "12345"},
@@ -1200,7 +1199,7 @@ func TestGWSCursorsRoundTrip(t *testing.T) {
 func TestLoadGWSCursors_NonExistent(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	acct := root.Platform("gws").AccountFromSlug("neversynced")
+	acct := root.AccountFor(account.New("gws", "neversynced"))
 
 	got, err := s.LoadGWSCursors(acct)
 	if err != nil {
@@ -1216,7 +1215,7 @@ func TestLoadGWSCursors_NonExistent(t *testing.T) {
 
 func TestAppendPendingDelete(t *testing.T) {
 	s, _ := setup(t)
-	acct := paths.NewDataRoot(t.TempDir()).Platform("gws").AccountFromSlug("test")
+	acct := paths.NewDataRoot(t.TempDir()).AccountFor(account.New("gws", "test"))
 	gmailDir := acct.Gmail()
 
 	for _, id := range []string{"msg-1", "msg-2", "msg-3"} {

@@ -13,6 +13,7 @@ import (
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -28,8 +29,8 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewWriter(s, root.Platform("gws").AccountFromSlug("test").Identity())
-	account := root.Platform("gws").AccountFromSlug("test")
+	id := identity.NewWriter(s, root.AccountFor(account.New("gws", "test")).Identity())
+	account := root.AccountFor(account.New("gws", "test"))
 
 	// --- Create test events ---
 	oneoffID := createEvent(t, `{

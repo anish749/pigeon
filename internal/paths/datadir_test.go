@@ -31,11 +31,11 @@ func TestAccountFor_Slugifies(t *testing.T) {
 	}
 }
 
-func TestPlatformDir_AccountFromSlug(t *testing.T) {
+func TestAccountFor(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Platform("slack").AccountFromSlug("coding-with-anish").Path()
+	got := root.AccountFor(account.New("slack", "coding-with-anish")).Path()
 	if got != "/tmp/test/slack/coding-with-anish" {
-		t.Errorf("AccountFromSlug().Path() = %q, want /tmp/test/slack/coding-with-anish", got)
+		t.Errorf("AccountFor().Path() = %q, want /tmp/test/slack/coding-with-anish", got)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestAccountDir_Conversation(t *testing.T) {
 }
 
 func TestConversationDir_DateFile(t *testing.T) {
-	conv := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws").Conversation("#general")
+	conv := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws")).Conversation("#general")
 	got := conv.DateFile("2024-01-15").Path()
 	if got != "/tmp/test/slack/ws/#general/2024-01-15.jsonl" {
 		t.Errorf("DateFile() = %q, want /tmp/test/slack/ws/#general/2024-01-15.jsonl", got)
@@ -56,7 +56,7 @@ func TestConversationDir_DateFile(t *testing.T) {
 }
 
 func TestConversationDir_ThreadsDir(t *testing.T) {
-	conv := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws").Conversation("#general")
+	conv := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws")).Conversation("#general")
 	got := conv.ThreadsDir()
 	if got != "/tmp/test/slack/ws/#general/threads" {
 		t.Errorf("ThreadsDir() = %q, want /tmp/test/slack/ws/#general/threads", got)
@@ -64,7 +64,7 @@ func TestConversationDir_ThreadsDir(t *testing.T) {
 }
 
 func TestConversationDir_ThreadFile(t *testing.T) {
-	conv := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws").Conversation("#general")
+	conv := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws")).Conversation("#general")
 	got := conv.ThreadFile("1234567890.123456").Path()
 	if got != "/tmp/test/slack/ws/#general/threads/1234567890.123456.jsonl" {
 		t.Errorf("ThreadFile() = %q, want /tmp/test/slack/ws/#general/threads/1234567890.123456.jsonl", got)
@@ -72,7 +72,7 @@ func TestConversationDir_ThreadFile(t *testing.T) {
 }
 
 func TestAccountDir_SyncCursorsPath(t *testing.T) {
-	acct := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws")
+	acct := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws"))
 	got := acct.SyncCursorsPath()
 	if got != "/tmp/test/slack/ws/.sync-cursors.yaml" {
 		t.Errorf("SyncCursorsPath() = %q, want /tmp/test/slack/ws/.sync-cursors.yaml", got)
@@ -80,7 +80,7 @@ func TestAccountDir_SyncCursorsPath(t *testing.T) {
 }
 
 func TestAccountDir_MaintenancePath(t *testing.T) {
-	acct := NewDataRoot("/tmp/test").Platform("slack").AccountFromSlug("ws")
+	acct := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws"))
 	got := acct.MaintenancePath()
 	if got != "/tmp/test/slack/ws/.maintenance.json" {
 		t.Errorf("MaintenancePath() = %q, want /tmp/test/slack/ws/.maintenance.json", got)
@@ -151,7 +151,7 @@ func TestIsThreadFile_ConversationNamedThreads(t *testing.T) {
 
 func TestIdentityDir_Path(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Platform("slack").AccountFromSlug("acme-corp").Identity().Path()
+	got := root.AccountFor(account.New("slack", "acme-corp")).Identity().Path()
 	want := "/tmp/test/slack/acme-corp/identity"
 	if got != want {
 		t.Errorf("Identity().Path() = %q, want %q", got, want)
@@ -160,7 +160,7 @@ func TestIdentityDir_Path(t *testing.T) {
 
 func TestIdentityDir_PeopleFile(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Platform("slack").AccountFromSlug("acme-corp").Identity().PeopleFile()
+	got := root.AccountFor(account.New("slack", "acme-corp")).Identity().PeopleFile()
 	want := PeopleFile("/tmp/test/slack/acme-corp/identity/people.jsonl")
 	if got != want {
 		t.Errorf("PeopleFile() = %q, want %q", got, want)
@@ -169,7 +169,7 @@ func TestIdentityDir_PeopleFile(t *testing.T) {
 
 func TestIdentityDir_UsesConstants(t *testing.T) {
 	root := NewDataRoot("/data")
-	dir := root.Platform("gws").AccountFromSlug("alice").Identity()
+	dir := root.AccountFor(account.New("gws", "alice")).Identity()
 	if dir.Path() != "/data/gws/alice/"+IdentitySubdir {
 		t.Errorf("path should use IdentitySubdir constant, got %q", dir.Path())
 	}
