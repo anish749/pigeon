@@ -1,5 +1,9 @@
 # Features
 
+## Elicitation protocol
+
+Define a decision tree for when pigeon should interrupt the user to ask a question — covering the four surfaces (TUI prompt, bash stdin, Claude's built-in `AskUserQuestion` guardrail, and Slack DM) with clear rules for which to use based on session context (interactive vs. headless) and urgency.
+
 ## Attachments
 
 Support file attachments (photos, documents, etc.) in Slack messages and deliver them through to the session so Claude can understand them.

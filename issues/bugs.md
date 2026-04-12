@@ -1,5 +1,17 @@
 # Bugs / Tech Debt
 
+## Delete sent Slack messages / unreact via CLI
+
+`pigeon hub send` and `pigeon react` have no inverse — there is no CLI command to delete a message the bot sent or to remove a reaction it added, leaving the user with no way to undo those actions from the same interface.
+
+## Expose protocol layer models to the user via CLI
+
+Currently the flags used in the protocol layer and the the ones in the CLI are different.
+The protocol is probably known and that should be the one that is referenced by others as well, including in the CLI, they should speak the same language.
+ via := modelv1.ViaPigeonAsUser
+ if !req.AsUser {
+  via = modelv1.ViaPigeonAsBot
+ }
 ## WhatsApp history not re-synced after reset
 
 After `pigeon reset --platform=whatsapp`, the daemon reconnects to WhatsApp but does not receive a full history sync. WhatsApp only sends history sync events during initial device pairing. After a reset (where message data is deleted but the device stays paired), there is no mechanism to request a re-transfer of history.
