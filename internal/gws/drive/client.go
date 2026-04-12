@@ -189,8 +189,11 @@ func GetSheetNames(spreadsheetID string) ([]string, error) {
 	return names, nil
 }
 
+// sheetValuesResponse uses json.RawMessage because the Sheets API returns
+// mixed types per cell: strings are quoted, but numbers and booleans are
+// bare JSON values. Using [][]string fails to unmarshal those bare values.
 type sheetValuesResponse struct {
-	Values [][]string `json:"values"`
+	Values [][]json.RawMessage `json:"values"`
 }
 
 // ReadSheetValues fetches cell values for a specific sheet range.
@@ -216,7 +219,31 @@ func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, 
 	if err := gws.RunParsed(&resp, "sheets", "spreadsheets", "values", "get", "--params", params); err != nil {
 		return nil, fmt.Errorf("read sheet %s %s/%s: %w", renderOption, spreadsheetID, sheetName, err)
 	}
-	return resp.Values, nil
+
+	rows := make([][]string, len(resp.Values))
+	for i, raw := range resp.Values {
+		row := make([]string, len(raw))
+		for j, cell := range raw {
+			row[j] = cellToString(cell)
+		}
+		rows[i] = row
+	}
+	return rows, nil
+}
+
+// cellToString converts a raw JSON cell value to a string. JSON strings are
+// unquoted; numbers, booleans, and null are used as their literal text.
+func cellToString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+	}
+	return string(raw)
 }
 
 // --- Comments API ---
