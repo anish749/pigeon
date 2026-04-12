@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/api"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/paths"
@@ -31,7 +32,7 @@ type SendParams struct {
 	Thread    string
 	Broadcast bool
 	PostAt    string // Unix timestamp — schedule for later (Slack only)
-	AsUser    bool
+	Via       modelv1.Via
 	DryRun    bool
 	Force     bool
 }
@@ -62,7 +63,7 @@ func RunSend(p SendParams) error {
 		Thread:    p.Thread,
 		Broadcast: p.Broadcast,
 		PostAt:    p.PostAt,
-		AsUser:    p.AsUser,
+		Via:       p.Via,
 		DryRun:    p.DryRun,
 		Force:     p.Force,
 		SessionID: os.Getenv("PIGEON_SESSION_ID"),

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func newSendCmd() *cobra.Command {
@@ -21,12 +22,12 @@ Target flags are platform-specific:
   Slack:    --user-id (DMs) or --channel (channels, group DMs)
   WhatsApp: --contact (name or phone number)
 
-By default, Slack messages are sent as the bot. Use --as-user to send as yourself.
+By default, Slack messages are sent as the bot. Use --via pigeon-as-user to send as yourself.
 Use --thread to reply to a thread, and --broadcast to also post the reply to the channel.
 Run 'pigeon list' to find user IDs and channel names.`,
 		Example: `  # Slack
   pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY -m "hey"
-  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY --as-user -m "sent as me"
+  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY --via pigeon-as-user -m "sent as me"
   pigeon send -p slack -a acme-corp --channel '#engineering' -m "deploying now"
   pigeon send -p slack -a acme-corp --channel '#engineering' --thread 1711568938.123456 -m "fixed!"
   pigeon send -p slack -a acme-corp --channel '#engineering' --post-at 2026-04-11T09:00:00 -m "scheduled"
@@ -72,10 +73,11 @@ Run 'pigeon list' to find user IDs and channel names.`,
 			if err != nil {
 				return err
 			}
-			asUser, err := cmd.Flags().GetBool("as-user")
+			viaStr, err := cmd.Flags().GetString("via")
 			if err != nil {
 				return err
 			}
+			via := modelv1.Via(viaStr)
 			dryRun, err := cmd.Flags().GetBool("dry-run")
 			if err != nil {
 				return err
@@ -118,7 +120,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 				Thread:    thread,
 				Broadcast: broadcast,
 				PostAt:    postAt,
-				AsUser:    asUser,
+				Via:       via,
 				DryRun:    dryRun,
 				Force:     force,
 			})
@@ -143,7 +145,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 	cmd.Flags().String("thread", "", "thread timestamp to reply to")
 	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
 	cmd.Flags().String("post-at", "", "when to send: ISO 8601 (2026-04-11T09:00:00, local timezone) or Unix timestamp (Slack only, up to 120 days)")
-	cmd.Flags().Bool("as-user", false, "send as yourself instead of the bot (Slack only)")
+	cmd.Flags().String("via", string(modelv1.ViaPigeonAsBot), "message pathway: pigeon-as-bot (default) or pigeon-as-user")
 	cmd.Flags().Bool("dry-run", false, "validate without sending")
 	cmd.Flags().Bool("force", false, "send even if the thread is not found locally")
 

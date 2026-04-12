@@ -182,7 +182,7 @@ type SendRequest struct {
 	Thread    string `json:"thread,omitempty"`
 	Broadcast bool   `json:"broadcast,omitempty"`
 	PostAt    string `json:"post_at,omitempty"` // Unix timestamp — schedule instead of send immediately
-	AsUser    bool   `json:"as_user,omitempty"`
+	Via       modelv1.Via `json:"via,omitempty"`
 	DryRun    bool   `json:"dry_run,omitempty"`
 	Force     bool   `json:"force,omitempty"`
 	// SessionID, when set, routes the send through the outbox for human
@@ -298,10 +298,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 		senderName = sender.Resolver.ContactName(ctx, myJID)
 		senderID = myJID.String()
 	}
-	via := modelv1.ViaPigeonAsUser
-	if !req.AsUser {
-		via = modelv1.ViaPigeonAsBot
-	}
+	// WhatsApp always sends as the user — there is no bot identity.
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -309,7 +306,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 			Ts:       resp.Timestamp,
 			Sender:   senderName,
 			SenderID: senderID,
-			Via:      via,
+			Via:      modelv1.ViaPigeonAsUser,
 			Text:     req.Message,
 		},
 	}
@@ -331,7 +328,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	// Choose API client based on identity.
 	api := sender.BotAPI
 	senderName := sender.BotName
-	if req.AsUser {
+	if req.Via == modelv1.ViaPigeonAsUser {
 		api = sender.UserAPI
 		senderName = sender.UserName
 	}
@@ -373,8 +370,8 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	if err != nil {
 		slog.ErrorContext(ctx, "slack send failed",
 			"channel_id", channelID, "channel_name", channelName,
-			"as_user", req.AsUser, "error", err)
-		if err.Error() == "channel_not_found" && !req.AsUser {
+			"via", req.Via, "error", err)
+		if err.Error() == "channel_not_found" && req.Via == modelv1.ViaPigeonAsBot {
 			return SendResponse{Error: fmt.Sprintf(
 				"send to %s failed: %v — the bot may not be a member of this channel. "+
 					"For private channels, ask someone to invite the bot. "+
@@ -392,12 +389,8 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 
 	// Store locally.
 	msgTS := slacklistener.ParseTimestamp(ts)
-	via := modelv1.ViaPigeonAsBot
-	if req.AsUser {
-		via = modelv1.ViaPigeonAsUser
-	}
 	senderID := sender.BotUserID
-	if req.AsUser {
+	if req.Via == modelv1.ViaPigeonAsUser {
 		senderID = sender.UserID
 	}
 	line := modelv1.Line{
@@ -407,7 +400,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 			Ts:       msgTS,
 			Sender:   senderName,
 			SenderID: senderID,
-			Via:      via,
+			Via:      req.Via,
 			Text:     req.Message,
 		},
 	}
