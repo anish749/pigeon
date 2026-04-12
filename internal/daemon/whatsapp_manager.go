@@ -142,7 +142,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 	}
 
 	// Push identity signals from WhatsApp contacts.
-	writer := identity.NewWriter(m.idStore, m.dataRoot.ServiceIdentity("whatsapp", account.New("whatsapp", wa.Account).NameSlug()))
+	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("whatsapp", wa.Account)).Identity())
 	go observeWhatsAppContacts(acctCtx, client, writer)
 
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{

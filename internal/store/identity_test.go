@@ -13,12 +13,12 @@ func testIdentityStore(t *testing.T) (*store.FSStore, paths.IdentityDir) {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	return s, root.Identity("test")
+	return s, root.Platform("test").AccountFromSlug("acct").Identity()
 }
 
 func TestLoadPeople_MissingFile(t *testing.T) {
 	s, dir := testIdentityStore(t)
-	people, err := s.LoadPeople(dir)
+	people, err := s.LoadPeople(dir.PeopleFile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestSavePeople_CreatesDir(t *testing.T) {
 	people := []identity.Person{
 		{Name: "Alice", Email: []string{"alice@company.com"}, Seen: "2026-04-11"},
 	}
-	if err := s.SavePeople(dir, people); err != nil {
+	if err := s.SavePeople(dir.PeopleFile(), people); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ func TestSavePeople_AtomicWrite(t *testing.T) {
 	people := []identity.Person{
 		{Name: "Alice", Seen: "2026-04-11"},
 	}
-	if err := s.SavePeople(dir, people); err != nil {
+	if err := s.SavePeople(dir.PeopleFile(), people); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,11 +78,11 @@ func TestLoadSave_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := s.SavePeople(dir, original); err != nil {
+	if err := s.SavePeople(dir.PeopleFile(), original); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := s.LoadPeople(dir)
+	loaded, err := s.LoadPeople(dir.PeopleFile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ this is not json
 		t.Fatal(err)
 	}
 
-	people, err := s.LoadPeople(dir)
+	people, err := s.LoadPeople(dir.PeopleFile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ this is not json
 func TestSavePeople_EmptyList(t *testing.T) {
 	s, dir := testIdentityStore(t)
 
-	if err := s.SavePeople(dir, nil); err != nil {
+	if err := s.SavePeople(dir.PeopleFile(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +155,7 @@ func TestSavePeople_OverwritesPrevious(t *testing.T) {
 	s, dir := testIdentityStore(t)
 
 	// Write two people.
-	if err := s.SavePeople(dir, []identity.Person{
+	if err := s.SavePeople(dir.PeopleFile(), []identity.Person{
 		{Name: "Alice", Seen: "2026-04-11"},
 		{Name: "Bob", Seen: "2026-04-11"},
 	}); err != nil {
@@ -163,13 +163,13 @@ func TestSavePeople_OverwritesPrevious(t *testing.T) {
 	}
 
 	// Overwrite with one person.
-	if err := s.SavePeople(dir, []identity.Person{
+	if err := s.SavePeople(dir.PeopleFile(), []identity.Person{
 		{Name: "Carol", Seen: "2026-04-11"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := s.LoadPeople(dir)
+	loaded, err := s.LoadPeople(dir.PeopleFile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestLoadPeople_SkipsEmptyLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, err := s.LoadPeople(dir)
+	people, err := s.LoadPeople(dir.PeopleFile())
 	if err != nil {
 		t.Fatal(err)
 	}

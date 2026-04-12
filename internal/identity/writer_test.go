@@ -18,7 +18,7 @@ func testWriterAndReader(t *testing.T) (*identity.Writer, *identity.Reader, path
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.ServiceIdentity("test", "acct")
+	dir := root.Platform("test").AccountFromSlug("acct").Identity()
 	w := identity.NewWriter(s, dir)
 	r := identity.NewReaderForDirs(s, []paths.IdentityDir{dir})
 	return w, r, dir
@@ -260,7 +260,7 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 func TestPersistence_RoundTrip(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.ServiceIdentity("test", "acct")
+	dir := root.Platform("test").AccountFromSlug("acct").Identity()
 
 	w1 := identity.NewWriter(s, dir)
 	if err := w1.ObserveBatch([]identity.Signal{
@@ -290,7 +290,7 @@ func TestPersistence_RoundTrip(t *testing.T) {
 func TestLoadPeople_MissingFile(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	r := identity.NewReaderForDirs(s, []paths.IdentityDir{root.ServiceIdentity("nonexistent", "acct")})
+	r := identity.NewReaderForDirs(s, []paths.IdentityDir{root.Platform("nonexistent").AccountFromSlug("acct").Identity()})
 
 	people, err := r.People()
 	if err != nil {

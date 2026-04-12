@@ -81,12 +81,12 @@ func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) 
 
 func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	acct := account.New("gws", g.Email)
-	acctDir := paths.DefaultDataRoot().AccountFor(acct)
+	acctDir := m.dataRoot.AccountFor(acct)
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
-	writer := identity.NewWriter(m.idStore, m.dataRoot.ServiceIdentity("gws", acct.NameSlug()))
+	writer := identity.NewWriter(m.idStore, acctDir.Identity())
 	p := poller.New(gwsPollInterval, acctDir, m.store, writer)
 	go func() {
 		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 )
 
 // Reader merges per-source identity files into a unified view at read time.
@@ -22,40 +23,44 @@ import (
 // only ever lives in one file. The Reader is for cold-path cross-source
 // name searches (FindUserID, SearchCandidates, People).
 type Reader struct {
-	store    Store
-	dataRoot paths.DataRoot
-	dirs     []paths.IdentityDir // if non-nil, limit to these dirs; else discover
+	store Store
+	base  string   // data root path for glob discovery; empty if paths is set
+	paths []string // if non-nil, limit to these people.jsonl paths; else discover
 }
 
-// NewReader creates a Reader that discovers all service identity dirs under
-// the data root at each read.
+// NewReader creates a Reader that discovers all identity files under the
+// data root at each read using a glob.
 func NewReader(store Store, dataRoot paths.DataRoot) *Reader {
-	return &Reader{store: store, dataRoot: dataRoot}
+	return &Reader{store: store, base: dataRoot.Path()}
 }
 
 // NewReaderForDirs creates a Reader that only merges the given identity
 // dirs. Used for context-scoped lookups.
 func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
-	return &Reader{store: store, dirs: dirs}
+	pp := make([]string, len(dirs))
+	for i, d := range dirs {
+		pp[i] = d.PeopleFile()
+	}
+	return &Reader{store: store, paths: pp}
 }
 
 // load reads all configured identity files and merges them into a single
 // deduplicated list of Persons.
 func (r *Reader) load() ([]Person, error) {
-	dirs := r.dirs
-	if dirs == nil {
-		discovered, err := r.dataRoot.AllIdentityDirs()
+	pp := r.paths
+	if pp == nil {
+		found, err := read.GlobPeopleFiles(r.base)
 		if err != nil {
-			return nil, fmt.Errorf("discover identity dirs: %w", err)
+			return nil, fmt.Errorf("discover identity files: %w", err)
 		}
-		dirs = discovered
+		pp = found
 	}
 
 	var merged []Person
-	for _, d := range dirs {
-		people, err := r.store.LoadPeople(d)
+	for _, path := range pp {
+		people, err := r.store.LoadPeople(path)
 		if err != nil {
-			return nil, fmt.Errorf("load %s: %w", d.Path(), err)
+			return nil, fmt.Errorf("load %s: %w", path, err)
 		}
 		for _, p := range people {
 			idx := findPersonMatch(merged, p)

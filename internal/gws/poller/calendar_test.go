@@ -28,7 +28,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewWriter(s, root.ServiceIdentity("gws", "test"))
+	id := identity.NewWriter(s, root.Platform("gws").AccountFromSlug("test").Identity())
 	account := root.Platform("gws").AccountFromSlug("test")
 
 	// --- Create test events ---

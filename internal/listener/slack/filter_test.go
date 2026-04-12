@@ -32,7 +32,7 @@ func testIdentityWriter(t *testing.T, workspace string, signals []identity.Signa
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	w := identity.NewWriter(s, root.ServiceIdentity("slack", workspace))
+	w := identity.NewWriter(s, root.Platform("slack").AccountFromSlug(workspace).Identity())
 	if err := w.ObserveBatch(signals); err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,8 @@ import (
 
 // Store is the persistence interface for identity data.
 type Store interface {
-	LoadPeople(dir paths.IdentityDir) ([]Person, error)
-	SavePeople(dir paths.IdentityDir, people []Person) error
+	LoadPeople(path string) ([]Person, error)
+	SavePeople(path string, people []Person) error
 }
 
 // Writer owns identity observations for a single source (one platform +
@@ -21,7 +21,7 @@ type Store interface {
 // A Writer is safe for concurrent use by multiple goroutines.
 type Writer struct {
 	store  Store
-	dir    paths.IdentityDir
+	path   string
 	mu     sync.Mutex
 	people []Person
 	loaded bool
@@ -31,7 +31,7 @@ type Writer struct {
 // NewWriter creates a Writer that persists this source's people file via the
 // given store.
 func NewWriter(store Store, dir paths.IdentityDir) *Writer {
-	return &Writer{store: store, dir: dir}
+	return &Writer{store: store, path: dir.PeopleFile()}
 }
 
 // Observe processes a single signal. Prefer ObserveBatch for bulk sources
@@ -103,7 +103,7 @@ func (w *Writer) loadLocked() error {
 	if w.loaded {
 		return nil
 	}
-	people, err := w.store.LoadPeople(w.dir)
+	people, err := w.store.LoadPeople(w.path)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (w *Writer) loadLocked() error {
 
 // saveLocked atomically writes people to disk. Must be called with w.mu held.
 func (w *Writer) saveLocked() error {
-	if err := w.store.SavePeople(w.dir, w.people); err != nil {
+	if err := w.store.SavePeople(w.path, w.people); err != nil {
 		return err
 	}
 	w.dirty = false

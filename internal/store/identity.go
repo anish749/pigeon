@@ -9,13 +9,11 @@ import (
 	"path/filepath"
 
 	"github.com/anish749/pigeon/internal/identity"
-	"github.com/anish749/pigeon/internal/paths"
 )
 
 // LoadPeople reads a people.jsonl file into memory. Returns an empty slice
 // if the file does not exist (first-run case).
-func (s *FSStore) LoadPeople(dir paths.IdentityDir) ([]identity.Person, error) {
-	path := dir.PeopleFile()
+func (s *FSStore) LoadPeople(path string) ([]identity.Person, error) {
 
 	mu := s.fileMu(path)
 	mu.Lock()
@@ -54,8 +52,7 @@ func (s *FSStore) LoadPeople(dir paths.IdentityDir) ([]identity.Person, error) {
 }
 
 // SavePeople atomically writes people to a JSONL file (write to temp, rename).
-func (s *FSStore) SavePeople(dir paths.IdentityDir, people []identity.Person) error {
-	path := dir.PeopleFile()
+func (s *FSStore) SavePeople(path string, people []identity.Person) error {
 
 	mu := s.fileMu(path)
 	mu.Lock()

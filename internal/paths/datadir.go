@@ -1,8 +1,6 @@
 package paths
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -31,7 +29,7 @@ const ConvMetaFilename = ".meta.json"
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
-// IdentitySubdir is the top-level directory under the data root for identity files.
+// IdentitySubdir is the subdirectory name for identity files within an account directory.
 const IdentitySubdir = "identity"
 
 // PeopleFilename is the filename for the per-context identity JSONL file.
@@ -40,6 +38,7 @@ const PeopleFilename = "people.jsonl"
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
+//	                                    ↘ IdentityDir
 //
 // Each level carries accumulated path segments and exposes Path() string.
 // Slugification lives in the account package; paths only accepts slugs or Account objects.
@@ -63,60 +62,6 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
 }
 
-// Identity returns an IdentityDir for the given context name.
-func (r DataRoot) Identity(context string) IdentityDir {
-	return IdentityDir{root: r, context: context}
-}
-
-// ServiceIdentity returns an IdentityDir for a specific service account:
-//
-//	identity/<platform>/<account-slug>/
-//
-// Each service (Slack workspace, WhatsApp account, GWS email) writes its own
-// people.jsonl under this path; cross-source merging happens at read time.
-func (r DataRoot) ServiceIdentity(platform, accountSlug string) IdentityDir {
-	return IdentityDir{root: r, context: filepath.Join(strings.ToLower(platform), accountSlug)}
-}
-
-// AllIdentityDirs discovers every service-identity directory under
-// <base>/identity/<platform>/<account>/ that contains a people.jsonl file.
-// Returns an empty slice (never an error) when no identity data exists yet.
-func (r DataRoot) AllIdentityDirs() ([]IdentityDir, error) {
-	base := filepath.Join(r.base, IdentitySubdir)
-	platformEntries, err := os.ReadDir(base)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", base, err)
-	}
-
-	var dirs []IdentityDir
-	for _, platformEntry := range platformEntries {
-		if !platformEntry.IsDir() {
-			continue
-		}
-		platform := platformEntry.Name()
-		platformPath := filepath.Join(base, platform)
-
-		acctEntries, err := os.ReadDir(platformPath)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", platformPath, err)
-		}
-		for _, acctEntry := range acctEntries {
-			if !acctEntry.IsDir() {
-				continue
-			}
-			accountSlug := acctEntry.Name()
-			peoplePath := filepath.Join(platformPath, accountSlug, PeopleFilename)
-			if _, err := os.Stat(peoplePath); err != nil {
-				continue
-			}
-			dirs = append(dirs, IdentityDir{root: r, context: filepath.Join(platform, accountSlug)})
-		}
-	}
-	return dirs, nil
-}
 
 // AccountFor returns an AccountDir from an account.Account.
 func (r DataRoot) AccountFor(acct account.Account) AccountDir {
@@ -154,6 +99,13 @@ func (a AccountDir) Path() string {
 // Conversation returns a ConversationDir for the given conversation name.
 func (a AccountDir) Conversation(name string) ConversationDir {
 	return ConversationDir{account: a, name: name}
+}
+
+// Identity returns the IdentityDir for this account:
+//
+//	<base>/<platform>/<account-slug>/identity/
+func (a AccountDir) Identity() IdentityDir {
+	return IdentityDir{account: a}
 }
 
 // SyncCursorsPath returns the path to the sync cursors file for this account.
@@ -231,18 +183,19 @@ func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
 }
 
-// IdentityDir represents the identity directory for a context: <base>/identity/<context>/
+// IdentityDir represents the identity directory for an account:
+//
+//	<base>/<platform>/<account-slug>/identity/
 type IdentityDir struct {
-	root    DataRoot
-	context string
+	account AccountDir
 }
 
 // Path returns the identity directory path.
 func (i IdentityDir) Path() string {
-	return filepath.Join(i.root.base, IdentitySubdir, i.context)
+	return filepath.Join(i.account.Path(), IdentitySubdir)
 }
 
-// PeopleFile returns the path to the people.jsonl file for this context.
+// PeopleFile returns the path to the people.jsonl file for this account.
 func (i IdentityDir) PeopleFile() string {
 	return filepath.Join(i.Path(), PeopleFilename)
 }

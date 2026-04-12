@@ -32,22 +32,6 @@ type ContextConfig struct {
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
 }
 
-// IdentityDirs returns the identity directories for every account in this
-// context, expressed relative to the given data root. The result is the
-// input to identity.NewReaderForDirs for context-scoped reads.
-func (c ContextConfig) IdentityDirs(root paths.DataRoot) []paths.IdentityDir {
-	var dirs []paths.IdentityDir
-	for _, w := range c.Slack {
-		dirs = append(dirs, root.ServiceIdentity("slack", w))
-	}
-	for _, e := range c.GWS {
-		dirs = append(dirs, root.ServiceIdentity("gws", e))
-	}
-	for _, a := range c.WhatsApp {
-		dirs = append(dirs, root.ServiceIdentity("whatsapp", a))
-	}
-	return dirs
-}
 
 // LinearConfig holds configuration for a single Linear workspace.
 type LinearConfig struct {
