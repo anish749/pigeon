@@ -68,7 +68,7 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 
 // AccountFor returns an AccountDir from an account.Account.
 func (r DataRoot) AccountFor(acct account.Account) AccountDir {
-	return r.Platform(acct.Platform).accountFromSlug(acct.NameSlug())
+	return AccountDir{platform: r.Platform(acct.Platform), slug: acct.NameSlug()}
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/
@@ -82,12 +82,6 @@ func (p PlatformDir) Path() string {
 	return filepath.Join(p.root.base, p.platform)
 }
 
-// accountFromSlug returns an AccountDir from an already-slugified name.
-// Unexported to prevent accidental use with raw (unslugged) names — callers
-// outside the paths package must use DataRoot.AccountFor which slugifies.
-func (p PlatformDir) accountFromSlug(s string) AccountDir {
-	return AccountDir{platform: p, slug: s}
-}
 
 // AccountDir represents an account directory: <base>/<platform>/<account-slug>/
 type AccountDir struct {
