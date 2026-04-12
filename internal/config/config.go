@@ -14,6 +14,9 @@ type Config struct {
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
 	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+
+	Contexts       map[string]Context `yaml:"contexts,omitempty"`
+	DefaultContext string             `yaml:"default_context,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.
