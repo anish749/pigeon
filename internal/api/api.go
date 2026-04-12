@@ -57,6 +57,7 @@ type Server struct {
 	mu          sync.RWMutex
 	whatsapp    map[string]*WhatsAppSender // account slug → sender
 	slack       map[string]*SlackSender    // account slug → sender
+	gws         map[string]struct{}        // account slug → present
 	hub         *hub.Hub
 	outbox      *outbox.Outbox
 	store       store.Store
@@ -70,6 +71,7 @@ func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syn
 	return &Server{
 		whatsapp:    make(map[string]*WhatsAppSender),
 		slack:       make(map[string]*SlackSender),
+		gws:         make(map[string]struct{}),
 		hub:         h,
 		outbox:      ob,
 		store:       s,
@@ -90,6 +92,20 @@ func (s *Server) RegisterWhatsApp(sender *WhatsAppSender) {
 func (s *Server) RegisterSlack(sender *SlackSender) {
 	s.mu.Lock()
 	s.slack[sender.Acct.NameSlug()] = sender
+	s.mu.Unlock()
+}
+
+// RegisterGWS registers a GWS account for status reporting.
+func (s *Server) RegisterGWS(acct account.Account) {
+	s.mu.Lock()
+	s.gws[acct.NameSlug()] = struct{}{}
+	s.mu.Unlock()
+}
+
+// UnregisterGWS removes a GWS account from status reporting.
+func (s *Server) UnregisterGWS(acct account.Account) {
+	s.mu.Lock()
+	delete(s.gws, acct.NameSlug())
 	s.mu.Unlock()
 }
 
@@ -446,17 +462,21 @@ type ClaudeSessionInfo struct {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
-	listeners := make(map[string][]string, 2)
+	listeners := make(map[string][]string, 3)
 	for slug := range s.slack {
 		listeners["slack"] = append(listeners["slack"], slug)
 	}
 	for slug := range s.whatsapp {
 		listeners["whatsapp"] = append(listeners["whatsapp"], slug)
 	}
+	for slug := range s.gws {
+		listeners["gws"] = append(listeners["gws"], slug)
+	}
 	s.mu.RUnlock()
 
 	sort.Strings(listeners["slack"])
 	sort.Strings(listeners["whatsapp"])
+	sort.Strings(listeners["gws"])
 
 	connected := s.hub.ConnectedClaudeSessions()
 	claudeSessions := make([]ClaudeSessionInfo, len(connected))
