@@ -39,34 +39,45 @@ atomically (temp file + rename).
 
 ## Directory Layout
 
+Identity files live as a subdirectory under each account, alongside
+conversations, service directories, and sync state:
+
 ```
 ~/.local/share/pigeon/
-├── identity/
-│   ├── slack/
-│   │   ├── acme-corp/
-│   │   │   └── people.jsonl          # signals from the acme-corp workspace
-│   │   └── vendor-ws/
-│   │       └── people.jsonl
-│   ├── gws/
-│   │   └── alice-at-company-com/
-│   │       └── people.jsonl          # signals from Gmail/Calendar/Drive
-│   └── whatsapp/
-│       └── 15551234567/
-│           └── people.jsonl          # signals from the WhatsApp contact book
 ├── slack/
-│   └── ...
-├── whatsapp/
-│   └── ...
-└── gws/
-    └── ...
+│   ├── acme-corp/
+│   │   ├── #engineering/             # conversation
+│   │   ├── @alice/                   # DM
+│   │   ├── identity/
+│   │   │   └── people.jsonl          # signals from this workspace
+│   │   └── .sync-cursors.yaml
+│   └── vendor-ws/
+│       ├── #general/
+│       └── identity/
+│           └── people.jsonl
+├── gws/
+│   └── user-at-company-com/
+│       ├── gmail/
+│       ├── gcalendar/
+│       ├── gdrive/
+│       └── identity/
+│           └── people.jsonl          # signals from Gmail/Calendar/Drive
+└── whatsapp/
+    └── 15551234567/
+        ├── +15559876543_Alice/
+        └── identity/
+            └── people.jsonl          # signals from the WhatsApp contact book
 ```
 
-Each `identity/<platform>/<account-slug>/` directory corresponds to one
-configured account. Files are created on first write.
+The path is `<base>/<platform>/<account-slug>/identity/people.jsonl`.
+Identity is a sibling of conversations and service directories — the
+account already owns its data, and identity is another kind of data the
+account produces. Files are created on first write.
 
 When no context is active, **all** identity files are merged — the reader
-discovers every `identity/*/*/people.jsonl` under the data root. When a
-context is active, only the accounts listed in that context are merged.
+discovers every `<platform>/<account>/identity/people.jsonl` under the
+data root. When a context is active, only the accounts listed in that
+context are merged.
 
 ## Line Format
 
@@ -142,23 +153,23 @@ One line per person with all identifiers means every grep — forward or
 reverse — returns the complete identity:
 
 ```bash
-# Forward: find all of alice's identifiers
-rg "alice" identity/work/people.jsonl
+# Forward: find all of alice's identifiers in a Slack workspace
+rg "alice" slack/acme-corp/identity/people.jsonl
 
 # Reverse: who is Slack user U04ABCDEF?
-rg "U04ABCDEF" identity/work/people.jsonl
+rg "U04ABCDEF" slack/acme-corp/identity/people.jsonl
 
-# Reverse: who has this email?
-rg "alice@company.com" identity/work/people.jsonl
+# Reverse: who has this email? (search all identity files)
+rg "alice@company.com" */*/identity/people.jsonl
 
 # Reverse: who has this phone?
-rg "15551234567" identity/work/people.jsonl
+rg "15551234567" */*/identity/people.jsonl
 
-# List everyone with a Slack identity
-rg '"slack"' identity/work/people.jsonl
+# List everyone with a Slack identity in a workspace
+rg '"slack"' slack/acme-corp/identity/people.jsonl
 
-# List everyone seen this week
-rg '"seen":"2026-04-1' identity/work/people.jsonl
+# Search across all identity files
+rg '"seen":"2026-04-1' */*/identity/people.jsonl
 ```
 
 ## Discovery
@@ -277,9 +288,10 @@ existing email-only person from Gmail).
 
 ### What Is Not Merged
 
-- **Cross-context merging**: never. Each context's identity file is
-  independent. The same person may exist in multiple context files
-  with different identifiers.
+- **Cross-context merging**: never. When a context is active, only that
+  context's account files are loaded. The same person may appear in
+  identity files belonging to different contexts with different
+  identifiers — they are never joined across context boundaries.
 - **Name-based merging**: never. Two people named "Alice" in different
   sources remain separate until a shared email or platform ID connects
   them.
@@ -313,7 +325,9 @@ pigeon identity list --slack
 
 When a command includes a person filter (e.g. `--from=alice`):
 
-1. **Load** the identity file for the active context.
+1. **Load** the per-account identity files for the active context's
+   accounts (or all accounts if no context is active). Merge them in
+   memory using the merge rules above.
 2. **Match** against the `name` field using case-insensitive substring
    matching. Also match against email prefixes (the part before `@`)
    and Slack mention names.
@@ -335,9 +349,9 @@ When a command includes a person filter (e.g. `--from=alice`):
 
 ## File Lifecycle
 
-1. **Creation**: the identity file is created when the first signal
-   arrives for a context. Typically this happens on Slack listener
-   startup (bulk user profile load).
+1. **Creation**: a per-account identity file is created when the first
+   signal arrives for that account. Typically this happens on Slack
+   listener startup (bulk user profile load).
 
 2. **Updates**: the identity service rewrites the file after each batch
    of signals (e.g. after processing all users from a Slack sync, not
@@ -348,9 +362,9 @@ When a command includes a person filter (e.g. `--from=alice`):
    observed. People not seen for an extended period may have left the
    organization. No automatic pruning — staleness is informational.
 
-4. **Deletion**: removing a context from config does not delete its
-   identity file. The file remains on disk and can be reused if the
-   context is recreated.
+4. **Deletion**: removing an account from config does not delete its
+   identity file. The file remains on disk alongside the account's
+   other data and can be reused if the account is re-added.
 
 ## Known Limitations
 
