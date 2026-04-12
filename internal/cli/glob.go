@@ -2,12 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
@@ -15,43 +14,38 @@ import (
 func newGlobCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "glob",
-		Short:   "Find data files by pattern and time window",
+		Short:   "Return file paths visible in the active context",
 		GroupID: groupReading,
-		Long: `Finds JSONL data files in the pigeon data directory using ripgrep.
+		Long: `Finds data files in the resolved source/account scope.
 
-Returns absolute file paths sorted by modification time (most recent first).
-Use --since to filter to files within a time window:
-
-  Date files (YYYY-MM-DD.jsonl) are filtered by filename.
-  Thread files (threads/*.jsonl) are filtered by content — only threads
-  containing messages within the window are returned.
-
-Without --since, all data files are returned.
-
-This is the file discovery tool — use "pigeon grep" for content search.
-Output is one file path per line, suitable for piping to other tools.`,
+When --source is omitted, all sources visible in the active context are included.
+Without --since, all matching files are returned. With --since, date-based files
+are filtered by filename and thread files are filtered by message timestamps.`,
 		Example: `  pigeon glob
-  pigeon glob --since=2h
-  pigeon glob --since=7d --platform=slack
-  pigeon glob --platform=slack --account=acme-corp
-  pigeon glob --since=24h | xargs jq -r 'select(.type == "msg") | .sender'`,
+  pigeon glob --context=work
+  pigeon glob --source=gmail --since=7d
+  pigeon glob --source=slack -a acme-corp --since=24h`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, err := cmd.Flags().GetString("platform")
+			source, err := cmd.Flags().GetString("source")
 			if err != nil {
-				return fmt.Errorf("get platform flag: %w", err)
+				return fmt.Errorf("get source flag: %w", err)
 			}
 			account, err := cmd.Flags().GetString("account")
 			if err != nil {
 				return fmt.Errorf("get account flag: %w", err)
+			}
+			contextName, err := cmd.Flags().GetString("context")
+			if err != nil {
+				return fmt.Errorf("get context flag: %w", err)
 			}
 			since, err := cmd.Flags().GetString("since")
 			if err != nil {
 				return fmt.Errorf("get since flag: %w", err)
 			}
 
-			dir := paths.SearchDir(platform, account)
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				return fmt.Errorf("no data at %s", dir)
+			scopes, err := commands.ResolveScopes(source, contextName, account)
+			if err != nil {
+				return err
 			}
 
 			var sinceDur time.Duration
@@ -63,18 +57,33 @@ Output is one file path per line, suitable for piping to other tools.`,
 				sinceDur = d
 			}
 
-			files, err := read.Glob(dir, sinceDur)
+			files, err := read.GlobMany(commandsScopeRoots(scopes), sinceDur)
 			if err != nil {
 				return err
 			}
-			for _, f := range files {
-				fmt.Println(f)
+			for _, file := range files {
+				fmt.Println(file)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringP("platform", "p", "", "filter by platform")
-	cmd.Flags().StringP("account", "a", "", "filter by account")
+	cmd.Flags().String("source", "", "filter by source")
+	cmd.Flags().StringP("account", "a", "", "narrow to a specific account")
+	cmd.Flags().String("context", "", "context name overriding PIGEON_CONTEXT and default_context")
 	cmd.Flags().String("since", "", "only files with data from last duration (e.g. 2h, 7d)")
 	return cmd
+}
+
+func commandsScopeRoots(scopes []commands.ResolvedScope) []string {
+	var roots []string
+	for _, scope := range scopes {
+		for _, acct := range scope.Accounts {
+			roots = append(roots, commandsSourceRoots(acct, scope.Source)...)
+		}
+	}
+	return roots
+}
+
+func commandsSourceRoots(acct commands.ResolvedAccount, source commands.Source) []string {
+	return commands.SourceRootsForCLI(acct, source)
 }

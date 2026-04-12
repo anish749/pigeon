@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
@@ -103,6 +104,27 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	return result, nil
 }
 
+// GlobMany runs Glob across multiple roots and returns a single de-duplicated
+// file list. Results preserve first-seen order across the provided dirs.
+func GlobMany(dirs []string, since time.Duration) ([]string, error) {
+	var (
+		all  []string
+		errs []error
+	)
+	for _, dir := range dirs {
+		files, err := Glob(dir, since)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		all = append(all, files...)
+	}
+	if len(all) == 0 {
+		return nil, errors.Join(errs...)
+	}
+	return uniqueStrings(all), errors.Join(errs...)
+}
+
 // expandDriveMetaMatches resolves each drive-meta file into the content
 // files it describes. The meta file is the anchor of identity for a Drive
 // file at a specific modification state, and ContentFiles enumerates the
@@ -119,4 +141,15 @@ func expandDriveMetaMatches(metas []paths.DriveMetaFile) ([]string, error) {
 		content = append(content, files...)
 	}
 	return content, errors.Join(errs...)
+}
+
+func uniqueStrings(items []string) []string {
+	var out []string
+	for _, item := range items {
+		if slices.Contains(out, item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }

@@ -23,13 +23,44 @@ type Config struct {
 	DefaultContext string                   `yaml:"default_context,omitempty"`
 }
 
+// StringList unmarshals either a scalar string or a YAML sequence into a
+// uniform string slice. Context config examples use both forms.
+type StringList []string
+
+// UnmarshalYAML accepts either:
+// - gws: work@company.com
+// - gws: [work@company.com, team@company.com]
+func (s *StringList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var single string
+		if err := value.Decode(&single); err != nil {
+			return err
+		}
+		*s = StringList{single}
+		return nil
+	case yaml.SequenceNode:
+		var many []string
+		if err := value.Decode(&many); err != nil {
+			return err
+		}
+		*s = StringList(many)
+		return nil
+	case 0:
+		*s = nil
+		return nil
+	default:
+		return fmt.Errorf("expected string or list, got yaml kind %d", value.Kind)
+	}
+}
+
 // ContextConfig lists the accounts that belong to a named context. Each
 // field holds account slugs (the same slug used in storage paths:
 // workspace slug for Slack, email slug for GWS, account slug for WhatsApp).
 type ContextConfig struct {
-	Slack    []string `yaml:"slack,omitempty"`
-	GWS      []string `yaml:"gws,omitempty"`
-	WhatsApp []string `yaml:"whatsapp,omitempty"`
+	Slack    StringList `yaml:"slack,omitempty"`
+	GWS      StringList `yaml:"gws,omitempty"`
+	WhatsApp StringList `yaml:"whatsapp,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.
