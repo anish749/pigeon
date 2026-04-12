@@ -2,7 +2,6 @@ package identity_test
 
 import (
 	"os"
-	"slices"
 	"testing"
 
 	"github.com/anish749/pigeon/internal/identity"
@@ -10,18 +9,33 @@ import (
 	"github.com/anish749/pigeon/internal/store"
 )
 
-func testService(t *testing.T) (*identity.Service, paths.IdentityDir) {
+// testWriterAndReader returns a Writer and a Reader both scoped to the same
+// single identity directory. Writer tests need a read path to assert what
+// was persisted; since per-source reads are just "the Reader over a single
+// dir", we use it here.
+func testWriterAndReader(t *testing.T) (*identity.Writer, *identity.Reader, paths.IdentityDir) {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.Identity("test")
-	return identity.NewService(s, dir), dir
+	dir := root.Platform("test").AccountFromSlug("acct").Identity()
+	w := identity.NewWriter(s, dir)
+	r := identity.NewReaderForDirs(s, []paths.IdentityDir{dir})
+	return w, r, dir
+}
+
+func readAll(t *testing.T, r *identity.Reader) []identity.Person {
+	t.Helper()
+	people, err := r.People()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return people
 }
 
 func TestObserve_NewPerson(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	err := svc.Observe(identity.Signal{
+	err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
 	})
@@ -29,10 +43,7 @@ func TestObserve_NewPerson(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, err := svc.People()
-	if err != nil {
-		t.Fatal(err)
-	}
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1", len(people))
 	}
@@ -45,7 +56,7 @@ func TestObserve_NewPerson(t *testing.T) {
 }
 
 func TestObserveBatch_SlackUsers(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
 	signals := []identity.Signal{
 		{
@@ -59,11 +70,11 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 			Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob.jones"},
 		},
 	}
-	if err := svc.ObserveBatch(signals); err != nil {
+	if err := w.ObserveBatch(signals); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 2 {
 		t.Fatalf("got %d people, want 2", len(people))
 	}
@@ -76,10 +87,10 @@ func TestObserveBatch_SlackUsers(t *testing.T) {
 }
 
 func TestMerge_EmailMatch(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
 	// First: email-only person from Gmail.
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice S",
 	}); err != nil {
@@ -87,7 +98,7 @@ func TestMerge_EmailMatch(t *testing.T) {
 	}
 
 	// Second: Slack signal with the same email → should merge.
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice Smith",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice Smith"},
@@ -95,7 +106,7 @@ func TestMerge_EmailMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1 (should have merged)", len(people))
 	}
@@ -108,10 +119,10 @@ func TestMerge_EmailMatch(t *testing.T) {
 }
 
 func TestMerge_SlackIDMatch(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
 	// First: Slack-only signal.
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Name:  "Bob",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "bob"},
 	}); err != nil {
@@ -119,7 +130,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 	}
 
 	// Second: signal with email + same Slack ID → merge.
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "bob@company.com",
 		Name:  "Bob Jones",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U05BCDEFG", DisplayName: "Bob Jones"},
@@ -127,7 +138,7 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1", len(people))
 	}
@@ -140,16 +151,16 @@ func TestMerge_SlackIDMatch(t *testing.T) {
 }
 
 func TestMerge_PhoneMatch(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
+	if err := w.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave Wilson"}); err != nil {
+	if err := w.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave Wilson"}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1", len(people))
 	}
@@ -162,41 +173,41 @@ func TestMerge_PhoneMatch(t *testing.T) {
 }
 
 func TestMerge_NoMatchCreatesNew(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
+	if err := w.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
+	if err := w.Observe(identity.Signal{Phone: "+15559876543", Name: "Dave"}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 2 {
 		t.Fatalf("got %d people, want 2 (no common identifier)", len(people))
 	}
 }
 
 func TestMerge_DuplicateEmailNotAppended(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
+	if err := w.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice Smith"}); err != nil {
+	if err := w.Observe(identity.Signal{Email: "alice@company.com", Name: "Alice Smith"}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people[0].Email) != 1 {
 		t.Errorf("email count = %d, want 1 (should not duplicate)", len(people[0].Email))
 	}
 }
 
 func TestMerge_MultipleEmails(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "alice@company.com",
 		Name:  "Alice",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
@@ -205,14 +216,14 @@ func TestMerge_MultipleEmails(t *testing.T) {
 	}
 
 	// Different email, same Slack ID → merge, add second email.
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "alice.personal@gmail.com",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1", len(people))
 	}
@@ -222,9 +233,9 @@ func TestMerge_MultipleEmails(t *testing.T) {
 }
 
 func TestMerge_MultiWorkspace(t *testing.T) {
-	svc, _ := testService(t)
+	w, r, _ := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "carol@company.com",
 		Name:  "Carol Davis",
 		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U06CDEFGH", DisplayName: "Carol Davis"},
@@ -232,14 +243,14 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.Observe(identity.Signal{
+	if err := w.Observe(identity.Signal{
 		Email: "carol@company.com",
 		Slack: &identity.SlackIdentity{Workspace: "vendor-ws", ID: "U09XYZABC", DisplayName: "Carol (Acme)"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	people, _ := svc.People()
+	people := readAll(t, r)
 	if len(people) != 1 {
 		t.Fatalf("got %d people, want 1", len(people))
 	}
@@ -254,20 +265,20 @@ func TestMerge_MultiWorkspace(t *testing.T) {
 func TestPersistence_RoundTrip(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	dir := root.Identity("test")
+	dir := root.Platform("test").AccountFromSlug("acct").Identity()
 
-	// Write with one service instance.
-	svc1 := identity.NewService(s, dir)
-	if err := svc1.ObserveBatch([]identity.Signal{
+	// Write with one writer instance.
+	w1 := identity.NewWriter(s, dir)
+	if err := w1.ObserveBatch([]identity.Signal{
 		{Email: "alice@company.com", Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"}},
 		{Phone: "+15559876543", Name: "Dave"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Read with a fresh service instance (proves it went through disk).
-	svc2 := identity.NewService(s, dir)
-	people, err := svc2.People()
+	// Read with a fresh reader (proves it went through disk).
+	r := identity.NewReaderForDirs(s, []paths.IdentityDir{dir})
+	people, err := r.People()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,9 +296,9 @@ func TestPersistence_RoundTrip(t *testing.T) {
 func TestLoadPeople_MissingFile(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	svc := identity.NewService(s, root.Identity("nonexistent"))
+	r := identity.NewReaderForDirs(s, []paths.IdentityDir{root.Platform("nonexistent").AccountFromSlug("acct").Identity()})
 
-	people, err := svc.People()
+	people, err := r.People()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,140 +308,60 @@ func TestLoadPeople_MissingFile(t *testing.T) {
 }
 
 func TestObserveBatch_Empty(t *testing.T) {
-	svc, _ := testService(t)
-	if err := svc.ObserveBatch(nil); err != nil {
+	w, _, _ := testWriterAndReader(t)
+	if err := w.ObserveBatch(nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestAtomicWrite_TempFileCleanup(t *testing.T) {
-	svc, dir := testService(t)
+	w, _, dir := testWriterAndReader(t)
 
-	if err := svc.Observe(identity.Signal{Email: "test@example.com", Name: "Test"}); err != nil {
+	if err := w.Observe(identity.Signal{Email: "test@example.com", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
 
 	path := dir.PeopleFile()
 
 	// The .tmp file should not exist after a successful write.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(string(path) + ".tmp"); !os.IsNotExist(err) {
 		t.Error("temp file should not exist after successful write")
 	}
 
 	// The actual file should exist.
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(string(path)); err != nil {
 		t.Errorf("people file should exist: %v", err)
 	}
 }
 
-func TestSearchCandidates(t *testing.T) {
-	cases := []struct {
-		name        string
-		signals     []identity.Signal
-		query       string
-		wantLen     int
-		wantName    string   // when len(got)==1, expected Person.Name
-		wantSlackID string   // when len(got)==1, expected Slack["w"].ID
-		wantNames   []string // when non-nil, expected Person.Name set (order-independent)
-	}{
-		{
-			name: "slack ID exact",
-			signals: []identity.Signal{
-				{Name: "Alice", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U111", DisplayName: "alice"}},
-				{Name: "Bob", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U222", DisplayName: "bob"}},
-			},
-			query:       "U111",
-			wantLen:     1,
-			wantName:    "Alice",
-			wantSlackID: "U111",
-		},
-		{
-			name: "email exact",
-			signals: []identity.Signal{
-				{Name: "Alice", Email: "alice@company.com"},
-				{Name: "Bob", Email: "bob@company.com"},
-			},
-			query:    "Alice@Company.Com",
-			wantLen:  1,
-			wantName: "Alice",
-		},
-		{
-			name: "name substring single match",
-			signals: []identity.Signal{
-				{Name: "Alice Smith", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U1", DisplayName: "asmith"}},
-				{Name: "Bob Jones", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U2", DisplayName: "bjones"}},
-			},
-			query:    "smith",
-			wantLen:  1,
-			wantName: "Alice Smith",
-		},
-		{
-			name: "name substring ambiguous",
-			signals: []identity.Signal{
-				{Name: "Alex One", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U1", DisplayName: "Alex"}},
-				{Name: "Alex Two", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U2", DisplayName: "Alex"}},
-			},
-			query:     "Alex",
-			wantLen:   2,
-			wantNames: []string{"Alex One", "Alex Two"},
-		},
-		{
-			name: "ID precedence over shared name substring",
-			signals: []identity.Signal{
-				{Name: "Pat", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U99", DisplayName: "Pat"}},
-				{Name: "Pat Lee", Slack: &identity.SlackIdentity{Workspace: "w", ID: "U88", DisplayName: "Pat"}},
-			},
-			query:       "U99",
-			wantLen:     1,
-			wantName:    "Pat",
-			wantSlackID: "U99",
-		},
-		{
-			name: "empty query",
-			signals: []identity.Signal{
-				{Name: "X", Email: "x@y.z"},
-			},
-			query:   "   ",
-			wantLen: 0,
-		},
+func TestLookupBySlackID(t *testing.T) {
+	w, _, _ := testWriterAndReader(t)
+
+	if err := w.Observe(identity.Signal{
+		Name:  "Alice",
+		Email: "alice@company.com",
+		Slack: &identity.SlackIdentity{Workspace: "acme", ID: "U04ABCDEF", DisplayName: "Alice"},
+	}); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc, _ := testService(t)
-			if err := svc.ObserveBatch(tc.signals); err != nil {
-				t.Fatal(err)
-			}
+	got, err := w.LookupBySlackID("acme", "U04ABCDEF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected person, got nil")
+	}
+	if got.Name != "Alice" {
+		t.Errorf("name = %q, want Alice", got.Name)
+	}
 
-			got, err := svc.SearchCandidates(tc.query)
-			if err != nil {
-				t.Fatalf("SearchCandidates: %v", err)
-			}
-			if len(got) != tc.wantLen {
-				t.Fatalf("len(got) = %d, want %d (got %#v)", len(got), tc.wantLen, got)
-			}
-			if tc.wantNames != nil {
-				names := make([]string, len(got))
-				for i := range got {
-					names[i] = got[i].Name
-				}
-				slices.Sort(names)
-				want := slices.Clone(tc.wantNames)
-				slices.Sort(want)
-				if !slices.Equal(names, want) {
-					t.Fatalf("names = %v, want %v", names, want)
-				}
-			}
-			if tc.wantLen == 1 {
-				if tc.wantName != "" && got[0].Name != tc.wantName {
-					t.Errorf("Name = %q, want %q", got[0].Name, tc.wantName)
-				}
-				if tc.wantSlackID != "" {
-					if got[0].Slack["w"].ID != tc.wantSlackID {
-						t.Errorf("Slack[w].ID = %q, want %q", got[0].Slack["w"].ID, tc.wantSlackID)
-					}
-				}
-			}
-		})
+	miss, err := w.LookupBySlackID("acme", "UNONEXISTENT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if miss != nil {
+		t.Errorf("expected nil for missing ID, got %+v", miss)
 	}
 }
+

@@ -29,15 +29,20 @@ const ConvMetaFilename = ".meta.json"
 // FileExt is the file extension for all message data files.
 const FileExt = ".jsonl"
 
-// IdentitySubdir is the top-level directory under the data root for identity files.
+// IdentitySubdir is the subdirectory name for identity files within an account directory.
 const IdentitySubdir = "identity"
 
-// PeopleFilename is the filename for the per-context identity JSONL file.
+// PeopleFilename is the filename for the per-account identity JSONL file.
 const PeopleFilename = "people.jsonl"
+
+// PeopleFileGlob is the rg --glob pattern that matches all people.jsonl
+// identity files under a data root.
+const PeopleFileGlob = "**/" + IdentitySubdir + "/" + PeopleFilename
 
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
+//	                                    ↘ IdentityDir
 //
 // Each level carries accumulated path segments and exposes Path() string.
 // Slugification lives in the account package; paths only accepts slugs or Account objects.
@@ -59,11 +64,6 @@ func (r DataRoot) Path() string { return r.base }
 // Platform returns a PlatformDir for the given platform.
 func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
-}
-
-// Identity returns an IdentityDir for the given context name.
-func (r DataRoot) Identity(context string) IdentityDir {
-	return IdentityDir{root: r, context: context}
 }
 
 // AccountFor returns an AccountDir from an account.Account.
@@ -102,6 +102,13 @@ func (a AccountDir) Path() string {
 // Conversation returns a ConversationDir for the given conversation name.
 func (a AccountDir) Conversation(name string) ConversationDir {
 	return ConversationDir{account: a, name: name}
+}
+
+// Identity returns the IdentityDir for this account:
+//
+//	<base>/<platform>/<account-slug>/identity/
+func (a AccountDir) Identity() IdentityDir {
+	return IdentityDir{account: a}
 }
 
 // SyncCursorsPath returns the path to the sync cursors file for this account.
@@ -179,18 +186,22 @@ func (c ConversationDir) ThreadFile(threadTS string) ThreadFile {
 	return ThreadFile(filepath.Join(c.Path(), ThreadsSubdir, threadTS+FileExt))
 }
 
-// IdentityDir represents the identity directory for a context: <base>/identity/<context>/
+// PeopleFile is the absolute path to a people.jsonl identity file.
+type PeopleFile string
+
+// IdentityDir represents the identity directory for an account:
+//
+//	<base>/<platform>/<account-slug>/identity/
 type IdentityDir struct {
-	root    DataRoot
-	context string
+	account AccountDir
 }
 
 // Path returns the identity directory path.
 func (i IdentityDir) Path() string {
-	return filepath.Join(i.root.base, IdentitySubdir, i.context)
+	return filepath.Join(i.account.Path(), IdentitySubdir)
 }
 
-// PeopleFile returns the path to the people.jsonl file for this context.
-func (i IdentityDir) PeopleFile() string {
-	return filepath.Join(i.Path(), PeopleFilename)
+// PeopleFile returns the path to the people.jsonl file for this account.
+func (i IdentityDir) PeopleFile() PeopleFile {
+	return PeopleFile(filepath.Join(i.Path(), PeopleFilename))
 }

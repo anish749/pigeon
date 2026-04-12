@@ -28,19 +28,19 @@ func TestAllowedSubType(t *testing.T) {
 	}
 }
 
-func testIdentityService(t *testing.T, workspace string, signals []identity.Signal) *identity.Service {
+func testIdentityWriter(t *testing.T, workspace string, signals []identity.Signal) *identity.Writer {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	svc := identity.NewService(s, root.Identity("test"))
-	if err := svc.ObserveBatch(signals); err != nil {
+	w := identity.NewWriter(s, root.Platform("slack").AccountFromSlug(workspace).Identity())
+	if err := w.ObserveBatch(signals); err != nil {
 		t.Fatal(err)
 	}
-	return svc
+	return w
 }
 
 func TestSenderName(t *testing.T) {
-	id := testIdentityService(t, "test-ws", []identity.Signal{
+	writer := testIdentityWriter(t, "test-ws", []identity.Signal{
 		{
 			Name: "alice",
 			Slack: &identity.SlackIdentity{
@@ -55,7 +55,7 @@ func TestSenderName(t *testing.T) {
 		},
 	})
 	r := &Resolver{
-		identity:  id,
+		writer:    writer,
 		workspace: "test-ws",
 		channels:  make(map[string]string),
 		dmUsers:   make(map[string]string),

@@ -9,6 +9,13 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
+// GlobFiles returns absolute paths to files under dir matching the given glob
+// patterns, sorted by modification time (most recent first).
+// Returns nil (not an error) when no files match.
+func GlobFiles(dir string, globs []string) ([]string, error) {
+	return rgFiles(dir, globs)
+}
+
 // Glob returns absolute paths to data files under dir, sorted by modification
 // time (most recent first).
 //

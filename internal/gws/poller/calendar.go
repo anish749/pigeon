@@ -17,7 +17,7 @@ import (
 // PollCalendar runs the calendar sync cycle: seed, incremental sync, and
 // window expansion for recurring events. Returns the number of changes
 // observed (events + recurring events changed) plus any error.
-func PollCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id *identity.Service) (int, error) {
+func PollCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
 	const calID = "primary"
 
 	if cursors.Calendar == nil {
@@ -56,7 +56,7 @@ func PollCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWS
 // BackfillDays ago onward, expands recurring events within ±BackfillDays,
 // and writes everything to disk. Returns the number of seeded events
 // (one-off + instances) plus any error.
-func seedCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, calID string, id *identity.Service) (int, error) {
+func seedCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, calID string, id identity.Observer) (int, error) {
 	slog.Info("seeding calendar", "calendar", calID)
 
 	result, err := calendar.SeedSyncToken(calID)
@@ -97,7 +97,7 @@ func seedCalendar(s *store.FSStore, account paths.AccountDir, cursors *store.GWS
 // syncCalendar performs an incremental sync: fetches changes since the last
 // sync token, writes events to disk, and re-expands any changed recurring parents.
 // Returns the number of changed events (one-off + recurring parents) plus any error.
-func syncCalendar(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string, id *identity.Service) (int, error) {
+func syncCalendar(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string, id identity.Observer) (int, error) {
 	result, err := calendar.ListEvents(calID, cur.SyncToken)
 	if err != nil {
 		return 0, fmt.Errorf("poll calendar %s: %w", calID, err)
@@ -136,7 +136,7 @@ func syncCalendar(s *store.FSStore, account paths.AccountDir, cur *store.GWSCale
 
 // maybeExpandWindow checks if the expansion window needs extending and, if so,
 // fetches new instances for all known recurring events.
-func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string, id *identity.Service) error {
+func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GWSCalendarCursor, calID string, id identity.Observer) error {
 	if cur.ExpandedUntil == "" || len(cur.RecurringEvents) == 0 {
 		return nil
 	}
@@ -174,7 +174,7 @@ func maybeExpandWindow(s *store.FSStore, account paths.AccountDir, cur *store.GW
 
 // writeEvents appends events to their date-partitioned JSONL files and
 // pushes identity signals from event attendees.
-func writeEvents(s *store.FSStore, account paths.AccountDir, calID string, events []*modelv1.CalendarEvent, id *identity.Service) []error {
+func writeEvents(s *store.FSStore, account paths.AccountDir, calID string, events []*modelv1.CalendarEvent, id identity.Observer) []error {
 	var errs []error
 	var signals []identity.Signal
 	for _, ev := range events {

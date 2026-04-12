@@ -1,6 +1,11 @@
 package identity
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+)
 
 func TestMatchesEmail_Exact(t *testing.T) {
 	p := Person{Email: []string{"alice@company.com"}}
@@ -357,6 +362,179 @@ func TestNewPerson_AllFields(t *testing.T) {
 	}
 }
 
+func TestFindPersonMatch(t *testing.T) {
+	cases := []struct {
+		name    string
+		people  []Person
+		q       Person
+		wantIdx int
+	}{
+		{
+			name:    "by email",
+			people:  []Person{{Name: "Alice", Email: []string{"alice@company.com"}}, {Name: "Bob", Email: []string{"bob@company.com"}}},
+			q:       Person{Email: []string{"bob@company.com"}},
+			wantIdx: 1,
+		},
+		{
+			// matchesEmail is used (not hasExactEmail), so Gmail dot-normalization applies.
+			name:    "by email normalized",
+			people:  []Person{{Name: "Alice", Email: []string{"alice@gmail.com"}}},
+			q:       Person{Email: []string{"a.l.i.c.e@gmail.com"}},
+			wantIdx: 0,
+		},
+		{
+			name:    "by slack ID",
+			people:  []Person{{Name: "Alice", Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}, {Name: "Bob", Slack: map[string]PersonSlack{"acme": {ID: "U04BBBBB"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}},
+			wantIdx: 0,
+		},
+		{
+			// q has the same ID in a different workspace name — should still match by ID.
+			name:    "by slack ID any workspace",
+			people:  []Person{{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"other": {ID: "U04AAAA"}}},
+			wantIdx: 0,
+		},
+		{
+			name:    "skips empty slack ID",
+			people:  []Person{{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}}},
+			q:       Person{Slack: map[string]PersonSlack{"acme": {ID: ""}}},
+			wantIdx: -1,
+		},
+		{
+			name:    "by phone",
+			people:  []Person{{Name: "Alice", WhatsApp: []string{"+15551234567"}}},
+			q:       Person{WhatsApp: []string{"+15551234567"}},
+			wantIdx: 0,
+		},
+		{
+			name:    "no match",
+			people:  []Person{{Email: []string{"alice@company.com"}}},
+			q:       Person{Email: []string{"nobody@example.com"}},
+			wantIdx: -1,
+		},
+		{
+			name:    "empty people",
+			people:  nil,
+			q:       Person{Email: []string{"alice@company.com"}},
+			wantIdx: -1,
+		},
+		{
+			name:    "empty query",
+			people:  []Person{{Email: []string{"alice@company.com"}}},
+			q:       Person{},
+			wantIdx: -1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := findPersonMatch(tc.people, tc.q); got != tc.wantIdx {
+				t.Errorf("findPersonMatch = %d, want %d", got, tc.wantIdx)
+			}
+		})
+	}
+}
+
+func TestMergePerson(t *testing.T) {
+	cases := []struct {
+		name string
+		dst  Person
+		src  Person
+		want Person
+	}{
+		{
+			name: "name: src newer wins",
+			dst:  Person{Name: "alice", Seen: "2026-01-01"},
+			src:  Person{Name: "Alice Smith", Seen: "2026-04-11"},
+			want: Person{Name: "Alice Smith", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: dst kept when src older",
+			dst:  Person{Name: "Alice Smith", Seen: "2026-04-11"},
+			src:  Person{Name: "alice", Seen: "2026-01-01"},
+			want: Person{Name: "Alice Smith", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: src fills empty dst",
+			dst:  Person{Name: "", Seen: "2026-04-11"},
+			src:  Person{Name: "Alice", Seen: "2026-01-01"},
+			want: Person{Name: "Alice", Seen: "2026-04-11"},
+		},
+		{
+			name: "name: empty src does not clear",
+			dst:  Person{Name: "Alice", Seen: "2026-01-01"},
+			src:  Person{Name: "", Seen: "2026-04-11"},
+			want: Person{Name: "Alice", Seen: "2026-04-11"},
+		},
+		{
+			name: "email: union of distinct addresses",
+			dst:  Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"},
+			src:  Person{Email: []string{"alice@personal.com"}, Seen: "2026-04-11"},
+			want: Person{Email: []string{"alice@company.com", "alice@personal.com"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "email: case-insensitive dedup",
+			dst:  Person{Email: []string{"alice@company.com"}, Seen: "2026-01-01"},
+			src:  Person{Email: []string{"Alice@Company.com"}, Seen: "2026-04-11"},
+			want: Person{Email: []string{"alice@company.com"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: new workspace added",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}}, Seen: "2026-01-01"},
+			src:  Person{Slack: map[string]PersonSlack{"vendor": {ID: "U09BBBBB"}}, Seen: "2026-04-11"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA"}, "vendor": {ID: "U09BBBBB"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: src newer wins for existing workspace",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "old"}}, Seen: "2026-01-01"},
+			src:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "new"}}, Seen: "2026-04-11"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "new"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "slack: dst kept when src older",
+			dst:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "current"}}, Seen: "2026-04-11"},
+			src:  Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "stale"}}, Seen: "2026-01-01"},
+			want: Person{Slack: map[string]PersonSlack{"acme": {ID: "U04AAAA", DisplayName: "current"}}, Seen: "2026-04-11"},
+		},
+		{
+			name: "phone: union of distinct numbers",
+			dst:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"},
+			src:  Person{WhatsApp: []string{"+15559876543"}, Seen: "2026-04-11"},
+			want: Person{WhatsApp: []string{"+15551234567", "+15559876543"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "phone: dedup",
+			dst:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-01-01"},
+			src:  Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-04-11"},
+			want: Person{WhatsApp: []string{"+15551234567"}, Seen: "2026-04-11"},
+		},
+		{
+			name: "seen: takes max",
+			dst:  Person{Seen: "2026-01-01"},
+			src:  Person{Seen: "2026-04-11"},
+			want: Person{Seen: "2026-04-11"},
+		},
+		{
+			name: "seen: does not regress",
+			dst:  Person{Seen: "2026-04-11"},
+			src:  Person{Seen: "2026-01-01"},
+			want: Person{Seen: "2026-04-11"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dstBefore := tc.dst // snapshot before call
+			got := mergePerson(tc.dst, tc.src)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mergePerson mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(dstBefore, tc.dst); diff != "" {
+				t.Errorf("dst was mutated (-before +after):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestNewPerson_MinimalSignal(t *testing.T) {
 	p := newPerson(Signal{Email: "bob@company.com", Name: "Bob"}, "2026-04-11")
 	if p.Slack != nil {
@@ -364,5 +542,105 @@ func TestNewPerson_MinimalSignal(t *testing.T) {
 	}
 	if p.WhatsApp != nil {
 		t.Error("whatsapp should be nil for email-only signal")
+	}
+}
+
+func TestSearchCandidates(t *testing.T) {
+	cases := []struct {
+		name        string
+		people      []Person
+		query       string
+		wantLen     int
+		wantName    string   // when len(got)==1, expected Person.Name
+		wantSlackID string   // when len(got)==1, expected Slack["w"].ID
+		wantNames   []string // when non-nil, expected Person.Name set (order-independent)
+	}{
+		{
+			name: "slack ID exact",
+			people: []Person{
+				{Name: "Alice", Slack: map[string]PersonSlack{"w": {ID: "U111", DisplayName: "alice"}}},
+				{Name: "Bob", Slack: map[string]PersonSlack{"w": {ID: "U222", DisplayName: "bob"}}},
+			},
+			query:       "U111",
+			wantLen:     1,
+			wantName:    "Alice",
+			wantSlackID: "U111",
+		},
+		{
+			name: "email exact",
+			people: []Person{
+				{Name: "Alice", Email: []string{"alice@company.com"}},
+				{Name: "Bob", Email: []string{"bob@company.com"}},
+			},
+			query:    "Alice@Company.Com",
+			wantLen:  1,
+			wantName: "Alice",
+		},
+		{
+			name: "name substring single match",
+			people: []Person{
+				{Name: "Alice Smith", Slack: map[string]PersonSlack{"w": {ID: "U1", DisplayName: "asmith"}}},
+				{Name: "Bob Jones", Slack: map[string]PersonSlack{"w": {ID: "U2", DisplayName: "bjones"}}},
+			},
+			query:    "smith",
+			wantLen:  1,
+			wantName: "Alice Smith",
+		},
+		{
+			name: "name substring ambiguous",
+			people: []Person{
+				{Name: "Alex One", Slack: map[string]PersonSlack{"w": {ID: "U1", DisplayName: "Alex"}}},
+				{Name: "Alex Two", Slack: map[string]PersonSlack{"w": {ID: "U2", DisplayName: "Alex"}}},
+			},
+			query:     "Alex",
+			wantLen:   2,
+			wantNames: []string{"Alex One", "Alex Two"},
+		},
+		{
+			name: "ID precedence over shared name substring",
+			people: []Person{
+				{Name: "Pat", Slack: map[string]PersonSlack{"w": {ID: "U99", DisplayName: "Pat"}}},
+				{Name: "Pat Lee", Slack: map[string]PersonSlack{"w": {ID: "U88", DisplayName: "Pat"}}},
+			},
+			query:       "U99",
+			wantLen:     1,
+			wantName:    "Pat",
+			wantSlackID: "U99",
+		},
+		{
+			name:    "empty query",
+			people:  []Person{{Name: "X", Email: []string{"x@y.z"}}},
+			query:   "   ",
+			wantLen: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := searchCandidates(tc.people, tc.query)
+			if len(got) != tc.wantLen {
+				t.Fatalf("len(got) = %d, want %d (got %#v)", len(got), tc.wantLen, got)
+			}
+			if tc.wantNames != nil {
+				names := make([]string, len(got))
+				for i := range got {
+					names[i] = got[i].Name
+				}
+				slices.Sort(names)
+				want := slices.Clone(tc.wantNames)
+				slices.Sort(want)
+				if !slices.Equal(names, want) {
+					t.Fatalf("names = %v, want %v", names, want)
+				}
+			}
+			if tc.wantLen == 1 {
+				if tc.wantName != "" && got[0].Name != tc.wantName {
+					t.Errorf("Name = %q, want %q", got[0].Name, tc.wantName)
+				}
+				if tc.wantSlackID != "" && got[0].Slack["w"].ID != tc.wantSlackID {
+					t.Errorf("Slack[w].ID = %q, want %q", got[0].Slack["w"].ID, tc.wantSlackID)
+				}
+			}
+		})
 	}
 }

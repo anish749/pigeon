@@ -1,0 +1,107 @@
+package identity
+
+import (
+	"fmt"
+
+	"github.com/anish749/pigeon/internal/paths"
+)
+
+// Reader merges per-source identity files into a unified view at read time.
+// Stateless between calls: each read loads the configured per-source files
+// fresh, merges them in memory using stable-identifier matching, and returns
+// the merged list.
+//
+// Because each Reader call builds a fresh local slice and the underlying
+// FSStore serialises per-file reads/writes with its own mutex and atomic
+// rename, the Reader needs no mutex of its own and is safe to share across
+// goroutines.
+//
+// The Reader is never on a hot path. Slack's UserName (per-message) hits
+// the per-workspace Writer, not the Reader — a (workspace, userID) pair
+// only ever lives in one file. The Reader is for cold-path cross-source
+// name searches (LookupBySlackID, SearchCandidates, People).
+type Reader struct {
+	store Store
+	base  string              // data root path for glob discovery; empty if paths is set
+	paths []paths.PeopleFile  // if non-nil, limit to these people.jsonl paths; else discover
+}
+
+// NewReader creates a Reader that discovers all identity files under the
+// data root at each read using a glob.
+func NewReader(store Store, dataRoot paths.DataRoot) *Reader {
+	return &Reader{store: store, base: dataRoot.Path()}
+}
+
+// NewReaderForDirs creates a Reader that only merges the given identity
+// dirs. Used for context-scoped lookups.
+func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
+	pp := make([]paths.PeopleFile, len(dirs))
+	for i, d := range dirs {
+		pp[i] = d.PeopleFile()
+	}
+	return &Reader{store: store, paths: pp}
+}
+
+// load reads all configured identity files and merges them into a single
+// deduplicated list of Persons.
+func (r *Reader) load() ([]Person, error) {
+	pp := r.paths
+	if pp == nil {
+		found, err := globPeopleFiles(r.base)
+		if err != nil {
+			return nil, fmt.Errorf("discover identity files: %w", err)
+		}
+		pp = found
+	}
+
+	var merged []Person
+	for _, path := range pp {
+		people, err := r.store.LoadPeople(path)
+		if err != nil {
+			return nil, fmt.Errorf("load %s: %w", path, err)
+		}
+		for _, p := range people {
+			idx := findPersonMatch(merged, p)
+			if idx >= 0 {
+				merged[idx] = mergePerson(merged[idx], p)
+			} else {
+				merged = append(merged, p)
+			}
+		}
+	}
+	return merged, nil
+}
+
+// LookupBySlackID returns the merged person with the given Slack user ID in
+// the given workspace, or nil if not found.
+func (r *Reader) LookupBySlackID(workspace, userID string) (*Person, error) {
+	people, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	for i := range people {
+		if ws, ok := people[i].Slack[workspace]; ok && ws.ID == userID {
+			p := people[i]
+			return &p, nil
+		}
+	}
+	return nil, nil
+}
+
+// SearchCandidates returns people matching the trimmed query. If the query
+// equals a stable identifier (Slack user ID in any workspace, WhatsApp number,
+// or email), at most one person is returned. Otherwise names are matched with
+// case-insensitive substring comparison against Person.Name and each Slack
+// display name, real name, and username.
+func (r *Reader) SearchCandidates(query string) ([]Person, error) {
+	people, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	return searchCandidates(people, query), nil
+}
+
+// People returns all known people with cross-source merging applied.
+func (r *Reader) People() ([]Person, error) {
+	return r.load()
+}

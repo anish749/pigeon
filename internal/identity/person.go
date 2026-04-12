@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -134,6 +135,30 @@ func (p *Person) merge(sig Signal, today string) {
 	}
 }
 
+// searchCandidates returns people matching the trimmed query. If the query
+// equals a stable identifier (Slack user ID, email, or phone), at most one
+// person is returned. Otherwise names are matched case-insensitively.
+func searchCandidates(people []Person, query string) []Person {
+	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
+	if q == "" {
+		return nil
+	}
+	for i := range people {
+		if people[i].matchesAnyExactID(q) {
+			p := people[i]
+			return []Person{p}
+		}
+	}
+	var out []Person
+	for i := range people {
+		if people[i].nameMatchesSubstring(q) {
+			p := people[i]
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // findMatch returns the index of the first person that matches the signal
 // by a stable identifier (email, Slack user ID, or phone). Returns -1 if
 // no match.
@@ -150,6 +175,71 @@ func findMatch(people []Person, sig Signal) int {
 		}
 	}
 	return -1
+}
+
+// findPersonMatch returns the index of the first person in `people` that
+// shares any stable identifier (email, Slack ID in any workspace, or phone)
+// with `q`. Used by the Reader to merge across per-source files.
+func findPersonMatch(people []Person, q Person) int {
+	for i := range people {
+		for _, e := range q.Email {
+			if people[i].matchesEmail(e) {
+				return i
+			}
+		}
+		for _, s := range q.Slack {
+			if s.ID != "" && people[i].matchesSlackID(s.ID) {
+				return i
+			}
+		}
+		for _, p := range q.WhatsApp {
+			if people[i].matchesPhone(p) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// mergePerson folds src into dst and returns the result. Union of all
+// identifiers; on conflicting fields (name, same-workspace Slack entry),
+// the more recently-seen record wins.
+func mergePerson(dst, src Person) Person {
+	srcNewer := src.Seen > dst.Seen
+	dst.Slack = maps.Clone(dst.Slack)
+
+	if src.Name != "" && (dst.Name == "" || srcNewer) {
+		dst.Name = src.Name
+	}
+
+	for _, e := range src.Email {
+		if !dst.hasExactEmail(e) {
+			dst.Email = append(dst.Email, e)
+		}
+	}
+
+	if src.Slack != nil {
+		if dst.Slack == nil {
+			dst.Slack = make(map[string]PersonSlack)
+		}
+		for ws, s := range src.Slack {
+			if _, exists := dst.Slack[ws]; !exists || srcNewer {
+				dst.Slack[ws] = s
+			}
+		}
+	}
+
+	for _, p := range src.WhatsApp {
+		if !dst.matchesPhone(p) {
+			dst.WhatsApp = append(dst.WhatsApp, p)
+		}
+	}
+
+	if src.Seen > dst.Seen {
+		dst.Seen = src.Seen
+	}
+
+	return dst
 }
 
 // newPerson creates a new Person from a signal.

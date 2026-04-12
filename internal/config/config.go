@@ -14,6 +14,22 @@ type Config struct {
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
 	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+
+	// Contexts define named account groupings. When a context is active,
+	// identity resolution and reads are scoped to that context's accounts.
+	// When no context is set, all accounts are visible and identity is
+	// merged across every known source.
+	Contexts       map[string]ContextConfig `yaml:"contexts,omitempty"`
+	DefaultContext string                   `yaml:"default_context,omitempty"`
+}
+
+// ContextConfig lists the accounts that belong to a named context. Each
+// field holds account slugs (the same slug used in storage paths:
+// workspace slug for Slack, email slug for GWS, account slug for WhatsApp).
+type ContextConfig struct {
+	Slack    []string `yaml:"slack,omitempty"`
+	GWS      []string `yaml:"gws,omitempty"`
+	WhatsApp []string `yaml:"whatsapp,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.

@@ -13,6 +13,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -24,7 +25,8 @@ type SlackManager struct {
 	onMessage  hub.MessageNotifyFunc
 	onReaction hub.ReactionNotifyFunc
 	store      store.Store
-	identity   *identity.Service
+	idStore    identity.Store
+	dataRoot   paths.DataRoot
 	running    map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -36,13 +38,17 @@ type runningWorkspace struct {
 // given API server. onMessage is called when a routable message arrives
 // (DMs, MPDMs, private channels, bot mentions). onReaction is called when
 // a reaction or unreaction event arrives. Either may be nil.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *SlackManager {
+//
+// Each workspace gets its own identity.Writer scoped to
+// slack/<workspace>/identity/people.jsonl.
+func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *SlackManager {
 	return &SlackManager{
 		apiServer:  apiServer,
 		onMessage:  onMessage,
 		onReaction: onReaction,
 		store:      s,
-		identity:   id,
+		idStore:    idStore,
+		dataRoot:   dataRoot,
 		running:    make(map[string]*runningWorkspace),
 	}
 }
@@ -102,7 +108,8 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, m.identity)
+	writer := identity.NewWriter(m.idStore, m.dataRoot.Platform("slack").AccountFromSlug(sl.Workspace).Identity())
+	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer)
 	if sender == nil {
 		cancel()
 		return
@@ -114,14 +121,14 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 
 // startSlackListener creates an independent Socket Mode connection, resolver,
 // listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, id *identity.Service) *api.SlackSender {
+func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer) *api.SlackSender {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
 	userAPI := goslack.New(sl.UserToken)
-	resolver := slacklistener.NewResolver(userAPI, id, sl.Workspace)
+	resolver := slacklistener.NewResolver(userAPI, writer, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)

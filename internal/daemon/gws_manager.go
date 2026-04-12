@@ -18,7 +18,8 @@ const gwsPollInterval = 20 * time.Second
 // GWSManager owns the lifecycle of GWS pollers.
 type GWSManager struct {
 	store    *store.FSStore
-	identity *identity.Service
+	idStore  identity.Store
+	dataRoot paths.DataRoot
 	running  map[string]*runningGWSAccount // email → account
 }
 
@@ -29,10 +30,14 @@ type runningGWSAccount struct {
 // NewGWSManager creates a new GWSManager. The store is shared with the rest
 // of the daemon so that GWS persistence uses the same per-file locks and
 // filesystem layout as messaging.
-func NewGWSManager(s *store.FSStore, id *identity.Service) *GWSManager {
+//
+// Each GWS account gets its own identity.Writer scoped to
+// gws/<email-slug>/identity/people.jsonl.
+func NewGWSManager(s *store.FSStore, idStore identity.Store, dataRoot paths.DataRoot) *GWSManager {
 	return &GWSManager{
 		store:    s,
-		identity: id,
+		idStore:  idStore,
+		dataRoot: dataRoot,
 		running:  make(map[string]*runningGWSAccount),
 	}
 }
@@ -75,12 +80,14 @@ func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) 
 }
 
 func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
-	acctDir := paths.DefaultDataRoot().AccountFor(account.New("gws", g.Email))
+	acct := account.New("gws", g.Email)
+	acctDir := m.dataRoot.AccountFor(acct)
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 
-	p := poller.New(gwsPollInterval, acctDir, m.store, m.identity)
+	writer := identity.NewWriter(m.idStore, acctDir.Identity())
+	p := poller.New(gwsPollInterval, acctDir, m.store, writer)
 	go func() {
 		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
 		if err := p.Run(child); err != nil && child.Err() == nil {

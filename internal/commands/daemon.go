@@ -17,7 +17,6 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
-	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
@@ -134,9 +133,9 @@ func DaemonRun(version string) error {
 	dataRoot := paths.DefaultDataRoot()
 	store := store.NewFSStore(dataRoot)
 
-	// Identity service — uses "default" context until the context system is built.
-	identitySvc := identity.NewService(store, dataRoot.Identity("default"))
-
+	// Identity: per-service writers (owned by each manager, one per account)
+	// flush signals to <platform>/<account>/identity/people.jsonl. The shared
+	// reader merges all those files at read time for cross-source lookups.
 	msgHub, err := hub.New(ctx, store)
 	if err != nil {
 		return fmt.Errorf("start hub: %w", err)
@@ -146,13 +145,13 @@ func DaemonRun(version string) error {
 	ob := outbox.New()
 	apiServer := api.NewServer(msgHub, ob, store, version)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, identitySvc)
+	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, identitySvc)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, store, dataRoot)
 	go slackMgr.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(store, identitySvc)
+	gwsMgr := daemon.NewGWSManager(store, store, dataRoot)
 	go gwsMgr.Run(ctx, cfg.GWS)
 
 	linearMgr := daemon.NewLinearManager(store)

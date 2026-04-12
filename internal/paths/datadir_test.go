@@ -151,28 +151,30 @@ func TestIsThreadFile_ConversationNamedThreads(t *testing.T) {
 
 func TestIdentityDir_Path(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Identity("work").Path()
-	if got != "/tmp/test/identity/work" {
-		t.Errorf("Identity(work).Path() = %q, want /tmp/test/identity/work", got)
+	got := root.Platform("slack").AccountFromSlug("acme-corp").Identity().Path()
+	want := "/tmp/test/slack/acme-corp/identity"
+	if got != want {
+		t.Errorf("Identity().Path() = %q, want %q", got, want)
 	}
 }
 
 func TestIdentityDir_PeopleFile(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Identity("personal").PeopleFile()
-	if got != "/tmp/test/identity/personal/people.jsonl" {
-		t.Errorf("PeopleFile() = %q, want /tmp/test/identity/personal/people.jsonl", got)
+	got := root.Platform("slack").AccountFromSlug("acme-corp").Identity().PeopleFile()
+	want := PeopleFile("/tmp/test/slack/acme-corp/identity/people.jsonl")
+	if got != want {
+		t.Errorf("PeopleFile() = %q, want %q", got, want)
 	}
 }
 
 func TestIdentityDir_UsesConstants(t *testing.T) {
 	root := NewDataRoot("/data")
-	dir := root.Identity("ctx")
-	if dir.Path() != "/data/"+IdentitySubdir+"/ctx" {
-		t.Errorf("path should use IdentitySubdir constant")
+	dir := root.Platform("gws").AccountFromSlug("alice").Identity()
+	if dir.Path() != "/data/gws/alice/"+IdentitySubdir {
+		t.Errorf("path should use IdentitySubdir constant, got %q", dir.Path())
 	}
-	if dir.PeopleFile() != "/data/"+IdentitySubdir+"/ctx/"+PeopleFilename {
-		t.Errorf("people file should use PeopleFilename constant")
+	if dir.PeopleFile() != "/data/gws/alice/"+IdentitySubdir+"/"+PeopleFilename {
+		t.Errorf("people file should use PeopleFilename constant, got %q", dir.PeopleFile())
 	}
 }
 

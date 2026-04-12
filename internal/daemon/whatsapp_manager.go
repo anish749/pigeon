@@ -17,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/walog"
 )
@@ -28,7 +29,8 @@ type WhatsAppManager struct {
 	apiServer *api.Server
 	onMessage hub.MessageNotifyFunc
 	store     store.Store
-	identity  *identity.Service
+	idStore   identity.Store
+	dataRoot  paths.DataRoot
 	running   map[string]*runningWAAccount // account → state
 }
 
@@ -39,12 +41,16 @@ type runningWAAccount struct {
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
 // the given API server. onMessage is called when a message is received (may be nil).
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, id *identity.Service) *WhatsAppManager {
+//
+// Each WhatsApp account gets its own identity.Writer scoped to
+// whatsapp/<account-slug>/identity/people.jsonl.
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,
 		onMessage: onMessage,
 		store:     s,
-		identity:  id,
+		idStore:   idStore,
+		dataRoot:  dataRoot,
 		running:   make(map[string]*runningWAAccount),
 	}
 }
@@ -136,7 +142,8 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 	}
 
 	// Push identity signals from WhatsApp contacts.
-	go observeWhatsAppContacts(acctCtx, client, m.identity)
+	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("whatsapp", wa.Account)).Identity())
+	go observeWhatsAppContacts(acctCtx, client, writer)
 
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
@@ -169,7 +176,7 @@ func ConnectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsm
 
 // observeWhatsAppContacts loads contacts from the whatsmeow store and pushes
 // identity signals. Runs in a goroutine so it doesn't block listener startup.
-func observeWhatsAppContacts(ctx context.Context, client *whatsmeow.Client, id *identity.Service) {
+func observeWhatsAppContacts(ctx context.Context, client *whatsmeow.Client, id identity.Observer) {
 	contacts, err := client.Store.Contacts.GetAllContacts(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "identity: failed to load WhatsApp contacts", "error", err)

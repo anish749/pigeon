@@ -6,49 +6,78 @@ known identifiers across platforms — email addresses, Slack user IDs
 and mention names, WhatsApp phone numbers — so that a single query
 like `--from=alice` resolves to the right identifier in every source.
 
-Identity files are scoped to a context (see `read-protocol.md`). Each
-context has its own identity file. When a context is active, identity
-resolution only sees people within that context's boundary.
+Identity is stored **per source** at write time and **merged across
+sources** at read time. Each listener or poller writes to its own account's
+identity file; a read component loads the relevant files and merges them
+in memory using stable identifiers (email, Slack ID, phone).
+
+Contexts (see `read-protocol.md`) scope which accounts' files are merged.
+When a context is active, reads only see identities from that context's
+accounts. When no context is active, reads merge every known source.
 
 ## Storage Philosophy
 
+Split writes, merged reads:
+
+- **Write path**: each service owns its own `people.jsonl`. A Slack
+  listener writing about a user never touches the GWS or WhatsApp files.
+  Within a single source, signals still merge on stable identifier, so the
+  per-source file stays deduplicated.
+- **Read path**: a reader loads all the per-source files, merges them in
+  memory via the same stable-identifier matching (email, Slack ID,
+  phone), and returns a unified view.
+
 One JSONL line per person, all identifiers on that line. This means a
 single grep on any identifier — a name, an email, a Slack user ID, a
-phone number — returns the complete person in one hit. No joins, no
-cross-file references.
+phone number — returns the complete (per-source) person in one hit. No
+joins, no cross-file references for querying a single file.
 
-The identity file is small (hundreds to low thousands of lines) and
-rewritten on update, not append-only. The identity service loads it
-into memory on startup, merges new signals as they arrive, and rewrites
-the file. No maintenance or compaction needed — the file is always
-clean.
+Per-source files are small (hundreds to low thousands of lines) and
+rewritten on update, not append-only. The per-source writer loads its
+file into memory, merges new signals as they arrive, and rewrites
+atomically (temp file + rename).
 
 ## Directory Layout
 
+Identity files live as a subdirectory under each account, alongside
+conversations, service directories, and sync state:
+
 ```
 ~/.local/share/pigeon/
-├── identity/
-│   ├── work/
-│   │   └── people.jsonl              # people in the work context
-│   ├── personal/
-│   │   └── people.jsonl              # people in the personal context
-│   └── project-x/
-│       └── people.jsonl              # people in the project-x context
 ├── slack/
-│   └── ...
-├── whatsapp/
-│   └── ...
-└── gws/
-    └── ...
+│   ├── acme-corp/
+│   │   ├── #engineering/             # conversation
+│   │   ├── @alice/                   # DM
+│   │   ├── identity/
+│   │   │   └── people.jsonl          # signals from this workspace
+│   │   └── .sync-cursors.yaml
+│   └── vendor-ws/
+│       ├── #general/
+│       └── identity/
+│           └── people.jsonl
+├── gws/
+│   └── user-at-company-com/
+│       ├── gmail/
+│       ├── gcalendar/
+│       ├── gdrive/
+│       └── identity/
+│           └── people.jsonl          # signals from Gmail/Calendar/Drive
+└── whatsapp/
+    └── 15551234567/
+        ├── +15559876543_Alice/
+        └── identity/
+            └── people.jsonl          # signals from the WhatsApp contact book
 ```
 
-Each context directory under `identity/` corresponds to a named context
-in `config.yaml`. The identity file is created when the first person is
-discovered within that context.
+The path is `<base>/<platform>/<account-slug>/identity/people.jsonl`.
+Identity is a sibling of conversations and service directories — the
+account already owns its data, and identity is another kind of data the
+account produces. Files are created on first write.
 
-When no context is active, identity resolution is unavailable — there
-is no global identity file. This is intentional: identity is scoped to
-a workspace boundary.
+When no context is active, **all** identity files are merged — the reader
+discovers every `<platform>/<account>/identity/people.jsonl` under the
+data root. When a context is active, only the accounts listed in that
+context are merged.
 
 ## Line Format
 
@@ -124,23 +153,23 @@ One line per person with all identifiers means every grep — forward or
 reverse — returns the complete identity:
 
 ```bash
-# Forward: find all of alice's identifiers
-rg "alice" identity/work/people.jsonl
+# Forward: find all of alice's identifiers in a Slack workspace
+rg "alice" slack/acme-corp/identity/people.jsonl
 
 # Reverse: who is Slack user U04ABCDEF?
-rg "U04ABCDEF" identity/work/people.jsonl
+rg "U04ABCDEF" slack/acme-corp/identity/people.jsonl
 
-# Reverse: who has this email?
-rg "alice@company.com" identity/work/people.jsonl
+# Reverse: who has this email? (search all identity files)
+rg "alice@company.com" */*/identity/people.jsonl
 
 # Reverse: who has this phone?
-rg "15551234567" identity/work/people.jsonl
+rg "15551234567" */*/identity/people.jsonl
 
-# List everyone with a Slack identity
-rg '"slack"' identity/work/people.jsonl
+# List everyone with a Slack identity in a workspace
+rg '"slack"' slack/acme-corp/identity/people.jsonl
 
-# List everyone seen this week
-rg '"seen":"2026-04-1' identity/work/people.jsonl
+# Search across all identity files
+rg '"seen":"2026-04-1' */*/identity/people.jsonl
 ```
 
 ## Discovery
@@ -212,13 +241,20 @@ The identity service handles matching and merging internally.
 
 ## Merge Rules
 
-When a signal arrives, the identity service resolves it against the
-current identity file:
+Merging happens in two places with the same rules applied at different
+times:
+
+- **Write-time (per-source)**: when a signal arrives for a particular
+  source, the per-source writer matches it against that source's own
+  people file.
+- **Read-time (cross-source)**: when a read is requested, the reader
+  loads every relevant per-source file and merges them using the same
+  matching rules.
 
 ### Matching
 
-Signals are matched to existing people by **stable identifiers only**,
-in this order:
+Signals (or persons, at read time) are matched to existing entries by
+**stable identifiers only**, in this order:
 
 1. **Email match**: signal's email matches any email in an existing
    person's `email` array.
@@ -252,9 +288,10 @@ existing email-only person from Gmail).
 
 ### What Is Not Merged
 
-- **Cross-context merging**: never. Each context's identity file is
-  independent. The same person may exist in multiple context files
-  with different identifiers.
+- **Cross-context merging**: never. When a context is active, only that
+  context's account files are loaded. The same person may appear in
+  identity files belonging to different contexts with different
+  identifiers — they are never joined across context boundaries.
 - **Name-based merging**: never. Two people named "Alice" in different
   sources remain separate until a shared email or platform ID connects
   them.
@@ -288,7 +325,9 @@ pigeon identity list --slack
 
 When a command includes a person filter (e.g. `--from=alice`):
 
-1. **Load** the identity file for the active context.
+1. **Load** the per-account identity files for the active context's
+   accounts (or all accounts if no context is active). Merge them in
+   memory using the merge rules above.
 2. **Match** against the `name` field using case-insensitive substring
    matching. Also match against email prefixes (the part before `@`)
    and Slack mention names.
@@ -310,9 +349,9 @@ When a command includes a person filter (e.g. `--from=alice`):
 
 ## File Lifecycle
 
-1. **Creation**: the identity file is created when the first signal
-   arrives for a context. Typically this happens on Slack listener
-   startup (bulk user profile load).
+1. **Creation**: a per-account identity file is created when the first
+   signal arrives for that account. Typically this happens on Slack
+   listener startup (bulk user profile load).
 
 2. **Updates**: the identity service rewrites the file after each batch
    of signals (e.g. after processing all users from a Slack sync, not
@@ -323,9 +362,9 @@ When a command includes a person filter (e.g. `--from=alice`):
    observed. People not seen for an extended period may have left the
    organization. No automatic pruning — staleness is informational.
 
-4. **Deletion**: removing a context from config does not delete its
-   identity file. The file remains on disk and can be reused if the
-   context is recreated.
+4. **Deletion**: removing an account from config does not delete its
+   identity file. The file remains on disk alongside the account's
+   other data and can be reused if the account is re-added.
 
 ## Known Limitations
 

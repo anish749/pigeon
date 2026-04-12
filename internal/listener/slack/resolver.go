@@ -49,10 +49,13 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error)
 }
 
 // Resolver resolves Slack user and channel names. User lookups are backed
-// by the identity service; channel and membership state is cached locally.
+// by the per-workspace identity writer — both hot-path ID lookups (UserName)
+// and name-based searches (FindUserID) hit only this workspace's own file,
+// since a Slack user ID only ever lives in the workspace that discovered it.
+// Channel and membership state is cached locally.
 type Resolver struct {
 	api       *goslack.Client
-	identity  *identity.Service
+	writer    *identity.Writer
 	workspace string
 	mu        sync.RWMutex
 	channels  map[string]string // channel ID → name
@@ -60,11 +63,12 @@ type Resolver struct {
 	members   map[string]bool   // channel IDs the user has joined
 }
 
-// NewResolver creates a new Slack name resolver backed by the identity service.
-func NewResolver(api *goslack.Client, id *identity.Service, workspace string) *Resolver {
+// NewResolver creates a new Slack name resolver backed by the per-workspace
+// identity writer.
+func NewResolver(api *goslack.Client, writer *identity.Writer, workspace string) *Resolver {
 	return &Resolver{
 		api:       api,
-		identity:  id,
+		writer:    writer,
 		workspace: workspace,
 		channels:  make(map[string]string),
 		dmUsers:   make(map[string]string),
@@ -89,7 +93,7 @@ func (r *Resolver) Load(ctx context.Context) (users int, channels int, err error
 		}
 		signals = append(signals, r.createSignal(u))
 	}
-	if err := r.identity.ObserveBatch(signals); err != nil {
+	if err := r.writer.ObserveBatch(signals); err != nil {
 		return 0, 0, fmt.Errorf("observe Slack users: %w", err)
 	}
 
@@ -169,7 +173,7 @@ func (r *Resolver) RegisterConversation(ctx context.Context, ch goslack.Channel)
 // as an identity signal for future lookups.
 func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) {
 	// Check identity service first.
-	person, err := r.identity.LookupBySlackID(r.workspace, userID)
+	person, err := r.writer.LookupBySlackID(r.workspace, userID)
 	if err != nil {
 		slog.WarnContext(ctx, "identity lookup failed, falling back to API",
 			"user_id", userID, "error", err)
@@ -185,7 +189,7 @@ func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) 
 	}
 
 	sig := r.createSignal(*user)
-	if err := r.identity.Observe(sig); err != nil {
+	if err := r.writer.Observe(sig); err != nil {
 		slog.ErrorContext(ctx, "identity observe failed after API lookup",
 			"user_id", userID, "error", err)
 	}
@@ -197,7 +201,7 @@ func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) 
 // then falls back to the bot API and pushes a signal.
 func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 	// Check identity service first.
-	person, err := r.identity.LookupBySlackID(r.workspace, botID)
+	person, err := r.writer.LookupBySlackID(r.workspace, botID)
 	if err != nil {
 		slog.WarnContext(ctx, "identity lookup failed for bot, falling back to API",
 			"bot_id", botID, "error", err)
@@ -216,7 +220,7 @@ func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 	}
 
 	sig := r.createBotSignal(botID, bot)
-	if err := r.identity.Observe(sig); err != nil {
+	if err := r.writer.Observe(sig); err != nil {
 		slog.ErrorContext(ctx, "identity observe failed for bot",
 			"bot_id", botID, "error", err)
 	}
@@ -314,7 +318,7 @@ func (e *AmbiguousUserError) Error() string {
 // Accepts exact user IDs (U...), or case-insensitive substring matches on
 // display name, real name, or username. Strips leading @ if present.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
-	candidates, err := r.identity.SearchCandidates(query)
+	candidates, err := r.writer.SearchCandidates(query)
 	if err != nil {
 		return "", "", fmt.Errorf("search identity: %w", err)
 	}
