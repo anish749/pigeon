@@ -16,3 +16,7 @@ type Resolver interface {
 	SearchCandidates(query string) ([]Person, error)
 	People() ([]Person, error)
 }
+
+// Compile-time interface satisfaction checks.
+var _ Observer = (*Writer)(nil)
+var _ Resolver = (*Reader)(nil)
