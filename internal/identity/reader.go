@@ -2,7 +2,6 @@ package identity
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/anish749/pigeon/internal/paths"
 )
@@ -95,31 +94,11 @@ func (r *Reader) LookupBySlackID(workspace, userID string) (*Person, error) {
 // case-insensitive substring comparison against Person.Name and each Slack
 // display name, real name, and username.
 func (r *Reader) SearchCandidates(query string) ([]Person, error) {
-	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
-	if q == "" {
-		return nil, nil
-	}
-
 	people, err := r.load()
 	if err != nil {
 		return nil, err
 	}
-
-	for i := range people {
-		if people[i].matchesAnyExactID(q) {
-			p := people[i]
-			return []Person{p}, nil
-		}
-	}
-
-	var out []Person
-	for i := range people {
-		if people[i].nameMatchesSubstring(q) {
-			p := people[i]
-			out = append(out, p)
-		}
-	}
-	return out, nil
+	return searchCandidates(people, query), nil
 }
 
 // People returns all known people with cross-source merging applied.

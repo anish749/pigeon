@@ -134,6 +134,30 @@ func (p *Person) merge(sig Signal, today string) {
 	}
 }
 
+// searchCandidates returns people matching the trimmed query. If the query
+// equals a stable identifier (Slack user ID, email, or phone), at most one
+// person is returned. Otherwise names are matched case-insensitively.
+func searchCandidates(people []Person, query string) []Person {
+	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
+	if q == "" {
+		return nil
+	}
+	for i := range people {
+		if people[i].matchesAnyExactID(q) {
+			p := people[i]
+			return []Person{p}
+		}
+	}
+	var out []Person
+	for i := range people {
+		if people[i].nameMatchesSubstring(q) {
+			p := people[i]
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // findMatch returns the index of the first person that matches the signal
 // by a stable identifier (email, Slack user ID, or phone). Returns -1 if
 // no match.

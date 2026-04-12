@@ -2,7 +2,6 @@ package identity
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -110,26 +109,7 @@ func (w *Writer) SearchCandidates(query string) ([]Person, error) {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
 
-	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
-	if q == "" {
-		return nil, nil
-	}
-
-	for i := range w.people {
-		if w.people[i].matchesAnyExactID(q) {
-			p := w.people[i]
-			return []Person{p}, nil
-		}
-	}
-
-	var out []Person
-	for i := range w.people {
-		if w.people[i].nameMatchesSubstring(q) {
-			p := w.people[i]
-			out = append(out, p)
-		}
-	}
-	return out, nil
+	return searchCandidates(w.people, query), nil
 }
 
 // loadLocked loads people from disk if not already loaded. Must be called
