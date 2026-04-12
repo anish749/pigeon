@@ -1,6 +1,8 @@
 package paths
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -64,6 +66,56 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 // Identity returns an IdentityDir for the given context name.
 func (r DataRoot) Identity(context string) IdentityDir {
 	return IdentityDir{root: r, context: context}
+}
+
+// ServiceIdentity returns an IdentityDir for a specific service account:
+//
+//	identity/<platform>/<account-slug>/
+//
+// Each service (Slack workspace, WhatsApp account, GWS email) writes its own
+// people.jsonl under this path; cross-source merging happens at read time.
+func (r DataRoot) ServiceIdentity(platform, accountSlug string) IdentityDir {
+	return IdentityDir{root: r, context: filepath.Join(strings.ToLower(platform), accountSlug)}
+}
+
+// AllIdentityDirs discovers every service-identity directory under
+// <base>/identity/<platform>/<account>/ that contains a people.jsonl file.
+// Returns an empty slice (never an error) when no identity data exists yet.
+func (r DataRoot) AllIdentityDirs() ([]IdentityDir, error) {
+	base := filepath.Join(r.base, IdentitySubdir)
+	platformEntries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", base, err)
+	}
+
+	var dirs []IdentityDir
+	for _, platformEntry := range platformEntries {
+		if !platformEntry.IsDir() {
+			continue
+		}
+		platform := platformEntry.Name()
+		platformPath := filepath.Join(base, platform)
+
+		acctEntries, err := os.ReadDir(platformPath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", platformPath, err)
+		}
+		for _, acctEntry := range acctEntries {
+			if !acctEntry.IsDir() {
+				continue
+			}
+			accountSlug := acctEntry.Name()
+			peoplePath := filepath.Join(platformPath, accountSlug, PeopleFilename)
+			if _, err := os.Stat(peoplePath); err != nil {
+				continue
+			}
+			dirs = append(dirs, IdentityDir{root: r, context: filepath.Join(platform, accountSlug)})
+		}
+	}
+	return dirs, nil
 }
 
 // AccountFor returns an AccountDir from an account.Account.

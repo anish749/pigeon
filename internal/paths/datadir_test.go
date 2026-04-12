@@ -1,6 +1,8 @@
 package paths
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -173,6 +175,94 @@ func TestIdentityDir_UsesConstants(t *testing.T) {
 	}
 	if dir.PeopleFile() != "/data/"+IdentitySubdir+"/ctx/"+PeopleFilename {
 		t.Errorf("people file should use PeopleFilename constant")
+	}
+}
+
+func TestServiceIdentity_Path(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	cases := []struct {
+		platform, slug string
+		want           string
+	}{
+		{"slack", "acme-corp", "/tmp/test/identity/slack/acme-corp"},
+		{"Slack", "acme-corp", "/tmp/test/identity/slack/acme-corp"}, // lowercased
+		{"whatsapp", "15551234567", "/tmp/test/identity/whatsapp/15551234567"},
+		{"gws", "user-at-company-com", "/tmp/test/identity/gws/user-at-company-com"},
+	}
+	for _, tc := range cases {
+		got := root.ServiceIdentity(tc.platform, tc.slug).Path()
+		if got != tc.want {
+			t.Errorf("ServiceIdentity(%q, %q).Path() = %q, want %q", tc.platform, tc.slug, got, tc.want)
+		}
+	}
+}
+
+func TestServiceIdentity_PeopleFile(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	got := root.ServiceIdentity("slack", "acme-corp").PeopleFile()
+	want := "/tmp/test/identity/slack/acme-corp/people.jsonl"
+	if got != want {
+		t.Errorf("PeopleFile() = %q, want %q", got, want)
+	}
+}
+
+func TestAllIdentityDirs_Empty(t *testing.T) {
+	root := NewDataRoot(t.TempDir())
+	dirs, err := root.AllIdentityDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 0 {
+		t.Errorf("got %d dirs, want 0", len(dirs))
+	}
+}
+
+func TestAllIdentityDirs_DiscoversServiceDirs(t *testing.T) {
+	base := t.TempDir()
+	root := NewDataRoot(base)
+
+	// Create populated identity dirs (with people.jsonl).
+	touch := func(platform, slug string) {
+		dir := root.ServiceIdentity(platform, slug)
+		if err := os.MkdirAll(dir.Path(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dir.PeopleFile(), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch("slack", "acme-corp")
+	touch("slack", "vendor-ws")
+	touch("gws", "alice")
+	touch("whatsapp", "15551234567")
+
+	// An empty dir (no people.jsonl) must be skipped.
+	if err := os.MkdirAll(filepath.Join(base, IdentitySubdir, "slack", "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, err := root.AllIdentityDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 4 {
+		t.Fatalf("got %d dirs, want 4: %+v", len(dirs), dirs)
+	}
+
+	paths := make(map[string]bool)
+	for _, d := range dirs {
+		paths[d.Path()] = true
+	}
+	wantPaths := []string{
+		filepath.Join(base, "identity", "slack", "acme-corp"),
+		filepath.Join(base, "identity", "slack", "vendor-ws"),
+		filepath.Join(base, "identity", "gws", "alice"),
+		filepath.Join(base, "identity", "whatsapp", "15551234567"),
+	}
+	for _, want := range wantPaths {
+		if !paths[want] {
+			t.Errorf("missing expected dir: %s", want)
+		}
 	}
 }
 
