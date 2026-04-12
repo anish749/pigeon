@@ -21,9 +21,9 @@ type Poller struct {
 }
 
 // New creates a Poller with the given interval, account directory, store
-// instance, and identity service. The store is used for every persistence
+// instance, and identity observer. The store is used for every persistence
 // operation so that file locking and filesystem layout stay consistent with
-// the rest of the daemon. The identity service may be nil.
+// the rest of the daemon.
 func New(interval time.Duration, account paths.AccountDir, s *store.FSStore, id identity.Observer) *Poller {
 	return &Poller{
 		interval: interval,
