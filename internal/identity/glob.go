@@ -5,10 +5,10 @@ import (
 	"github.com/anish749/pigeon/internal/read"
 )
 
-// GlobPeopleFiles returns paths to all people.jsonl identity files under dir,
+// globPeopleFiles returns paths to all people.jsonl identity files under dir,
 // discovered via paths.PeopleFileGlob.
 // Returns nil (not an error) when no identity data exists yet.
-func GlobPeopleFiles(dir string) ([]paths.PeopleFile, error) {
+func globPeopleFiles(dir string) ([]paths.PeopleFile, error) {
 	files, err := read.GlobFiles(dir, []string{paths.PeopleFileGlob})
 	if err != nil {
 		return nil, err

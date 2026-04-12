@@ -48,7 +48,7 @@ func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
 func (r *Reader) load() ([]Person, error) {
 	pp := r.paths
 	if pp == nil {
-		found, err := GlobPeopleFiles(r.base)
+		found, err := globPeopleFiles(r.base)
 		if err != nil {
 			return nil, fmt.Errorf("discover identity files: %w", err)
 		}
