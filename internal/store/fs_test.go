@@ -1137,3 +1137,285 @@ func TestAppendPendingDelete(t *testing.T) {
 		t.Errorf("pending deletes = %q, want %q", data, want)
 	}
 }
+
+// --- GWS JSONL maintenance ---
+
+func emailLine(id string, t time.Time, subject string) modelv1.Line {
+	return modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID:      id,
+			Ts:      t,
+			Subject: subject,
+			To:      []string{"user@example.com"},
+			Labels:  []string{"INBOX"},
+		},
+	}
+}
+
+// TestMaintain_GmailDedup verifies that Gmail daily files are deduplicated
+// by ID with the last occurrence winning (an email re-synced after a label
+// change overwrites the earlier copy).
+func TestMaintain_GmailDedup(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	gmail := root.AccountFor(acct).Gmail()
+
+	date := "2026-03-16"
+	df := gmail.DateFile(date)
+
+	// Two writes of the same email ID — the second ("updated") wins.
+	for _, l := range []modelv1.Line{
+		emailLine("E1", ts(2026, 3, 16, 9, 0, 0), "hello"),
+		emailLine("E2", ts(2026, 3, 16, 10, 0, 0), "world"),
+		emailLine("E1", ts(2026, 3, 16, 9, 0, 0), "updated"),
+	} {
+		if err := s.AppendLine(df, l); err != nil {
+			t.Fatalf("AppendLine: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	data, err := os.ReadFile(df.Path())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	lines, perr := parseGWSLines(data)
+	if perr != nil {
+		t.Fatalf("parseGWSLines: %v", perr)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	// DedupGWS keeps the last occurrence in input order. E2 was between
+	// the two E1 entries, so the surviving order is [E2, E1-updated].
+	if lines[0].Email.ID != "E2" || lines[1].Email.ID != "E1" {
+		t.Errorf("order = [%s, %s], want [E2, E1]", lines[0].Email.ID, lines[1].Email.ID)
+	}
+	if got := lines[1].Email.Subject; got != "updated" {
+		t.Errorf("E1 subject = %q, want %q (last-write wins)", got, "updated")
+	}
+}
+
+// TestMaintain_CalendarDedup verifies that Calendar daily files are
+// deduplicated by event ID.
+func TestMaintain_CalendarDedup(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	cal := root.AccountFor(acct).Calendar("primary")
+
+	df := cal.DateFile("2026-03-16")
+
+	raw := func(id, summary string) modelv1.Line {
+		serialized := map[string]any{
+			"id":      id,
+			"summary": summary,
+		}
+		return modelv1.Line{
+			Type: modelv1.LineEvent,
+			Event: &modelv1.CalendarEvent{
+				Serialized: serialized,
+			},
+		}
+	}
+	// Populate the Runtime.Id field via the serialised-then-parsed path
+	// so that Line.ID() returns the expected ID. Easier: just re-parse
+	// the marshalled bytes.
+	marshal := func(l modelv1.Line) modelv1.Line {
+		b, err := modelv1.Marshal(l)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		parsed, err := modelv1.Parse(string(b))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return parsed
+	}
+
+	for _, l := range []modelv1.Line{
+		marshal(raw("EV1", "standup")),
+		marshal(raw("EV2", "1:1")),
+		marshal(raw("EV1", "standup (rescheduled)")),
+	} {
+		if err := s.AppendLine(df, l); err != nil {
+			t.Fatalf("AppendLine: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	data, err := os.ReadFile(df.Path())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	lines, perr := parseGWSLines(data)
+	if perr != nil {
+		t.Fatalf("parseGWSLines: %v", perr)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	id0, _ := lines[0].ID()
+	id1, _ := lines[1].ID()
+	if id0 != "EV2" || id1 != "EV1" {
+		t.Errorf("ids = [%s, %s], want [EV2, EV1]", id0, id1)
+	}
+	if got := lines[1].Event.Runtime.Summary; got != "standup (rescheduled)" {
+		t.Errorf("EV1 summary = %q, want last-write value", got)
+	}
+}
+
+// TestMaintain_PendingEmailDeletes verifies that Gmail maintenance applies
+// entries from .pending-email-deletes, filters out the matching email lines,
+// and removes the pending-deletes file after successful processing.
+func TestMaintain_PendingEmailDeletes(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	gmail := root.AccountFor(acct).Gmail()
+
+	// Populate two days of Gmail data: E1 and E3 span two files; E2 and E4
+	// stay on their respective days. Pending deletes target E1 and E4.
+	day1 := gmail.DateFile("2026-03-15")
+	day2 := gmail.DateFile("2026-03-16")
+	for _, pair := range []struct {
+		df paths.DateFile
+		l  modelv1.Line
+	}{
+		{day1, emailLine("E1", ts(2026, 3, 15, 9, 0, 0), "keep?")},
+		{day1, emailLine("E2", ts(2026, 3, 15, 9, 1, 0), "stays")},
+		{day2, emailLine("E3", ts(2026, 3, 16, 9, 0, 0), "stays")},
+		{day2, emailLine("E4", ts(2026, 3, 16, 9, 1, 0), "delete me")},
+	} {
+		if err := s.AppendLine(pair.df, pair.l); err != nil {
+			t.Fatalf("AppendLine: %v", err)
+		}
+	}
+
+	for _, id := range []string{"E1", "E4"} {
+		if err := s.AppendPendingDelete(gmail, id); err != nil {
+			t.Fatalf("AppendPendingDelete(%s): %v", id, err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{day1.Path(), []string{"E2"}},
+		{day2.Path(), []string{"E3"}},
+	} {
+		data, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", tc.path, err)
+		}
+		lines, perr := parseGWSLines(data)
+		if perr != nil {
+			t.Fatalf("parseGWSLines %s: %v", tc.path, perr)
+		}
+		got := make([]string, len(lines))
+		for i, l := range lines {
+			got[i] = l.Email.ID
+		}
+		if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tc.want) {
+			t.Errorf("%s: ids = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+
+	// Pending deletes file should be gone after successful application.
+	if _, err := os.Stat(gmail.PendingDeletesPath()); !os.IsNotExist(err) {
+		t.Errorf("pending deletes file still present: err = %v", err)
+	}
+}
+
+// TestMaintain_PendingEmailDeletes_ForcesUnchangedFiles verifies that the
+// mtime-based skip does not apply when there are pending deletes — even a
+// Gmail file that hasn't been appended to since the previous maintenance
+// gets the delete applied.
+func TestMaintain_PendingEmailDeletes_ForcesUnchangedFiles(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	gmail := root.AccountFor(acct).Gmail()
+	df := gmail.DateFile("2026-03-15")
+
+	for _, l := range []modelv1.Line{
+		emailLine("E1", ts(2026, 3, 15, 9, 0, 0), "a"),
+		emailLine("E2", ts(2026, 3, 15, 9, 1, 0), "b"),
+	} {
+		if err := s.AppendLine(df, l); err != nil {
+			t.Fatalf("AppendLine: %v", err)
+		}
+	}
+
+	// First maintenance records current mtime.
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// Queue a delete and re-run without touching the file.
+	if err := s.AppendPendingDelete(gmail, "E1"); err != nil {
+		t.Fatalf("AppendPendingDelete: %v", err)
+	}
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("second Maintain: %v", err)
+	}
+
+	data, err := os.ReadFile(df.Path())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	lines, perr := parseGWSLines(data)
+	if perr != nil {
+		t.Fatalf("parseGWSLines: %v", perr)
+	}
+	if len(lines) != 1 || lines[0].Email.ID != "E2" {
+		t.Errorf("lines after delete = %+v, want [E2]", lines)
+	}
+	if _, err := os.Stat(gmail.PendingDeletesPath()); !os.IsNotExist(err) {
+		t.Errorf("pending deletes file still present")
+	}
+}
+
+// TestMaintain_SkipsDotfiles ensures the walker leaves hidden JSONL files
+// (e.g. .poll-metrics.jsonl) untouched — they have an unrelated schema
+// and were previously parsed as empty date files and truncated to zero.
+func TestMaintain_SkipsDotfiles(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user@example.com")
+	ad := root.AccountFor(acct)
+
+	if err := os.MkdirAll(ad.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	metrics := ad.PollMetricsPath()
+	contents := []byte(`{"service":"gmail","startedAt":"2026-03-16T00:00:00Z"}` + "\n")
+	if err := os.WriteFile(metrics, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	got, err := os.ReadFile(metrics)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(contents) {
+		t.Errorf("poll metrics mutated by Maintain: got %q, want %q", got, contents)
+	}
+}

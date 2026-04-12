@@ -252,8 +252,23 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	}
 
 	var errs []error
+
+	// Load pending email deletes — these apply to Gmail date files as part
+	// of the gmail maintenance pass. Non-nil and non-empty means we must
+	// force-process every Gmail date file regardless of mtime.
+	pendingDeletes, pendErr := loadPendingEmailDeletes(ad.Gmail().PendingDeletesPath())
+	if pendErr != nil {
+		errs = append(errs, pendErr)
+	}
+	var gmailErr error // set if any Gmail file failed; gates deletes-file removal
+
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
+			return nil
+		}
+		// Skip hidden JSONL files (e.g. .poll-metrics.jsonl) — these are
+		// operational logs with their own schema, not messaging data.
+		if strings.HasPrefix(filepath.Base(path), ".") {
 			return nil
 		}
 		rel, relErr := filepath.Rel(dir, path)
@@ -262,18 +277,35 @@ func (s *FSStore) Maintain(acct account.Account) error {
 			return nil
 		}
 		mtime := info.ModTime().UTC().Format(time.RFC3339)
-		if state[rel] == mtime {
+
+		// Force-process Gmail date files when there are pending deletes,
+		// even if mtime is unchanged — the deletes target content inside
+		// these files regardless of recent writes.
+		isGmail := paths.IsGmailDateFile(path)
+		force := isGmail && len(pendingDeletes) > 0
+		if !force && state[rel] == mtime {
 			return nil // unchanged since last maintenance
 		}
 
-		if err := s.maintainFile(path); err != nil {
+		var fileDeletes map[string]bool
+		if isGmail {
+			fileDeletes = pendingDeletes
+		}
+
+		if err := s.maintainFile(path, fileDeletes); err != nil {
 			errs = append(errs, fmt.Errorf("maintain %s: %w", rel, err))
+			if isGmail {
+				gmailErr = err
+			}
 			return nil
 		}
 
 		newInfo, statErr := os.Stat(path)
 		if statErr != nil {
 			errs = append(errs, fmt.Errorf("stat after maintain %s: %w", rel, statErr))
+			if isGmail {
+				gmailErr = statErr
+			}
 			return nil
 		}
 		state[rel] = newInfo.ModTime().UTC().Format(time.RFC3339)
@@ -281,6 +313,14 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	})
 	if err != nil {
 		return fmt.Errorf("walk %s: %w", dir, err)
+	}
+
+	// Clear the pending deletes file only if every Gmail file we visited
+	// succeeded — otherwise we'd drop deletes that never got applied.
+	if len(pendingDeletes) > 0 && gmailErr == nil {
+		if err := os.Remove(ad.Gmail().PendingDeletesPath()); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove pending deletes: %w", err))
+		}
 	}
 
 	if err := saveMaintenanceState(stateFile, state); err != nil {
@@ -645,7 +685,7 @@ func cleanupStaleDriveMeta(dir, keepName string) error {
 	return nil
 }
 
-func (s *FSStore) maintainFile(path string) error {
+func (s *FSStore) maintainFile(path string, pendingEmailDeletes map[string]bool) error {
 	mu := s.fileMu(path)
 	mu.Lock()
 	defer mu.Unlock()
@@ -677,6 +717,14 @@ func (s *FSStore) maintainFile(path string) error {
 		return os.WriteFile(path, newData, 0644)
 	}
 
+	// GWS JSONL files (Gmail, Calendar, Drive comments) carry ID-bearing
+	// lines where the last occurrence of an ID is canonical. Dedup by ID
+	// and, for Gmail files, drop lines whose IDs are in the pending
+	// deletes set.
+	if paths.IsGWSFile(path) {
+		return maintainGWSFile(path, data, pendingEmailDeletes)
+	}
+
 	df, parseErr := modelv1.ParseDateFile(data)
 	if parseErr != nil {
 		slog.Warn("parse date file: some lines skipped", "file", path, "error", parseErr)
@@ -690,6 +738,98 @@ func (s *FSStore) maintainFile(path string) error {
 		return nil
 	}
 	return os.WriteFile(path, newData, 0644)
+}
+
+// maintainGWSFile dedups and optionally filters deletes from a GWS JSONL
+// file. Lines are parsed generically; unparseable lines are logged and
+// skipped. If pendingEmailDeletes is non-nil, lines whose ID is in the
+// set are removed before dedup.
+func maintainGWSFile(path string, data []byte, pendingEmailDeletes map[string]bool) error {
+	lines, parseErr := parseGWSLines(data)
+	if parseErr != nil {
+		slog.Warn("parse gws file: some lines skipped", "file", path, "error", parseErr)
+	}
+
+	if len(pendingEmailDeletes) > 0 {
+		kept := lines[:0]
+		for _, l := range lines {
+			if id, ok := l.ID(); ok && pendingEmailDeletes[id] {
+				continue
+			}
+			kept = append(kept, l)
+		}
+		lines = kept
+	}
+
+	lines = compact.DedupGWS(lines)
+
+	newData, err := marshalGWSLines(lines)
+	if err != nil {
+		return fmt.Errorf("marshal gws file: %w", err)
+	}
+	if string(newData) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, newData, 0644)
+}
+
+// parseGWSLines parses a GWS JSONL file into a generic []Line slice.
+// Unparseable lines are collected into the returned error but successfully
+// parsed lines are still returned — matching the behaviour of ParseDateFile.
+func parseGWSLines(data []byte) ([]modelv1.Line, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var lines []modelv1.Line
+	var errs []error
+	lineNum := 0
+	for _, raw := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		lineNum++
+		if raw == "" {
+			continue
+		}
+		l, err := modelv1.Parse(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
+			continue
+		}
+		lines = append(lines, l)
+	}
+	return lines, errors.Join(errs...)
+}
+
+// marshalGWSLines serialises a slice of GWS Lines back to JSONL, preserving
+// the caller's ordering (DedupGWS preserves input order).
+func marshalGWSLines(lines []modelv1.Line) ([]byte, error) {
+	var b []byte
+	for _, l := range lines {
+		data, err := modelv1.Marshal(l)
+		if err != nil {
+			return nil, fmt.Errorf("marshal line: %w", err)
+		}
+		b = append(b, data...)
+		b = append(b, '\n')
+	}
+	return b, nil
+}
+
+// loadPendingEmailDeletes reads the .pending-email-deletes file into a set
+// of email IDs. Returns an empty map if the file does not exist.
+func loadPendingEmailDeletes(path string) (map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read pending deletes: %w", err)
+	}
+	set := make(map[string]bool)
+	for _, id := range strings.Split(string(data), "\n") {
+		if id = strings.TrimSpace(id); id != "" {
+			set[id] = true
+		}
+	}
+	return set, nil
 }
 
 func listDateFiles(dir string) ([]string, error) {

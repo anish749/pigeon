@@ -242,6 +242,38 @@ func (f DriveFileDir) CommentsFile() CommentsFile {
 	return CommentsFile(filepath.Join(f.Path(), commentsFile+FileExt))
 }
 
+// IsGmailDateFile reports whether path is a Gmail daily email file:
+// <account>/gmail/YYYY-MM-DD.jsonl.
+func IsGmailDateFile(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == gmailSubdir && IsDateFile(filepath.Base(path))
+}
+
+// IsCalendarDateFile reports whether path is a Calendar daily events file:
+// <account>/gcalendar/<calID>/YYYY-MM-DD.jsonl.
+func IsCalendarDateFile(path string) bool {
+	if !IsDateFile(filepath.Base(path)) {
+		return false
+	}
+	return filepath.Base(filepath.Dir(filepath.Dir(path))) == gcalendarSubdir
+}
+
+// IsDriveCommentsFile reports whether path is a Drive file's comments JSONL:
+// <account>/gdrive/<slug>/comments.jsonl.
+func IsDriveCommentsFile(path string) bool {
+	if filepath.Base(path) != commentsFile+FileExt {
+		return false
+	}
+	return filepath.Base(filepath.Dir(filepath.Dir(path))) == gdriveSubdir
+}
+
+// IsGWSFile reports whether path is a GWS JSONL file whose content is a
+// sequence of ID-bearing lines (emails, calendar events, drive comments)
+// that should be deduplicated on maintenance rather than compacted as a
+// messaging date file.
+func IsGWSFile(path string) bool {
+	return IsGmailDateFile(path) || IsCalendarDateFile(path) || IsDriveCommentsFile(path)
+}
+
 // TabFile returns the path to a document tab's markdown content.
 func (f DriveFileDir) TabFile(tabTitle string) TabFile {
 	return TabFile(filepath.Join(f.Path(), tabTitle+MarkdownExt))
