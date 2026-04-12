@@ -14,7 +14,6 @@ import (
 // LoadPeople reads a people.jsonl file into memory. Returns an empty slice
 // if the file does not exist (first-run case).
 func (s *FSStore) LoadPeople(path string) ([]identity.Person, error) {
-
 	mu := s.fileMu(path)
 	mu.Lock()
 	defer mu.Unlock()
@@ -53,7 +52,6 @@ func (s *FSStore) LoadPeople(path string) ([]identity.Person, error) {
 
 // SavePeople atomically writes people to a JSONL file (write to temp, rename).
 func (s *FSStore) SavePeople(path string, people []identity.Person) error {
-
 	mu := s.fileMu(path)
 	mu.Lock()
 	defer mu.Unlock()

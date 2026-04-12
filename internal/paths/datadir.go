@@ -62,7 +62,6 @@ func (r DataRoot) Platform(platform string) PlatformDir {
 	return PlatformDir{root: r, platform: strings.ToLower(platform)}
 }
 
-
 // AccountFor returns an AccountDir from an account.Account.
 func (r DataRoot) AccountFor(acct account.Account) AccountDir {
 	return r.Platform(acct.Platform).AccountFromSlug(acct.NameSlug())

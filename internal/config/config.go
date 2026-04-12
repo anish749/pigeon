@@ -32,7 +32,6 @@ type ContextConfig struct {
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
 }
 
-
 // LinearConfig holds configuration for a single Linear workspace.
 type LinearConfig struct {
 	Workspace string `yaml:"workspace"` // Linear workspace slug

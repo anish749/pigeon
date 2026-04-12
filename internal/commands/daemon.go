@@ -135,7 +135,7 @@ func DaemonRun(version string) error {
 	store := store.NewFSStore(dataRoot)
 
 	// Identity: per-service writers (owned by each manager, one per account)
-	// flush signals to identity/<platform>/<account>/people.jsonl. The shared
+	// flush signals to <platform>/<account>/identity/people.jsonl. The shared
 	// reader merges all those files at read time for cross-source lookups.
 	identityReader := identity.NewReader(store, dataRoot)
 

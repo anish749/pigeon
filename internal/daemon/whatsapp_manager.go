@@ -43,7 +43,7 @@ type runningWAAccount struct {
 // the given API server. onMessage is called when a message is received (may be nil).
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
-// identity/whatsapp/<account-slug>/people.jsonl.
+// whatsapp/<account-slug>/identity/people.jsonl.
 func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer: apiServer,

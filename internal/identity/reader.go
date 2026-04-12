@@ -21,7 +21,7 @@ import (
 // The Reader is never on a hot path. Slack's UserName (per-message) hits
 // the per-workspace Writer, not the Reader — a (workspace, userID) pair
 // only ever lives in one file. The Reader is for cold-path cross-source
-// name searches (FindUserID, SearchCandidates, People).
+// name searches (LookupBySlackID, SearchCandidates, People).
 type Reader struct {
 	store Store
 	base  string   // data root path for glob discovery; empty if paths is set

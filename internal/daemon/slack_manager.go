@@ -41,7 +41,7 @@ type runningWorkspace struct {
 // a reaction or unreaction event arrives. Either may be nil.
 //
 // Each workspace gets its own identity.Writer scoped to
-// identity/slack/<workspace>/people.jsonl. The shared reader provides a
+// slack/<workspace>/identity/people.jsonl. The shared reader provides a
 // merged cross-source view for name-based searches.
 func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, reader identity.Resolver, dataRoot paths.DataRoot) *SlackManager {
 	return &SlackManager{

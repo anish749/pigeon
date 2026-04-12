@@ -32,7 +32,7 @@ type runningGWSAccount struct {
 // filesystem layout as messaging.
 //
 // Each GWS account gets its own identity.Writer scoped to
-// identity/gws/<email-slug>/people.jsonl.
+// gws/<email-slug>/identity/people.jsonl.
 func NewGWSManager(s *store.FSStore, idStore identity.Store, dataRoot paths.DataRoot) *GWSManager {
 	return &GWSManager{
 		store:    s,
