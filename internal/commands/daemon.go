@@ -83,18 +83,22 @@ func DaemonStatus() error {
 	if len(status.SyncStatus) > 0 {
 		fmt.Println("  sync:")
 		for key, ss := range status.SyncStatus {
+			kind := string(ss.Kind)
+			if kind == "" {
+				kind = "sync"
+			}
 			if ss.Syncing {
 				elapsed := time.Since(*ss.StartedAt).Truncate(time.Second)
 				if ss.Detail != "" {
-					fmt.Printf("    %-30s syncing  %s  %s\n", key, elapsed, ss.Detail)
+					fmt.Printf("    %-30s %-9s syncing  %s  %s\n", key, kind, elapsed, ss.Detail)
 				} else {
-					fmt.Printf("    %-30s syncing  %s\n", key, elapsed)
+					fmt.Printf("    %-30s %-9s syncing  %s\n", key, kind, elapsed)
 				}
 			} else if ss.CompletedAt != nil {
 				ago := time.Since(*ss.CompletedAt).Truncate(time.Second)
-				fmt.Printf("    %-30s idle     synced %s ago\n", key, ago)
+				fmt.Printf("    %-30s %-9s idle  completed %s ago\n", key, kind, ago)
 			} else {
-				fmt.Printf("    %-30s idle     last sync: unknown\n", key)
+				fmt.Printf("    %-30s %-9s idle  last sync: unknown\n", key, kind)
 			}
 		}
 	}

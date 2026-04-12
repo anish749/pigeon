@@ -87,7 +87,7 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 // the poll loop.
 func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
 	key := p.acct.Display() + "/" + service
-	p.syncTracker.Start(key)
+	p.syncTracker.Start(key, syncstatus.KindPoll)
 	start := time.Now()
 	n, err := fn()
 	p.syncTracker.Done(key, err)

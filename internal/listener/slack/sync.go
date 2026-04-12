@@ -189,7 +189,7 @@ func (ms *MessageStore) Cursor(channelID string) (string, bool) {
 // (via bot token), interleaving them into the same contact directories.
 func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore, tracker *syncstatus.Tracker) (retErr error) {
 	statusKey := acct.Display()
-	tracker.Start(statusKey)
+	tracker.Start(statusKey, syncstatus.KindBackfill)
 	defer func() { tracker.Done(statusKey, retErr) }()
 
 	api := goslack.New(userToken)

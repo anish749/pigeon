@@ -10,7 +10,7 @@ import (
 func TestStartAndDone(t *testing.T) {
 	tr := NewTracker()
 
-	tr.Start("slack/test")
+	tr.Start("slack/test", KindBackfill)
 	all := tr.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(all))
@@ -18,6 +18,9 @@ func TestStartAndDone(t *testing.T) {
 	info := all["slack/test"]
 	if !info.Syncing {
 		t.Error("expected syncing=true after Start")
+	}
+	if info.Kind != KindBackfill {
+		t.Errorf("expected kind %q, got %q", KindBackfill, info.Kind)
 	}
 	if info.StartedAt == nil {
 		t.Error("expected StartedAt to be set")
@@ -41,7 +44,7 @@ func TestStartAndDone(t *testing.T) {
 
 func TestDoneWithError(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("wa/phone")
+	tr.Start("wa/phone", KindHistory)
 	tr.Done("wa/phone", errors.New("connection lost"))
 
 	info := tr.All()["wa/phone"]
@@ -52,7 +55,7 @@ func TestDoneWithError(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("slack/ws")
+	tr.Start("slack/ws", KindBackfill)
 	tr.Update("slack/ws", "dms: 3/10")
 
 	info := tr.All()["slack/ws"]
@@ -92,8 +95,8 @@ func TestDoneWithoutStart(t *testing.T) {
 
 func TestMultipleAccounts(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("slack/a")
-	tr.Start("gws/b")
+	tr.Start("slack/a", KindBackfill)
+	tr.Start("gws/b", KindPoll)
 	tr.Done("slack/a", nil)
 
 	all := tr.All()
@@ -110,7 +113,7 @@ func TestMultipleAccounts(t *testing.T) {
 
 func TestAllReturnsSnapshot(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("key")
+	tr.Start("key", KindPoll)
 
 	snap := tr.All()
 	tr.Done("key", nil)
@@ -130,7 +133,7 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			key := "key"
-			tr.Start(key)
+			tr.Start(key, KindPoll)
 			tr.Update(key, "progress")
 			tr.All()
 			tr.Done(key, nil)
@@ -148,10 +151,10 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestStartResetsError(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("key")
+	tr.Start("key", KindPoll)
 	tr.Done("key", errors.New("first error"))
 
-	tr.Start("key")
+	tr.Start("key", KindPoll)
 	info := tr.All()["key"]
 	if info.Error != "" {
 		t.Errorf("Start should clear previous error, got %q", info.Error)
@@ -160,7 +163,7 @@ func TestStartResetsError(t *testing.T) {
 
 func TestTimestampOrdering(t *testing.T) {
 	tr := NewTracker()
-	tr.Start("key")
+	tr.Start("key", KindPoll)
 	time.Sleep(time.Millisecond)
 	tr.Done("key", nil)
 

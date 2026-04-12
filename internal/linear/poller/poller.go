@@ -68,7 +68,7 @@ func (p *Poller) poll(ctx context.Context, cursors *store.LinearCursors) {
 	if ctx.Err() != nil {
 		return
 	}
-	p.syncTracker.Start(p.acct.Display())
+	p.syncTracker.Start(p.acct.Display(), syncstatus.KindPoll)
 	n, err := PollIssues(ctx, p.store, p.accountDir, p.workspace, cursors)
 	p.syncTracker.Done(p.acct.Display(), err)
 	if err != nil {
