@@ -37,6 +37,7 @@ const (
 	LineEvent         LineType = "event"
 	LineLinearIssue   LineType = "linear-issue"
 	LineLinearComment LineType = "linear-comment"
+	LineSlackBlock    LineType = "slack-block"
 )
 
 // MsgLine represents a message event.
@@ -107,6 +108,7 @@ type Line struct {
 	Event         *CalendarEvent
 	Issue         *LinearIssue
 	LinearComment *LinearComment
+	SlackBlock    *SlackBlock
 }
 
 // Ts returns the timestamp of the line's inner type. Returns the zero time
@@ -147,6 +149,10 @@ func (l Line) Ts() time.Time {
 				return t
 			}
 		}
+	case LineSlackBlock:
+		if l.SlackBlock != nil {
+			return l.SlackBlock.Runtime.ParseTs()
+		}
 	}
 	return time.Time{}
 }
@@ -179,6 +185,10 @@ func (l Line) ID() (string, bool) {
 	case LineLinearComment:
 		if l.LinearComment != nil {
 			return l.LinearComment.Runtime.ID, true
+		}
+	case LineSlackBlock:
+		if l.SlackBlock != nil {
+			return l.SlackBlock.Runtime.ID, true
 		}
 	}
 	return "", false
@@ -231,6 +241,8 @@ func Marshal(l Line) ([]byte, error) {
 		return marshalRaw(l.Issue.Serialized, string(LineLinearIssue))
 	case LineLinearComment:
 		return marshalRaw(l.LinearComment.Serialized, string(LineLinearComment))
+	case LineSlackBlock:
+		return marshalRaw(l.SlackBlock.Serialized, string(LineSlackBlock))
 	default:
 		return nil, fmt.Errorf("marshal line: unknown type %q", l.Type)
 	}
@@ -308,6 +320,13 @@ func Parse(line string) (Line, error) {
 			return Line{}, fmt.Errorf("parse linear comment line: %w", err)
 		}
 		l.LinearComment = &LinearComment{Runtime: runtime, Serialized: serialized}
+	case LineSlackBlock:
+		var runtime SlackBlockRuntime
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse slack block line: %w", err)
+		}
+		l.SlackBlock = &SlackBlock{Runtime: runtime, Serialized: serialized}
 	case "":
 		return Line{}, fmt.Errorf("parse line: missing type field")
 	default:

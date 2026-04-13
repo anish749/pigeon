@@ -130,17 +130,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	// Extract text from the message body, falling back to blocks and
-	// attachments when the top-level Text field is empty. msg.Message is
-	// always populated by the custom JSON unmarshaler on MessageEvent.
-	var blocks goslack.Blocks
-	var attachments []goslack.Attachment
-	if msg.Message != nil {
-		blocks = msg.Message.Blocks
-		attachments = msg.Message.Attachments
-	}
-	msgText := extractText(msg.Text, blocks, attachments)
-	if msgText == "" {
+	// Determine whether this message has text or only block content.
+	// Messages with empty Text but non-empty blocks/attachments are stored
+	// as SlackBlock lines (raw JSON), similar to how GWS and Linear store
+	// structured data.
+	hasBlocks := msg.Message != nil && (len(msg.Message.Blocks.BlockSet) > 0 || len(msg.Message.Attachments) > 0)
+	if msg.Text == "" && !hasBlocks {
 		return
 	}
 
@@ -172,20 +167,38 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		userName = "sent to pigeon by " + userName
 		via = modelv1.ViaToPigeon
 	}
-	text, err := l.resolver.ResolveText(ctx, msgText)
-	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
-			"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
-		return
-	}
 	ts := ParseTimestamp(msg.TimeStamp)
-
 	isThreadReply := msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp
+
+	// Build the line to write. Text messages use MsgLine; block-only
+	// messages use SlackBlock to preserve the raw structured data.
+	var line modelv1.Line
+	if msg.Text != "" {
+		text, err := l.resolver.ResolveText(ctx, msg.Text)
+		if err != nil {
+			slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
+				"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
+			return
+		}
+		line = modelv1.Line{
+			Type: modelv1.LineMessage,
+			Msg: &modelv1.MsgLine{
+				ID:       msg.TimeStamp,
+				Ts:       ts,
+				Sender:   userName,
+				SenderID: userID,
+				Via:      via,
+				Text:     text,
+			},
+		}
+	} else {
+		line = buildSlackBlockLine(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments)
+	}
 
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(msg.Channel, channelName, userName, userID, text, ts, msg.TimeStamp, via); err != nil {
+		if err := l.messages.Append(channelName, line); err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
@@ -198,7 +211,10 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, userID, text, ts, msg.TimeStamp, true, via); err != nil {
+		if line.Type == modelv1.LineMessage {
+			line.Msg.Reply = true
+		}
+		if err := l.messages.AppendThread(channelName, msg.ThreadTimeStamp, line); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
@@ -255,8 +271,8 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 		return
 	}
 	parent := msgs[0]
-	parentText := extractText(parent.Text, parent.Blocks, parent.Attachments)
-	if parentText == "" {
+	hasBlocks := len(parent.Blocks.BlockSet) > 0 || len(parent.Attachments) > 0
+	if parent.Text == "" && !hasBlocks {
 		return
 	}
 	userName, userID, err := l.resolver.SenderName(ctx, parent.User, parent.BotID, parent.Username)
@@ -265,14 +281,29 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 			"account", l.acct, "thread_ts", threadTS)
 		return
 	}
-	text, err := l.resolver.ResolveText(ctx, parentText)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve thread parent text", "error", err,
-			"account", l.acct, "thread_ts", threadTS)
-		return
-	}
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, userID, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
+	var line modelv1.Line
+	if parent.Text != "" {
+		text, err := l.resolver.ResolveText(ctx, parent.Text)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to resolve thread parent text", "error", err,
+				"account", l.acct, "thread_ts", threadTS)
+			return
+		}
+		line = modelv1.Line{
+			Type: modelv1.LineMessage,
+			Msg: &modelv1.MsgLine{
+				ID:       parent.Timestamp,
+				Ts:       ts,
+				Sender:   userName,
+				SenderID: userID,
+				Text:     text,
+			},
+		}
+	} else {
+		line = buildSlackBlockLine(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments)
+	}
+	if err := l.messages.AppendThread(channelName, threadTS, line); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}

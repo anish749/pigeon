@@ -99,6 +99,16 @@ func (ms *MessageStore) AppendDelete(channelName string, line modelv1.Line) erro
 	return ms.store.Append(ms.acct, channelName, line)
 }
 
+// Append stores any line type in the date file for its timestamp.
+func (ms *MessageStore) Append(channelName string, line modelv1.Line) error {
+	return ms.store.Append(ms.acct, channelName, line)
+}
+
+// AppendThread stores any line type in the given thread file.
+func (ms *MessageStore) AppendThread(channelName, threadTS string, line modelv1.Line) error {
+	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
+}
+
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
@@ -316,10 +326,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 
-			// Extract text from the message body, falling back to blocks
-			// and attachments when the top-level Text field is empty.
-			msgText := extractText(msg.Text, msg.Blocks, msg.Attachments)
-			if msgText == "" {
+			hasBlocks := len(msg.Blocks.BlockSet) > 0 || len(msg.Attachments) > 0
+			if msg.Text == "" && !hasBlocks {
 				continue
 			}
 
@@ -329,15 +337,31 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}
-			text, err := resolver.ResolveText(ctx, msgText)
-			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve text",
-					"channel", channelName, "ts", msg.Timestamp, "error", err)
-				continue
-			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
+			var line modelv1.Line
+			if msg.Text != "" {
+				text, err := resolver.ResolveText(ctx, msg.Text)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve text",
+						"channel", channelName, "ts", msg.Timestamp, "error", err)
+					continue
+				}
+				line = modelv1.Line{
+					Type: modelv1.LineMessage,
+					Msg: &modelv1.MsgLine{
+						ID:       msg.Timestamp,
+						Ts:       ts,
+						Sender:   userName,
+						SenderID: userID,
+						Text:     text,
+					},
+				}
+			} else {
+				line = buildSlackBlockLine(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments)
+			}
+
+			if err := ms.Append(channelName, line); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -493,17 +517,11 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 
-			msgText := extractText(msg.Text, msg.Blocks, msg.Attachments)
-			if msgText == "" {
+			hasBlocks := len(msg.Blocks.BlockSet) > 0 || len(msg.Attachments) > 0
+			if msg.Text == "" && !hasBlocks {
 				continue
 			}
 
-			text, err := resolver.ResolveText(ctx, msgText)
-			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve text",
-					"channel", channelName, "ts", msg.Timestamp, "error", err)
-				continue
-			}
 			ts := ParseTimestamp(msg.Timestamp)
 
 			var senderName string
@@ -525,7 +543,30 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				via = modelv1.ViaToPigeon
 			}
 
-			if err := ms.Write(ch.ID, channelName, senderName, senderID, text, ts, msg.Timestamp, via); err != nil {
+			var line modelv1.Line
+			if msg.Text != "" {
+				text, err := resolver.ResolveText(ctx, msg.Text)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve text",
+						"channel", channelName, "ts", msg.Timestamp, "error", err)
+					continue
+				}
+				line = modelv1.Line{
+					Type: modelv1.LineMessage,
+					Msg: &modelv1.MsgLine{
+						ID:       msg.Timestamp,
+						Ts:       ts,
+						Sender:   senderName,
+						SenderID: senderID,
+						Via:      via,
+						Text:     text,
+					},
+				}
+			} else {
+				line = buildSlackBlockLine(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments)
+			}
+
+			if err := ms.Append(channelName, line); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -673,8 +714,8 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			if !allowedSubType(reply.SubType) {
 				continue
 			}
-			replyText := extractText(reply.Text, reply.Blocks, reply.Attachments)
-			if replyText == "" {
+			hasBlocks := len(reply.Blocks.BlockSet) > 0 || len(reply.Attachments) > 0
+			if reply.Text == "" && !hasBlocks {
 				continue
 			}
 			userName, userID, err := resolver.SenderName(ctx, reply.User, reply.BotID, reply.Username)
@@ -683,15 +724,32 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 				continue
 			}
-			text, err := resolver.ResolveText(ctx, replyText)
-			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve text",
-					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
-				continue
-			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
+
+			var line modelv1.Line
+			if reply.Text != "" {
+				text, err := resolver.ResolveText(ctx, reply.Text)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve text",
+						"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
+					continue
+				}
+				line = modelv1.Line{
+					Type: modelv1.LineMessage,
+					Msg: &modelv1.MsgLine{
+						ID:       reply.Timestamp,
+						Ts:       ts,
+						Sender:   userName,
+						SenderID: userID,
+						Text:     text,
+						Reply:    isReply,
+					},
+				}
+			} else {
+				line = buildSlackBlockLine(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments)
+			}
+			if err := ms.AppendThread(channelName, msg.Timestamp, line); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -718,8 +776,8 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if !allowedSubType(ctxMsg.SubType) {
 						continue
 					}
-					ctxText := extractText(ctxMsg.Text, ctxMsg.Blocks, ctxMsg.Attachments)
-					if ctxText == "" {
+					hasBlocks := len(ctxMsg.Blocks.BlockSet) > 0 || len(ctxMsg.Attachments) > 0
+					if ctxMsg.Text == "" && !hasBlocks {
 						continue
 					}
 					userName, userID, err := resolver.SenderName(ctx, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
@@ -728,14 +786,30 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 						continue
 					}
-					text, err := resolver.ResolveText(ctx, ctxText)
-					if err != nil {
-						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve text",
-							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
-						continue
-					}
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, userID, text, ts, ctxMsg.Timestamp); err != nil {
+
+					var line modelv1.Line
+					if ctxMsg.Text != "" {
+						text, err := resolver.ResolveText(ctx, ctxMsg.Text)
+						if err != nil {
+							slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve text",
+								"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
+							continue
+						}
+						line = modelv1.Line{
+							Type: modelv1.LineMessage,
+							Msg: &modelv1.MsgLine{
+								ID:       ctxMsg.Timestamp,
+								Ts:       ts,
+								Sender:   userName,
+								SenderID: userID,
+								Text:     text,
+							},
+						}
+					} else {
+						line = buildSlackBlockLine(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments)
+					}
+					if err := ms.AppendThread(channelName, msg.Timestamp, line); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}
