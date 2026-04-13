@@ -116,33 +116,20 @@ func (r *Resolver) ResolveMentions(text string) string {
 		// matches the longest span of text starting at the @. Try all
 		// name fields (canonical name, display name, real name, username)
 		// so that both "@alice" and "@Sherlock Holmes" resolve correctly.
-		//
-		// When multiple candidates match the search, skip the username
-		// (ws.Name) field — usernames are handles that can be misleadingly
-		// unique (e.g. "sherlock" vs "sherlock.watson") even when the
-		// human intent is ambiguous.
+		// A unique username match (e.g. "@sherlock" → username "sherlock")
+		// is treated as unambiguous even when multiple candidates share
+		// the first name, since usernames are unique handles in Slack.
 		atIdx := m[2] - 1
 		afterAt := text[atIdx+1:] // text after the @
 		var bestID string
 		var bestLen int
 		var ties int
-		var wsCount int
-		for _, p := range candidates {
-			if _, ok := p.Slack[r.workspace]; ok {
-				wsCount++
-			}
-		}
 		for _, p := range candidates {
 			ws, ok := p.Slack[r.workspace]
 			if !ok {
 				continue
 			}
-			var names []string
-			if wsCount > 1 {
-				names = uniqueNames(p.Name, ws.DisplayName, ws.RealName)
-			} else {
-				names = uniqueNames(p.Name, ws.DisplayName, ws.RealName, ws.Name)
-			}
+			names := uniqueNames(p.Name, ws.DisplayName, ws.RealName, ws.Name)
 			for _, n := range names {
 				if len(n) > len(afterAt) {
 					continue

@@ -178,9 +178,9 @@ func TestResolveMentions(t *testing.T) {
 			want: "<@U333> please review",
 		},
 		{
-			name: "multi-word ambiguous first name leaves as-is",
+			name: "ambiguous first name resolved by unique username",
 			text: "hey @Sherlock what do you think?",
-			want: "hey @Sherlock what do you think?",
+			want: "hey <@U333> what do you think?",
 		},
 		{
 			name: "two multi-word mentions",
@@ -224,9 +224,9 @@ func TestResolveMentions(t *testing.T) {
 		// "sherlock" that fits the text — it should NOT resolve because
 		// the intent is ambiguous (two people share the first name).
 		{
-			name: "ambiguous first name with unique username should not resolve",
+			name: "unique username resolves despite multiple candidates",
 			text: "hey @sherlock what do you think?",
-			want: "hey @sherlock what do you think?",
+			want: "hey <@U333> what do you think?",
 		},
 		{
 			name: "non-ascii first character in mention",
