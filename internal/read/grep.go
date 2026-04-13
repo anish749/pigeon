@@ -1,6 +1,8 @@
 package read
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"time"
@@ -65,6 +67,27 @@ func Grep(dir string, opts GrepOpts) ([]byte, error) {
 	return runGrep(args)
 }
 
+// GrepMany runs Grep across multiple roots and concatenates the raw rg output.
+// Exit-code-1 "no matches" remains a quiet success for each individual root.
+func GrepMany(dirs []string, opts GrepOpts) ([]byte, error) {
+	var (
+		out  bytes.Buffer
+		errs []error
+	)
+	for _, dir := range dirs {
+		data, err := Grep(dir, opts)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		out.Write(data)
+	}
+	if out.Len() == 0 {
+		return nil, errorsJoin(errs)
+	}
+	return out.Bytes(), errorsJoin(errs)
+}
+
 // buildGrepFlags constructs the rg flag list for the given options, excluding
 // the query and file/dir arguments.
 func buildGrepFlags(opts GrepOpts) []string {
@@ -103,4 +126,8 @@ func runGrep(args []string) ([]byte, error) {
 		return nil, fmt.Errorf("rg: %w", err)
 	}
 	return out, nil
+}
+
+func errorsJoin(errs []error) error {
+	return errors.Join(errs...)
 }
