@@ -24,9 +24,18 @@ whether to continue it or create a new one.`,
   pigeon claude -p whatsapp -a +14155551234
   pigeon claude --session <claude-code-session-id>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
-			sessionID, _ := cmd.Flags().GetString("session")
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return err
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return err
+			}
+			sessionID, err := cmd.Flags().GetString("session")
+			if err != nil {
+				return err
+			}
 			return commands.RunClaudeSession(commands.ClaudeSessionParams{
 				Platform:  platform,
 				Account:   account,
