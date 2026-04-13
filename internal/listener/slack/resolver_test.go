@@ -28,6 +28,66 @@ func TestResolveMentions(t *testing.T) {
 				Name:        "bob",
 			},
 		},
+		{
+			Name: "Sherlock Holmes",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U333",
+				DisplayName: "Sherlock Holmes",
+				RealName:    "Sherlock Holmes",
+				Name:        "sherlock",
+			},
+		},
+		{
+			Name: "Björk Guðmundsdóttir",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U555",
+				DisplayName: "Björk",
+				RealName:    "Björk Guðmundsdóttir",
+				Name:        "bjork",
+			},
+		},
+		{
+			Name: "Björn Borg",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U666",
+				DisplayName: "Björn Borg",
+				RealName:    "Björn Borg",
+				Name:        "bjorn.borg",
+			},
+		},
+		{
+			Name: "Ørjan Nilsen",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U888",
+				DisplayName: "Ørjan Nilsen",
+				RealName:    "Ørjan Nilsen",
+				Name:        "orjan.nilsen",
+			},
+		},
+		{
+			Name: "Lars Müller",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U777",
+				DisplayName: "Lars Müller",
+				RealName:    "Lars Müller",
+				Name:        "lars.muller",
+			},
+		},
+		{
+			Name: "Sherlock Watson",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U444",
+				DisplayName: "Sherlock Watson",
+				RealName:    "Sherlock Watson",
+				Name:        "sherlock.watson",
+			},
+		},
 	})
 	r := &Resolver{
 		writer:    writer,
@@ -101,6 +161,76 @@ func TestResolveMentions(t *testing.T) {
 			name: "pre-resolved mentions left as-is",
 			text: "<!here> <@U111> already formatted",
 			want: "<!here> <@U111> already formatted",
+		},
+		{
+			name: "multi-word name consumes full name",
+			text: "don't worry @Sherlock Holmes we've got this",
+			want: "don't worry <@U333> we've got this",
+		},
+		{
+			name: "multi-word name at end of text",
+			text: "thanks @Sherlock Holmes",
+			want: "thanks <@U333>",
+		},
+		{
+			name: "multi-word name at start",
+			text: "@Sherlock Holmes please review",
+			want: "<@U333> please review",
+		},
+		{
+			name: "ambiguous first name resolved by unique username",
+			text: "hey @Sherlock what do you think?",
+			want: "hey <@U333> what do you think?",
+		},
+		{
+			name: "two multi-word mentions",
+			text: "@Sherlock Holmes and @Alice Johnson sync up",
+			want: "<@U333> and <@U111> sync up",
+		},
+		{
+			name: "multi-word name case insensitive",
+			text: "hey @sherlock holmes check this",
+			want: "hey <@U333> check this",
+		},
+		{
+			name: "multi-word unicode name consumed fully",
+			text: "hey @Lars Müller please review",
+			want: "hey <@U777> please review",
+		},
+		{
+			name: "unicode name matched by ascii username",
+			text: "hey @bjork great show last night",
+			want: "hey <@U555> great show last night",
+		},
+		{
+			name: "unicode word boundary prevents partial match",
+			text: "hey @bjorkést check this",
+			want: "hey @bjorkést check this",
+		},
+		// Unicode first-word: regex must capture @Björk, not just ASCII.
+		{
+			name: "unicode first word in mention",
+			text: "hey @Björk great show",
+			want: "hey <@U555> great show",
+		},
+		{
+			name: "unicode multi-word mention",
+			text: "hey @Björn Borg great match",
+			want: "hey <@U666> great match",
+		},
+		// Username priority: Holmes has username "sherlock", Watson has
+		// "sherlock.watson". Both match the substring search, but only
+		// Holmes has the username "sherlock" that fits the text — since
+		// usernames are unique Slack handles, the match is unambiguous.
+		{
+			name: "unique username resolves despite multiple candidates",
+			text: "hey @sherlock what do you think?",
+			want: "hey <@U333> what do you think?",
+		},
+		{
+			name: "non-ascii first character in mention",
+			text: "hey @Ørjan Nilsen nice set",
+			want: "hey <@U888> nice set",
 		},
 	}
 

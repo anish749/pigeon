@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -23,8 +25,9 @@ var mentionRe = regexp.MustCompile(`<@(U[A-Z0-9]+)(?:\|[^>]*)?>`)
 var channelMentionRe = regexp.MustCompile(`<#(C[A-Z0-9]+)\|([^>]+)>`)
 
 // outboundMentionRe matches @name patterns in outbound message text.
-// Captures one or more words after @. Does not match inside URLs or emails.
-var outboundMentionRe = regexp.MustCompile(`(?:^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)`)
+// Captures one or more words after @, including Unicode letters (e.g. Björk, Ørjan).
+// Does not match inside URLs or emails.
+var outboundMentionRe = regexp.MustCompile(`(?:^|\s)@([\pL\pN][\pL\pN_.-]*)`)
 
 // specialMentions maps broadcast @mentions to Slack's special syntax.
 var specialMentions = map[string]string{
@@ -72,6 +75,11 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error)
 // to Slack's wire format. Replaces @name with <@USER_ID> when exactly one user
 // matches, and @channel/@here/@everyone with <!channel>/<!here>/<!everyone>.
 // Unrecognized or ambiguous mentions are left as-is.
+//
+// Multi-word names (e.g. "@Sherlock Holmes") are handled by greedy lookahead:
+// the regex captures the first word, SearchCandidates returns all substring
+// matches, and we pick the candidate whose full name appears longest in the
+// text starting at the @ position.
 func (r *Resolver) ResolveMentions(text string) string {
 	// Handle special broadcast mentions first.
 	for name, repl := range specialMentions {
@@ -98,20 +106,90 @@ func (r *Resolver) ResolveMentions(text string) string {
 			continue
 		}
 
-		userID, _, err := r.FindUserID(name)
+		candidates, err := r.writer.SearchCandidates(name)
 		if err != nil {
-			// Not found or ambiguous — leave as-is.
-			slog.Warn("mention not resolved, leaving as-is", "mention", name, "error", err)
+			slog.Warn("mention search failed", "mention", name, "error", err)
 			continue
 		}
 
-		// Replace @name with <@USER_ID>. The @ is one byte before the
-		// captured group start.
+		// Filter to this workspace and find the candidate whose name
+		// matches the longest span of text starting at the @. Try all
+		// name fields (canonical name, display name, real name, username)
+		// so that both "@alice" and "@Sherlock Holmes" resolve correctly.
+		// A unique username match (e.g. "@sherlock" → username "sherlock")
+		// is treated as unambiguous even when multiple candidates share
+		// the first name, since usernames are unique handles in Slack.
 		atIdx := m[2] - 1
-		text = text[:atIdx] + "<@" + userID + ">" + text[m[3]:]
+		afterAt := text[atIdx+1:] // text after the @
+		var bestID string
+		var bestLen int
+		var ties int
+		for _, p := range candidates {
+			ws, ok := p.Slack[r.workspace]
+			if !ok {
+				continue
+			}
+			names := uniqueNames(p.Name, ws.DisplayName, ws.RealName, ws.Name)
+			for _, n := range names {
+				if len(n) > len(afterAt) {
+					continue
+				}
+				if !strings.EqualFold(afterAt[:len(n)], n) {
+					continue
+				}
+				// Ensure the match ends at a word boundary: end of string,
+				// or followed by a non-letter/digit (Unicode-aware).
+				if len(n) < len(afterAt) {
+					ch, _ := utf8.DecodeRuneInString(afterAt[len(n):])
+					if unicode.IsLetter(ch) || unicode.IsDigit(ch) {
+						continue
+					}
+				}
+				if len(n) > bestLen {
+					bestID = ws.ID
+					bestLen = len(n)
+					ties = 1
+				} else if len(n) == bestLen && ws.ID != bestID {
+					ties++
+				}
+			}
+		}
+
+		if bestID == "" || ties > 1 {
+			if bestID == "" {
+				slog.Warn("mention not resolved, leaving as-is", "mention", name,
+					"error", fmt.Errorf("no user matching %q", name))
+			} else {
+				slog.Warn("mention not resolved, leaving as-is", "mention", name,
+					"error", fmt.Errorf("multiple users match %q at same length", name))
+			}
+			continue
+		}
+
+		// Replace @<matched name> with <@USER_ID>.
+		endIdx := atIdx + 1 + bestLen
+		text = text[:atIdx] + "<@" + bestID + ">" + text[endIdx:]
 	}
 
 	return text
+}
+
+// uniqueNames returns the non-empty, deduplicated names from the given list.
+func uniqueNames(names ...string) []string {
+	seen := make(map[string]bool, len(names))
+	var out []string
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		lower := strings.ToLower(n)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 // Resolver resolves Slack user and channel names. User lookups are backed
