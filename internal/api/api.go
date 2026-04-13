@@ -140,8 +140,8 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 // SlackTarget identifies a Slack recipient: either a user (for DMs) or a channel/group DM.
 // Exactly one of UserID or Channel must be set.
 type SlackTarget struct {
-	UserID  string `json:"user_id,omitempty"`  // Slack user ID (U-prefixed) for DMs
-	Channel string `json:"channel,omitempty"`  // #channel or @mpdm-... for channels/group DMs
+	UserID  string `json:"user_id,omitempty"` // Slack user ID (U-prefixed) for DMs
+	Channel string `json:"channel,omitempty"` // #channel or @mpdm-... for channels/group DMs
 }
 
 // Validate checks that exactly one field is set and that values are well-formed.
@@ -179,12 +179,12 @@ type SendRequest struct {
 	Slack   *SlackTarget `json:"slack,omitempty"`
 	Contact string       `json:"contact,omitempty"` // WhatsApp contact name or phone
 
-	Thread    string `json:"thread,omitempty"`
-	Broadcast bool   `json:"broadcast,omitempty"`
-	PostAt    string `json:"post_at,omitempty"` // Unix timestamp — schedule instead of send immediately
+	Thread    string      `json:"thread,omitempty"`
+	Broadcast bool        `json:"broadcast,omitempty"`
+	PostAt    string      `json:"post_at,omitempty"` // Unix timestamp — schedule instead of send immediately
 	Via       modelv1.Via `json:"via,omitempty"`
-	DryRun    bool   `json:"dry_run,omitempty"`
-	Force     bool   `json:"force,omitempty"`
+	DryRun    bool        `json:"dry_run,omitempty"`
+	Force     bool        `json:"force,omitempty"`
 	// SessionID, when set, routes the send through the outbox for human
 	// review instead of sending immediately. Set automatically by the CLI
 	// when PIGEON_SESSION_ID is in the environment.
@@ -225,6 +225,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if err := validateTarget(req.Platform, req.Slack, req.Contact); err != nil {
 		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
 		return
+	}
+
+	// Default Via when not set (e.g. TUI, API callers that omit it).
+	if req.Via == "" {
+		req.Via = modelv1.ViaPigeonAsBot
 	}
 
 	// Undo shell escaping: zsh (and bash with histexpand) escape "!" to "\!"
@@ -420,14 +425,14 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 
 // StatusResponse is the daemon API response for GET /api/status.
 type StatusResponse struct {
-	Version                 string                      `json:"version"`
-	PID                     int                         `json:"pid"`
-	Executable              string                      `json:"executable"`
-	StartedAt               time.Time                   `json:"started_at"`
-	LogFile                 string                      `json:"log_file"`
-	Listeners               map[string][]string         `json:"listeners"`
-	SyncStatus              map[string]syncstatus.Info   `json:"sync_status,omitempty"`
-	ConnectedClaudeSessions []ClaudeSessionInfo          `json:"connected_claude_sessions"`
+	Version                 string                     `json:"version"`
+	PID                     int                        `json:"pid"`
+	Executable              string                     `json:"executable"`
+	StartedAt               time.Time                  `json:"started_at"`
+	LogFile                 string                     `json:"log_file"`
+	Listeners               map[string][]string        `json:"listeners"`
+	SyncStatus              map[string]syncstatus.Info `json:"sync_status,omitempty"`
+	ConnectedClaudeSessions []ClaudeSessionInfo        `json:"connected_claude_sessions"`
 }
 
 // ClaudeSessionInfo describes a connected Claude Code session in the status response.

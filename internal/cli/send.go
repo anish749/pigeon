@@ -22,7 +22,8 @@ Target flags are platform-specific:
   Slack:    --user-id (DMs) or --channel (channels, group DMs)
   WhatsApp: --contact (name or phone number)
 
-By default, Slack messages are sent as the bot. Use --via pigeon-as-user to send as yourself.
+By default, Slack messages are sent as the bot. Use --via pigeon-as-user to
+send as the account owner who connected pigeon (uses their user token).
 Use --thread to reply to a thread, and --broadcast to also post the reply to the channel.
 Run 'pigeon list' to find user IDs and channel names.`,
 		Example: `  # Slack
@@ -145,7 +146,7 @@ Run 'pigeon list' to find user IDs and channel names.`,
 	cmd.Flags().String("thread", "", "thread timestamp to reply to")
 	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
 	cmd.Flags().String("post-at", "", "when to send: ISO 8601 (2026-04-11T09:00:00, local timezone) or Unix timestamp (Slack only, up to 120 days)")
-	cmd.Flags().String("via", string(modelv1.ViaPigeonAsBot), "message pathway: pigeon-as-bot (default) or pigeon-as-user")
+	cmd.Flags().String("via", string(modelv1.ViaPigeonAsBot), "send identity: pigeon-as-bot (default) or pigeon-as-user (send as the account owner)")
 	cmd.Flags().Bool("dry-run", false, "validate without sending")
 	cmd.Flags().Bool("force", false, "send even if the thread is not found locally")
 

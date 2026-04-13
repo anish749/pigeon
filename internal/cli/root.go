@@ -220,7 +220,8 @@ WORKFLOW — SENDING MESSAGES
   pigeon send -p slack -a acme-corp -c #engineering -m "deploying now"
   pigeon send -p slack -a acme-corp -c @alice -m "quick question"
 
-  Slack messages are sent as the bot by default. Use --via pigeon-as-user to send as yourself.
+  Slack messages are sent as the bot by default. Use --via pigeon-as-user to
+  send as the account owner who connected pigeon.
 
   Thread replies:
 
