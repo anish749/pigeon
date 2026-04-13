@@ -59,6 +59,16 @@ func TestResolveMentions(t *testing.T) {
 			},
 		},
 		{
+			Name: "Lars Müller",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U777",
+				DisplayName: "Lars Müller",
+				RealName:    "Lars Müller",
+				Name:        "lars.muller",
+			},
+		},
+		{
 			Name: "Sherlock Watson",
 			Slack: &identity.SlackIdentity{
 				Workspace:   "test-ws",
@@ -171,6 +181,11 @@ func TestResolveMentions(t *testing.T) {
 			name: "multi-word name case insensitive",
 			text: "hey @sherlock holmes check this",
 			want: "hey <@U333> check this",
+		},
+		{
+			name: "multi-word unicode name consumed fully",
+			text: "hey @Lars Müller please review",
+			want: "hey <@U777> please review",
 		},
 		{
 			name: "unicode name matched by ascii username",
