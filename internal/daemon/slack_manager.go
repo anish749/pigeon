@@ -7,6 +7,7 @@ import (
 
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
@@ -174,24 +175,17 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
 
 	// Run listener and socket mode client concurrently. If either exits,
-	// the context is cancelled so the other stops too.
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		listener.Run(runCtx)
-		done <- nil
-	}()
-
-	smErr := smClient.RunContext(runCtx)
-
-	// Wait for listener to finish after cancelling.
-	cancel()
-	<-done
-
-	if smErr != nil {
-		return fmt.Errorf("slack socket mode: %w", smErr)
-	}
-	return nil
+	// the errgroup cancels the other.
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		listener.Run(gCtx)
+		return nil
+	})
+	g.Go(func() error {
+		if err := smClient.RunContext(gCtx); err != nil {
+			return fmt.Errorf("slack socket mode: %w", err)
+		}
+		return nil
+	})
+	return g.Wait()
 }

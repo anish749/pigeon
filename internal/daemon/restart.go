@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 )
 
 const (
@@ -14,48 +16,38 @@ const (
 )
 
 // runWithRestart runs fn in a loop, restarting it with exponential backoff
-// when it exits with an error. If fn panics, the panic is recovered and
-// treated as a restartable error. The loop exits when ctx is cancelled.
+// when it exits with an error or unexpectedly returns nil. If fn panics,
+// the panic is recovered and treated as a restartable error. The loop exits
+// when ctx is cancelled.
 //
-// The delay starts at 5s and doubles up to 5min. It resets to 5s after fn
-// has been running for 30+ seconds (indicating a stable run rather than an
-// immediate crash loop).
+// The delay starts at 5s and doubles up to 5min. It resets after fn has been
+// running for 30+ seconds (indicating a stable run rather than a crash loop).
 func runWithRestart(ctx context.Context, label string, fn func(context.Context) error) {
-	delay := restartInitialDelay
+	bo := backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(restartInitialDelay),
+		backoff.WithMaxInterval(restartMaxDelay),
+		backoff.WithMultiplier(2),
+		backoff.WithMaxElapsedTime(0), // never stop retrying
+	)
 
-	for {
+	backoff.RetryNotify(func() error {
 		started := time.Now()
 		err := runRecoverable(ctx, fn)
-
-		// Context cancelled — daemon is shutting down.
 		if ctx.Err() != nil {
-			return
+			return backoff.Permanent(ctx.Err())
 		}
-
-		if err == nil {
-			// fn returned nil but context is still alive — unexpected
-			// clean exit. Treat it the same as a crash.
-			slog.Warn("account exited unexpectedly, restarting",
-				"account", label, "delay", delay)
-		} else {
-			slog.Error("account crashed, restarting",
-				"account", label, "error", err, "delay", delay)
-		}
-
 		// Reset backoff if the run was stable (lasted 30+ seconds).
 		if time.Since(started) >= restartStableAfter {
-			delay = restartInitialDelay
+			bo.Reset()
 		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
+		if err == nil {
+			return fmt.Errorf("unexpected clean exit")
 		}
-
-		// Exponential backoff, capped at max.
-		delay = min(delay*2, restartMaxDelay)
-	}
+		return err
+	}, backoff.WithContext(bo, ctx), func(err error, d time.Duration) {
+		slog.Error("account crashed, restarting",
+			"account", label, "error", err, "delay", d)
+	})
 }
 
 // runRecoverable calls fn, recovering from panics and returning them as errors.
