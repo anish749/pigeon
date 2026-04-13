@@ -70,6 +70,7 @@ func (l *Listener) EventHandler(ctx context.Context) func(any) {
 			l.handleLoggedOut(ctx, v)
 		case *events.Connected:
 			slog.InfoContext(ctx, "whatsapp: connected", "account", l.acct)
+			go l.requestResyncIfNeeded(ctx)
 		case *events.Disconnected:
 			slog.WarnContext(ctx, "whatsapp: disconnected", "account", l.acct)
 		}

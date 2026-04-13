@@ -106,6 +106,12 @@ func (a AccountDir) Identity() IdentityDir {
 	return IdentityDir{account: a}
 }
 
+// ResyncMarkerPath returns the path to the resync marker file for this account.
+// When present, the daemon should request a full history re-sync on next connect.
+func (a AccountDir) ResyncMarkerPath() string {
+	return filepath.Join(a.Path(), ".needs-resync")
+}
+
 // SyncCursorsPath returns the path to the sync cursors file for this account.
 func (a AccountDir) SyncCursorsPath() string {
 	return filepath.Join(a.Path(), ".sync-cursors.yaml")
