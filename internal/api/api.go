@@ -303,7 +303,6 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 		senderName = sender.Resolver.ContactName(ctx, myJID)
 		senderID = myJID.String()
 	}
-	// WhatsApp always sends as the user — there is no bot identity.
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -311,7 +310,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 			Ts:       resp.Timestamp,
 			Sender:   senderName,
 			SenderID: senderID,
-			Via:      modelv1.ViaPigeonAsUser,
+			Via:      modelv1.ViaPigeonAsUser, // WhatsApp always sends as the user — there is no bot identity.
 			Text:     req.Message,
 		},
 	}
