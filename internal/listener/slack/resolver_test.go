@@ -35,7 +35,7 @@ func TestResolveMentions(t *testing.T) {
 				ID:          "U333",
 				DisplayName: "Sherlock Holmes",
 				RealName:    "Sherlock Holmes",
-				Name:        "sherlock.holmes",
+				Name:        "sherlock",
 			},
 		},
 		{
@@ -56,6 +56,16 @@ func TestResolveMentions(t *testing.T) {
 				DisplayName: "Björn Borg",
 				RealName:    "Björn Borg",
 				Name:        "bjorn.borg",
+			},
+		},
+		{
+			Name: "Ørjan Nilsen",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U888",
+				DisplayName: "Ørjan Nilsen",
+				RealName:    "Ørjan Nilsen",
+				Name:        "orjan.nilsen",
 			},
 		},
 		{
@@ -196,6 +206,32 @@ func TestResolveMentions(t *testing.T) {
 			name: "unicode word boundary prevents partial match",
 			text: "hey @bjorkést check this",
 			want: "hey @bjorkést check this",
+		},
+		// Unicode first-word: regex must capture @Björk, not just ASCII.
+		{
+			name: "unicode first word in mention",
+			text: "hey @Björk great show",
+			want: "hey <@U555> great show",
+		},
+		{
+			name: "unicode multi-word mention",
+			text: "hey @Björn Borg great match",
+			want: "hey <@U666> great match",
+		},
+		// Username ambiguity: Holmes has username "sherlock", Watson has
+		// "sherlock.watson". @Sherlock alone matches both people via
+		// substring search, but only Holmes has the 8-char username
+		// "sherlock" that fits the text — it should NOT resolve because
+		// the intent is ambiguous (two people share the first name).
+		{
+			name: "ambiguous first name with unique username should not resolve",
+			text: "hey @sherlock what do you think?",
+			want: "hey @sherlock what do you think?",
+		},
+		{
+			name: "non-ascii first character in mention",
+			text: "hey @Ørjan Nilsen nice set",
+			want: "hey <@U888> nice set",
 		},
 	}
 

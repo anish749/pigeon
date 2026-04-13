@@ -25,8 +25,9 @@ var mentionRe = regexp.MustCompile(`<@(U[A-Z0-9]+)(?:\|[^>]*)?>`)
 var channelMentionRe = regexp.MustCompile(`<#(C[A-Z0-9]+)\|([^>]+)>`)
 
 // outboundMentionRe matches @name patterns in outbound message text.
-// Captures one or more words after @. Does not match inside URLs or emails.
-var outboundMentionRe = regexp.MustCompile(`(?:^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)`)
+// Captures one or more words after @, including Unicode letters (e.g. Björk, Ørjan).
+// Does not match inside URLs or emails.
+var outboundMentionRe = regexp.MustCompile(`(?:^|\s)@([\pL\pN][\pL\pN_.-]*)`)
 
 // specialMentions maps broadcast @mentions to Slack's special syntax.
 var specialMentions = map[string]string{
@@ -115,17 +116,33 @@ func (r *Resolver) ResolveMentions(text string) string {
 		// matches the longest span of text starting at the @. Try all
 		// name fields (canonical name, display name, real name, username)
 		// so that both "@alice" and "@Sherlock Holmes" resolve correctly.
+		//
+		// When multiple candidates match the search, skip the username
+		// (ws.Name) field — usernames are handles that can be misleadingly
+		// unique (e.g. "sherlock" vs "sherlock.watson") even when the
+		// human intent is ambiguous.
 		atIdx := m[2] - 1
 		afterAt := text[atIdx+1:] // text after the @
 		var bestID string
 		var bestLen int
 		var ties int
+		var wsCount int
+		for _, p := range candidates {
+			if _, ok := p.Slack[r.workspace]; ok {
+				wsCount++
+			}
+		}
 		for _, p := range candidates {
 			ws, ok := p.Slack[r.workspace]
 			if !ok {
 				continue
 			}
-			names := uniqueNames(p.Name, ws.DisplayName, ws.RealName, ws.Name)
+			var names []string
+			if wsCount > 1 {
+				names = uniqueNames(p.Name, ws.DisplayName, ws.RealName)
+			} else {
+				names = uniqueNames(p.Name, ws.DisplayName, ws.RealName, ws.Name)
+			}
 			for _, n := range names {
 				if len(n) > len(afterAt) {
 					continue
