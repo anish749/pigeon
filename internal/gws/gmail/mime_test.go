@@ -40,6 +40,9 @@ func TestParseRawMessage_PlainText(t *testing.T) {
 	if len(parsed.attachments) != 0 {
 		t.Errorf("attachments = %v, want empty", parsed.attachments)
 	}
+	if parsed.html != "" {
+		t.Errorf("html = %q, want empty for text/plain message", parsed.html)
+	}
 }
 
 func TestParseRawMessage_Multipart(t *testing.T) {
@@ -96,6 +99,9 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 	// parseRawMessage falls back to env.Root.Content.
 	if parsed.html == "" {
 		t.Error("html is empty, expected fallback to root part content")
+	}
+	if want := "<p>Hello <b>world</b></p>\r\n"; parsed.html != want {
+		t.Errorf("html = %q, want %q", parsed.html, want)
 	}
 }
 
