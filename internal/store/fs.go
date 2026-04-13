@@ -252,6 +252,10 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	}
 
 	var errs []error
+	if err := s.applyPendingEmailDeletes(ad.Gmail()); err != nil {
+		errs = append(errs, fmt.Errorf("apply pending email deletes: %w", err))
+	}
+
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
 			return nil
@@ -607,6 +611,92 @@ func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) e
 		return fmt.Errorf("write pending delete: %w", err)
 	}
 	return nil
+}
+
+// applyPendingEmailDeletes reads the pending-email-deletes file, removes
+// matching email lines from gmail date files, and deletes the pending file.
+func (s *FSStore) applyPendingEmailDeletes(gmailDir paths.GmailDir) error {
+	pendingPath := gmailDir.PendingDeletesPath()
+	data, err := os.ReadFile(pendingPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read pending deletes: %w", err)
+	}
+
+	ids := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line != "" {
+			ids[line] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return os.Remove(pendingPath)
+	}
+
+	files, err := listDateFiles(gmailDir.Path())
+	if err != nil {
+		return fmt.Errorf("list gmail date files: %w", err)
+	}
+
+	var errs []error
+	for _, file := range files {
+		if err := s.removeEmailLines(file, ids); err != nil {
+			errs = append(errs, fmt.Errorf("remove emails from %s: %w", filepath.Base(file), err))
+		}
+	}
+
+	if err := os.Remove(pendingPath); err != nil {
+		errs = append(errs, fmt.Errorf("remove pending deletes file: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// removeEmailLines rewrites a JSONL file, dropping email lines whose ID is
+// in the delete set. Non-email lines are preserved. If no lines are removed,
+// the file is not rewritten.
+func (s *FSStore) removeEmailLines(path string, deleteIDs map[string]struct{}) error {
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	rawLines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	var kept []string
+	removed := 0
+	for _, raw := range rawLines {
+		if raw == "" {
+			continue
+		}
+		line, err := modelv1.Parse(raw)
+		if err != nil {
+			kept = append(kept, raw) // preserve unparseable lines
+			continue
+		}
+		if line.Type == modelv1.LineEmail && line.Email != nil {
+			if _, ok := deleteIDs[line.Email.ID]; ok {
+				removed++
+				continue
+			}
+		}
+		kept = append(kept, raw)
+	}
+
+	if removed == 0 {
+		return nil
+	}
+
+	if len(kept) == 0 {
+		return os.Remove(path)
+	}
+
+	newData := strings.Join(kept, "\n") + "\n"
+	return os.WriteFile(path, []byte(newData), 0644)
 }
 
 func cleanupStaleDriveMeta(dir, keepName string) error {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1232,4 +1233,101 @@ func TestAppendPendingDelete(t *testing.T) {
 	if string(data) != want {
 		t.Errorf("pending deletes = %q, want %q", data, want)
 	}
+}
+
+func emailLine(id string, t time.Time, from, subject, text string) modelv1.Line {
+	return modelv1.Line{
+		Type: modelv1.LineEmail,
+		Email: &modelv1.EmailLine{
+			ID: id, Ts: t, From: from, Subject: subject, Text: text,
+		},
+	}
+}
+
+func TestApplyPendingEmailDeletes(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "test")
+	gmailDir := root.AccountFor(acct).Gmail()
+
+	// Write three emails across two date files.
+	e1 := emailLine("aaa", ts(2026, 3, 10, 9, 0, 0), "a@x.com", "subj1", "body1")
+	e2 := emailLine("bbb", ts(2026, 3, 10, 10, 0, 0), "b@x.com", "subj2", "body2")
+	e3 := emailLine("ccc", ts(2026, 3, 11, 8, 0, 0), "c@x.com", "subj3", "body3")
+
+	if err := s.AppendLine(gmailDir.DateFile("2026-03-10"), e1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(gmailDir.DateFile("2026-03-10"), e2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(gmailDir.DateFile("2026-03-11"), e3); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mark "aaa" and "ccc" as deleted.
+	for _, id := range []string{"aaa", "ccc"} {
+		if err := s.AppendPendingDelete(gmailDir, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Run maintenance, which should apply the pending deletes.
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// Pending file should be gone.
+	if _, err := os.Stat(gmailDir.PendingDeletesPath()); !os.IsNotExist(err) {
+		t.Error("pending deletes file should be removed after maintenance")
+	}
+
+	// 2026-03-10 should have only "bbb".
+	data, err := os.ReadFile(gmailDir.DateFile("2026-03-10").Path())
+	if err != nil {
+		t.Fatalf("read date file: %v", err)
+	}
+	lines := nonEmptyLines(string(data))
+	if len(lines) != 1 {
+		t.Fatalf("2026-03-10: got %d lines, want 1", len(lines))
+	}
+	parsed, err := modelv1.Parse(lines[0])
+	if err != nil {
+		t.Fatalf("parse remaining line: %v", err)
+	}
+	if parsed.Email.ID != "bbb" {
+		t.Errorf("remaining email ID = %q, want bbb", parsed.Email.ID)
+	}
+
+	// 2026-03-11 date file should be removed (all lines deleted).
+	if _, err := os.Stat(gmailDir.DateFile("2026-03-11").Path()); !os.IsNotExist(err) {
+		t.Error("2026-03-11 file should be removed when all emails deleted")
+	}
+}
+
+func TestApplyPendingEmailDeletes_NoPendingFile(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "test")
+	gmailDir := root.AccountFor(acct).Gmail()
+
+	// Create the gmail dir so Maintain can walk it, but no pending file.
+	if err := os.MkdirAll(gmailDir.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Maintain should succeed even when no pending file exists.
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+}
+
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }
