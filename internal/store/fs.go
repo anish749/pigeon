@@ -666,6 +666,12 @@ func (s *FSStore) maintainFile(path string) error {
 		return os.WriteFile(path, newData, 0644)
 	}
 
+	// GWS and Linear JSONL files use ID-based dedup instead of the
+	// messaging compaction pipeline (which only handles msg/react/edit/delete).
+	if paths.IsGWSFile(path) {
+		return s.maintainGWSFile(path, data)
+	}
+
 	df, parseErr := modelv1.ParseDateFile(data)
 	if parseErr != nil {
 		slog.Warn("skipping compaction: parse date file failed", "file", path, "error", parseErr)
@@ -684,6 +690,72 @@ func (s *FSStore) maintainFile(path string) error {
 		return nil
 	}
 	return os.WriteFile(path, newData, 0644)
+}
+
+// maintainGWSFile compacts a GWS or Linear JSONL file by deduplicating
+// lines by ID (keeping the last occurrence of each).
+func (s *FSStore) maintainGWSFile(path string, data []byte) error {
+	lines, parseErr := parseLines(data)
+	if parseErr != nil {
+		slog.Warn("skipping compaction: parse GWS file failed", "file", path, "error", parseErr)
+		return nil
+	}
+
+	deduped := compact.DedupGWS(lines)
+
+	var buf []byte
+	var errs []error
+	for _, l := range deduped {
+		b, err := modelv1.Marshal(l)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		buf = append(buf, b...)
+		buf = append(buf, '\n')
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("marshal GWS file: %w", err)
+	}
+
+	if len(buf) == 0 {
+		slog.Warn("skipping compaction: would empty file", "file", path)
+		return nil
+	}
+	if string(buf) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, buf, 0644)
+}
+
+// parseLines parses raw JSONL bytes into a slice of Lines. Returns
+// successfully parsed lines and any parse errors. If any line fails to
+// parse, the entire file is considered unparseable (returns nil lines and
+// the error) to prevent silently dropping data during compaction.
+func parseLines(data []byte) ([]modelv1.Line, error) {
+	raw := string(data)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+
+	var lines []modelv1.Line
+	var errs []error
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		l, err := modelv1.Parse(p)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return lines, nil
 }
 
 func listDateFiles(dir string) ([]string, error) {

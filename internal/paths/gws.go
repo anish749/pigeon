@@ -85,6 +85,18 @@ func DriveMetaFileGlobsSince(since time.Duration) []string {
 	return globs
 }
 
+// IsGWSFile reports whether the given file path lives under a Google Workspace
+// or Linear subdirectory (gmail, gcalendar, gdrive, issues). Used by the
+// maintenance pass to route GWS/Linear files to ID-based dedup instead of
+// messaging compaction.
+func IsGWSFile(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+gmailSubdir+sep) ||
+		strings.Contains(path, sep+gcalendarSubdir+sep) ||
+		strings.Contains(path, sep+gdriveSubdir+sep) ||
+		strings.Contains(path, sep+linearIssuesSubdir+sep)
+}
+
 // GWS path types extend AccountDir for Google Workspace services.
 //
 //	AccountDir → GmailDir
