@@ -68,8 +68,17 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 	// or from enmime's HTML→text conversion. env.HTML is only populated
 	// when a multipart message has an explicit text/html part.
 	//
+	// For single-part text/html messages, enmime populates env.Text
+	// (via HTML→text conversion) but leaves env.HTML empty. Fall back
+	// to env.Root.Content so we don't lose the original HTML.
+	//
 	// We store text always (greppable). We store html when present so
 	// the protocol carries enough info to render rich content later.
+	html := env.HTML
+	if html == "" && env.Root != nil && env.Root.ContentType == "text/html" {
+		html = string(env.Root.Content)
+	}
+
 	return &parsedMessage{
 		subject:     env.GetHeader("Subject"),
 		fromName:    fromName,
@@ -77,7 +86,7 @@ func parseRawMessage(raw string) (*parsedMessage, error) {
 		to:          to,
 		cc:          cc,
 		text:        env.Text,
-		html:        env.HTML,
+		html:        html,
 		attachments: attachments,
 		warnings:    warnings,
 	}, nil

@@ -40,6 +40,9 @@ func TestParseRawMessage_PlainText(t *testing.T) {
 	if len(parsed.attachments) != 0 {
 		t.Errorf("attachments = %v, want empty", parsed.attachments)
 	}
+	if parsed.html != "" {
+		t.Errorf("html = %q, want empty for text/plain message", parsed.html)
+	}
 }
 
 func TestParseRawMessage_Multipart(t *testing.T) {
@@ -92,8 +95,14 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 	if parsed.text == "" {
 		t.Error("text is empty, expected enmime HTML→text conversion")
 	}
-	// Single-part text/html: enmime doesn't populate HTML separately.
-	// HTML is only set for multipart messages with an explicit text/html part.
+	// Single-part text/html: enmime doesn't populate env.HTML, but
+	// parseRawMessage falls back to env.Root.Content.
+	if parsed.html == "" {
+		t.Error("html is empty, expected fallback to root part content")
+	}
+	if want := "<p>Hello <b>world</b></p>\r\n"; parsed.html != want {
+		t.Errorf("html = %q, want %q", parsed.html, want)
+	}
 }
 
 func TestParseRawMessage_PaddedBase64URL(t *testing.T) {
