@@ -198,14 +198,33 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		return resolved, errors.Join(errs...)
 	}
 
+	matched := make(map[string]bool, len(threads))
 	var result []modelv1.ResolvedMsg
 	for _, m := range resolved.Messages {
 		result = append(result, m)
 		if tf, ok := threads[m.ID]; ok {
+			matched[m.ID] = true
 			for _, r := range tf.Replies {
 				r.Reply = true
 				result = append(result, r)
 			}
+		}
+	}
+
+	// Append thread replies whose parent message wasn't in the selected date
+	// files (e.g. the parent is older than the --since cutoff). Without this,
+	// real-time thread replies to old messages are silently dropped from the
+	// output because there is no parent to attach them to.
+	for parentID, tf := range threads {
+		if matched[parentID] || parentID == "" {
+			continue
+		}
+		// Include the parent so the reader knows which message the replies
+		// belong to, then append all replies.
+		result = append(result, tf.Parent)
+		for _, r := range tf.Replies {
+			r.Reply = true
+			result = append(result, r)
 		}
 	}
 
