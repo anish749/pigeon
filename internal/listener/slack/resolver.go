@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -132,10 +134,10 @@ func (r *Resolver) ResolveMentions(text string) string {
 					continue
 				}
 				// Ensure the match ends at a word boundary: end of string,
-				// or followed by a non-alphanumeric character.
+				// or followed by a non-letter/digit (Unicode-aware).
 				if len(n) < len(afterAt) {
-					next := afterAt[len(n)]
-					if isAlphanumeric(next) {
+					ch, _ := utf8.DecodeRuneInString(afterAt[len(n):])
+					if unicode.IsLetter(ch) || unicode.IsDigit(ch) {
 						continue
 					}
 				}
@@ -166,11 +168,6 @@ func (r *Resolver) ResolveMentions(text string) string {
 	}
 
 	return text
-}
-
-// isAlphanumeric reports whether b is an ASCII letter or digit.
-func isAlphanumeric(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // uniqueNames returns the non-empty, deduplicated names from the given list.
