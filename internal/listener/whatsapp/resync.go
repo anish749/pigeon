@@ -3,27 +3,37 @@ package whatsapp
 import (
 	"context"
 	"log/slog"
-	"os"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	wastore "go.mau.fi/whatsmeow/store"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/anish749/pigeon/internal/paths"
 )
 
-// requestResyncIfNeeded checks for a resync marker left by `pigeon reset`
-// and, if present, sends a full history sync request to the primary device.
-// The marker is removed after the request is sent so it only fires once.
+// requestResyncIfNeeded checks whether the local message store is empty for
+// this account. If the device is paired but no conversations exist locally,
+// it sends a FULL_HISTORY_SYNC_ON_DEMAND peer message to the primary device.
+//
+// This covers the case where `pigeon reset` wiped message data while the
+// device remained paired — WhatsApp won't re-send history automatically
+// because it considers the device already synced.
+//
+// Known limitation: if the daemon crashes mid-history-sync, the store will
+// contain partial data. On next connect the store is non-empty, so no resync
+// is requested, and WhatsApp won't resend the initial history. This is
+// accepted as rare enough that the added complexity of tracking sync
+// completion isn't warranted.
 func (l *Listener) requestResyncIfNeeded(ctx context.Context) {
-	acctDir := paths.DefaultDataRoot().AccountFor(l.acct)
-	marker := acctDir.ResyncMarkerPath()
-
-	if _, err := os.Stat(marker); err != nil {
-		return // no marker — nothing to do
+	convs, err := l.store.ListConversations(l.acct)
+	if err != nil {
+		slog.ErrorContext(ctx, "whatsapp: failed to list conversations for resync check",
+			"account", l.acct, "error", err)
+		return
+	}
+	if len(convs) > 0 {
+		return // store has data — nothing to do
 	}
 
-	slog.InfoContext(ctx, "whatsapp: resync marker found, requesting full history sync",
+	slog.InfoContext(ctx, "whatsapp: empty store detected, requesting full history sync",
 		"account", l.acct)
 
 	msg := buildFullHistorySyncRequest()
@@ -31,11 +41,6 @@ func (l *Listener) requestResyncIfNeeded(ctx context.Context) {
 		slog.ErrorContext(ctx, "whatsapp: failed to request history re-sync",
 			"account", l.acct, "error", err)
 		return
-	}
-
-	if err := os.Remove(marker); err != nil {
-		slog.WarnContext(ctx, "whatsapp: failed to remove resync marker",
-			"account", l.acct, "error", err)
 	}
 
 	slog.InfoContext(ctx, "whatsapp: full history re-sync requested",
