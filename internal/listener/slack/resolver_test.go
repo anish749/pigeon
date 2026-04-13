@@ -28,6 +28,26 @@ func TestResolveMentions(t *testing.T) {
 				Name:        "bob",
 			},
 		},
+		{
+			Name: "Sherlock Holmes",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U333",
+				DisplayName: "Sherlock Holmes",
+				RealName:    "Sherlock Holmes",
+				Name:        "sherlock.holmes",
+			},
+		},
+		{
+			Name: "Sherlock Watson",
+			Slack: &identity.SlackIdentity{
+				Workspace:   "test-ws",
+				ID:          "U444",
+				DisplayName: "Sherlock Watson",
+				RealName:    "Sherlock Watson",
+				Name:        "sherlock.watson",
+			},
+		},
 	})
 	r := &Resolver{
 		writer:    writer,
@@ -101,6 +121,36 @@ func TestResolveMentions(t *testing.T) {
 			name: "pre-resolved mentions left as-is",
 			text: "<!here> <@U111> already formatted",
 			want: "<!here> <@U111> already formatted",
+		},
+		{
+			name: "multi-word name consumes full name",
+			text: "don't worry @Sherlock Holmes we've got this",
+			want: "don't worry <@U333> we've got this",
+		},
+		{
+			name: "multi-word name at end of text",
+			text: "thanks @Sherlock Holmes",
+			want: "thanks <@U333>",
+		},
+		{
+			name: "multi-word name at start",
+			text: "@Sherlock Holmes please review",
+			want: "<@U333> please review",
+		},
+		{
+			name: "multi-word ambiguous first name leaves as-is",
+			text: "hey @Sherlock what do you think?",
+			want: "hey @Sherlock what do you think?",
+		},
+		{
+			name: "two multi-word mentions",
+			text: "@Sherlock Holmes and @Alice Johnson sync up",
+			want: "<@U333> and <@U111> sync up",
+		},
+		{
+			name: "multi-word name case insensitive",
+			text: "hey @sherlock holmes check this",
+			want: "hey <@U333> check this",
 		},
 	}
 
