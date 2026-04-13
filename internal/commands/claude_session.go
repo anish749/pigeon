@@ -40,7 +40,7 @@ type ClaudeSessionParams struct {
 func RunClaudeSession(p ClaudeSessionParams) error {
 	// Session ID path: find and resume the session by its Claude Code session ID.
 	if p.SessionID != "" {
-		return runSessionByID(p.SessionID)
+		return runSessionByID(p)
 	}
 
 	// Non-interactive path: platform+account provided via flags.
@@ -68,64 +68,104 @@ func RunClaudeSession(p ClaudeSessionParams) error {
 	}
 }
 
-func runSessionByID(sessionID string) error {
+func runSessionByID(p ClaudeSessionParams) error {
 	sessions, err := claude.ListAllSessions()
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
 
-	var found *claude.Session
+	// Check if any registered account already owns this session ID.
 	for _, s := range sessions {
-		if s.SessionID == sessionID {
-			found = s
-			break
+		if s.SessionID == p.SessionID {
+			// Already active — resume directly, no prompts needed.
+			if isSessionConnected(p.SessionID) {
+				return launchClaude(p.SessionID, s.Name, s.CWD, true)
+			}
+			// Known but not connected — use the normal account flow.
+			return runSessionForAccount(account.New(s.Platform, s.Account))
 		}
 	}
 
-	if found == nil {
-		return fmt.Errorf("session %s not found — use 'pigeon claude' to list or create sessions", sessionID)
+	// Session not registered with pigeon yet (started externally).
+	// Select which account should receive messages for this session.
+	var acct account.Account
+	if p.Platform != "" && p.Account != "" {
+		acct = account.New(p.Platform, p.Account)
+		if err := validateAccount(acct); err != nil {
+			return err
+		}
+	} else {
+		acct, err = selectAccount()
+		if err != nil {
+			return err
+		}
 	}
 
-	// Already active in another window — resume directly, no prompts needed.
-	if isSessionConnected(sessionID) {
-		return launchClaude(sessionID, found.Name, found.CWD, true)
-	}
+	return bindExternalSession(acct, p.SessionID)
+}
 
-	// Not currently connected — show details and ask to confirm.
-	acct := account.New(found.Platform, found.Account)
-	fmt.Printf("\n%sResume session for %s%s%s\n", bold, cyan, acct.Display(), reset)
-	fmt.Printf("  Claude Code session ID: %s%s%s\n", dim, sessionID, reset)
-	fmt.Printf("  Directory:              %s%s%s\n", dim, found.CWD, reset)
-	fmt.Printf("  Created:                %s%s%s\n", dim, found.CreatedAt.Format("2006-01-02 15:04"), reset)
-	fmt.Println()
+// bindExternalSession connects an externally-started Claude Code session to a
+// pigeon account. If the account already has a session bound to it, the user
+// is warned and asked to confirm the switch before the binding is updated.
+func bindExternalSession(acct account.Account, sessionID string) error {
+	sf, err := claude.OpenSession(acct)
+	if err != nil {
+		return err
+	}
+	defer sf.Close()
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
-	if cwd != found.CWD {
-		fmt.Printf("  %s⚠  Your current directory is %s%s\n", yellow, cwd, reset)
-		fmt.Printf("  %s   Resuming will change your working directory to %s%s\n\n", yellow, found.CWD, reset)
+
+	if sf.Exists() {
+		existing := sf.Data()
+		connected := isSessionConnected(existing.SessionID)
+
+		fmt.Printf("\n%s%s%s already has a session bound to it.%s\n", bold, cyan, acct.Display(), reset)
+		fmt.Printf("  Current session: %s%s%s\n", dim, existing.SessionID, reset)
+		if connected {
+			fmt.Printf("  Status:          %s✓ Connected in another window%s\n", green, reset)
+		}
+		fmt.Println()
+
+		if connected {
+			fmt.Printf("  %s⚠  Pigeon is connected to the current session in another window.%s\n", yellow, reset)
+			fmt.Printf("  %s   Switching will disconnect pigeon from it.%s\n\n", dim, reset)
+		}
+
+		prompt := promptui.Select{
+			Label: "What would you like to do",
+			Items: []string{
+				fmt.Sprintf("Switch to session %s", sessionID),
+				"Exit",
+			},
+			Size: 2,
+		}
+
+		idx, _, err := prompt.Run()
+		if err != nil || idx != 0 {
+			return nil // ctrl-c, escape, or Exit chosen
+		}
 	}
 
-	prompt := promptui.Select{
-		Label: "What would you like to do",
-		Items: []string{
-			"Resume this session",
-			"Exit",
-		},
-		Size: 2,
+	now := time.Now()
+	s := &claude.Session{
+		Platform:      acct.Platform,
+		Account:       acct.Name,
+		SessionID:     sessionID,
+		CWD:           cwd,
+		Name:          acct.Display(),
+		CreatedAt:     now,
+		LastDelivered: now,
+	}
+	if err := sf.Save(s); err != nil {
+		return err
 	}
 
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return nil // ctrl-c / escape
-	}
-
-	if idx == 0 {
-		return launchClaude(sessionID, found.Name, found.CWD, true)
-	}
-	return nil
+	fmt.Printf("\n  %s✓%s Pigeon connected to session\n\n", green, reset)
+	return launchClaude(sessionID, acct.Display(), cwd, true)
 }
 
 func runSessionForAccount(acct account.Account) error {
