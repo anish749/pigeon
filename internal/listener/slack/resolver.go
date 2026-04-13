@@ -22,6 +22,26 @@ var mentionRe = regexp.MustCompile(`<@(U[A-Z0-9]+)(?:\|[^>]*)?>`)
 // channelMentionRe matches Slack channel mentions: <#C12345678|channel-name>
 var channelMentionRe = regexp.MustCompile(`<#(C[A-Z0-9]+)\|([^>]+)>`)
 
+// outboundMentionRe matches @name patterns in outbound message text.
+// Captures one or more words after @. Does not match inside URLs or emails.
+var outboundMentionRe = regexp.MustCompile(`(?:^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)`)
+
+// specialMentions maps broadcast @mentions to Slack's special syntax.
+var specialMentions = map[string]string{
+	"channel":  "<!channel>",
+	"here":     "<!here>",
+	"everyone": "<!everyone>",
+}
+
+// specialMentionRes is a precompiled regex for each special mention.
+var specialMentionRes = func() map[string]*regexp.Regexp {
+	m := make(map[string]*regexp.Regexp, len(specialMentions))
+	for name := range specialMentions {
+		m[name] = regexp.MustCompile(`(?:^|\s)@` + regexp.QuoteMeta(name) + `\b`)
+	}
+	return m
+}()
+
 // ResolveText replaces Slack markup in message text with human-readable names.
 // Converts <@U12345678> to @displayname and <#C12345678|name> to #name.
 func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error) {
@@ -46,6 +66,52 @@ func (r *Resolver) ResolveText(ctx context.Context, text string) (string, error)
 	}
 	text = channelMentionRe.ReplaceAllString(text, "#$2")
 	return text, nil
+}
+
+// ResolveMentions converts human-readable @mentions in outbound message text
+// to Slack's wire format. Replaces @name with <@USER_ID> when exactly one user
+// matches, and @channel/@here/@everyone with <!channel>/<!here>/<!everyone>.
+// Unrecognized or ambiguous mentions are left as-is.
+func (r *Resolver) ResolveMentions(text string) string {
+	// Handle special broadcast mentions first.
+	for name, repl := range specialMentions {
+		pat := specialMentionRes[name]
+		text = pat.ReplaceAllStringFunc(text, func(m string) string {
+			prefix := ""
+			if len(m) > 0 && m[0] != '@' {
+				prefix = string(m[0])
+			}
+			return prefix + repl
+		})
+	}
+
+	// Resolve user mentions. Process from right to left so replacements
+	// don't shift indices for earlier matches.
+	matches := outboundMentionRe.FindAllStringSubmatchIndex(text, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		// m[2]:m[3] is the captured name (group 1).
+		name := text[m[2]:m[3]]
+
+		// Skip if already handled as a special mention.
+		if _, ok := specialMentions[strings.ToLower(name)]; ok {
+			continue
+		}
+
+		userID, _, err := r.FindUserID(name)
+		if err != nil {
+			// Not found or ambiguous — leave as-is.
+			slog.Warn("mention not resolved, leaving as-is", "mention", name, "error", err)
+			continue
+		}
+
+		// Replace @name with <@USER_ID>. The @ is one byte before the
+		// captured group start.
+		atIdx := m[2] - 1
+		text = text[:atIdx] + "<@" + userID + ">" + text[m[3]:]
+	}
+
+	return text
 }
 
 // Resolver resolves Slack user and channel names. User lookups are backed
