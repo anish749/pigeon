@@ -92,8 +92,11 @@ func TestParseRawMessage_HTMLOnly(t *testing.T) {
 	if parsed.text == "" {
 		t.Error("text is empty, expected enmime HTML→text conversion")
 	}
-	// Single-part text/html: enmime doesn't populate HTML separately.
-	// HTML is only set for multipart messages with an explicit text/html part.
+	// Single-part text/html: enmime doesn't populate env.HTML, but
+	// parseRawMessage falls back to env.Root.Content.
+	if parsed.html == "" {
+		t.Error("html is empty, expected fallback to root part content")
+	}
 }
 
 func TestParseRawMessage_PaddedBase64URL(t *testing.T) {
