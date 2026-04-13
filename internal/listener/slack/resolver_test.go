@@ -218,11 +218,10 @@ func TestResolveMentions(t *testing.T) {
 			text: "hey @Björn Borg great match",
 			want: "hey <@U666> great match",
 		},
-		// Username ambiguity: Holmes has username "sherlock", Watson has
-		// "sherlock.watson". @Sherlock alone matches both people via
-		// substring search, but only Holmes has the 8-char username
-		// "sherlock" that fits the text — it should NOT resolve because
-		// the intent is ambiguous (two people share the first name).
+		// Username priority: Holmes has username "sherlock", Watson has
+		// "sherlock.watson". Both match the substring search, but only
+		// Holmes has the username "sherlock" that fits the text — since
+		// usernames are unique Slack handles, the match is unambiguous.
 		{
 			name: "unique username resolves despite multiple candidates",
 			text: "hey @sherlock what do you think?",
