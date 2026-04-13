@@ -378,14 +378,11 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		slog.ErrorContext(ctx, "slack send failed",
 			"channel_id", channelID, "channel_name", channelName,
 			"via", req.Via, "error", err)
-		if err.Error() == "channel_not_found" && req.Via == modelv1.ViaPigeonAsBot {
-			return SendResponse{Error: fmt.Sprintf(
-				"send to %s failed: %v — the bot may not be a member of this channel. "+
-					"For private channels, ask someone to invite the bot. "+
-					"For Slack Connect channels, ensure the bot is added to the shared channel.",
-				channelName, err)}
+		hint := ""
+		if req.Via == modelv1.ViaPigeonAsBot {
+			hint = slackChannelNotFoundHint(err)
 		}
-		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v", channelName, err)}
+		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v%s", channelName, err, hint)}
 	}
 
 	// Ensure .meta.json exists for this conversation.
@@ -718,7 +715,7 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		reactErr = sender.BotAPI.AddReactionContext(ctx, req.Emoji, ref)
 	}
 	if reactErr != nil {
-		return ReactResponse{Error: fmt.Sprintf("react on %s: %v", channelName, reactErr)}
+		return ReactResponse{Error: fmt.Sprintf("react on %s: %v%s", channelName, reactErr, slackChannelNotFoundHint(reactErr))}
 	}
 
 	// Store locally. Derive date file from the message timestamp.
