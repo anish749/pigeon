@@ -97,6 +97,11 @@ func TestResolveMentions(t *testing.T) {
 			text: "@here @alice is on call today",
 			want: "<!here> <@U111> is on call today",
 		},
+		{
+			name: "pre-resolved mentions left as-is",
+			text: "<!here> <@U111> already formatted",
+			want: "<!here> <@U111> already formatted",
+		},
 	}
 
 	for _, tt := range tests {

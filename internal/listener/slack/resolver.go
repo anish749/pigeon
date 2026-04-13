@@ -101,6 +101,7 @@ func (r *Resolver) ResolveMentions(text string) string {
 		userID, _, err := r.FindUserID(name)
 		if err != nil {
 			// Not found or ambiguous — leave as-is.
+			slog.Warn("mention not resolved, leaving as-is", "mention", name, "error", err)
 			continue
 		}
 
