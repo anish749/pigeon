@@ -38,7 +38,6 @@ type ClaudeSessionParams struct {
 }
 
 func RunClaudeSession(p ClaudeSessionParams) error {
-	// Session ID path: find and resume the session by its Claude Code session ID.
 	if p.SessionID != "" {
 		return runSessionByID(p)
 	}
@@ -88,17 +87,9 @@ func runSessionByID(p ClaudeSessionParams) error {
 
 	// Session not registered with pigeon yet (started externally).
 	// Select which account should receive messages for this session.
-	var acct account.Account
-	if p.Platform != "" && p.Account != "" {
-		acct = account.New(p.Platform, p.Account)
-		if err := validateAccount(acct); err != nil {
-			return err
-		}
-	} else {
-		acct, err = selectAccount()
-		if err != nil {
-			return err
-		}
+	acct, err := resolveAccount(p.Platform, p.Account)
+	if err != nil {
+		return err
 	}
 
 	return bindExternalSession(acct, p.SessionID)
@@ -113,11 +104,6 @@ func bindExternalSession(acct account.Account, sessionID string) error {
 		return err
 	}
 	defer sf.Close()
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
-	}
 
 	if sf.Exists() {
 		existing := sf.Data()
@@ -148,6 +134,11 @@ func bindExternalSession(acct account.Account, sessionID string) error {
 		if err != nil || idx != 0 {
 			return nil // ctrl-c, escape, or Exit chosen
 		}
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
 	}
 
 	now := time.Now()
@@ -191,6 +182,19 @@ func runSessionForAccount(acct account.Account) error {
 type accountOption struct {
 	Acct  account.Account
 	Label string // e.g. "slack / tubular"
+}
+
+// resolveAccount returns the account from flags if both are set and valid,
+// otherwise falls back to interactive selection.
+func resolveAccount(platform, name string) (account.Account, error) {
+	if platform != "" && name != "" {
+		acct := account.New(platform, name)
+		if err := validateAccount(acct); err != nil {
+			return account.Account{}, err
+		}
+		return acct, nil
+	}
+	return selectAccount()
 }
 
 func selectAccount() (account.Account, error) {
