@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
@@ -18,6 +19,7 @@ const gwsPollInterval = 20 * time.Second
 
 // GWSManager owns the lifecycle of GWS pollers.
 type GWSManager struct {
+	apiServer   *api.Server
 	store       *store.FSStore
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -35,8 +37,9 @@ type runningGWSAccount struct {
 //
 // Each GWS account gets its own identity.Writer scoped to
 // gws/<email-slug>/identity/people.jsonl.
-func NewGWSManager(s *store.FSStore, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *GWSManager {
+func NewGWSManager(apiServer *api.Server, s *store.FSStore, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *GWSManager {
 	return &GWSManager{
+		apiServer:   apiServer,
 		store:       s,
 		idStore:     idStore,
 		dataRoot:    dataRoot,
@@ -71,6 +74,7 @@ func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) 
 		if _, ok := desiredEmails[email]; !ok {
 			slog.Info("gws account removed, stopping", "email", email)
 			acct.cancel()
+			m.apiServer.UnregisterGWS(account.New("gws", email))
 			delete(m.running, email)
 		}
 	}
@@ -88,6 +92,7 @@ func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 
 	child, cancel := context.WithCancel(ctx)
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
+	m.apiServer.RegisterGWS(acct)
 
 	go runWithRestart(child, "gws/"+g.Email, func(ctx context.Context) error {
 		writer := identity.NewWriter(m.idStore, acctDir.Identity())
