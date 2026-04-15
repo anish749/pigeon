@@ -94,9 +94,9 @@ func DriveMetaFileGlobsSince(since time.Duration) []string {
 // messaging compaction.
 func IsGWSFile(path string) bool {
 	sep := string(filepath.Separator)
-	return strings.Contains(path, sep+gmailSubdir+sep) ||
-		strings.Contains(path, sep+gcalendarSubdir+sep) ||
-		strings.Contains(path, sep+gdriveSubdir+sep) ||
+	return strings.Contains(path, sep+GmailSubdir+sep) ||
+		strings.Contains(path, sep+GcalendarSubdir+sep) ||
+		strings.Contains(path, sep+GdriveSubdir+sep) ||
 		strings.Contains(path, sep+linearIssuesSubdir+sep)
 }
 
