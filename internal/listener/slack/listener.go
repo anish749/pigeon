@@ -217,7 +217,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
-	if result.State == hub.RouteNoSession && shouldAutoReply(l.botUserID, msg.User, msg.BotID, isBotDM) {
+	if shouldAutoReply(l.botUserID, msg, result.State, isBotDM) {
 		botAPI := goslack.New(l.botToken)
 		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
 			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false))
@@ -296,16 +296,14 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 	// Route the reaction to the connected session. The listener only sees
 	// reactions for channels the bot has visibility into (DMs/MPDMs and
 	// channels it's a member of), so there is no additional filter here.
-	if l.onReaction == nil {
-		return
-	}
-	l.onReaction(l.acct, channelName, hub.ReactionInfo{
+	res := l.onReaction(l.acct, channelName, hub.ReactionInfo{
 		MsgID:    item.Timestamp,
 		Sender:   userName,
 		SenderID: userID,
 		Emoji:    emoji,
 		Remove:   remove,
 	})
+	slog.InfoContext(ctx, "slack reaction routed", "result", res, "account", l.acct)
 }
 
 // handleEdit stores a message edit event.

@@ -4,7 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/slack-go/slack/slackevents"
+
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
@@ -33,23 +36,30 @@ func TestShouldAutoReply(t *testing.T) {
 	tests := []struct {
 		name       string
 		botUserID  string
-		msgUser    string
-		msgBotID   string
+		msg        *slackevents.MessageEvent
+		routeState hub.RouteState
 		isBotDM    bool
 		want       bool
 	}{
-		{"other user DMs bot", "U_BOT", "U_OTHER", "", true, true},
-		{"bot's own message by user ID", "U_BOT", "U_BOT", "", true, false},
-		{"bot's own message by bot ID", "U_BOT", "", "U_BOT", true, false},
-		{"not a bot DM", "U_BOT", "U_OTHER", "", false, false},
-		{"empty botUserID still allows reply", "", "U_OTHER", "", true, true},
+		{"other user DMs bot", "U_BOT",
+			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, true, true},
+		{"bot's own message by user ID", "U_BOT",
+			&slackevents.MessageEvent{User: "U_BOT"}, hub.RouteNoSession, true, false},
+		{"bot's own message by bot ID", "U_BOT",
+			&slackevents.MessageEvent{BotID: "U_BOT"}, hub.RouteNoSession, true, false},
+		{"not a bot DM", "U_BOT",
+			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, false, false},
+		{"session exists", "U_BOT",
+			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteOK, true, false},
+		{"empty botUserID still allows reply", "",
+			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldAutoReply(tt.botUserID, tt.msgUser, tt.msgBotID, tt.isBotDM)
+			got := shouldAutoReply(tt.botUserID, tt.msg, tt.routeState, tt.isBotDM)
 			if got != tt.want {
-				t.Errorf("shouldAutoReply(%q, %q, %q, %v) = %v, want %v",
-					tt.botUserID, tt.msgUser, tt.msgBotID, tt.isBotDM, got, tt.want)
+				t.Errorf("shouldAutoReply(%q, msg, %v, %v) = %v, want %v",
+					tt.botUserID, tt.routeState, tt.isBotDM, got, tt.want)
 			}
 		})
 	}

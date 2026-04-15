@@ -1,15 +1,26 @@
 package slack
 
+import (
+	"github.com/slack-go/slack/slackevents"
+
+	"github.com/anish749/pigeon/internal/hub"
+)
+
 // shouldAutoReply reports whether a no-session auto-reply should be sent for
-// this message. It returns true only when the message is a DM to the bot from
-// someone else — never when the bot itself is the sender, which would create an
-// infinite loop (each auto-reply arrives back as a bot_message event in the
-// same DM, triggering another auto-reply).
-func shouldAutoReply(botUserID, msgUser, msgBotID string, isBotDM bool) bool {
+// this message. It requires all three conditions:
+//   - the message is a DM to the bot (isBotDM)
+//   - no pigeon session is configured (RouteNoSession)
+//   - the sender is not our own bot, which would create an infinite loop
+//     (each auto-reply arrives back as a bot_message event in the same DM,
+//     triggering another auto-reply, bounded only by Slack rate limits)
+func shouldAutoReply(botUserID string, msg *slackevents.MessageEvent, routeState hub.RouteState, isBotDM bool) bool {
 	if !isBotDM {
 		return false
 	}
-	if botUserID != "" && (msgUser == botUserID || msgBotID == botUserID) {
+	if routeState != hub.RouteNoSession {
+		return false
+	}
+	if botUserID != "" && (msg.User == botUserID || msg.BotID == botUserID) {
 		return false
 	}
 	return true
