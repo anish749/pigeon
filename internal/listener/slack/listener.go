@@ -180,20 +180,10 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 				"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
 			return
 		}
-		line = modelv1.Line{
-			Type: modelv1.LineMessage,
-			Msg: &modelv1.MsgLine{
-				ID:       msg.TimeStamp,
-				Ts:       ts,
-				Sender:   userName,
-				SenderID: userID,
-				Via:      via,
-				Text:     text,
-			},
-		}
+		line = modelv1.NewMsgLine(msg.TimeStamp, ts, userName, userID, text, via, false)
 	} else {
 		var err error
-		line, err = buildSlackBlockLine(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments)
+		line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments))
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to build slack block line", "error", err, "account", l.acct)
 			return
@@ -295,19 +285,10 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 				"account", l.acct, "thread_ts", threadTS)
 			return
 		}
-		line = modelv1.Line{
-			Type: modelv1.LineMessage,
-			Msg: &modelv1.MsgLine{
-				ID:       parent.Timestamp,
-				Ts:       ts,
-				Sender:   userName,
-				SenderID: userID,
-				Text:     text,
-			},
-		}
+		line = modelv1.NewMsgLine(parent.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 	} else {
 		var err error
-		line, err = buildSlackBlockLine(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments)
+		line, err = modelv1.NewSlackBlockLine(slackBlockPayload(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments))
 		if err != nil {
 			slog.WarnContext(ctx, "failed to build thread parent block line", "error", err, "account", l.acct)
 			return
@@ -397,7 +378,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		},
 	}
 
-	if err := l.messages.AppendEdit(channelName, line); err != nil {
+	if err := l.messages.Append(channelName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
@@ -448,7 +429,7 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		},
 	}
 
-	if err := l.messages.AppendDelete(channelName, line); err != nil {
+	if err := l.messages.Append(channelName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
 	}
 

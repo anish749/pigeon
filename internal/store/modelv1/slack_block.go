@@ -1,6 +1,10 @@
 package modelv1
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // SlackBlock holds two representations of a Slack message whose content
 // lives in Block Kit blocks or legacy attachments (i.e. Text is empty).
@@ -25,5 +29,39 @@ type SlackBlockRuntime struct {
 	SenderID string    `json:"from"`     // platform user ID
 	Via      Via       `json:"via,omitempty"`
 	Reply    bool      `json:"reply,omitempty"`
+}
+
+// NewSlackBlockLine creates a SlackBlock line from a serialized map containing
+// the message metadata and raw block/attachment data. Runtime is derived from
+// the map via JSON round-trip, following the same pattern as Linear and GWS.
+func NewSlackBlockLine(serialized map[string]any) (Line, error) {
+	raw, err := json.Marshal(serialized)
+	if err != nil {
+		return Line{}, fmt.Errorf("marshal slack block: %w", err)
+	}
+	var runtime SlackBlockRuntime
+	if err := json.Unmarshal(raw, &runtime); err != nil {
+		return Line{}, fmt.Errorf("parse slack block runtime: %w", err)
+	}
+	return Line{
+		Type:       LineSlackBlock,
+		SlackBlock: &SlackBlock{Runtime: runtime, Serialized: serialized},
+	}, nil
+}
+
+// NewMsgLine creates a message Line with the given fields.
+func NewMsgLine(id string, ts time.Time, sender, senderID, text string, via Via, reply bool) Line {
+	return Line{
+		Type: LineMessage,
+		Msg: &MsgLine{
+			ID:       id,
+			Ts:       ts,
+			Sender:   sender,
+			SenderID: senderID,
+			Via:      via,
+			Text:     text,
+			Reply:    reply,
+		},
+	}
 }
 

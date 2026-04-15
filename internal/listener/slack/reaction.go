@@ -26,7 +26,7 @@ func writeReaction(ms *MessageStore, channelName string, msgTS string, sender st
 			Remove:   remove,
 		},
 	}
-	return ms.AppendReaction(channelName, line)
+	return ms.Append(channelName, line)
 }
 
 // writeReactions writes LineReaction events for all reactions on a Slack message.

@@ -81,24 +81,6 @@ func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
 	}
 }
 
-// AppendReaction stores a reaction or unreaction event in the date file
-// corresponding to the target message's timestamp.
-func (ms *MessageStore) AppendReaction(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// AppendEdit stores a message edit event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// AppendDelete stores a message delete event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
 // Append stores any line type in the date file for its timestamp.
 func (ms *MessageStore) Append(channelName string, line modelv1.Line) error {
 	return ms.store.Append(ms.acct, channelName, line)
@@ -106,55 +88,6 @@ func (ms *MessageStore) Append(channelName string, line modelv1.Line) error {
 
 // AppendThread stores any line type in the given thread file.
 func (ms *MessageStore) AppendThread(channelName, threadTS string, line modelv1.Line) error {
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
-// Write persists a message to the appropriate date file. Does not advance the
-// cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-		},
-	}
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-			Reply:    isReply,
-		},
-	}
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
-// WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Text:     text,
-		},
-	}
 	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
 }
 
@@ -347,19 +280,10 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 						"channel", channelName, "ts", msg.Timestamp, "error", err)
 					continue
 				}
-				line = modelv1.Line{
-					Type: modelv1.LineMessage,
-					Msg: &modelv1.MsgLine{
-						ID:       msg.Timestamp,
-						Ts:       ts,
-						Sender:   userName,
-						SenderID: userID,
-						Text:     text,
-					},
-				}
+				line = modelv1.NewMsgLine(msg.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 			} else {
 				var err error
-				line, err = buildSlackBlockLine(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments)
+				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments))
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -556,20 +480,10 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 						"channel", channelName, "ts", msg.Timestamp, "error", err)
 					continue
 				}
-				line = modelv1.Line{
-					Type: modelv1.LineMessage,
-					Msg: &modelv1.MsgLine{
-						ID:       msg.Timestamp,
-						Ts:       ts,
-						Sender:   senderName,
-						SenderID: senderID,
-						Via:      via,
-						Text:     text,
-					},
-				}
+				line = modelv1.NewMsgLine(msg.Timestamp, ts, senderName, senderID, text, via, false)
 			} else {
 				var err error
-				line, err = buildSlackBlockLine(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments)
+				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments))
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -745,20 +659,10 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 					continue
 				}
-				line = modelv1.Line{
-					Type: modelv1.LineMessage,
-					Msg: &modelv1.MsgLine{
-						ID:       reply.Timestamp,
-						Ts:       ts,
-						Sender:   userName,
-						SenderID: userID,
-						Text:     text,
-						Reply:    isReply,
-					},
-				}
+				line = modelv1.NewMsgLine(reply.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, isReply)
 			} else {
 				var err error
-				line, err = buildSlackBlockLine(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments)
+				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments))
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -811,19 +715,10 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 								"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 							continue
 						}
-						line = modelv1.Line{
-							Type: modelv1.LineMessage,
-							Msg: &modelv1.MsgLine{
-								ID:       ctxMsg.Timestamp,
-								Ts:       ts,
-								Sender:   userName,
-								SenderID: userID,
-								Text:     text,
-							},
-						}
+						line = modelv1.NewMsgLine(ctxMsg.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 					} else {
 						var err error
-						line, err = buildSlackBlockLine(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments)
+						line, err = modelv1.NewSlackBlockLine(slackBlockPayload(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments))
 						if err != nil {
 							slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 							continue
