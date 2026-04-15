@@ -41,7 +41,7 @@ type runningWorkspace struct {
 // NewSlackManager creates a manager that registers Slack senders with the
 // given API server. onMessage is called when a routable message arrives
 // (DMs, MPDMs, private channels, bot mentions). onReaction is called when
-// a reaction or unreaction event arrives. Either may be nil.
+// a reaction or unreaction event arrives. Both must be non-nil.
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
