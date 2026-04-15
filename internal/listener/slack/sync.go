@@ -283,7 +283,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				line = modelv1.NewMsgLine(msg.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 			} else {
 				var err error
-				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments))
+				line, err = slackBlockLine(msg.Msg, ts, userName, modelv1.ViaOrganic, false)
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -483,7 +483,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				line = modelv1.NewMsgLine(msg.Timestamp, ts, senderName, senderID, text, via, false)
 			} else {
 				var err error
-				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments))
+				line, err = slackBlockLine(msg.Msg, ts, senderName, via, false)
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -662,7 +662,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 				line = modelv1.NewMsgLine(reply.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, isReply)
 			} else {
 				var err error
-				line, err = modelv1.NewSlackBlockLine(slackBlockPayload(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments))
+				line, err = slackBlockLine(reply.Msg, ts, userName, modelv1.ViaOrganic, isReply)
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 					continue
@@ -718,7 +718,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						line = modelv1.NewMsgLine(ctxMsg.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 					} else {
 						var err error
-						line, err = modelv1.NewSlackBlockLine(slackBlockPayload(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments))
+						line, err = slackBlockLine(ctxMsg.Msg, ts, userName, modelv1.ViaOrganic, false)
 						if err != nil {
 							slog.WarnContext(ctx, "slack sync: build block line", "error", err)
 							continue

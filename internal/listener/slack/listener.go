@@ -183,7 +183,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		line = modelv1.NewMsgLine(msg.TimeStamp, ts, userName, userID, text, via, false)
 	} else {
 		var err error
-		line, err = modelv1.NewSlackBlockLine(slackBlockPayload(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments))
+		line, err = slackBlockLine(*msg.Message, ts, userName, via, isThreadReply)
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to build slack block line", "error", err, "account", l.acct)
 			return
@@ -288,7 +288,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 		line = modelv1.NewMsgLine(parent.Timestamp, ts, userName, userID, text, modelv1.ViaOrganic, false)
 	} else {
 		var err error
-		line, err = modelv1.NewSlackBlockLine(slackBlockPayload(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments))
+		line, err = slackBlockLine(parent.Msg, ts, userName, modelv1.ViaOrganic, false)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to build thread parent block line", "error", err, "account", l.acct)
 			return
