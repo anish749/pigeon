@@ -223,3 +223,7 @@ The GWS Gmail poller fails to fetch a message because the underlying `gws` CLI p
 ## Slack: @Slackbot DM fetch fails on every sync
 
 Every sync cycle attempts to fetch the @Slackbot bot DM and fails with `channel_not_found`. The Slackbot DM channel cannot be fetched via the Slack API. This is expected behavior but it generates a warning on every sync cycle for every workspace, adding noise to the logs.
+
+## Hub: reaction notifications lack context about the reacted message
+
+When a reaction event is delivered to a connected Claude Code session via the hub, only the reaction itself is sent (emoji, channel, timestamp). The message that was reacted to is not included. The receiving session has no way to understand what the reaction means without separately looking up the original message. This makes reactions largely useless as a signal to the agent — it sees "someone reacted 👍" but not what they reacted to.
