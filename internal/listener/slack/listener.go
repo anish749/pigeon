@@ -36,9 +36,10 @@ type Listener struct {
 
 // NewListener creates a Slack listener for a single workspace.
 // botUserID is the bot's Slack user ID (used to detect @mentions).
-// onMessage is called (if non-nil) when a routable message arrives:
+// onMessage is called when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
-// onReaction is called (if non-nil) when a reaction or unreaction event arrives.
+// onReaction is called when a reaction or unreaction event arrives.
+// Both callbacks must be non-nil.
 func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:      client,
