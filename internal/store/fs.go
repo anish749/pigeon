@@ -675,7 +675,8 @@ func (s *FSStore) removeEmailLines(path string, deleteIDs map[string]struct{}) e
 		}
 		line, err := modelv1.Parse(raw)
 		if err != nil {
-			kept = append(kept, raw) // preserve unparseable lines
+			slog.Warn("unparseable line in date file, preserving", "file", path, "error", err)
+			kept = append(kept, raw)
 			continue
 		}
 		if line.Type == modelv1.LineEmail && line.Email != nil {
