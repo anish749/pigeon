@@ -29,6 +29,32 @@ func TestAllowedSubType(t *testing.T) {
 	}
 }
 
+func TestShouldAutoReply(t *testing.T) {
+	tests := []struct {
+		name       string
+		botUserID  string
+		msgUser    string
+		msgBotID   string
+		isBotDM    bool
+		want       bool
+	}{
+		{"other user DMs bot", "U_BOT", "U_OTHER", "", true, true},
+		{"bot's own message by user ID", "U_BOT", "U_BOT", "", true, false},
+		{"bot's own message by bot ID", "U_BOT", "", "U_BOT", true, false},
+		{"not a bot DM", "U_BOT", "U_OTHER", "", false, false},
+		{"empty botUserID still allows reply", "", "U_OTHER", "", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldAutoReply(tt.botUserID, tt.msgUser, tt.msgBotID, tt.isBotDM)
+			if got != tt.want {
+				t.Errorf("shouldAutoReply(%q, %q, %q, %v) = %v, want %v",
+					tt.botUserID, tt.msgUser, tt.msgBotID, tt.isBotDM, got, tt.want)
+			}
+		})
+	}
+}
+
 func testIdentityWriter(t *testing.T, workspace string, signals []identity.Signal) *identity.Writer {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
