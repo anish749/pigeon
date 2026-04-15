@@ -19,16 +19,11 @@ type SlackBlock struct {
 // SlackBlockRuntime holds the fields pigeon needs for dedup, timestamp
 // extraction, and display. Everything else lives in Serialized.
 type SlackBlockRuntime struct {
-	ID       string `json:"id"`       // Slack message timestamp (e.g. "1711568938.123456")
-	Ts       string `json:"ts"`       // ISO 8601 timestamp for storage ordering
-	Sender   string `json:"sender"`   // display name
-	SenderID string `json:"from"`     // platform user ID
-	Via      Via    `json:"via,omitempty"`
-	Reply    bool   `json:"reply,omitempty"`
+	ID       string    `json:"id"`       // Slack message timestamp (e.g. "1711568938.123456")
+	Ts       time.Time `json:"ts"`       // timestamp for storage ordering
+	Sender   string    `json:"sender"`   // display name
+	SenderID string    `json:"from"`     // platform user ID
+	Via      Via       `json:"via,omitempty"`
+	Reply    bool      `json:"reply,omitempty"`
 }
 
-// ParseTs parses the ISO 8601 timestamp from the runtime.
-func (s *SlackBlockRuntime) ParseTs() time.Time {
-	t, _ := time.Parse(time.RFC3339, s.Ts)
-	return t
-}

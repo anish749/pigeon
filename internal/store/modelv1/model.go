@@ -151,7 +151,7 @@ func (l Line) Ts() time.Time {
 		}
 	case LineSlackBlock:
 		if l.SlackBlock != nil {
-			return l.SlackBlock.Runtime.ParseTs()
+			return l.SlackBlock.Runtime.Ts
 		}
 	}
 	return time.Time{}

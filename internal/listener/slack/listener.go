@@ -192,7 +192,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			},
 		}
 	} else {
-		line = buildSlackBlockLine(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments)
+		var err error
+		line, err = buildSlackBlockLine(msg.TimeStamp, ts, userName, userID, via, isThreadReply, msg.Message.Blocks, msg.Message.Attachments)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to build slack block line", "error", err, "account", l.acct)
+			return
+		}
 	}
 
 	// Write to channel date file unless it's a thread-only reply.
@@ -301,7 +306,12 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 			},
 		}
 	} else {
-		line = buildSlackBlockLine(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments)
+		var err error
+		line, err = buildSlackBlockLine(parent.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, parent.Blocks, parent.Attachments)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to build thread parent block line", "error", err, "account", l.acct)
+			return
+		}
 	}
 	if err := l.messages.AppendThread(channelName, threadTS, line); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,

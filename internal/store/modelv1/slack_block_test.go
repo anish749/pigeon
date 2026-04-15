@@ -34,7 +34,7 @@ func TestMarshalParseSlackBlock(t *testing.T) {
 		SlackBlock: &SlackBlock{
 			Runtime: SlackBlockRuntime{
 				ID:       "1711568938.123456",
-				Ts:       "2026-03-27T18:15:38Z",
+				Ts:       time.Date(2026, 3, 27, 18, 15, 38, 0, time.UTC),
 				Sender:   "DeployBot",
 				SenderID: "B04DEPLOY",
 			},
@@ -111,34 +111,19 @@ func TestSlackBlockID(t *testing.T) {
 }
 
 func TestSlackBlockTs(t *testing.T) {
+	want := time.Date(2026, 3, 27, 18, 15, 38, 0, time.UTC)
 	l := Line{
 		Type: LineSlackBlock,
 		SlackBlock: &SlackBlock{
-			Runtime: SlackBlockRuntime{Ts: "2026-03-27T18:15:38Z"},
+			Runtime: SlackBlockRuntime{Ts: want},
 		},
 	}
-	ts := l.Ts()
-	if ts.IsZero() {
-		t.Fatal("Ts() returned zero time")
-	}
-	want := time.Date(2026, 3, 27, 18, 15, 38, 0, time.UTC)
-	if !ts.Equal(want) {
-		t.Errorf("Ts() = %v, want %v", ts, want)
+	got := l.Ts()
+	if !got.Equal(want) {
+		t.Errorf("Ts() = %v, want %v", got, want)
 	}
 }
 
-func TestSlackBlockTsInvalid(t *testing.T) {
-	l := Line{
-		Type: LineSlackBlock,
-		SlackBlock: &SlackBlock{
-			Runtime: SlackBlockRuntime{Ts: "not-a-date"},
-		},
-	}
-	ts := l.Ts()
-	if !ts.IsZero() {
-		t.Errorf("Ts() = %v, want zero time for invalid date", ts)
-	}
-}
 
 func TestSlackBlockRoundTripPreservesUnknownFields(t *testing.T) {
 	raw := `{"type":"slack-block","id":"ts1","ts":"2026-01-01T00:00:00Z","sender":"Bot","from":"B1","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"hello"}}],"customField":"preserve-me"}`
@@ -181,7 +166,7 @@ func TestSlackBlockWithViaAndReply(t *testing.T) {
 		SlackBlock: &SlackBlock{
 			Runtime: SlackBlockRuntime{
 				ID:       "ts1",
-				Ts:       "2026-03-27T18:15:38Z",
+				Ts:       time.Date(2026, 3, 27, 18, 15, 38, 0, time.UTC),
 				Sender:   "sent to pigeon by Alice",
 				SenderID: "U123",
 				Via:      ViaToPigeon,

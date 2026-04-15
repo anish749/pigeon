@@ -2,6 +2,7 @@ package slack
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	goslack "github.com/slack-go/slack"
@@ -11,22 +12,13 @@ import (
 
 // buildSlackBlockLine creates a SlackBlock line from a Slack message whose
 // Text is empty but whose blocks/attachments carry structured content.
-// The blocks and attachments are serialized as raw JSON in a map alongside
-// the message metadata (id, ts, sender, etc.).
-func buildSlackBlockLine(slackTS string, ts time.Time, sender, senderID string, via modelv1.Via, isReply bool, blocks goslack.Blocks, attachments []goslack.Attachment) modelv1.Line {
-	runtime := modelv1.SlackBlockRuntime{
-		ID:       slackTS,
-		Ts:       ts.Format(time.RFC3339),
-		Sender:   sender,
-		SenderID: senderID,
-		Via:      via,
-		Reply:    isReply,
-	}
-
-	// Build the serialized map with the raw block data alongside metadata.
+// The full payload is serialized as a map[string]any; the Runtime is derived
+// from that same map, following the same pattern as Linear and GWS line types.
+func buildSlackBlockLine(slackTS string, ts time.Time, sender, senderID string, via modelv1.Via, isReply bool, blocks goslack.Blocks, attachments []goslack.Attachment) (modelv1.Line, error) {
+	// Build the canonical map — this is what gets persisted.
 	serialized := map[string]any{
 		"id":     slackTS,
-		"ts":     ts.Format(time.RFC3339),
+		"ts":     ts,
 		"sender": sender,
 		"from":   senderID,
 	}
@@ -36,9 +28,6 @@ func buildSlackBlockLine(slackTS string, ts time.Time, sender, senderID string, 
 	if isReply {
 		serialized["reply"] = true
 	}
-
-	// Serialize blocks and attachments as raw JSON values to preserve
-	// the exact Slack API structure without loss.
 	if len(blocks.BlockSet) > 0 {
 		serialized["blocks"] = marshalToAny(blocks)
 	}
@@ -46,10 +35,20 @@ func buildSlackBlockLine(slackTS string, ts time.Time, sender, senderID string, 
 		serialized["attachments"] = marshalToAny(attachments)
 	}
 
+	// Derive Runtime from the serialized map, same as Linear/GWS.
+	raw, err := json.Marshal(serialized)
+	if err != nil {
+		return modelv1.Line{}, fmt.Errorf("marshal slack block: %w", err)
+	}
+	var runtime modelv1.SlackBlockRuntime
+	if err := json.Unmarshal(raw, &runtime); err != nil {
+		return modelv1.Line{}, fmt.Errorf("parse slack block runtime: %w", err)
+	}
+
 	return modelv1.Line{
 		Type:       modelv1.LineSlackBlock,
 		SlackBlock: &modelv1.SlackBlock{Runtime: runtime, Serialized: serialized},
-	}
+	}, nil
 }
 
 // marshalToAny round-trips a value through JSON to get a map[string]any /

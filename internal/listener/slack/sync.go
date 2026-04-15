@@ -358,7 +358,12 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 					},
 				}
 			} else {
-				line = buildSlackBlockLine(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments)
+				var err error
+				line, err = buildSlackBlockLine(msg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, msg.Blocks, msg.Attachments)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
+					continue
+				}
 			}
 
 			if err := ms.Append(channelName, line); err != nil {
@@ -563,7 +568,12 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 					},
 				}
 			} else {
-				line = buildSlackBlockLine(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments)
+				var err error
+				line, err = buildSlackBlockLine(msg.Timestamp, ts, senderName, senderID, via, false, msg.Blocks, msg.Attachments)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
+					continue
+				}
 			}
 
 			if err := ms.Append(channelName, line); err != nil {
@@ -747,7 +757,12 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					},
 				}
 			} else {
-				line = buildSlackBlockLine(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments)
+				var err error
+				line, err = buildSlackBlockLine(reply.Timestamp, ts, userName, userID, modelv1.ViaOrganic, isReply, reply.Blocks, reply.Attachments)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: build block line", "error", err)
+					continue
+				}
 			}
 			if err := ms.AppendThread(channelName, msg.Timestamp, line); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
@@ -807,7 +822,12 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 							},
 						}
 					} else {
-						line = buildSlackBlockLine(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments)
+						var err error
+						line, err = buildSlackBlockLine(ctxMsg.Timestamp, ts, userName, userID, modelv1.ViaOrganic, false, ctxMsg.Blocks, ctxMsg.Attachments)
+						if err != nil {
+							slog.WarnContext(ctx, "slack sync: build block line", "error", err)
+							continue
+						}
 					}
 					if err := ms.AppendThread(channelName, msg.Timestamp, line); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
