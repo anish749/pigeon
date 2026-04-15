@@ -3,6 +3,7 @@ module github.com/anish749/pigeon
 go 1.25.0
 
 require (
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creativeprojects/go-selfupdate v1.5.2
@@ -18,6 +19,7 @@ require (
 	github.com/slack-go/slack v0.19.0
 	github.com/spf13/cobra v1.10.2
 	go.mau.fi/whatsmeow v0.0.0-20260305215846-fc65416c22c4
+	golang.org/x/sync v0.20.0
 	google.golang.org/api v0.275.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1

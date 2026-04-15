@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
@@ -110,27 +112,23 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 	}
 
 	wsCtx, cancel := context.WithCancel(ctx)
-
-	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("slack", sl.Workspace)).Identity())
-	sender := startSlackListener(wsCtx, sl, m.store, m.onMessage, m.onReaction, writer, m.syncTracker)
-	if sender == nil {
-		cancel()
-		return
-	}
-
-	m.apiServer.RegisterSlack(sender)
 	m.running[sl.TeamID] = &runningWorkspace{cancel: cancel}
+
+	go runWithRestart(wsCtx, "slack/"+sl.Workspace, func(ctx context.Context) error {
+		return m.runSlackWorkspace(ctx, sl)
+	})
 }
 
-// startSlackListener creates an independent Socket Mode connection, resolver,
-// listener, and sync for a single workspace.
-func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, writer *identity.Writer, syncTracker *syncstatus.Tracker) *api.SlackSender {
+// runSlackWorkspace creates a Socket Mode connection, resolver, listener, and
+// sync for a single workspace. It blocks until the connection or listener exits.
+func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackConfig) error {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))
 	smClient := socketmode.New(botAPI)
 
 	userAPI := goslack.New(sl.UserToken)
+	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("slack", sl.Workspace)).Identity())
 	resolver := slacklistener.NewResolver(userAPI, writer, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
@@ -159,19 +157,10 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages := slacklistener.NewMessageStore(acct, s)
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, onMessage, onReaction, syncTracker)
-	go listener.Run(ctx)
+	messages := slacklistener.NewMessageStore(acct, m.store)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.syncTracker)
 
-	go func() {
-		if err := smClient.RunContext(ctx); err != nil {
-			slog.ErrorContext(ctx, "slack socket mode error", "account", acct, "error", err)
-		}
-	}()
-
-	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
-
-	return &api.SlackSender{
+	m.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:    botAPI,
 		UserAPI:   userAPI,
 		Resolver:  resolver,
@@ -181,5 +170,22 @@ func startSlackListener(ctx context.Context, sl config.SlackConfig, s store.Stor
 		BotUserID: botUserID,
 		UserName:  userName,
 		UserID:    userID,
-	}
+	})
+
+	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)
+
+	// Run listener and socket mode client concurrently. If either exits,
+	// the errgroup cancels the other.
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		listener.Run(gCtx)
+		return nil
+	})
+	g.Go(func() error {
+		if err := smClient.RunContext(gCtx); err != nil {
+			return fmt.Errorf("slack socket mode: %w", err)
+		}
+		return nil
+	})
+	return g.Wait()
 }

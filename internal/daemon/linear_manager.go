@@ -79,11 +79,9 @@ func (m *LinearManager) startWorkspace(ctx context.Context, lc config.LinearConf
 	child, cancel := context.WithCancel(ctx)
 	m.running[lc.Workspace] = &runningLinearWorkspace{cancel: cancel}
 
-	p := linearpoller.New(linearPollInterval, lc.Workspace, acct, acctDir, m.store, m.syncTracker)
-	go func() {
+	go runWithRestart(child, "linear/"+lc.Workspace, func(ctx context.Context) error {
+		p := linearpoller.New(linearPollInterval, lc.Workspace, acct, acctDir, m.store, m.syncTracker)
 		slog.Info("linear poller started", "workspace", lc.Workspace, "account_dir", acctDir.Path())
-		if err := p.Run(child); err != nil && child.Err() == nil {
-			slog.Error("linear poller exited", "workspace", lc.Workspace, "error", err)
-		}
-	}()
+		return p.Run(ctx)
+	})
 }

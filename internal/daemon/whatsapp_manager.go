@@ -116,14 +116,22 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 	}
 
 	acctCtx, cancel := context.WithCancel(ctx)
+	m.running[wa.Account] = &runningWAAccount{cancel: cancel, lock: lock}
 
-	client, err := ConnectWhatsApp(acctCtx, wa.DB, jid)
+	go runWithRestart(acctCtx, "whatsapp/"+wa.Account, func(ctx context.Context) error {
+		return m.runWhatsAppAccount(ctx, wa, jid)
+	})
+}
+
+// runWhatsAppAccount creates a WhatsApp client, connects, registers the event
+// handler and API sender, then blocks until ctx is cancelled. On restart the
+// whole connection is re-established.
+func (m *WhatsAppManager) runWhatsAppAccount(ctx context.Context, wa config.WhatsAppConfig, jid types.JID) error {
+	client, err := ConnectWhatsApp(ctx, wa.DB, jid)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to create WhatsApp client, skipping", "account", wa.Account, "error", err)
-		cancel()
-		lock.Close()
-		return
+		return fmt.Errorf("create whatsapp client: %w", err)
 	}
+	defer client.Disconnect()
 
 	acct := account.New("whatsapp", wa.Account)
 	onLogout := func() {
@@ -135,18 +143,15 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 		}
 	}
 	listener := walistener.New(client, acct, m.store, onLogout, m.onMessage, m.syncTracker)
-	client.AddEventHandler(listener.EventHandler(acctCtx))
+	client.AddEventHandler(listener.EventHandler(ctx))
 
 	if err := client.Connect(); err != nil {
-		slog.ErrorContext(ctx, "failed to connect WhatsApp, skipping", "account", wa.Account, "error", err)
-		cancel()
-		lock.Close()
-		return
+		return fmt.Errorf("connect whatsapp: %w", err)
 	}
 
 	// Push identity signals from WhatsApp contacts.
 	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("whatsapp", wa.Account)).Identity())
-	go observeWhatsAppContacts(acctCtx, client, writer)
+	go observeWhatsAppContacts(ctx, client, writer)
 
 	m.apiServer.RegisterWhatsApp(&api.WhatsAppSender{
 		Client:   client,
@@ -154,8 +159,13 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 		Resolver: listener.Resolver(),
 	})
 
-	m.running[wa.Account] = &runningWAAccount{cancel: cancel, lock: lock}
 	slog.InfoContext(ctx, "whatsapp listener started", "account", wa.Account, "device", wa.DeviceJID)
+
+	// Block until context is cancelled. The whatsmeow client manages its
+	// own reconnection internally; we just keep this goroutine alive so
+	// the restart wrapper can recover from panics or permanent failures.
+	<-ctx.Done()
+	return nil
 }
 
 // ConnectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
