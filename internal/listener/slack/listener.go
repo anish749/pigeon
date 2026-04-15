@@ -217,7 +217,11 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
-	if isBotDM && result.State == hub.RouteNoSession {
+	// Skip messages from our own bot to prevent an infinite loop: the auto-reply
+	// itself arrives back as a bot_message event in the same DM, which would
+	// trigger another auto-reply, and so on — bounded only by Slack rate limits.
+	isSelf := l.botUserID != "" && (msg.User == l.botUserID || msg.BotID == l.botUserID)
+	if isBotDM && result.State == hub.RouteNoSession && !isSelf {
 		botAPI := goslack.New(l.botToken)
 		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
 			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false))
