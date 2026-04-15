@@ -42,10 +42,10 @@ func PrintSummary(matches []Match, sinceDur time.Duration) {
 			var count int
 			senders := make(map[string]struct{})
 			for _, m := range msgs {
-				if !m.Msg.Ts.Before(cutoff) {
+				if !m.Line.Ts().Before(cutoff) {
 					count++
-					if m.Msg.Sender != "" {
-						senders[m.Msg.Sender] = struct{}{}
+					if s := lineSender(m.Line); s != "" {
+						senders[s] = struct{}{}
 					}
 				}
 			}
@@ -122,8 +122,7 @@ func PrintGroupedResults(matches []Match) {
 		}
 
 		for _, m := range g.msgs {
-			resolved := modelv1.ResolvedMsg{MsgLine: m.Msg}
-			for _, s := range modelv1.FormatMsg(resolved, time.Local) {
+			for _, s := range formatMatchLine(m.Line, time.Local) {
 				fmt.Printf("  %s\n", s)
 			}
 		}
@@ -189,6 +188,58 @@ func chooseBuckets(since time.Duration) []timeBucket {
 		{7 * 24 * time.Hour, "7d"},
 		{14 * 24 * time.Hour, "14d"},
 		{30 * 24 * time.Hour, "30d"},
+	}
+}
+
+// lineSender returns the display name of the sender for any displayable line type.
+func lineSender(l modelv1.Line) string {
+	switch l.Type {
+	case modelv1.LineMessage:
+		return l.Msg.Sender
+	case modelv1.LineEmail:
+		if l.Email.FromName != "" {
+			return l.Email.FromName
+		}
+		return l.Email.From
+	case modelv1.LineComment:
+		if l.Comment.Runtime.Author != nil {
+			return l.Comment.Runtime.Author.DisplayName
+		}
+	case modelv1.LineEvent:
+		if l.Event.Runtime.Organizer != nil {
+			return l.Event.Runtime.Organizer.DisplayName
+		}
+	}
+	return ""
+}
+
+// formatMatchLine renders any displayable line type for terminal output.
+func formatMatchLine(l modelv1.Line, loc *time.Location) []string {
+	switch l.Type {
+	case modelv1.LineMessage:
+		resolved := modelv1.ResolvedMsg{MsgLine: *l.Msg}
+		return modelv1.FormatMsg(resolved, loc)
+	case modelv1.LineEmail:
+		tsStr := l.Email.Ts.In(loc).Format("2006-01-02 15:04:05")
+		sender := l.Email.FromName
+		if sender == "" {
+			sender = l.Email.From
+		}
+		return []string{fmt.Sprintf("[%s] %s: %s", tsStr, sender, l.Email.Subject)}
+	case modelv1.LineComment:
+		author := ""
+		if l.Comment.Runtime.Author != nil {
+			author = l.Comment.Runtime.Author.DisplayName
+		}
+		return []string{fmt.Sprintf("[comment] %s: %s", author, l.Comment.Runtime.Content)}
+	case modelv1.LineEvent:
+		return []string{fmt.Sprintf("[event] %s (%s)", l.Event.Runtime.Summary, l.Event.Runtime.Status)}
+	case modelv1.LineLinearIssue:
+		return []string{fmt.Sprintf("[linear] %s", l.Issue.Runtime.Identifier)}
+	case modelv1.LineLinearComment:
+		return []string{fmt.Sprintf("[linear-comment] %s", l.LinearComment.Runtime.ID)}
+	default:
+		return nil
 	}
 }
 

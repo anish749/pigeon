@@ -27,7 +27,7 @@ func messageExists(accountDir, messageID string) (bool, error) {
 	// collected into err but valid matches are still returned).
 	matches, parseErr := search.ParseGrepOutput(output, accountDir)
 	for _, m := range matches {
-		if m.Msg.ID == messageID {
+		if id, ok := m.Line.ID(); ok && id == messageID {
 			return true, nil
 		}
 	}

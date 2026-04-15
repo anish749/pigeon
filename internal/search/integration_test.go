@@ -93,8 +93,8 @@ func TestIntegration_RgBasicSearch(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("matches = %d, want 2", len(matches))
 	}
-	if matches[0].Msg.ID != "M1" {
-		t.Errorf("match[0].ID = %q, want M1", matches[0].Msg.ID)
+	if matches[0].Line.Msg.ID != "M1" {
+		t.Errorf("match[0].ID = %q, want M1", matches[0].Line.Msg.ID)
 	}
 	if matches[0].Platform != "slack" {
 		t.Errorf("match[0].Platform = %q, want slack", matches[0].Platform)
@@ -219,8 +219,8 @@ func TestIntegration_RgTextWithBraces(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	if matches[0].Msg.Text != "meeting at {office} tomorrow" {
-		t.Errorf("text = %q, want 'meeting at {office} tomorrow'", matches[0].Msg.Text)
+	if matches[0].Line.Msg.Text != "meeting at {office} tomorrow" {
+		t.Errorf("text = %q, want 'meeting at {office} tomorrow'", matches[0].Line.Msg.Text)
 	}
 }
 
@@ -240,8 +240,8 @@ func TestIntegration_RgTextWithNewlines(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	if matches[0].Msg.Text != "line one\nline two\nline three" {
-		t.Errorf("text = %q, want multiline text", matches[0].Msg.Text)
+	if matches[0].Line.Msg.Text != "line one\nline two\nline three" {
+		t.Errorf("text = %q, want multiline text", matches[0].Line.Msg.Text)
 	}
 }
 
@@ -270,7 +270,7 @@ func TestIntegration_RgPreservesAllFields(t *testing.T) {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
 
-	got := matches[0].Msg
+	got := matches[0].Line.Msg
 	if got.ID != "M1" || got.Sender != "Alice" || got.SenderID != "U1" {
 		t.Errorf("basic fields: %+v", got)
 	}
@@ -319,8 +319,8 @@ func TestIntegration_RgSenderWithSpecialChars(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want 1", len(matches))
 	}
-	if matches[0].Msg.Sender != "Dr. Smith: Cardiologist" {
-		t.Errorf("sender = %q, want 'Dr. Smith: Cardiologist'", matches[0].Msg.Sender)
+	if matches[0].Line.Msg.Sender != "Dr. Smith: Cardiologist" {
+		t.Errorf("sender = %q, want 'Dr. Smith: Cardiologist'", matches[0].Line.Msg.Sender)
 	}
 }
 
