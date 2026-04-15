@@ -114,6 +114,16 @@ func (c *Config) RemoveWhatsApp(account string) {
 	}
 }
 
+// RemoveSlack removes a Slack configuration entry by workspace name.
+func (c *Config) RemoveSlack(workspace string) {
+	for i, existing := range c.Slack {
+		if existing.Workspace == workspace {
+			c.Slack = append(c.Slack[:i], c.Slack[i+1:]...)
+			return
+		}
+	}
+}
+
 // AddSlack upserts a Slack configuration entry by team ID.
 // If a workspace with the same team ID already exists, it is overwritten.
 func (c *Config) AddSlack(entry SlackConfig) {

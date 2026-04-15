@@ -75,8 +75,10 @@ func RunUnlinkWhatsApp(account string) error {
 		}
 	}
 
+	waAccount := wa.Account
+
 	// Delete message data.
-	dataDir := paths.DefaultDataRoot().AccountFor(acctpkg.New("whatsapp", wa.Account)).Path()
+	dataDir := paths.DefaultDataRoot().AccountFor(acctpkg.New("whatsapp", waAccount)).Path()
 	if err := os.RemoveAll(dataDir); err != nil {
 		slog.WarnContext(ctx, "failed to delete message data", "dir", dataDir, "error", err)
 	} else {
@@ -84,11 +86,11 @@ func RunUnlinkWhatsApp(account string) error {
 	}
 
 	// Remove config entry.
-	cfg.RemoveWhatsApp(wa.Account)
+	cfg.RemoveWhatsApp(waAccount)
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	fmt.Printf("Removed %s from config.\n", wa.Account)
+	fmt.Printf("Removed %s from config.\n", waAccount)
 
 	return nil
 }

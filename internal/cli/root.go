@@ -252,7 +252,12 @@ MAINTENANCE
   pigeon reset --platform=slack --account=acme-corp
 
   Deletes all synced message data and sync cursors for a workspace/account.
-  The next daemon start will re-sync from scratch.`,
+  The next daemon start will re-sync from scratch.
+
+  pigeon unlink --platform=slack --account=acme-corp
+
+  Removes an account entirely — deletes data and removes from config.
+  The inverse of the setup commands.`,
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			slog.SetDefault(slog.New(tint.NewHandler(os.Stdout, &tint.Options{
@@ -305,7 +310,7 @@ MAINTENANCE
 
 		// Maintenance
 		newResetCmd(),
-		newUnlinkWhatsAppCmd(),
+		newUnlinkCmd(),
 		newUpdateCmd(version),
 	)
 
