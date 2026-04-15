@@ -22,6 +22,13 @@ type ReadParams struct {
 }
 
 func RunRead(p ReadParams) error {
+	switch p.Platform {
+	case "gws":
+		return fmt.Errorf("read is not supported for gws accounts (data is organized by service, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search gws data")
+	case "linear":
+		return fmt.Errorf("read is not supported for linear accounts (data is organized by issue, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search linear data")
+	}
+
 	s := store.NewFSStore(paths.DefaultDataRoot())
 	acct := account.New(p.Platform, p.Account)
 	aliases := loadAliases(acct)
