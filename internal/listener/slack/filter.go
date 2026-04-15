@@ -13,14 +13,14 @@ import (
 //   - the sender is not our own bot, which would create an infinite loop
 //     (each auto-reply arrives back as a bot_message event in the same DM,
 //     triggering another auto-reply, bounded only by Slack rate limits)
-func shouldAutoReply(botUserID string, msg *slackevents.MessageEvent, routeState hub.RouteState, isBotDM bool) bool {
+func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeState hub.RouteState, isBotDM bool) bool {
 	if !isBotDM {
 		return false
 	}
 	if routeState != hub.RouteNoSession {
 		return false
 	}
-	if botUserID != "" && (msg.User == botUserID || msg.BotID == botUserID) {
+	if pigeonBotUID != "" && (msg.User == pigeonBotUID || msg.BotID == pigeonBotUID) {
 		return false
 	}
 	return true

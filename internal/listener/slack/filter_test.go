@@ -35,7 +35,7 @@ func TestAllowedSubType(t *testing.T) {
 func TestShouldAutoReply(t *testing.T) {
 	tests := []struct {
 		name       string
-		botUserID  string
+		pigeonBotUID  string
 		msg        *slackevents.MessageEvent
 		routeState hub.RouteState
 		isBotDM    bool
@@ -51,15 +51,15 @@ func TestShouldAutoReply(t *testing.T) {
 			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, false, false},
 		{"session exists", "U_BOT",
 			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteOK, true, false},
-		{"empty botUserID still allows reply", "",
+		{"empty pigeonBotUID still allows reply", "",
 			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldAutoReply(tt.botUserID, tt.msg, tt.routeState, tt.isBotDM)
+			got := shouldAutoReply(tt.pigeonBotUID, tt.msg, tt.routeState, tt.isBotDM)
 			if got != tt.want {
 				t.Errorf("shouldAutoReply(%q, msg, %v, %v) = %v, want %v",
-					tt.botUserID, tt.routeState, tt.isBotDM, got, tt.want)
+					tt.pigeonBotUID, tt.routeState, tt.isBotDM, got, tt.want)
 			}
 		})
 	}

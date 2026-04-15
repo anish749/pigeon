@@ -28,19 +28,19 @@ type Listener struct {
 	botToken    string
 	acct        account.Account
 	teamID      string
-	botUserID   string // bot's Slack user ID, used to detect @mentions
+	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
 	onMessage   hub.MessageNotifyFunc
 	onReaction  hub.ReactionNotifyFunc
 	syncTracker *syncstatus.Tracker
 }
 
 // NewListener creates a Slack listener for a single workspace.
-// botUserID is the bot's Slack user ID (used to detect @mentions).
+// pigeonBotUID is the Slack user ID of the Pigeon bot (used to detect @mentions and self-messages).
 // onMessage is called when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called when a reaction or unreaction event arrives.
 // Both callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, botUserID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:      client,
 		resolver:    resolver,
@@ -49,7 +49,7 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		botToken:    botToken,
 		acct:        acct,
 		teamID:      teamID,
-		botUserID:   botUserID,
+		pigeonBotUID:   pigeonBotUID,
 		onMessage:   onMessage,
 		onReaction:  onReaction,
 		syncTracker: syncTracker,
@@ -209,7 +209,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	case "group":
 		result = l.onMessage(l.acct, channelName)
 	case "channel":
-		if l.botUserID != "" && strings.Contains(msg.Text, "<@"+l.botUserID+">") {
+		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
 			result = l.onMessage(l.acct, channelName)
 		}
 	default:
@@ -218,7 +218,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
-	if shouldAutoReply(l.botUserID, msg, result.State, isBotDM) {
+	if shouldAutoReply(l.pigeonBotUID, msg, result.State, isBotDM) {
 		botAPI := goslack.New(l.botToken)
 		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
 			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false))
