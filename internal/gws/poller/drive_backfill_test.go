@@ -9,11 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // TestDriveBackfillLive verifies that existing Docs and Sheets are picked up
@@ -27,8 +29,11 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewWriter(s, root.AccountFor(account.New("gws", "test")).Identity())
-	account := root.AccountFor(account.New("gws", "test"))
+	acct := account.New("gws", "test")
+	acctDir := root.AccountFor(acct)
+	id := identity.NewWriter(s, acctDir.Identity())
+	gwsClient := gws.NewClient(nil)
+	p := poller.New(20*time.Second, acct, acctDir, s, id, syncstatus.NewTracker(), gwsClient)
 
 	// --- Create a test doc BEFORE seeding ---
 	t.Log("=== Creating test doc before seed ===")
@@ -41,17 +46,17 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed with backfill ---
 	t.Log("=== Phase 1: Seed with backfill ===")
-	cursors, err := s.LoadGWSCursors(account)
+	cursors, err := s.LoadGWSCursors(acctDir)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
+	if _, err := p.PollDrive(cursors); err != nil {
 		// Partial errors (e.g. formula parsing on specific sheets) are expected —
 		// they don't prevent the backfill from completing.
 		t.Logf("drive seed partial errors: %v", err)
 	}
-	if err := s.SaveGWSCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(acctDir, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -61,7 +66,7 @@ func TestDriveBackfillLive(t *testing.T) {
 	t.Logf("pageToken: %s", cursors.Drive.PageToken)
 
 	// Verify the test doc was backfilled to disk.
-	driveDir := account.Drive().Path()
+	driveDir := acctDir.Drive().Path()
 	if !hasDriveFile(t, driveDir, docID) {
 		t.Fatal("test doc not found on disk after backfill seed")
 	}
@@ -82,7 +87,7 @@ func TestDriveBackfillLive(t *testing.T) {
 
 	// --- Phase 2: Quiet incremental poll ---
 	t.Log("=== Phase 2: Quiet poll ===")
-	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
+	if _, err := p.PollDrive(cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

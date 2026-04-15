@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // TestCalendarBackfillLive runs a full calendar sync lifecycle against the
@@ -29,8 +31,11 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewWriter(s, root.AccountFor(account.New("gws", "test")).Identity())
-	account := root.AccountFor(account.New("gws", "test"))
+	acct := account.New("gws", "test")
+	acctDir := root.AccountFor(acct)
+	id := identity.NewWriter(s, acctDir.Identity())
+	gwsClient := gws.NewClient(nil)
+	p := poller.New(20*time.Second, acct, acctDir, s, id, syncstatus.NewTracker(), gwsClient)
 
 	// --- Create test events ---
 	oneoffID := createEvent(t, `{
@@ -54,15 +59,15 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 1: Seed ---
 	t.Log("=== Phase 1: Seed ===")
-	cursors, err := s.LoadGWSCursors(account)
+	cursors, err := s.LoadGWSCursors(acctDir)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
-	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
+	if _, err := p.PollCalendar(cursors); err != nil {
 		t.Fatalf("seed poll: %v", err)
 	}
-	if err := s.SaveGWSCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(acctDir, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -87,7 +92,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 	}
 
 	// Verify events landed on disk.
-	calDir := account.Calendar("primary").Path()
+	calDir := acctDir.Calendar("primary").Path()
 	allEvents := readAllEvents(t, s, calDir)
 
 	if !hasEventWithSummary(allEvents, "pigeon-test-oneoff") {
@@ -108,10 +113,10 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
+	if _, err := p.PollCalendar(cursors); err != nil {
 		t.Fatalf("incremental poll: %v", err)
 	}
-	if err := s.SaveGWSCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(acctDir, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -123,7 +128,7 @@ func TestCalendarBackfillLive(t *testing.T) {
 
 	// --- Phase 3: Second incremental poll (should be quiet) ---
 	t.Log("=== Phase 3: Quiet poll ===")
-	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
+	if _, err := p.PollCalendar(cursors); err != nil {
 		t.Errorf("quiet poll: %v", err)
 	}
 

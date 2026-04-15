@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/gws"
+	"github.com/anish749/pigeon/internal/gws/calendar"
+	"github.com/anish749/pigeon/internal/gws/drive"
+	"github.com/anish749/pigeon/internal/gws/gmail"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
@@ -22,11 +26,15 @@ type Poller struct {
 	store       *store.FSStore
 	identity    identity.Observer
 	syncTracker *syncstatus.Tracker
+
+	gmail    *gmail.Client
+	drive    *drive.Client
+	calendar *calendar.Client
 }
 
 // New creates a Poller with the given interval, account, account directory,
-// store instance, and identity observer.
-func New(interval time.Duration, acct account.Account, accountDir paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker) *Poller {
+// store instance, identity observer, and gws client for subprocess calls.
+func New(interval time.Duration, acct account.Account, accountDir paths.AccountDir, s *store.FSStore, id identity.Observer, syncTracker *syncstatus.Tracker, gwsClient *gws.Client) *Poller {
 	return &Poller{
 		interval:    interval,
 		acct:        acct,
@@ -34,6 +42,9 @@ func New(interval time.Duration, acct account.Account, accountDir paths.AccountD
 		store:       s,
 		identity:    id,
 		syncTracker: syncTracker,
+		gmail:       gmail.NewClient(gwsClient),
+		drive:       drive.NewClient(gwsClient),
+		calendar:    calendar.NewClient(gwsClient),
 	}
 }
 
@@ -71,13 +82,13 @@ func (p *Poller) pollAll(ctx context.Context, cursors *store.GWSCursors) {
 		return
 	}
 	p.runAndRecord("gmail", func() (int, error) {
-		return PollGmail(p.store, p.accountDir, cursors, p.identity)
+		return p.PollGmail(cursors)
 	})
 	p.runAndRecord("calendar", func() (int, error) {
-		return PollCalendar(p.store, p.accountDir, cursors, p.identity)
+		return p.PollCalendar(cursors)
 	})
 	p.runAndRecord("drive", func() (int, error) {
-		return PollDrive(p.store, p.accountDir, cursors, p.identity)
+		return p.PollDrive(cursors)
 	})
 }
 

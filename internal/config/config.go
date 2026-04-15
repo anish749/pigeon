@@ -40,8 +40,9 @@ type LinearConfig struct {
 
 // GWSConfig holds configuration for a single Google Workspace account.
 type GWSConfig struct {
-	Account string `yaml:"account"` // display name for this account
-	Email   string `yaml:"email"`   // Google account email (used for account slug)
+	Account string            `yaml:"account"` // display name for this account
+	Email   string            `yaml:"email"`   // Google account email (used for account slug)
+	Env     map[string]string `yaml:"env,omitempty"`
 }
 
 type WhatsAppConfig struct {
