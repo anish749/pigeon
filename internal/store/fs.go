@@ -260,6 +260,51 @@ func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 	return convs, nil
 }
 
+// GWSServiceInfo holds summary information about a GWS service directory.
+type GWSServiceInfo struct {
+	Service string // "gmail", "gcalendar", "gdrive"
+	Items   int    // date files for gmail, calendars for gcalendar, files for gdrive
+}
+
+// ListGWSServices returns summary info for each GWS service directory
+// under the given account. Only services that exist on disk are returned.
+func (s *FSStore) ListGWSServices(acct account.Account) ([]GWSServiceInfo, error) {
+	ad := s.root.AccountFor(acct)
+	var infos []GWSServiceInfo
+	for _, svc := range paths.GWSServices {
+		dir := filepath.Join(ad.Path(), svc)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("list %s: %w", svc, err)
+		}
+		count := 0
+		for _, e := range entries {
+			switch svc {
+			case paths.GmailSubdir:
+				// Count date files directly in gmail/.
+				if !e.IsDir() && paths.IsDateFile(e.Name()) {
+					count++
+				}
+			case paths.GcalendarSubdir:
+				// Count calendar subdirectories.
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					count++
+				}
+			case paths.GdriveSubdir:
+				// Count drive file subdirectories.
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					count++
+				}
+			}
+		}
+		infos = append(infos, GWSServiceInfo{Service: svc, Items: count})
+	}
+	return infos, nil
+}
+
 // Maintain runs the maintenance pass for an account.
 func (s *FSStore) Maintain(acct account.Account) error {
 	ad := s.root.AccountFor(acct)
