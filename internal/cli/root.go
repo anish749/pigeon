@@ -303,6 +303,7 @@ MAINTENANCE
 		// Sending
 		newSendCmd(),
 		newReactCmd(),
+		newDeleteCmd(),
 		newReviewCmd(),
 
 		// Slack
