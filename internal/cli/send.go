@@ -25,7 +25,7 @@ Pick a platform subcommand:
 
 	// Shared flags live on the parent so they apply to every subcommand.
 	cmd.PersistentFlags().StringP("account", "a", "", "account name")
-	cmd.PersistentFlags().StringP("message", "m", "", "message text (Slack mrkdwn supported: *bold*, _italic_, ~strike~, `code`)")
+	cmd.PersistentFlags().StringP("message", "m", "", "message text")
 	cmd.PersistentFlags().Bool("dry-run", false, "validate without sending")
 	if err := cmd.MarkPersistentFlagRequired("account"); err != nil {
 		panic(err)
@@ -43,6 +43,8 @@ func newSendSlackCmd() *cobra.Command {
 		Use:   "slack",
 		Short: "Send a Slack message",
 		Long: `Send a Slack DM, channel message, group DM, or thread reply.
+
+Message text supports Slack mrkdwn: *bold*, _italic_, ~strike~, ` + "`code`" + `.
 
 By default, messages are sent as the bot. Use --via pigeon-as-user to send as
 the account owner who connected pigeon (uses their user token).
