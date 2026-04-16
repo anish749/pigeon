@@ -1,12 +1,34 @@
 # Features
 
+## Elicitation protocol
+
+### Owner
+
+The owner is the person running pigeon. No explicit configuration is needed — pigeon already knows who the owner is on each connected platform from the credentials used during setup.
+
+### Elicitation
+
+Pigeon runs in the background. When an agent decides it needs input from the owner, it reaches out to the owner directly via one of the connected platforms (Slack, WhatsApp, etc.) and waits.
+
+The owner replies to that message. Pigeon routes the reply back to the right agent and resumes. Thread replies are used for correlation, so multiple agents can have open questions simultaneously without confusion.
+
+The agent waits indefinitely. There is no timeout and no default action. The agent may choose to follow up if the matter is urgent, but otherwise it simply waits.
+
+### Outreach to non-owners
+
+When pigeon wants to contact someone other than the owner — scheduling a meeting, asking availability, gathering information — it does not send that message on its own. It first asks the owner for approval.
+
+The owner can approve from wherever is convenient: the terminal or directly from Slack. Both are equivalent.
+
+The agent can also batch this upfront: it tells the owner "here's what I'm planning to do and who I need to contact" and the owner approves the whole plan at once before anything is sent.
+
 ## Attachments
 
 Support file attachments (photos, documents, etc.) in Slack messages and deliver them through to the session so Claude can understand them.
 
 ## Reactions
 
-`pigeon react` command is implemented for both Slack and WhatsApp. Slack incoming reaction events are handled (`reaction_added` / `reaction_removed`).
+`pigeon react` command is implemented for both Slack and WhatsApp. Slack incoming reaction events are handled (`reaction_added` / `reaction_removed`) and delivered to connected Claude Code sessions (#177).
 
 Remaining: handle incoming WhatsApp reaction events. WhatsApp sends `ReactionMessage` in the event handler (`waE2E.Message.ReactionMessage`) with the target message key and emoji text. The listener should extract these and store as `ReactLine` / unreact lines, matching the pattern used in the Slack listener's `handleReaction`.
 
