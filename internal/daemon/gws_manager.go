@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -30,6 +31,10 @@ type GWSManager struct {
 
 type runningGWSAccount struct {
 	cancel context.CancelFunc
+	// cfg is the config the poller was started with. reconcile compares
+	// this against the desired config to detect any change (env, label,
+	// or future fields) and restart the poller when it differs.
+	cfg config.GWSConfig
 }
 
 // NewGWSManager creates a new GWSManager. The store is shared with the rest
@@ -66,22 +71,34 @@ func (m *GWSManager) Count() int {
 }
 
 func (m *GWSManager) reconcile(ctx context.Context, desired []config.GWSConfig) {
-	desiredEmails := make(map[string]config.GWSConfig)
+	desiredByEmail := make(map[string]config.GWSConfig)
 	for _, g := range desired {
-		desiredEmails[g.Email] = g
+		desiredByEmail[g.Email] = g
 	}
 
-	for email, acct := range m.running {
-		if _, ok := desiredEmails[email]; !ok {
+	// Stop accounts that are no longer desired.
+	for email, running := range m.running {
+		if _, ok := desiredByEmail[email]; !ok {
 			slog.Info("gws account removed, stopping", "email", email)
-			acct.cancel()
+			running.cancel()
 			m.apiServer.UnregisterGWS(account.New("gws", email))
 			delete(m.running, email)
 		}
 	}
 
+	// Start new accounts, and restart existing ones whose config has changed.
+	// reflect.DeepEqual compares the whole GWSConfig struct, so any future
+	// field addition is covered automatically without updating this diff.
 	for _, g := range desired {
-		if _, ok := m.running[g.Email]; !ok {
+		running, ok := m.running[g.Email]
+		if !ok {
+			m.startAccount(ctx, g)
+			continue
+		}
+		if !reflect.DeepEqual(running.cfg, g) {
+			slog.Info("gws account config changed, restarting", "email", g.Email)
+			running.cancel()
+			delete(m.running, g.Email)
 			m.startAccount(ctx, g)
 		}
 	}
@@ -92,7 +109,7 @@ func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	acctDir := m.dataRoot.AccountFor(acct)
 
 	child, cancel := context.WithCancel(ctx)
-	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
+	m.running[g.Email] = &runningGWSAccount{cancel: cancel, cfg: g}
 	m.apiServer.RegisterGWS(acct)
 
 	gwsClient := gws.NewClient(g.Env)
