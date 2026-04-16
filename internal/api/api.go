@@ -201,9 +201,12 @@ type SendRequest struct {
 	Via       modelv1.Via `json:"via,omitempty"`
 	DryRun    bool        `json:"dry_run,omitempty"`
 	Force     bool        `json:"force,omitempty"`
-	// SessionID, when set, routes the send through the outbox for human
-	// review instead of sending immediately. Set automatically by the CLI
-	// when PIGEON_SESSION_ID is in the environment.
+	// SessionID identifies the Claude session that originated the send, so
+	// approve/feedback actions in the outbox TUI can be delivered back to
+	// the right session. Set automatically by the CLI when
+	// PIGEON_SESSION_ID is in the environment. Empty for direct CLI use —
+	// the send still goes through the outbox, but feedback has no session
+	// to deliver to and the TUI will disable that action.
 	SessionID string `json:"session_id,omitempty"`
 }
 
@@ -253,8 +256,10 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	// literal backslash-bang that wasn't intended.
 	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
 
-	// When a session ID is present, queue for review instead of sending.
-	if req.SessionID != "" {
+	// All real sends go through the outbox for human review. Dry-run is
+	// the one exception — it validates targeting without sending, so
+	// queuing it for approval would be meaningless.
+	if !req.DryRun {
 		payload, err := json.Marshal(req)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, SendResponse{Error: "marshal send request: " + err.Error()})

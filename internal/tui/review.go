@@ -123,7 +123,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.approveItem(m.items[m.cursor].ID)
 		}
 	case "f":
-		if len(m.items) > 0 {
+		if len(m.items) > 0 && m.items[m.cursor].SessionID != "" {
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
@@ -209,7 +209,11 @@ func (m model) View() string {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
 	} else {
-		b.WriteString(helpStyle.Render("  a approve  f feedback  j/k navigate  q quit"))
+		help := "  a approve  f feedback  j/k navigate  q quit"
+		if m.cursor < count && m.items[m.cursor].SessionID == "" {
+			help = "  a approve  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
+		}
+		b.WriteString(helpStyle.Render(help))
 	}
 	return b.String()
 }
@@ -344,11 +348,11 @@ func itemSummary(item *outbox.Item) string {
 	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
 }
 
-// sendIdentity returns "user" or "bot" — the sender identity for an
+// sendIdentity returns "user" or "pigeon" — the sender identity for an
 // outbound message. WhatsApp always sends as the user (no bot identity).
 func sendIdentity(req api.SendRequest) string {
 	if req.Platform == "whatsapp" || req.Via == modelv1.ViaPigeonAsUser {
 		return "user"
 	}
-	return "bot"
+	return "pigeon"
 }

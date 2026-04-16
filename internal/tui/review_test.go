@@ -16,8 +16,8 @@ func TestSendIdentity(t *testing.T) {
 		req  api.SendRequest
 		want string
 	}{
-		{name: "slack as bot via explicit", req: api.SendRequest{Platform: "slack", Via: modelv1.ViaPigeonAsBot}, want: "bot"},
-		{name: "slack as bot via empty default", req: api.SendRequest{Platform: "slack"}, want: "bot"},
+		{name: "slack as bot via explicit", req: api.SendRequest{Platform: "slack", Via: modelv1.ViaPigeonAsBot}, want: "pigeon"},
+		{name: "slack as bot via empty default", req: api.SendRequest{Platform: "slack"}, want: "pigeon"},
 		{name: "slack as user", req: api.SendRequest{Platform: "slack", Via: modelv1.ViaPigeonAsUser}, want: "user"},
 		{name: "whatsapp always user — via empty", req: api.SendRequest{Platform: "whatsapp"}, want: "user"},
 		{name: "whatsapp always user — via bot ignored", req: api.SendRequest{Platform: "whatsapp", Via: modelv1.ViaPigeonAsBot}, want: "user"},
@@ -41,7 +41,7 @@ func TestItemSummary(t *testing.T) {
 		{
 			name: "slack as bot shows from",
 			req:  api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{Channel: "#eng"}, Message: "hello", Via: modelv1.ViaPigeonAsBot},
-			want: "slack → #eng (from bot): hello",
+			want: "slack → #eng (from pigeon): hello",
 		},
 		{
 			name: "slack as user shows from",
@@ -51,7 +51,7 @@ func TestItemSummary(t *testing.T) {
 		{
 			name: "slack empty via defaults to bot",
 			req:  api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{Channel: "#eng"}, Message: "hello"},
-			want: "slack → #eng (from bot): hello",
+			want: "slack → #eng (from pigeon): hello",
 		},
 		{
 			name: "whatsapp omits from",
@@ -73,7 +73,7 @@ func TestItemSummaryTruncatesLongMessage(t *testing.T) {
 	longMsg := strings.Repeat("a", 100)
 	req := api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{Channel: "#eng"}, Message: longMsg, Via: modelv1.ViaPigeonAsBot}
 	got := itemSummary(itemFromReq(t, req))
-	want := "slack → #eng (from bot): " + strings.Repeat("a", 57) + "..."
+	want := "slack → #eng (from pigeon): " + strings.Repeat("a", 57) + "..."
 	if got != want {
 		t.Fatalf("itemSummary() = %q, want %q", got, want)
 	}
