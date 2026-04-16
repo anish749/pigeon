@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/commands"
@@ -15,7 +17,7 @@ func newResetCmd() *cobra.Command {
 Device pairings, auth tokens, and config are preserved.
 The next daemon start will re-sync messages from scratch.
 
-Use unlink-whatsapp to fully unpair a WhatsApp device.`,
+Use 'pigeon unlink' to fully remove an account and its config.`,
 		Example: `  pigeon reset --platform=slack --account=acme-corp`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			platform, err := cmd.Flags().GetString("platform")
@@ -36,22 +38,38 @@ Use unlink-whatsapp to fully unpair a WhatsApp device.`,
 	return cmd
 }
 
-func newUnlinkWhatsAppCmd() *cobra.Command {
+func newUnlinkCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "unlink-whatsapp",
-		Short: "Unpair WhatsApp device, delete data, and remove config",
-		Long: `Unlinks the WhatsApp device from your phone, deletes all synced
-message data, and removes the account from pigeon's config.
-This is the inverse of setup-whatsapp. You will need to re-pair
-with a QR code to use this account again.`,
+		Use:   "unlink",
+		Short: "Remove an account and delete its data",
+		Long: `Removes an account from pigeon's config and deletes all synced data.
+This is the inverse of the setup commands. For WhatsApp, also unpairs the
+device from your phone.
+
+Supported platforms: slack, whatsapp`,
+		Example: `  pigeon unlink --platform=slack --account=acme-corp
+  pigeon unlink --platform=whatsapp --account=+14155551234`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return err
+			}
 			account, err := cmd.Flags().GetString("account")
 			if err != nil {
 				return err
 			}
-			return commands.RunUnlinkWhatsApp(account)
+			switch platform {
+			case "slack":
+				return commands.RunUnlinkSlack(account)
+			case "whatsapp":
+				return commands.RunUnlinkWhatsApp(account)
+			default:
+				return fmt.Errorf("unlink not supported for platform %q (supported: slack, whatsapp)", platform)
+			}
 		},
 	}
-	cmd.Flags().String("account", "", "WhatsApp account")
+	cmd.Flags().StringP("platform", "p", "", "platform (slack, whatsapp)")
+	cmd.Flags().StringP("account", "a", "", "account/workspace name")
+	cmd.MarkFlagRequired("platform")
 	return cmd
 }
