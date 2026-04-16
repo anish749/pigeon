@@ -275,6 +275,7 @@ func (c *Client) ListComments(fileID string) ([]*modelv1.DriveComment, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list comments for %s: %w", fileID, err)
 		}
+		out = gws.TrimToJSON(out)
 
 		var resp drive.CommentList
 		if err := json.Unmarshal(out, &resp); err != nil {

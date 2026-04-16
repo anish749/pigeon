@@ -41,6 +41,7 @@ func (c *Client) fetchEvents(args ...string) (*gcal.Events, []map[string]any, er
 	if err != nil {
 		return nil, nil, err
 	}
+	out = gws.TrimToJSON(out)
 
 	var resp gcal.Events
 	if err := json.Unmarshal(out, &resp); err != nil {

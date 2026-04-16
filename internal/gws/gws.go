@@ -2,6 +2,7 @@
 package gws
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,10 +97,33 @@ func (c *Client) RunParsed(dst any, args ...string) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(out, dst); err != nil {
+	if err := json.Unmarshal(TrimToJSON(out), dst); err != nil {
 		return fmt.Errorf("parse gws output: %w", err)
 	}
 	return nil
+}
+
+// TrimToJSON strips any non-JSON prefix (e.g. "Using keyring backend: keyring")
+// that the gws CLI prints to stdout before its JSON payload. It returns the
+// slice starting at the first '{' or '[' byte, or the original input if
+// neither is found (letting the caller surface the real parse error).
+// Callers that unmarshal gws.Client.Run output directly should wrap it with
+// TrimToJSON; RunParsed applies it automatically.
+func TrimToJSON(b []byte) []byte {
+	obj := bytes.IndexByte(b, '{')
+	arr := bytes.IndexByte(b, '[')
+	switch {
+	case obj < 0 && arr < 0:
+		return b
+	case obj < 0:
+		return b[arr:]
+	case arr < 0:
+		return b[obj:]
+	case obj < arr:
+		return b[obj:]
+	default:
+		return b[arr:]
+	}
 }
 
 // parseExitError attempts to extract a structured APIError from the gws CLI's

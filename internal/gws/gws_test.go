@@ -1,6 +1,7 @@
 package gws
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 )
@@ -42,6 +43,31 @@ func TestIsGone(t *testing.T) {
 	err := fmt.Errorf("gws: %w", &APIError{Code: 410, Reason: "gone", Message: "expired"})
 	if !IsGone(err) {
 		t.Error("IsGone(410) = false, want true")
+	}
+}
+
+func TestTrimToJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"keyring prefix on object", "Using keyring backend: keyring\n{\"ok\":true}", "{\"ok\":true}"},
+		{"keyring prefix on array", "Using keyring backend: keyring\n[1,2,3]", "[1,2,3]"},
+		{"no prefix object", "{\"ok\":true}", "{\"ok\":true}"},
+		{"no prefix array", "[1,2,3]", "[1,2,3]"},
+		{"object before array", "noise {\"a\":1} [2]", "{\"a\":1} [2]"},
+		{"array before object", "noise [1] {\"a\":1}", "[1] {\"a\":1}"},
+		{"no json bytes", "just text", "just text"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TrimToJSON([]byte(tt.in))
+			if !bytes.Equal(got, []byte(tt.want)) {
+				t.Errorf("TrimToJSON(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
