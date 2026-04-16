@@ -348,11 +348,11 @@ func itemSummary(item *outbox.Item) string {
 	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
 }
 
-// sendIdentity returns "user" or "bot" — the sender identity for an
+// sendIdentity returns "user" or "pigeon" — the sender identity for an
 // outbound message. WhatsApp always sends as the user (no bot identity).
 func sendIdentity(req api.SendRequest) string {
 	if req.Platform == "whatsapp" || req.Via == modelv1.ViaPigeonAsUser {
 		return "user"
 	}
-	return "bot"
+	return "pigeon"
 }
