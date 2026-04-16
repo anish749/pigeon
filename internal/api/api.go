@@ -190,7 +190,7 @@ func (t SlackTarget) Display() string {
 type SendRequest struct {
 	Platform string `json:"platform"`
 	Account  string `json:"account"`
-	Message  string `json:"message"`
+	Message  string `json:"message"` // Slack mrkdwn formatted text
 
 	// Target — platform-specific, exactly one must be set.
 	Slack   *SlackTarget `json:"slack,omitempty"`
@@ -377,7 +377,8 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	req.Message = sender.Resolver.ResolveMentions(req.Message)
 
 	// Build message options.
-	// Text is always set as the notification/fallback, even when blocks are present.
+	// Text is always set as the notification/fallback, even when blocks are
+	// present. The message is mrkdwn-formatted; escape=false preserves it.
 	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
 
 	if req.Via == modelv1.ViaPigeonAsUser {
