@@ -8,6 +8,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
@@ -94,9 +95,10 @@ func (m *GWSManager) startAccount(ctx context.Context, g config.GWSConfig) {
 	m.running[g.Email] = &runningGWSAccount{cancel: cancel}
 	m.apiServer.RegisterGWS(acct)
 
+	gwsClient := gws.NewClient(g.Env)
 	go runWithRestart(child, "gws/"+g.Email, func(ctx context.Context) error {
 		writer := identity.NewWriter(m.idStore, acctDir.Identity())
-		p := poller.New(gwsPollInterval, acct, acctDir, m.store, writer, m.syncTracker)
+		p := poller.New(gwsPollInterval, acct, acctDir, m.store, writer, m.syncTracker, gwsClient)
 		slog.Info("gws poller started", "email", g.Email, "account_dir", acctDir.Path())
 		return p.Run(ctx)
 	})

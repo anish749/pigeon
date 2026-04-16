@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -57,10 +58,28 @@ func IsCursorExpired(err error) bool {
 	return false
 }
 
+// Client wraps the gws CLI with optional per-account environment variables.
+type Client struct {
+	env []string // "KEY=VALUE" pairs merged onto os.Environ()
+}
+
+// NewClient creates a Client that injects the given environment variables
+// into every gws subprocess. Pass nil for default (inherited) environment.
+func NewClient(env map[string]string) *Client {
+	var pairs []string
+	for k, v := range env {
+		pairs = append(pairs, k+"="+v)
+	}
+	return &Client{env: pairs}
+}
+
 // Run executes a gws CLI command and returns the raw JSON output.
 // On failure, returns an *APIError if the CLI returned a structured error response.
-func Run(args ...string) ([]byte, error) {
+func (c *Client) Run(args ...string) ([]byte, error) {
 	cmd := exec.Command("gws", args...)
+	if len(c.env) > 0 {
+		cmd.Env = append(os.Environ(), c.env...)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -69,6 +88,18 @@ func Run(args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("gws %v: %w", args, err)
 	}
 	return out, nil
+}
+
+// RunParsed executes a gws CLI command and unmarshals the JSON output into dst.
+func (c *Client) RunParsed(dst any, args ...string) error {
+	out, err := c.Run(args...)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(out, dst); err != nil {
+		return fmt.Errorf("parse gws output: %w", err)
+	}
+	return nil
 }
 
 // parseExitError attempts to extract a structured APIError from the gws CLI's
@@ -82,18 +113,6 @@ func parseExitError(args []string, exitErr *exec.ExitError) error {
 		return fmt.Errorf("gws %v: %w", args, &envelope.Error)
 	}
 	return fmt.Errorf("gws %v: %s", args, stderr)
-}
-
-// RunParsed executes a gws CLI command and unmarshals the JSON output into dst.
-func RunParsed(dst any, args ...string) error {
-	out, err := Run(args...)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(out, dst); err != nil {
-		return fmt.Errorf("parse gws output: %w", err)
-	}
-	return nil
 }
 
 // ParamsJSON marshals a map to a JSON string for --params flags.

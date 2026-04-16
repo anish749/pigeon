@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/gws/poller"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // TestLiveSmoke runs a real seed+poll cycle against the Google APIs.
@@ -26,18 +28,20 @@ func TestLiveSmoke(t *testing.T) {
 
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	id := identity.NewWriter(s, root.AccountFor(account.New("gws", "test")).Identity())
-	account := root.AccountFor(account.New("gws", "test"))
-	accountDir := account.Path()
+	acct := account.New("gws", "test")
+	acctDir := root.AccountFor(acct)
+	id := identity.NewWriter(s, acctDir.Identity())
+	gwsClient := gws.NewClient(nil)
+	p := poller.New(20*time.Second, acct, acctDir, s, id, syncstatus.NewTracker(), gwsClient)
 
-	cursors, err := s.LoadGWSCursors(account)
+	cursors, err := s.LoadGWSCursors(acctDir)
 	if err != nil {
 		t.Fatalf("load cursors: %v", err)
 	}
 
 	// --- Seed all three services ---
 	t.Log("=== Seeding Gmail ===")
-	if _, err := poller.PollGmail(s, account, cursors, id); err != nil {
+	if _, err := p.PollGmail(cursors); err != nil {
 		t.Fatalf("gmail seed: %v", err)
 	}
 	if cursors.Gmail.HistoryID == "" {
@@ -46,7 +50,7 @@ func TestLiveSmoke(t *testing.T) {
 	t.Logf("gmail historyId: %s", cursors.Gmail.HistoryID)
 
 	t.Log("=== Seeding Calendar ===")
-	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
+	if _, err := p.PollCalendar(cursors); err != nil {
 		t.Fatalf("calendar seed: %v", err)
 	}
 	if cursors.Calendar["primary"] == nil || cursors.Calendar["primary"].SyncToken == "" {
@@ -55,7 +59,7 @@ func TestLiveSmoke(t *testing.T) {
 	t.Logf("calendar syncToken: %.20s...", cursors.Calendar["primary"].SyncToken)
 
 	t.Log("=== Seeding Drive ===")
-	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
+	if _, err := p.PollDrive(cursors); err != nil {
 		t.Fatalf("drive seed: %v", err)
 	}
 	if cursors.Drive.PageToken == "" {
@@ -63,7 +67,7 @@ func TestLiveSmoke(t *testing.T) {
 	}
 	t.Logf("drive pageToken: %s", cursors.Drive.PageToken)
 
-	if err := s.SaveGWSCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(acctDir, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
@@ -98,21 +102,22 @@ func TestLiveSmoke(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	t.Log("=== Polling Drive ===")
-	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
+	if _, err := p.PollDrive(cursors); err != nil {
 		t.Fatalf("drive poll: %v", err)
 	}
-	if err := s.SaveGWSCursors(account, cursors); err != nil {
+	if err := s.SaveGWSCursors(acctDir, cursors); err != nil {
 		t.Fatalf("save cursors: %v", err)
 	}
 
 	// --- Verify files on disk ---
+	accountPath := acctDir.Path()
 	t.Log("=== Files on disk ===")
 	var mdFiles, metaFiles, jsonlFiles int
-	filepath.Walk(accountDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(accountPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		rel, _ := filepath.Rel(accountDir, path)
+		rel, _ := filepath.Rel(accountPath, path)
 		t.Logf("  %s (%d bytes)", rel, info.Size())
 		base := filepath.Base(rel)
 		switch {
@@ -134,18 +139,18 @@ func TestLiveSmoke(t *testing.T) {
 	}
 
 	// --- Verify .md content ---
-	filepath.Walk(accountDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(accountPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
 		data, _ := os.ReadFile(path)
-		rel, _ := filepath.Rel(accountDir, path)
+		rel, _ := filepath.Rel(accountPath, path)
 		t.Logf("  content of %s: %q", rel, string(data)[:min(len(data), 100)])
 		return nil
 	})
 
 	// --- Verify drive-meta- content ---
-	filepath.Walk(accountDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(accountPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -154,20 +159,20 @@ func TestLiveSmoke(t *testing.T) {
 			return nil
 		}
 		data, _ := os.ReadFile(path)
-		rel, _ := filepath.Rel(accountDir, path)
+		rel, _ := filepath.Rel(accountPath, path)
 		t.Logf("  content of %s: %s", rel, string(data))
 		return nil
 	})
 
 	// --- Second poll (should be quiet) ---
 	t.Log("=== Second poll (expect no changes) ===")
-	if _, err := poller.PollGmail(s, account, cursors, id); err != nil {
+	if _, err := p.PollGmail(cursors); err != nil {
 		t.Errorf("gmail poll 2: %v", err)
 	}
-	if _, err := poller.PollCalendar(s, account, cursors, id); err != nil {
+	if _, err := p.PollCalendar(cursors); err != nil {
 		t.Errorf("calendar poll 2: %v", err)
 	}
-	if _, err := poller.PollDrive(s, account, cursors, id); err != nil {
+	if _, err := p.PollDrive(cursors); err != nil {
 		t.Errorf("drive poll 2: %v", err)
 	}
 }

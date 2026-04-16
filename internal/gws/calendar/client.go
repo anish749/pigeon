@@ -11,6 +11,16 @@ import (
 	gcal "google.golang.org/api/calendar/v3"
 )
 
+// Client wraps a gws.Client for Calendar API calls.
+type Client struct {
+	gws *gws.Client
+}
+
+// NewClient creates a Calendar client backed by the given gws.Client.
+func NewClient(g *gws.Client) *Client {
+	return &Client{gws: g}
+}
+
 // EventsResult holds the categorized output from a calendar list or seed call.
 type EventsResult struct {
 	// Events contains one-off events and recurring instances, ready to write to disk.
@@ -26,8 +36,8 @@ type EventsResult struct {
 // fetchEvents runs a gws events command and returns both the typed response
 // and the per-item raw JSON maps. The two are parsed from the same bytes so
 // resp.Items and the returned raw items are guaranteed to line up by index.
-func fetchEvents(args ...string) (*gcal.Events, []map[string]any, error) {
-	out, err := gws.Run(args...)
+func (c *Client) fetchEvents(args ...string) (*gcal.Events, []map[string]any, error) {
+	out, err := c.gws.Run(args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,7 +118,7 @@ func classify(items []*modelv1.CalendarEvent) (events []*modelv1.CalendarEvent, 
 
 // ListEvents fetches changed events for a calendar using a syncToken.
 // Paginates through all pages. Returns categorized events and the new syncToken.
-func ListEvents(calendarID, syncToken string) (*EventsResult, error) {
+func (c *Client) ListEvents(calendarID, syncToken string) (*EventsResult, error) {
 	result := &EventsResult{}
 	params := map[string]string{
 		"calendarId": calendarID,
@@ -116,7 +126,7 @@ func ListEvents(calendarID, syncToken string) (*EventsResult, error) {
 	}
 
 	for {
-		resp, rawItems, err := fetchEvents("calendar", "events", "list", "--params", gws.ParamsJSON(params))
+		resp, rawItems, err := c.fetchEvents("calendar", "events", "list", "--params", gws.ParamsJSON(params))
 		if err != nil {
 			return nil, fmt.Errorf("list events %s: %w", calendarID, err)
 		}
@@ -143,7 +153,7 @@ func ListEvents(calendarID, syncToken string) (*EventsResult, error) {
 // BackfillDays ago onward (singleEvents=false, so recurring events come as
 // parents with RRULEs — no infinite expansion). Returns categorized events
 // and the sync token for subsequent incremental calls.
-func SeedSyncToken(calendarID string) (*EventsResult, error) {
+func (c *Client) SeedSyncToken(calendarID string) (*EventsResult, error) {
 	now := time.Now().UTC()
 	result := &EventsResult{}
 	params := map[string]string{
@@ -152,7 +162,7 @@ func SeedSyncToken(calendarID string) (*EventsResult, error) {
 	}
 
 	for {
-		resp, rawItems, err := fetchEvents("calendar", "events", "list", "--params", gws.ParamsJSON(params))
+		resp, rawItems, err := c.fetchEvents("calendar", "events", "list", "--params", gws.ParamsJSON(params))
 		if err != nil {
 			return nil, fmt.Errorf("seed calendar sync token: %w", err)
 		}
@@ -177,7 +187,7 @@ func SeedSyncToken(calendarID string) (*EventsResult, error) {
 }
 
 // ListInstances fetches expanded instances of a recurring event within a time window.
-func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*modelv1.CalendarEvent, error) {
+func (c *Client) ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*modelv1.CalendarEvent, error) {
 	params := map[string]string{
 		"calendarId": calendarID,
 		"eventId":    eventID,
@@ -187,7 +197,7 @@ func ListInstances(calendarID, eventID, timeMin, timeMax string) ([]*modelv1.Cal
 
 	var allEvents []*modelv1.CalendarEvent
 	for {
-		resp, rawItems, err := fetchEvents("calendar", "events", "instances", "--params", gws.ParamsJSON(params))
+		resp, rawItems, err := c.fetchEvents("calendar", "events", "instances", "--params", gws.ParamsJSON(params))
 		if err != nil {
 			return nil, fmt.Errorf("list instances %s: %w", eventID, err)
 		}

@@ -11,6 +11,16 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
+// Client wraps a gws.Client for Gmail API calls.
+type Client struct {
+	gws *gws.Client
+}
+
+// NewClient creates a Gmail client backed by the given gws.Client.
+func NewClient(g *gws.Client) *Client {
+	return &Client{gws: g}
+}
+
 // gmailProfile is the subset of users.getProfile we need.
 type gmailProfile struct {
 	HistoryID string `json:"historyId"`
@@ -49,10 +59,10 @@ type gmailRawMessage struct {
 }
 
 // GetHistoryID fetches the current historyId from the user's profile.
-func GetHistoryID() (string, error) {
+func (c *Client) GetHistoryID() (string, error) {
 	params := gws.ParamsJSON(map[string]string{"userId": "me"})
 	var profile gmailProfile
-	if err := gws.RunParsed(&profile, "gmail", "users", "getProfile", "--params", params); err != nil {
+	if err := c.gws.RunParsed(&profile, "gmail", "users", "getProfile", "--params", params); err != nil {
 		return "", fmt.Errorf("get gmail profile: %w", err)
 	}
 	if profile.HistoryID == "" {
@@ -64,7 +74,7 @@ func GetHistoryID() (string, error) {
 // ListHistory fetches message changes since startHistoryId.
 // Paginates through all pages. Returns added message IDs, deleted message IDs,
 // and the new historyId.
-func ListHistory(startHistoryId string) (added []string, deleted []string, newHistoryId string, err error) {
+func (c *Client) ListHistory(startHistoryId string) (added []string, deleted []string, newHistoryId string, err error) {
 	addedSet := make(map[string]bool)
 	deletedSet := make(map[string]bool)
 
@@ -79,7 +89,7 @@ func ListHistory(startHistoryId string) (added []string, deleted []string, newHi
 		}
 
 		var resp gmailHistoryResponse
-		if err := gws.RunParsed(&resp, "gmail", "users", "history", "list", "--params", gws.ParamsJSON(params)); err != nil {
+		if err := c.gws.RunParsed(&resp, "gmail", "users", "history", "list", "--params", gws.ParamsJSON(params)); err != nil {
 			return nil, nil, "", err
 		}
 
@@ -123,7 +133,7 @@ type messagesListResponse struct {
 
 // ListMessages enumerates message IDs matching a Gmail search query.
 // Paginates through all pages. Returns message IDs only (no content).
-func ListMessages(query string) ([]string, error) {
+func (c *Client) ListMessages(query string) ([]string, error) {
 	params := map[string]string{
 		"userId":     "me",
 		"q":          query,
@@ -133,7 +143,7 @@ func ListMessages(query string) ([]string, error) {
 	var ids []string
 	for {
 		var resp messagesListResponse
-		if err := gws.RunParsed(&resp, "gmail", "users", "messages", "list", "--params", gws.ParamsJSON(params)); err != nil {
+		if err := c.gws.RunParsed(&resp, "gmail", "users", "messages", "list", "--params", gws.ParamsJSON(params)); err != nil {
 			return nil, fmt.Errorf("list gmail messages: %w", err)
 		}
 
@@ -152,7 +162,7 @@ func ListMessages(query string) ([]string, error) {
 }
 
 // GetMessage fetches a raw message by ID and parses it with enmime.
-func GetMessage(messageID string) (*modelv1.EmailLine, error) {
+func (c *Client) GetMessage(messageID string) (*modelv1.EmailLine, error) {
 	params := gws.ParamsJSON(map[string]string{
 		"userId": "me",
 		"id":     messageID,
@@ -160,7 +170,7 @@ func GetMessage(messageID string) (*modelv1.EmailLine, error) {
 	})
 
 	var msg gmailRawMessage
-	if err := gws.RunParsed(&msg, "gmail", "users", "messages", "get", "--params", params); err != nil {
+	if err := c.gws.RunParsed(&msg, "gmail", "users", "messages", "get", "--params", params); err != nil {
 		return nil, fmt.Errorf("get gmail message %s: %w", messageID, err)
 	}
 

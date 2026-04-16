@@ -29,12 +29,12 @@ const (
 // PollDrive polls for Drive changes and processes Docs, Sheets, and comments.
 // Returns the number of changes observed plus any error. On initial seed
 // it returns the backfilled file count.
-func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
+func (p *Poller) PollDrive(cursors *store.GWSCursors) (int, error) {
 	if cursors.Drive.PageToken == "" {
-		return seedDrive(s, account, cursors, id)
+		return p.seedDrive(cursors)
 	}
 
-	changes, newToken, err := drive.ListChanges(cursors.Drive.PageToken)
+	changes, newToken, err := p.drive.ListChanges(cursors.Drive.PageToken)
 	if err != nil {
 		return 0, fmt.Errorf("poll drive changes: %w", err)
 	}
@@ -42,7 +42,7 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 	var errs []error
 	for _, ch := range changes {
 		if ch.Removed {
-			if err := s.RemoveDriveFile(account.Drive(), ch.FileID); err != nil {
+			if err := p.store.RemoveDriveFile(p.accountDir.Drive(), ch.FileID); err != nil {
 				errs = append(errs, fmt.Errorf("remove drive file %s: %w", ch.FileID, err))
 			}
 			slog.Info("drive file removed", "fileId", ch.FileID)
@@ -51,11 +51,11 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 
 		switch ch.File.MimeType {
 		case mimeDoc:
-			if err := handleDoc(s, account, ch, id); err != nil {
+			if err := p.handleDoc(ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle doc %s: %w", ch.FileID, err))
 			}
 		case mimeSheet:
-			if err := handleSheet(s, account, ch, id); err != nil {
+			if err := p.handleSheet(ch); err != nil {
 				errs = append(errs, fmt.Errorf("handle sheet %s: %w", ch.FileID, err))
 			}
 		default:
@@ -75,17 +75,17 @@ func PollDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 // modified within BackfillDays, then saves the cursor. The cursor is acquired
 // BEFORE backfill so that changes made during the (potentially slow) backfill
 // are captured by the first incremental poll.
-func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCursors, id identity.Observer) (int, error) {
+func (p *Poller) seedDrive(cursors *store.GWSCursors) (int, error) {
 	slog.Info("seeding drive with backfill")
 
 	// Get the changes cursor first — backfill can take minutes.
-	token, err := drive.SeedPageToken()
+	token, err := p.drive.SeedPageToken()
 	if err != nil {
 		return 0, fmt.Errorf("seed drive page token: %w", err)
 	}
 
 	timeMin := time.Now().UTC().AddDate(0, 0, -gws.BackfillDays).Format(time.RFC3339)
-	files, err := drive.ListFiles(timeMin)
+	files, err := p.drive.ListFiles(timeMin)
 	if err != nil {
 		return 0, fmt.Errorf("backfill drive: %w", err)
 	}
@@ -94,11 +94,11 @@ func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 	for _, ch := range files {
 		switch ch.File.MimeType {
 		case mimeDoc:
-			if err := handleDoc(s, account, ch, id); err != nil {
+			if err := p.handleDoc(ch); err != nil {
 				errs = append(errs, fmt.Errorf("backfill doc %s: %w", ch.FileID, err))
 			}
 		case mimeSheet:
-			if err := handleSheet(s, account, ch, id); err != nil {
+			if err := p.handleSheet(ch); err != nil {
 				errs = append(errs, fmt.Errorf("backfill sheet %s: %w", ch.FileID, err))
 			}
 		}
@@ -109,8 +109,8 @@ func seedDrive(s *store.FSStore, account paths.AccountDir, cursors *store.GWSCur
 	return len(files), errors.Join(errs...)
 }
 
-func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id identity.Observer) error {
-	doc, err := drive.GetDocument(ch.FileID)
+func (p *Poller) handleDoc(ch drive.Change) error {
+	doc, err := p.drive.GetDocument(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
 			slog.Warn("drive doc inaccessible, skipping", "fileId", ch.FileID, "error", err)
@@ -119,7 +119,7 @@ func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id i
 		return fmt.Errorf("get document: %w", err)
 	}
 
-	fileDir := account.Drive().File(driveSlug(doc.Title, ch.FileID))
+	fileDir := p.accountDir.Drive().File(driveSlug(doc.Title, ch.FileID))
 
 	tabs, err := doc.AllTabs()
 	if err != nil {
@@ -132,7 +132,7 @@ func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id i
 
 	for _, tab := range tabs {
 		result := md.Convert(tab)
-		if err := s.WriteContent(fileDir.TabFile(tab.Title), []byte(result.Markdown)); err != nil {
+		if err := p.store.WriteContent(fileDir.TabFile(tab.Title), []byte(result.Markdown)); err != nil {
 			errs = append(errs, fmt.Errorf("write tab %s: %w", tab.Title, err))
 		}
 		tabMetas = append(tabMetas, modelv1.TabMeta{ID: tab.TabID, Title: tab.Title})
@@ -145,7 +145,7 @@ func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id i
 		}
 	}
 
-	if err := storeComments(s, fileDir, ch.FileID, id); err != nil {
+	if err := p.storeComments(fileDir, ch.FileID); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -161,7 +161,7 @@ func handleDoc(s *store.FSStore, account paths.AccountDir, ch drive.Change, id i
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Tabs:         tabMetas,
 	}
-	if err := s.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
+	if err := p.store.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
@@ -178,8 +178,8 @@ func driveModifiedDate(modifiedTime string) (string, error) {
 	return t.UTC().Format("2006-01-02"), nil
 }
 
-func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id identity.Observer) error {
-	sheetNames, err := drive.GetSheetNames(ch.FileID)
+func (p *Poller) handleSheet(ch drive.Change) error {
+	sheetNames, err := p.drive.GetSheetNames(ch.FileID)
 	if err != nil {
 		if gws.IsNotFound(err) || gws.IsStatusCode(err, 403) {
 			slog.Warn("drive sheet inaccessible, skipping", "fileId", ch.FileID, "error", err)
@@ -188,13 +188,13 @@ func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id
 		return fmt.Errorf("get sheet names: %w", err)
 	}
 
-	fileDir := account.Drive().File(driveSlug(ch.File.Name, ch.FileID))
+	fileDir := p.accountDir.Drive().File(driveSlug(ch.File.Name, ch.FileID))
 
 	var errs []error
 
 	for _, name := range sheetNames {
 		// Values.
-		values, err := drive.ReadSheetValues(ch.FileID, name)
+		values, err := p.drive.ReadSheetValues(ch.FileID, name)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read sheet %s values: %w", name, err))
 			continue
@@ -204,12 +204,12 @@ func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id
 			errs = append(errs, fmt.Errorf("convert sheet %s to csv: %w", name, err))
 			continue
 		}
-		if err := s.WriteContent(fileDir.SheetFile(name), csvData); err != nil {
+		if err := p.store.WriteContent(fileDir.SheetFile(name), csvData); err != nil {
 			errs = append(errs, fmt.Errorf("write sheet %s csv: %w", name, err))
 		}
 
 		// Formulas.
-		formulas, err := drive.ReadSheetFormulas(ch.FileID, name)
+		formulas, err := p.drive.ReadSheetFormulas(ch.FileID, name)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read sheet %s formulas: %w", name, err))
 			continue
@@ -219,12 +219,12 @@ func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id
 			errs = append(errs, fmt.Errorf("convert sheet %s formulas to csv: %w", name, err))
 			continue
 		}
-		if err := s.WriteContent(fileDir.FormulaFile(name), formulaCSV); err != nil {
+		if err := p.store.WriteContent(fileDir.FormulaFile(name), formulaCSV); err != nil {
 			errs = append(errs, fmt.Errorf("write sheet %s formulas csv: %w", name, err))
 		}
 	}
 
-	if err := storeComments(s, fileDir, ch.FileID, id); err != nil {
+	if err := p.storeComments(fileDir, ch.FileID); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -240,7 +240,7 @@ func handleSheet(s *store.FSStore, account paths.AccountDir, ch drive.Change, id
 		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
 		Sheets:       sheetNames,
 	}
-	if err := s.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
+	if err := p.store.SaveDriveMeta(fileDir.MetaFile(modifiedDate), meta); err != nil {
 		errs = append(errs, fmt.Errorf("save meta: %w", err))
 	}
 
@@ -303,8 +303,8 @@ func driveSlug(title, fileID string) string {
 // Drive Comments API has no incremental sync — every call returns the full
 // snapshot. Overwrite ensures deleted comments disappear and resolved status
 // stays current.
-func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, id identity.Observer) error {
-	comments, err := drive.ListComments(fileID)
+func (p *Poller) storeComments(fileDir paths.DriveFileDir, fileID string) error {
+	comments, err := p.drive.ListComments(fileID)
 	if err != nil {
 		return fmt.Errorf("list comments for %s: %w", fileID, err)
 	}
@@ -331,11 +331,11 @@ func storeComments(s *store.FSStore, fileDir paths.DriveFileDir, fileID string, 
 		}
 	}
 
-	if err := s.WriteLines(fileDir.CommentsFile(), lines); err != nil {
+	if err := p.store.WriteLines(fileDir.CommentsFile(), lines); err != nil {
 		return fmt.Errorf("write comments for %s: %w", fileID, err)
 	}
 
-	if err := id.ObserveBatch(signals); err != nil {
+	if err := p.identity.ObserveBatch(signals); err != nil {
 		return fmt.Errorf("identity observe for %s: %w", fileID, err)
 	}
 	return nil

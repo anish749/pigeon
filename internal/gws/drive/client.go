@@ -10,6 +10,16 @@ import (
 	drive "google.golang.org/api/drive/v3"
 )
 
+// Client wraps a gws.Client for Drive, Docs, and Sheets API calls.
+type Client struct {
+	gws *gws.Client
+}
+
+// NewClient creates a Drive client backed by the given gws.Client.
+func NewClient(g *gws.Client) *Client {
+	return &Client{gws: g}
+}
+
 // --- Changes API ---
 
 type changesResponse struct {
@@ -34,7 +44,7 @@ type File struct {
 
 // ListChanges fetches all changes since pageToken. Paginates through all pages.
 // Returns the changes and the new pageToken for the next poll.
-func ListChanges(pageToken string) ([]Change, string, error) {
+func (c *Client) ListChanges(pageToken string) ([]Change, string, error) {
 	var allChanges []Change
 	var newPageToken string
 
@@ -46,7 +56,7 @@ func ListChanges(pageToken string) ([]Change, string, error) {
 		})
 
 		var resp changesResponse
-		if err := gws.RunParsed(&resp, "drive", "changes", "list", "--params", params); err != nil {
+		if err := c.gws.RunParsed(&resp, "drive", "changes", "list", "--params", params); err != nil {
 			return nil, "", fmt.Errorf("list drive changes: %w", err)
 		}
 
@@ -70,9 +80,9 @@ type seedPageTokenResponse struct {
 }
 
 // SeedPageToken gets the starting page token for future change polling.
-func SeedPageToken() (string, error) {
+func (c *Client) SeedPageToken() (string, error) {
 	var resp seedPageTokenResponse
-	if err := gws.RunParsed(&resp, "drive", "changes", "getStartPageToken"); err != nil {
+	if err := c.gws.RunParsed(&resp, "drive", "changes", "getStartPageToken"); err != nil {
 		return "", fmt.Errorf("seed drive page token: %w", err)
 	}
 	if resp.StartPageToken == "" {
@@ -84,7 +94,7 @@ func SeedPageToken() (string, error) {
 // ListFiles enumerates Docs and Sheets modified after timeMin. Returns them
 // as Change structs so callers can use the same handleDoc/handleSheet pipeline.
 // Results are ordered by modifiedTime descending (most recent first).
-func ListFiles(timeMin string) ([]Change, error) {
+func (c *Client) ListFiles(timeMin string) ([]Change, error) {
 	q := fmt.Sprintf(
 		"modifiedTime > '%s' and (mimeType = 'application/vnd.google-apps.document' or mimeType = 'application/vnd.google-apps.spreadsheet') and trashed = false",
 		timeMin,
@@ -98,7 +108,7 @@ func ListFiles(timeMin string) ([]Change, error) {
 	var allChanges []Change
 	for {
 		var resp filesListResponse
-		if err := gws.RunParsed(&resp, "drive", "files", "list", "--params", gws.ParamsJSON(params)); err != nil {
+		if err := c.gws.RunParsed(&resp, "drive", "files", "list", "--params", gws.ParamsJSON(params)); err != nil {
 			return nil, fmt.Errorf("list drive files: %w", err)
 		}
 
@@ -138,7 +148,7 @@ type filesListFile struct {
 // --- Docs API ---
 
 // GetDocument fetches a Google Doc with all tab content.
-func GetDocument(docID string) (*modelv1.Document, error) {
+func (c *Client) GetDocument(docID string) (*modelv1.Document, error) {
 	// includeTabsContent is a boolean, so we use json.Marshal directly
 	// instead of ParamsJSON (which only handles map[string]string).
 	params := map[string]any{"documentId": docID, "includeTabsContent": true}
@@ -148,7 +158,7 @@ func GetDocument(docID string) (*modelv1.Document, error) {
 	}
 
 	var doc modelv1.Document
-	if err := gws.RunParsed(&doc, "docs", "documents", "get", "--params", string(paramsJSON)); err != nil {
+	if err := c.gws.RunParsed(&doc, "docs", "documents", "get", "--params", string(paramsJSON)); err != nil {
 		return nil, fmt.Errorf("get document %s: %w", docID, err)
 	}
 	return &doc, nil
@@ -171,14 +181,14 @@ type sheetProperties struct {
 }
 
 // GetSheetNames fetches the sheet tab names for a spreadsheet.
-func GetSheetNames(spreadsheetID string) ([]string, error) {
+func (c *Client) GetSheetNames(spreadsheetID string) ([]string, error) {
 	params := gws.ParamsJSON(map[string]string{
 		"spreadsheetId": spreadsheetID,
 		"fields":        "sheets.properties(sheetId,title,index)",
 	})
 
 	var resp sheetsMetaResponse
-	if err := gws.RunParsed(&resp, "sheets", "spreadsheets", "get", "--params", params); err != nil {
+	if err := c.gws.RunParsed(&resp, "sheets", "spreadsheets", "get", "--params", params); err != nil {
 		return nil, fmt.Errorf("get sheet names %s: %w", spreadsheetID, err)
 	}
 
@@ -197,18 +207,18 @@ type sheetValuesResponse struct {
 }
 
 // ReadSheetValues fetches cell values for a specific sheet range.
-func ReadSheetValues(spreadsheetID, sheetName string) ([][]string, error) {
-	return readSheetRange(spreadsheetID, sheetName, "FORMATTED_VALUE")
+func (c *Client) ReadSheetValues(spreadsheetID, sheetName string) ([][]string, error) {
+	return c.readSheetRange(spreadsheetID, sheetName, "FORMATTED_VALUE")
 }
 
 // ReadSheetFormulas fetches formulas for a specific sheet range.
 // Cells with formulas return the formula string (e.g. "=SUM(A1:A10)");
 // cells without formulas return the computed value.
-func ReadSheetFormulas(spreadsheetID, sheetName string) ([][]string, error) {
-	return readSheetRange(spreadsheetID, sheetName, "FORMULA")
+func (c *Client) ReadSheetFormulas(spreadsheetID, sheetName string) ([][]string, error) {
+	return c.readSheetRange(spreadsheetID, sheetName, "FORMULA")
 }
 
-func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, error) {
+func (c *Client) readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, error) {
 	params := gws.ParamsJSON(map[string]string{
 		"spreadsheetId":     spreadsheetID,
 		"range":             sheetName,
@@ -216,7 +226,7 @@ func readSheetRange(spreadsheetID, sheetName, renderOption string) ([][]string, 
 	})
 
 	var resp sheetValuesResponse
-	if err := gws.RunParsed(&resp, "sheets", "spreadsheets", "values", "get", "--params", params); err != nil {
+	if err := c.gws.RunParsed(&resp, "sheets", "spreadsheets", "values", "get", "--params", params); err != nil {
 		return nil, fmt.Errorf("read sheet %s %s/%s: %w", renderOption, spreadsheetID, sheetName, err)
 	}
 
@@ -253,7 +263,7 @@ func cellToString(raw json.RawMessage) string {
 // (for field access) with the raw API response map (for lossless storage).
 // Replies are nested inside each comment — the API returns them that way
 // and storage preserves that shape.
-func ListComments(fileID string) ([]*modelv1.DriveComment, error) {
+func (c *Client) ListComments(fileID string) ([]*modelv1.DriveComment, error) {
 	params := map[string]string{
 		"fileId": fileID,
 		"fields": "comments,nextPageToken",
@@ -261,7 +271,7 @@ func ListComments(fileID string) ([]*modelv1.DriveComment, error) {
 
 	var all []*modelv1.DriveComment
 	for {
-		out, err := gws.Run("drive", "comments", "list", "--params", gws.ParamsJSON(params))
+		out, err := c.gws.Run("drive", "comments", "list", "--params", gws.ParamsJSON(params))
 		if err != nil {
 			return nil, fmt.Errorf("list comments for %s: %w", fileID, err)
 		}
