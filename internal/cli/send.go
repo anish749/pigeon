@@ -25,7 +25,7 @@ Pick a platform subcommand:
 
 	// Shared flags live on the parent so they apply to every subcommand.
 	cmd.PersistentFlags().StringP("account", "a", "", "account name")
-	cmd.PersistentFlags().StringP("message", "m", "", "message text")
+	cmd.PersistentFlags().StringP("message", "m", "", "message text (Slack mrkdwn supported: *bold*, _italic_, ~strike~, `code`)")
 	cmd.PersistentFlags().Bool("dry-run", false, "validate without sending")
 	if err := cmd.MarkPersistentFlagRequired("account"); err != nil {
 		panic(err)
