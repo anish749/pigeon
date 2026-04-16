@@ -75,6 +75,7 @@ func newSendWhatsappCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "whatsapp",
 		Short:   "Send a WhatsApp message",
+		Long:    `Send a WhatsApp message to a contact by name or phone number.`,
 		Example: `  pigeon send whatsapp -a +14155551234 -c Alice -m "hey, are you free?"`,
 		PreRunE: ensureDaemon,
 		RunE:    runSendWhatsapp,
