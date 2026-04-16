@@ -126,6 +126,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
 	mux.HandleFunc("POST /api/react", s.handleReact)
+	mux.HandleFunc("POST /api/delete", s.handleDeleteMsg)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
@@ -848,4 +849,80 @@ func (s *Server) reactWhatsApp(ctx context.Context, acct account.Account, req Re
 	}
 
 	return ReactResponse{OK: true}
+}
+
+// DeleteRequest is the daemon API request for /api/delete.
+type DeleteRequest struct {
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+
+	// Target — platform-specific.
+	Slack *SlackTarget `json:"slack,omitempty"`
+
+	MessageID string `json:"message_id"`
+}
+
+// DeleteResponse is the daemon API response for /api/delete.
+type DeleteResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Server) handleDeleteMsg(w http.ResponseWriter, r *http.Request) {
+	var req DeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, DeleteResponse{Error: "invalid JSON: " + err.Error()})
+		return
+	}
+
+	if req.Platform == "" || req.Account == "" || req.MessageID == "" {
+		writeJSON(w, http.StatusBadRequest, DeleteResponse{Error: "platform, account, and message_id are required"})
+		return
+	}
+	if req.Platform != "slack" {
+		writeJSON(w, http.StatusBadRequest, DeleteResponse{Error: "delete is only supported for Slack"})
+		return
+	}
+	if req.Slack == nil {
+		writeJSON(w, http.StatusBadRequest, DeleteResponse{Error: "slack target (user_id or channel) is required"})
+		return
+	}
+	if err := req.Slack.Validate(); err != nil {
+		writeJSON(w, http.StatusBadRequest, DeleteResponse{Error: err.Error()})
+		return
+	}
+
+	resp := s.deleteSlack(r.Context(), account.New(req.Platform, req.Account), req)
+	status := http.StatusOK
+	if !resp.OK {
+		status = http.StatusInternalServerError
+	}
+	writeJSON(w, status, resp)
+}
+
+func (s *Server) deleteSlack(ctx context.Context, acct account.Account, req DeleteRequest) DeleteResponse {
+	s.mu.RLock()
+	sender, ok := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return DeleteResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
+	}
+
+	channelID, channelName, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
+	if err != nil {
+		return DeleteResponse{Error: err.Error()}
+	}
+
+	// Bots can only delete their own messages via chat.delete.
+	// The delete event will come back through the websocket and the listener
+	// stores it locally — no need to duplicate that here.
+	_, _, err = sender.BotAPI.DeleteMessageContext(ctx, channelID, req.MessageID)
+	if err != nil {
+		return DeleteResponse{Error: fmt.Sprintf("delete in %s: %v%s", channelName, err, slackChannelNotFoundHint(err))}
+	}
+
+	slog.InfoContext(ctx, "slack message deleted",
+		"msg_id", req.MessageID, "channel", channelName, "account", acct)
+
+	return DeleteResponse{OK: true}
 }
