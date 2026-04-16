@@ -16,6 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 var (
@@ -221,7 +222,8 @@ func (m model) renderDetail(item *outbox.Item) string {
 
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
-	b.WriteString(fmt.Sprintf("  Via: %s / %s\n", req.Platform, req.Account))
+	b.WriteString(fmt.Sprintf("  On: %s / %s\n", req.Platform, req.Account))
+	b.WriteString(fmt.Sprintf("  From: %s\n", sendIdentity(req)))
 	if req.Thread != "" {
 		b.WriteString(fmt.Sprintf("  Thread: %s\n", req.Thread))
 	}
@@ -334,5 +336,19 @@ func itemSummary(item *outbox.Item) string {
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}
+	// Slack can send as either bot or user, so call out the identity.
+	// WhatsApp always sends as the user — no need to clutter the line.
+	if req.Platform == "slack" {
+		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, req.Target(), sendIdentity(req), msg)
+	}
 	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
+}
+
+// sendIdentity returns "user" or "bot" — the sender identity for an
+// outbound message. WhatsApp always sends as the user (no bot identity).
+func sendIdentity(req api.SendRequest) string {
+	if req.Platform == "whatsapp" || req.Via == modelv1.ViaPigeonAsUser {
+		return "user"
+	}
+	return "bot"
 }
