@@ -99,6 +99,12 @@ func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "note is required for feedback"})
 		return
 	}
+	if item.SessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "this item did not come from a pigeon-connected session — feedback has nowhere to deliver. Use approve or leave it queued.",
+		})
+		return
+	}
 
 	msg := fmt.Sprintf("[outbox] Feedback on message %s: %s", item.ID, note)
 	if err := h.notify(item.SessionID, msg); err != nil {

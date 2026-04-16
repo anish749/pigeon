@@ -124,6 +124,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		if len(m.items) > 0 {
+			if m.items[m.cursor].SessionID == "" {
+				m.status = dimStyle.Render("Feedback unavailable — this item did not come from a pigeon-connected session")
+				return m, clearStatusAfter(3 * time.Second)
+			}
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
@@ -209,7 +213,11 @@ func (m model) View() string {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
 	} else {
-		b.WriteString(helpStyle.Render("  a approve  f feedback  j/k navigate  q quit"))
+		help := "  a approve  f feedback  j/k navigate  q quit"
+		if m.cursor < count && m.items[m.cursor].SessionID == "" {
+			help = "  a approve  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
+		}
+		b.WriteString(helpStyle.Render(help))
 	}
 	return b.String()
 }
