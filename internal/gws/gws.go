@@ -2,6 +2,7 @@
 package gws
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ const BackfillDays = 90
 const ExpansionThresholdDays = 30
 
 // APIError represents a structured error from a Google Workspace API call.
-// The gws CLI returns these as JSON on stderr: {"error":{"code":404,"message":"...","reason":"..."}}.
+// The gws CLI returns these as JSON on stdout: {"error":{"code":404,"message":"...","reason":"..."}}.
 type APIError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -80,14 +81,17 @@ func (c *Client) Run(args ...string) ([]byte, error) {
 	if len(c.env) > 0 {
 		cmd.Env = append(os.Environ(), c.env...)
 	}
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, parseExitError(args, exitErr)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, parseExitError(args, stdout.Bytes(), stderr.Bytes())
 		}
 		return nil, fmt.Errorf("gws %v: %w", args, err)
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
 
 // RunParsed executes a gws CLI command and unmarshals the JSON output into dst.
@@ -102,15 +106,18 @@ func (c *Client) RunParsed(dst any, args ...string) error {
 	return nil
 }
 
-// parseExitError attempts to extract a structured APIError from the gws CLI's
-// stderr output. Falls back to a plain error if parsing fails.
-func parseExitError(args []string, exitErr *exec.ExitError) error {
-	stderr := exitErr.Stderr
+// parseExitError extracts a structured APIError from the gws CLI output.
+// The gws CLI writes error JSON to stdout (not stderr) via print_error_json;
+// stderr typically contains only diagnostic banners like "Using keyring backend: keyring".
+func parseExitError(args []string, stdout, stderr []byte) error {
 	var envelope struct {
 		Error APIError `json:"error"`
 	}
-	if json.Unmarshal(stderr, &envelope) == nil && envelope.Error.Code != 0 {
+	if json.Unmarshal(stdout, &envelope) == nil && envelope.Error.Code != 0 {
 		return fmt.Errorf("gws %v: %w", args, &envelope.Error)
+	}
+	if len(stdout) > 0 {
+		return fmt.Errorf("gws %v: %s", args, stdout)
 	}
 	return fmt.Errorf("gws %v: %s", args, stderr)
 }
