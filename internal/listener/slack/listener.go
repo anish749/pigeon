@@ -319,10 +319,11 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 			"channel", msg.Channel, "error", err, "account", l.acct)
 		return
 	}
-	userName, err := l.resolver.UserName(ctx, msg.Message.User)
+	userName, userID, err := l.resolver.SenderName(ctx, msg.Message.User, msg.Message.BotID, msg.Message.Username)
 	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve user",
-			"user_id", msg.Message.User, "channel", channelName, "error", err, "account", l.acct)
+		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve sender",
+			"user_id", msg.Message.User, "bot_id", msg.Message.BotID, "username", msg.Message.Username,
+			"channel", channelName, "error", err, "account", l.acct)
 		return
 	}
 	text, err := l.resolver.ResolveText(ctx, msg.Message.Text)
@@ -339,7 +340,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 			Ts:       ts,
 			MsgID:    msg.Message.Timestamp,
 			Sender:   userName,
-			SenderID: msg.Message.User,
+			SenderID: userID,
 			Text:     text,
 		},
 	}
@@ -375,14 +376,15 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 
 	var senderName, senderID string
 	if msg.PreviousMessage != nil {
-		name, err := l.resolver.UserName(ctx, msg.PreviousMessage.User)
+		name, id, err := l.resolver.SenderName(ctx, msg.PreviousMessage.User, msg.PreviousMessage.BotID, msg.PreviousMessage.Username)
 		if err != nil {
-			slog.WarnContext(ctx, "slack: skipping delete, cannot resolve user",
-				"user_id", msg.PreviousMessage.User, "channel", channelName, "error", err, "account", l.acct)
+			slog.WarnContext(ctx, "slack: skipping delete, cannot resolve sender",
+				"user_id", msg.PreviousMessage.User, "bot_id", msg.PreviousMessage.BotID, "username", msg.PreviousMessage.Username,
+				"channel", channelName, "error", err, "account", l.acct)
 			return
 		}
 		senderName = name
-		senderID = msg.PreviousMessage.User
+		senderID = id
 	}
 
 	line := modelv1.Line{
