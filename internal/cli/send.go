@@ -18,139 +18,166 @@ func newSendCmd() *cobra.Command {
 		GroupID: groupSending,
 		Long: `Send a message through the daemon's connected clients.
 
-Target flags are platform-specific:
-  Slack:    --user-id (DMs) or --channel (channels, group DMs)
-  WhatsApp: --contact (name or phone number)
-
-By default, Slack messages are sent as the bot. Use --via pigeon-as-user to
-send as the account owner who connected pigeon (uses their user token).
-Use --thread to reply to a thread, and --broadcast to also post the reply to the channel.
-Run 'pigeon list' to find user IDs and channel names.`,
-		Example: `  # Slack
-  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY -m "hey"
-  pigeon send -p slack -a acme-corp --user-id U07HF6KQ7PY --via pigeon-as-user -m "sent as me"
-  pigeon send -p slack -a acme-corp --channel '#engineering' -m "deploying now"
-  pigeon send -p slack -a acme-corp --channel '#engineering' --thread 1711568938.123456 -m "fixed!"
-  pigeon send -p slack -a acme-corp --channel '#engineering' --post-at 2026-04-11T09:00:00 -m "scheduled"
-  pigeon send -p slack -a acme-corp --channel '@mpdm-alice--bob-1' -m "hey all"
-
-  # WhatsApp
-  pigeon send -p whatsapp -a +14155551234 --contact Alice -m "hey, are you free?"`,
-		PreRunE: ensureDaemon,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, err := cmd.Flags().GetString("platform")
-			if err != nil {
-				return err
-			}
-			account, err := cmd.Flags().GetString("account")
-			if err != nil {
-				return err
-			}
-			userID, err := cmd.Flags().GetString("user-id")
-			if err != nil {
-				return err
-			}
-			channel, err := cmd.Flags().GetString("channel")
-			if err != nil {
-				return err
-			}
-			contact, err := cmd.Flags().GetString("contact")
-			if err != nil {
-				return err
-			}
-			message, err := cmd.Flags().GetString("message")
-			if err != nil {
-				return err
-			}
-			thread, err := cmd.Flags().GetString("thread")
-			if err != nil {
-				return err
-			}
-			broadcast, err := cmd.Flags().GetBool("broadcast")
-			if err != nil {
-				return err
-			}
-			postAt, err := cmd.Flags().GetString("post-at")
-			if err != nil {
-				return err
-			}
-			viaStr, err := cmd.Flags().GetString("via")
-			if err != nil {
-				return err
-			}
-			via := modelv1.Via(viaStr)
-			dryRun, err := cmd.Flags().GetBool("dry-run")
-			if err != nil {
-				return err
-			}
-			force, err := cmd.Flags().GetBool("force")
-			if err != nil {
-				return err
-			}
-
-			switch platform {
-			case "slack":
-				if contact != "" {
-					return fmt.Errorf("use --user-id or --channel for Slack, not --contact")
-				}
-			case "whatsapp":
-				if userID != "" || channel != "" {
-					return fmt.Errorf("use --contact for WhatsApp, not --user-id or --channel")
-				}
-				if postAt != "" {
-					return fmt.Errorf("--post-at is only supported for Slack")
-				}
-			}
-
-			// Convert human-readable --post-at to Unix timestamp for the API.
-			if postAt != "" {
-				ts, err := parsePostAt(postAt)
-				if err != nil {
-					return err
-				}
-				postAt = strconv.FormatInt(ts, 10)
-			}
-
-			return commands.RunSend(commands.SendParams{
-				Platform:  platform,
-				Account:   account,
-				UserID:    userID,
-				Channel:   channel,
-				Contact:   contact,
-				Message:   message,
-				Thread:    thread,
-				Broadcast: broadcast,
-				PostAt:    postAt,
-				Via:       via,
-				DryRun:    dryRun,
-				Force:     force,
-			})
-		},
+Pick a platform subcommand:
+  pigeon send slack    — Slack DMs, channels, group DMs, threads
+  pigeon send whatsapp — WhatsApp contacts`,
 	}
 
-	cmd.Flags().StringP("platform", "p", "", "platform name")
-	cmd.Flags().StringP("account", "a", "", "account name")
-	cmd.Flags().StringP("message", "m", "", "message text")
-	cmd.MarkFlagRequired("platform")
-	cmd.MarkFlagRequired("account")
-	cmd.MarkFlagRequired("message")
+	// Shared flags live on the parent so they apply to every subcommand.
+	cmd.PersistentFlags().StringP("account", "a", "", "account name")
+	cmd.PersistentFlags().StringP("message", "m", "", "message text")
+	cmd.PersistentFlags().Bool("dry-run", false, "validate without sending")
+	if err := cmd.MarkPersistentFlagRequired("account"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkPersistentFlagRequired("message"); err != nil {
+		panic(err)
+	}
 
-	// Target flags — mutually exclusive.
+	cmd.AddCommand(newSendSlackCmd(), newSendWhatsappCmd())
+	return cmd
+}
+
+func newSendSlackCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "slack",
+		Short: "Send a Slack message",
+		Long: `Send a Slack DM, channel message, group DM, or thread reply.
+
+By default, messages are sent as the bot. Use --via pigeon-as-user to send as
+the account owner who connected pigeon (uses their user token).
+Use --thread to reply to a thread, and --broadcast to also post the reply to
+the channel. Run 'pigeon list' to find user IDs and channel names.`,
+		Example: `  pigeon send slack -a acme-corp --user-id U07HF6KQ7PY -m "hey"
+  pigeon send slack -a acme-corp --user-id U07HF6KQ7PY --via pigeon-as-user -m "sent as me"
+  pigeon send slack -a acme-corp -c '#engineering' -m "deploying now"
+  pigeon send slack -a acme-corp -c '#engineering' --thread 1711568938.123456 -m "fixed!"
+  pigeon send slack -a acme-corp -c '#engineering' --post-at 2026-04-11T09:00:00 -m "scheduled"
+  pigeon send slack -a acme-corp -c '@mpdm-alice--bob-1' -m "hey all"`,
+		PreRunE: ensureDaemon,
+		RunE:    runSendSlack,
+	}
+
 	cmd.Flags().String("user-id", "", "Slack user ID for DMs (U-prefixed, from 'pigeon list')")
-	cmd.Flags().String("channel", "", "Slack channel (#name) or group DM (@mpdm-...)")
-	cmd.Flags().StringP("contact", "c", "", "WhatsApp contact name or phone number")
-	cmd.MarkFlagsMutuallyExclusive("user-id", "channel", "contact")
-	cmd.MarkFlagsOneRequired("user-id", "channel", "contact")
+	cmd.Flags().StringP("channel", "c", "", "Slack channel (#name) or group DM (@mpdm-...)")
+	cmd.MarkFlagsMutuallyExclusive("user-id", "channel")
+	cmd.MarkFlagsOneRequired("user-id", "channel")
 
-	// Slack-specific flags.
 	cmd.Flags().String("thread", "", "thread timestamp to reply to")
 	cmd.Flags().Bool("broadcast", false, "broadcast thread reply to channel")
-	cmd.Flags().String("post-at", "", "when to send: ISO 8601 (2026-04-11T09:00:00, local timezone) or Unix timestamp (Slack only, up to 120 days)")
+	cmd.Flags().String("post-at", "", "when to send: ISO 8601 (2026-04-11T09:00:00, local timezone) or Unix timestamp (up to 120 days)")
 	cmd.Flags().String("via", string(modelv1.ViaPigeonAsBot), "send identity: pigeon-as-bot (default) or pigeon-as-user (send as the account owner)")
-	cmd.Flags().Bool("dry-run", false, "validate without sending")
 	cmd.Flags().Bool("force", false, "send even if the thread is not found locally")
-
 	return cmd
+}
+
+func newSendWhatsappCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "whatsapp",
+		Short:   "Send a WhatsApp message",
+		Long:    `Send a WhatsApp message to a contact by name or phone number.`,
+		Example: `  pigeon send whatsapp -a +14155551234 -c Alice -m "hey, are you free?"`,
+		PreRunE: ensureDaemon,
+		RunE:    runSendWhatsapp,
+	}
+
+	cmd.Flags().StringP("contact", "c", "", "contact name or phone number")
+	if err := cmd.MarkFlagRequired("contact"); err != nil {
+		panic(err)
+	}
+	return cmd
+}
+
+func runSendSlack(cmd *cobra.Command, args []string) error {
+	account, err := cmd.Flags().GetString("account")
+	if err != nil {
+		return err
+	}
+	message, err := cmd.Flags().GetString("message")
+	if err != nil {
+		return err
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	if err != nil {
+		return err
+	}
+	userID, err := cmd.Flags().GetString("user-id")
+	if err != nil {
+		return err
+	}
+	channel, err := cmd.Flags().GetString("channel")
+	if err != nil {
+		return err
+	}
+	thread, err := cmd.Flags().GetString("thread")
+	if err != nil {
+		return err
+	}
+	broadcast, err := cmd.Flags().GetBool("broadcast")
+	if err != nil {
+		return err
+	}
+	postAt, err := cmd.Flags().GetString("post-at")
+	if err != nil {
+		return err
+	}
+	viaStr, err := cmd.Flags().GetString("via")
+	if err != nil {
+		return err
+	}
+	force, err := cmd.Flags().GetBool("force")
+	if err != nil {
+		return err
+	}
+
+	if postAt != "" {
+		ts, err := parsePostAt(postAt)
+		if err != nil {
+			return err
+		}
+		postAt = strconv.FormatInt(ts, 10)
+	}
+
+	return commands.RunSend(commands.SendParams{
+		Platform:  "slack",
+		Account:   account,
+		UserID:    userID,
+		Channel:   channel,
+		Message:   message,
+		Thread:    thread,
+		Broadcast: broadcast,
+		PostAt:    postAt,
+		Via:       modelv1.Via(viaStr),
+		DryRun:    dryRun,
+		Force:     force,
+	})
+}
+
+func runSendWhatsapp(cmd *cobra.Command, args []string) error {
+	account, err := cmd.Flags().GetString("account")
+	if err != nil {
+		return err
+	}
+	message, err := cmd.Flags().GetString("message")
+	if err != nil {
+		return err
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	if err != nil {
+		return err
+	}
+	contact, err := cmd.Flags().GetString("contact")
+	if err != nil {
+		return err
+	}
+
+	return commands.RunSend(commands.SendParams{
+		Platform: "whatsapp",
+		Account:  account,
+		Contact:  contact,
+		Message:  message,
+		DryRun:   dryRun,
+	})
 }
 
 // parsePostAt accepts either a Unix timestamp (all digits) or an ISO 8601
