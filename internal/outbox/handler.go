@@ -100,9 +100,7 @@ func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
 		return
 	}
 	if item.SessionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "this item did not come from a pigeon-connected session — feedback has nowhere to deliver. Use approve or leave it queued.",
-		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "item has no session to deliver feedback to"})
 		return
 	}
 
