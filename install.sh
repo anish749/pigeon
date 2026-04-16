@@ -37,11 +37,15 @@ if ! curl -fsSL -o "${TMP}/${ARCHIVE}" "$URL"; then
   exit 1
 fi
 
-# Extract and install binary
+# Extract and install binary.
+# Use `install(1)` rather than `cp`: on macOS, `cp` truncates the existing file
+# in place, preserving the `com.apple.provenance` xattr that caches the prior
+# binary's code signature. The new bytes then fail signature validation on
+# exec and are killed with SIGKILL. `install` unlinks the target first, giving
+# a fresh inode with no stale xattrs.
 tar -xzf "${TMP}/${ARCHIVE}" -C "$TMP"
 mkdir -p "$INSTALL_DIR"
-cp "${TMP}/pigeon" "${INSTALL_DIR}/pigeon"
-chmod +x "${INSTALL_DIR}/pigeon"
+install -m 755 "${TMP}/pigeon" "${INSTALL_DIR}/pigeon"
 echo "Installed pigeon to ${INSTALL_DIR}/pigeon"
 
 # Check PATH
