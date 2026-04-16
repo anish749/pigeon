@@ -123,11 +123,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.approveItem(m.items[m.cursor].ID)
 		}
 	case "f":
-		if len(m.items) > 0 {
-			if m.items[m.cursor].SessionID == "" {
-				m.status = dimStyle.Render("Feedback unavailable — this item did not come from a pigeon-connected session")
-				return m, clearStatusAfter(3 * time.Second)
-			}
+		if len(m.items) > 0 && m.items[m.cursor].SessionID != "" {
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
