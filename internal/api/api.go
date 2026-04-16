@@ -377,7 +377,23 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	req.Message = sender.Resolver.ResolveMentions(req.Message)
 
 	// Build message options.
+	// Text is always set as the notification/fallback, even when blocks are present.
 	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
+
+	if req.Via == modelv1.ViaPigeonAsUser {
+		// Wrap user-token messages in Block Kit so recipients can
+		// distinguish automated sends from the human typing directly.
+		opts = append(opts, goslack.MsgOptionBlocks(
+			goslack.NewSectionBlock(
+				goslack.NewTextBlockObject("mrkdwn", req.Message, false, false),
+				nil, nil,
+			),
+			goslack.NewContextBlock("",
+				goslack.NewTextBlockObject("mrkdwn", "_sent via pigeon_", false, false),
+			),
+		))
+	}
+
 	if req.Thread != "" {
 		opts = append(opts, goslack.MsgOptionTS(req.Thread))
 		if req.Broadcast {
