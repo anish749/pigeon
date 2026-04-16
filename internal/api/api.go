@@ -914,36 +914,15 @@ func (s *Server) deleteSlack(ctx context.Context, acct account.Account, req Dele
 	}
 
 	// Bots can only delete their own messages via chat.delete.
+	// The delete event will come back through the websocket and the listener
+	// stores it locally — no need to duplicate that here.
 	_, _, err = sender.BotAPI.DeleteMessageContext(ctx, channelID, req.MessageID)
 	if err != nil {
 		return DeleteResponse{Error: fmt.Sprintf("delete in %s: %v%s", channelName, err, slackChannelNotFoundHint(err))}
 	}
 
-	// Store the delete event locally.
-	msgTS := slacklistener.ParseTimestamp(req.MessageID)
-	line := modelv1.Line{
-		Type: modelv1.LineDelete,
-		Delete: &modelv1.DeleteLine{
-			Ts:       time.Now().UTC(),
-			MsgID:    req.MessageID,
-			Sender:   sender.BotName,
-			SenderID: sender.BotUserID,
-			Via:      modelv1.ViaPigeonAsBot,
-		},
-	}
-	if err := s.store.Append(sender.Acct, channelName, line); err != nil {
-		slog.ErrorContext(ctx, "failed to store delete event", "error", err)
-	}
-
-	// Also record in thread file if one exists for this message.
-	if s.store.ThreadExists(sender.Acct, channelName, req.MessageID) {
-		if err := s.store.AppendThread(sender.Acct, channelName, req.MessageID, line); err != nil {
-			slog.ErrorContext(ctx, "failed to store delete in thread", "error", err)
-		}
-	}
-
 	slog.InfoContext(ctx, "slack message deleted",
-		"msg_id", req.MessageID, "channel", channelName, "ts", msgTS, "account", acct)
+		"msg_id", req.MessageID, "channel", channelName, "account", acct)
 
 	return DeleteResponse{OK: true}
 }
