@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -135,7 +136,7 @@ func TestSenderName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, id, err := r.SenderName(context.Background(), tt.userID, tt.botID, tt.username)
+			name, id, err := r.SenderName(context.Background(), goslack.Msg{User: tt.userID, BotID: tt.botID, Username: tt.username})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got name=%q id=%q", name, id)
