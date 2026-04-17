@@ -13,10 +13,10 @@ import (
 
 // fakePrioritizer implements slackPrioritizer for tests.
 type fakePrioritizer struct {
-	pages       map[int]*goslack.SearchMessages
-	searchErr   error
-	mutedIDs    string // comma-separated channel IDs
-	prefsErr    error
+	pages     map[int]*goslack.SearchMessages
+	searchErr error
+	mutedIDs  string // comma-separated channel IDs
+	prefsErr  error
 }
 
 func (f *fakePrioritizer) SearchMessagesContext(_ context.Context, _ string, params goslack.SearchParameters) (*goslack.SearchMessages, error) {
@@ -226,8 +226,8 @@ func TestPrioritize_PageErrorSyncsAll(t *testing.T) {
 
 func TestPrioritize_ResultIsSorted(t *testing.T) {
 	channels := []goslack.Channel{
-		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0000"}}},            // public
-		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0001", IsIM: true}}}, // DM
+		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0000"}}},               // public
+		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0001", IsIM: true}}},   // DM
 		{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C0002", IsMpIM: true}}}, // mpim
 	}
 	searcher := &fakePrioritizer{

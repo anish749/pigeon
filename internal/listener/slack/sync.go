@@ -737,4 +737,3 @@ func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimi
 	}
 	return all, nil
 }
-
