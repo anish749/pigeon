@@ -1390,54 +1390,31 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
-// TestInterleaveThreads_ParentNotInDateFiles verifies that thread replies are
-// included in the output even when the parent message's date file is outside
-// the selected range (e.g. the parent is from days ago and we're reading with
-// --since). This is the fix for the bug where real-time thread replies to old
-// messages were silently dropped.
-func TestInterleaveThreads_ParentNotInDateFiles(t *testing.T) {
+// TestReadConversation_NoDateFile_ReturnsEmpty verifies that when no date file
+// exists for the requested date, ReadConversation returns empty even if thread
+// files exist. Thread replies without a corresponding date file entry should
+// not cause all threads to be dumped into the output.
+func TestReadConversation_NoDateFile_ReturnsEmpty(t *testing.T) {
 	s, acct := setup(t)
 
 	// Parent message is from March 10 — will be in its own date file.
 	parent := msgLine("P1", ts(2026, 3, 10, 9, 0, 0), "Alice", "U1", "old thread start")
 	s.Append(acct, "#general", parent)
 
-	// Thread reply is from March 16 — recent.
+	// Thread reply is from March 16 — only in thread file, no date file.
 	reply := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
 		ID: "R1", Ts: ts(2026, 3, 16, 14, 0, 0), Sender: "Bob", SenderID: "U2", Text: "replying to old thread", Reply: true,
 	}}
 	s.AppendThread(acct, "#general", "P1", parent)
 	s.AppendThread(acct, "#general", "P1", reply)
 
-	// Read only March 16 — the parent's date file (March 10) is NOT selected.
+	// Read only March 16 — no date file exists for this date.
 	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
 	if err != nil {
 		t.Fatalf("ReadConversation: %v", err)
 	}
-
-	// Before the fix this returned 0 messages — the thread reply was silently
-	// dropped because the parent wasn't in the selected date files.
-	// After the fix: parent + reply from the unmatched thread file are appended.
-	if len(df.Messages) < 1 {
-		t.Fatalf("messages = %d, want at least 1 (thread reply should not be dropped)", len(df.Messages))
-	}
-
-	// Verify the reply is present.
-	var foundReply bool
-	for _, m := range df.Messages {
-		if m.ID == "R1" {
-			foundReply = true
-			if !m.Reply {
-				t.Error("R1 should have Reply=true")
-			}
-		}
-	}
-	if !foundReply {
-		var ids []string
-		for _, m := range df.Messages {
-			ids = append(ids, m.ID)
-		}
-		t.Errorf("thread reply R1 not found in output, got IDs: %v", ids)
+	if len(df.Messages) != 0 {
+		t.Errorf("expected 0 messages for date with no date file, got %d", len(df.Messages))
 	}
 }
 

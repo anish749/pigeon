@@ -98,6 +98,10 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		opts.Last = 25
 	}
 
+	if len(selected) == 0 {
+		return &modelv1.ResolvedDateFile{}, nil
+	}
+
 	merged := &modelv1.DateFile{}
 	for _, f := range selected {
 		data, err := os.ReadFile(f)
