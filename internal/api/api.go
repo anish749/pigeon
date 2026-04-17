@@ -427,40 +427,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v%s", channelName, err, hint)}
 	}
 
-	// Ensure .meta.json exists for this conversation.
-	slackMeta := sender.Resolver.ConvMeta(channelID, channelName)
-	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, channelName, slackMeta); err != nil {
-		slog.ErrorContext(ctx, "write meta failed", "channel", channelName, "error", err)
-	}
-
-	// Store locally.
+	// The listener will pick up this message via Socket Mode and write it to
+	// the store with the via field extracted from the pigeon_send metadata.
 	msgTS := slacklistener.ParseTimestamp(ts)
-	senderID := sender.BotUserID
-	if req.Via == modelv1.ViaPigeonAsUser {
-		senderID = sender.UserID
-	}
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       ts,
-			Ts:       msgTS,
-			Sender:   senderName,
-			SenderID: senderID,
-			Via:      req.Via,
-			Text:     req.Message,
-		},
-	}
-	if req.Thread != "" {
-		line.Msg.Reply = true
-		if err := s.store.AppendThread(sender.Acct, channelName, req.Thread, line); err != nil {
-			slog.ErrorContext(ctx, "failed to store sent thread message", "error", err)
-		}
-	} else {
-		if err := s.store.Append(sender.Acct, channelName, line); err != nil {
-			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
-		}
-	}
-
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339), SendAs: senderName}
 }
 
