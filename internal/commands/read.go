@@ -74,6 +74,9 @@ func RunRead(p ReadParams) error {
 			}
 		}
 		header += " ---"
+		if printed > 0 {
+			fmt.Println()
+		}
 		fmt.Println(header)
 		fmt.Printf("    %s\n", convDir.Path())
 		fmt.Println(strings.Join(lines, "\n"))
