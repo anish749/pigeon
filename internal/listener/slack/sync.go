@@ -48,55 +48,6 @@ func NewMessageStore(acct account.Account, s *store.FSStore) (*MessageStore, err
 	}, nil
 }
 
-// Write persists a message to the appropriate date file. Does not advance the
-// cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-		},
-	}
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-			Reply:    isReply,
-		},
-	}
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
-// WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Text:     text,
-		},
-	}
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
 // EnsureThreadContextSeparator writes the separator line to a thread file.
 func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS string) error {
 	line := modelv1.Line{Type: modelv1.LineSeparator}
