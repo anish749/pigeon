@@ -289,7 +289,7 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	if err := writeReaction(l.messages, channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
+	if err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 	}
 

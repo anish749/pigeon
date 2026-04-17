@@ -6,6 +6,9 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
+type writeParams struct {
+}
+
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
@@ -57,7 +60,22 @@ func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, sender
 
 // AppendReaction stores a reaction or unreaction event in the date file
 // corresponding to the target message's timestamp.
-func (ms *MessageStore) AppendReaction(channelName string, line modelv1.Line) error {
+func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emoji string, remove bool) error {
+	lineType := modelv1.LineReaction
+	if remove {
+		lineType = modelv1.LineUnreaction
+	}
+	line := modelv1.Line{
+		Type: lineType,
+		React: &modelv1.ReactLine{
+			Ts:       ParseTimestamp(msgTS),
+			MsgID:    msgTS,
+			Sender:   sender,
+			SenderID: senderID,
+			Emoji:    emoji,
+			Remove:   remove,
+		},
+	}
 	return ms.store.Append(ms.acct, channelName, line)
 }
 
