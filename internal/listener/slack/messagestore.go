@@ -6,14 +6,6 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-// ResolvedSender holds the resolver-derived fields common to all incoming
-// Slack events (messages, reactions, edits, deletes).
-type ResolvedSender struct {
-	ChannelName string
-	SenderName  string
-	SenderID    string
-}
-
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
 func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {

@@ -372,6 +372,27 @@ func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
 	return sig.Name, nil
 }
 
+// ResolvedSender holds the resolver-derived fields common to all incoming
+// Slack events (messages, reactions, edits, deletes).
+type ResolvedSender struct {
+	ChannelName string
+	SenderName  string
+	SenderID    string
+}
+
+// ResolveSender resolves both the channel and sender for an incoming event.
+func (r *Resolver) ResolveSender(ctx context.Context, channelID, userID, botID, username string) (ResolvedSender, error) {
+	channelName, err := r.ChannelName(ctx, channelID)
+	if err != nil {
+		return ResolvedSender{}, fmt.Errorf("resolve channel %s: %w", channelID, err)
+	}
+	senderName, senderID, err := r.SenderName(ctx, userID, botID, username)
+	if err != nil {
+		return ResolvedSender{}, err
+	}
+	return ResolvedSender{ChannelName: channelName, SenderName: senderName, SenderID: senderID}, nil
+}
+
 // SenderName resolves a message sender to (name, id). Tries the user ID first,
 // then the message's Username field (common for bots), then a bot API lookup.
 func (r *Resolver) SenderName(ctx context.Context, userID, botID, username string) (string, string, error) {
