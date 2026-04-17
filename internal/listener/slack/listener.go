@@ -124,10 +124,11 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	if msg.Message == nil || !shouldKeepMessage(*msg.Message) {
-		if msg.Message != nil {
-			logDroppedMessage(ctx, *msg.Message, msg.Channel, "slack listener")
-		}
+	if msg.Message == nil {
+		return
+	}
+	if !shouldKeepMessage(*msg.Message) {
+		logDroppedMessage(ctx, *msg.Message, msg.Channel, "slack listener")
 		return
 	}
 
