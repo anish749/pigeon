@@ -43,7 +43,7 @@ func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text str
 }
 
 // WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string) error {
+func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, raw map[string]any) error {
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -52,6 +52,7 @@ func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text str
 			Sender:   rs.SenderName,
 			SenderID: rs.SenderID,
 			Text:     text,
+			Raw:      raw,
 		},
 	}
 	return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
