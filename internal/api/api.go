@@ -257,6 +257,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	// literal backslash-bang that wasn't intended.
 	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
 
+	if err := s.checkMPDMBotAccess(r.Context(), req); err != nil {
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
+		return
+	}
+
 	// All real sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
@@ -597,6 +602,38 @@ func validateTarget(platform string, slack *SlackTarget, contact string) error {
 		if !hasContact {
 			return fmt.Errorf("use contact for WhatsApp, not slack target")
 		}
+	}
+	return nil
+}
+
+// checkMPDMBotAccess rejects bot-token sends to group DMs where the bot is
+// not a member. Bots cannot access MPDMs they haven't been invited to, so we
+// fail early before the message enters the outbox.
+func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error {
+	if req.Platform != "slack" || req.Slack == nil {
+		return nil
+	}
+	if !strings.HasPrefix(req.Slack.Channel, "@mpdm-") {
+		return nil
+	}
+	if req.Via == modelv1.ViaPigeonAsUser {
+		return nil
+	}
+
+	acct := account.New(req.Platform, req.Account)
+	s.mu.RLock()
+	sender, ok := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("no Slack workspace %q registered", acct.Display())
+	}
+
+	channelID, _, err := sender.Resolver.FindChannelID(ctx, req.Slack.Channel)
+	if err != nil {
+		return fmt.Errorf("resolve MPDM channel: %w", err)
+	}
+	if !sender.Resolver.IsMember(channelID) {
+		return fmt.Errorf("bot is not a member of this group DM — use --via pigeon-as-user to send as yourself")
 	}
 	return nil
 }
