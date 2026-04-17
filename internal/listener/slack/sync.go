@@ -404,32 +404,16 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			var senderName string
-			var senderID string
-			var via modelv1.Via
-			if msg.BotID != "" {
-				name, err := resolver.BotName(ctx, msg.BotID)
-				if err != nil {
-					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve bot",
-						"channel", channelName, "ts", msg.Timestamp, "error", err)
-					continue
-				}
-				senderName = name
-				senderID = msg.BotID
-				via = modelv1.ViaPigeonAsBot
-			} else {
-				userName, err := resolver.UserName(ctx, msg.User)
-				if err != nil {
-					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve user",
-						"channel", channelName, "ts", msg.Timestamp, "error", err)
-					continue
-				}
-				senderName = userName
-				senderID = msg.User
-				via = modelv1.ViaToPigeon
+			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.Msg)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve",
+					"channel", channelName, "ts", msg.Timestamp, "error", err)
+				continue
 			}
-
-			rs := ResolvedSender{ChannelName: channelName, SenderName: senderName, SenderID: senderID}
+			via := modelv1.ViaToPigeon
+			if msg.BotID != "" {
+				via = modelv1.ViaPigeonAsBot
+			}
 			if err := ms.Write(rs, text, ts, msg.Timestamp, via); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
