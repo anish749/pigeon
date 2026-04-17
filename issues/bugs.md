@@ -100,3 +100,11 @@ Every sync cycle attempts to fetch the @Slackbot bot DM and fails with `channel_
 ## Hub: reaction notifications lack context about the reacted message
 
 When a reaction event is delivered to a connected Claude Code session via the hub, only the reaction itself is sent (emoji, channel, timestamp). The message that was reacted to is not included. The receiving session has no way to understand what the reaction means without separately looking up the original message. This makes reactions largely useless as a signal to the agent — it sees "someone reacted 👍" but not what they reacted to.
+
+## Terminal UI review does not show the recipient/target name
+
+When reviewing outgoing messages in the terminal UI, there is no indication of who the message is being sent to. The sender is shown but not the target — the person being messaged or the conversation the message is going to. This makes it hard to confirm messages are addressed correctly during review.
+
+## Terminal UI review does not allow changing the send mode
+
+When reviewing an outgoing message in the terminal UI, the send mode (send as bot, impersonate user, or send from the user's own account) is fixed. There is no way to change it during review. The user should be able to toggle the send mode from the review screen before approving.
