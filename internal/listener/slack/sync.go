@@ -211,10 +211,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Skip system events (channel_join, channel_topic, etc.) and messages
-			// with empty text. Allow bot messages through — they contain valuable
-			// info (alerts, CI, integrations).
-			if msg.Text == "" || !allowedSubType(msg.SubType) {
+			if !shouldKeepMessage(msg.SubType, msg.Text) {
 				slog.WarnContext(ctx, "slack sync: skipping message",
 					"channel", channelName, "ts", msg.Timestamp,
 					"botID", msg.BotID, "subType", msg.SubType,
@@ -392,7 +389,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		for _, msg := range msgs {
 			lastTS = msg.Timestamp
 
-			if (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+			if !shouldKeepMessage(msg.SubType, msg.Text) {
 				continue
 			}
 
@@ -561,7 +558,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.Text == "" || !allowedSubType(reply.SubType) {
+			if !shouldKeepMessage(reply.SubType, reply.Text) {
 				continue
 			}
 			rs, err := resolver.ResolveSender(ctx, channelID, reply.Msg)
@@ -602,7 +599,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
+					if !shouldKeepMessage(ctxMsg.SubType, ctxMsg.Text) {
 						continue
 					}
 					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.Msg)

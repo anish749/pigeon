@@ -26,12 +26,50 @@ func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeSt
 	return true
 }
 
-// allowedSubType returns true if a message with this SubType should be saved.
-// Empty subtype (normal message), thread_broadcast, and bot_message are allowed.
-// System events like channel_join, channel_topic, channel_leave are filtered.
-func allowedSubType(subType string) bool {
+// shouldKeepMessage reports whether a Slack message should be stored.
+// Messages with empty text are always skipped. The subtype determines whether
+// the message is conversational content (keep) or a system/structural event (skip).
+//
+// Known subtypes and their handling:
+//
+// Kept (conversational content):
+//
+//	""                    regular message — human-typed or app-posted via chat.postMessage
+//	"bot_message"         legacy bot or incoming webhook post (e.g. CI alerts, k8s notifications)
+//	"thread_broadcast"    thread reply also posted to the channel ("Also send to #channel")
+//	"assistant_app_thread" app assistant conversation (e.g. Slack AI, custom app threads)
+//
+// Skipped (system/structural events):
+//
+//	"message_changed"     edit notification — routed to handleEdit in the listener, not present in history
+//	"message_deleted"     delete notification — routed to handleDelete in the listener, not present in history
+//	"channel_join"        system: user joined channel
+//	"channel_leave"       system: user left channel
+//	"channel_topic"       system: channel topic changed
+//	"channel_purpose"     system: channel purpose changed
+//	"channel_name"        system: channel renamed
+//	"channel_archive"     system: channel archived
+//	"channel_unarchive"   system: channel unarchived
+//	"group_join"          system: user joined private channel
+//	"group_leave"         system: user left private channel
+//	"group_topic"         system: private channel topic changed
+//	"group_purpose"       system: private channel purpose changed
+//	"group_name"          system: private channel renamed
+//	"group_archive"       system: private channel archived
+//	"group_unarchive"     system: private channel unarchived
+//	"pinned_item"         system: item pinned
+//	"unpinned_item"       system: item unpinned
+//	"ekm_access_denied"   system: message hidden by EKM
+//	"me_message"          /me slash command — could be kept but rare in practice
+//	"huddle_thread"       huddle-related system message
+//	"tombstone"           placeholder for deleted messages in history
+//	"file_share"          file uploaded — has empty text unless user added a comment
+func shouldKeepMessage(subType, text string) bool {
+	if text == "" {
+		return false
+	}
 	switch subType {
-	case "", "thread_broadcast", "bot_message":
+	case "", "bot_message", "thread_broadcast", "assistant_app_thread":
 		return true
 	default:
 		return false
