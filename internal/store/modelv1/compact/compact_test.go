@@ -54,6 +54,101 @@ func TestCompact_DedupReactions_KeepsFirst(t *testing.T) {
 	}
 }
 
+func TestCompact_DedupMessages_PreservesRaw(t *testing.T) {
+	raw := map[string]any{
+		"files": []any{
+			map[string]any{"name": "doc.pdf", "size": float64(999)},
+		},
+	}
+	f := &modelv1.DateFile{
+		Messages: []modelv1.MsgLine{
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
+		},
+	}
+	got := compact.Compact(f)
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages count = %d, want 1", len(got.Messages))
+	}
+	if got.Messages[0].Raw == nil {
+		t.Fatal("raw is nil after dedup, want preserved")
+	}
+	files, ok := got.Messages[0].Raw["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("raw[files] = %v, want slice of 1", got.Messages[0].Raw["files"])
+	}
+	if files[0].(map[string]any)["name"] != "doc.pdf" {
+		t.Errorf("file name = %v, want doc.pdf", files[0].(map[string]any)["name"])
+	}
+}
+
+func TestCompact_EditUpdatesRaw(t *testing.T) {
+	origRaw := map[string]any{
+		"blocks": []any{map[string]any{"type": "rich_text", "text": "original"}},
+	}
+	editRaw := map[string]any{
+		"blocks": []any{map[string]any{"type": "rich_text", "text": "edited"}},
+	}
+	f := &modelv1.DateFile{
+		Messages: []modelv1.MsgLine{
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "original", Raw: origRaw},
+		},
+		Edits: []modelv1.EditLine{
+			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1", Text: "edited", Raw: editRaw},
+		},
+	}
+	got := compact.Compact(f)
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages count = %d, want 1", len(got.Messages))
+	}
+	if got.Messages[0].Text != "edited" {
+		t.Errorf("text = %q, want %q", got.Messages[0].Text, "edited")
+	}
+	if got.Messages[0].Raw == nil {
+		t.Fatal("raw is nil after edit, want updated")
+	}
+	blocks := got.Messages[0].Raw["blocks"].([]any)
+	if blocks[0].(map[string]any)["text"] != "edited" {
+		t.Errorf("raw block text = %v, want edited", blocks[0].(map[string]any)["text"])
+	}
+}
+
+func TestCompactThread_EditUpdatesRaw(t *testing.T) {
+	origRaw := map[string]any{
+		"files": []any{map[string]any{"name": "v1.pdf"}},
+	}
+	editRaw := map[string]any{
+		"files": []any{map[string]any{"name": "v2.pdf"}},
+	}
+	f := &modelv1.ThreadFile{
+		Parent:  modelv1.MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "parent"},
+		Replies: []modelv1.MsgLine{
+			{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "original", Reply: true, Raw: origRaw},
+		},
+		Edits: []modelv1.EditLine{
+			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "R1", Sender: "Bob", SenderID: "U2", Text: "edited", Raw: editRaw},
+		},
+	}
+	got := compact.CompactThread(f)
+	if got == nil {
+		t.Fatal("CompactThread returned nil")
+	}
+	if len(got.Replies) != 1 {
+		t.Fatalf("replies count = %d, want 1", len(got.Replies))
+	}
+	reply := got.Replies[0]
+	if reply.Text != "edited" {
+		t.Errorf("text = %q, want %q", reply.Text, "edited")
+	}
+	if reply.Raw == nil {
+		t.Fatal("raw is nil after thread edit, want updated")
+	}
+	files := reply.Raw["files"].([]any)
+	if files[0].(map[string]any)["name"] != "v2.pdf" {
+		t.Errorf("raw file name = %v, want v2.pdf", files[0].(map[string]any)["name"])
+	}
+}
+
 func TestCompact_NoDuplicates_Unchanged(t *testing.T) {
 	f := &modelv1.DateFile{
 		Messages: []modelv1.MsgLine{
