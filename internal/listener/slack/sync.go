@@ -17,18 +17,6 @@ import (
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
-// viaFromMetadata extracts the pigeon via field from Slack message metadata.
-// Returns ViaOrganic if the message was not sent by pigeon.
-func viaFromMetadata(md goslack.SlackMetadata) modelv1.Via {
-	if md.EventType != "pigeon_send" {
-		return modelv1.ViaOrganic
-	}
-	if v, ok := md.EventPayload["via"].(string); ok {
-		return modelv1.Via(v)
-	}
-	return modelv1.ViaOrganic
-}
-
 const (
 	syncDays     = 90
 	activityDays = 30
