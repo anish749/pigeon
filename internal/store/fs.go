@@ -120,6 +120,19 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	// Interleave thread replies after their parent message.
 	resolved, interleaveErr := s.interleaveThreads(acct, conversation, resolved)
 
+	// Apply --date filter: after thread interleaving, keep only messages
+	// that fall on the requested date. Without this, unmatched-parent threads
+	// from other dates leak into the output.
+	if opts.Date != "" {
+		var filtered []modelv1.ResolvedMsg
+		for _, m := range resolved.Messages {
+			if m.Ts.Format("2006-01-02") == opts.Date {
+				filtered = append(filtered, m)
+			}
+		}
+		resolved.Messages = filtered
+	}
+
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
 		cutoff := time.Now().Add(-opts.Since)
