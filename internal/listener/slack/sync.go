@@ -17,6 +17,18 @@ import (
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
+// viaFromMetadata extracts the pigeon via field from Slack message metadata.
+// Returns ViaOrganic if the message was not sent by pigeon.
+func viaFromMetadata(md goslack.SlackMetadata) modelv1.Via {
+	if md.EventType != "pigeon_send" {
+		return modelv1.ViaOrganic
+	}
+	if v, ok := md.EventPayload["via"].(string); ok {
+		return modelv1.Via(v)
+	}
+	return modelv1.ViaOrganic
+}
+
 const (
 	syncDays     = 90
 	activityDays = 30
@@ -303,7 +315,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
+			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, viaFromMetadata(msg.Metadata)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -569,10 +581,11 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 		}
 
 		resp, err := api.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
-			ChannelID: channelID,
-			Oldest:    oldest,
-			Limit:     1000,
-			Cursor:    cursor,
+			ChannelID:          channelID,
+			Oldest:             oldest,
+			Limit:              1000,
+			Cursor:             cursor,
+			IncludeAllMetadata: true,
 		})
 		if gate.update(err) {
 			continue
@@ -656,7 +669,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
+			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, viaFromMetadata(reply.Metadata)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -718,10 +731,11 @@ func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimi
 			return all, err
 		}
 		msgs, hasMore, nextCursor, err := api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
-			ChannelID: channelID,
-			Timestamp: threadTS,
-			Limit:     1000,
-			Cursor:    cursor,
+			ChannelID:          channelID,
+			Timestamp:          threadTS,
+			Limit:              1000,
+			Cursor:             cursor,
+			IncludeAllMetadata: true,
 		})
 		if gate.update(err) {
 			continue
