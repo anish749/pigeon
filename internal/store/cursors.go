@@ -40,3 +40,8 @@ type LinearCursors struct {
 type LinearIssueCursor struct {
 	UpdatedAfter string `yaml:"updated_after,omitempty"`
 }
+
+// SlackCursors maps channel ID to the last synced Slack message timestamp.
+// The daemon loads and saves them via FSStore.LoadSlackCursors / SaveSlackCursors
+// so that sync and the real-time listener can resume where they left off.
+type SlackCursors map[string]string

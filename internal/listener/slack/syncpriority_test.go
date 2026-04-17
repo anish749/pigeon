@@ -7,6 +7,8 @@ import (
 	"time"
 
 	goslack "github.com/slack-go/slack"
+
+	"github.com/anish749/pigeon/internal/store"
 )
 
 // fakePrioritizer implements slackPrioritizer for tests.
@@ -71,8 +73,8 @@ func makeMatches(channelIDs ...string) []goslack.SearchMessage {
 	return matches
 }
 
-func cursorAt(t time.Time) syncCursors {
-	return syncCursors{"C0000": fmt.Sprintf("%d.000000", t.Unix())}
+func cursorAt(t time.Time) store.SlackCursors {
+	return store.SlackCursors{"C0000": fmt.Sprintf("%d.000000", t.Unix())}
 }
 
 func noopGate() *rateLimitGate {
@@ -254,7 +256,7 @@ func TestPrioritize_ResultIsSorted(t *testing.T) {
 func TestMaxCursorTime(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-48 * time.Hour)
-	cursors := syncCursors{
+	cursors := store.SlackCursors{
 		"C0001": fmt.Sprintf("%d.000000", old.Unix()),
 		"C0002": fmt.Sprintf("%d.000000", now.Unix()),
 		"C0003": fmt.Sprintf("%d.000000", old.Unix()),
@@ -266,7 +268,7 @@ func TestMaxCursorTime(t *testing.T) {
 }
 
 func TestMaxCursorTime_Empty(t *testing.T) {
-	got := maxCursorTime(syncCursors{})
+	got := maxCursorTime(store.SlackCursors{})
 	if !got.IsZero() {
 		t.Fatal("expected zero time for empty cursors")
 	}

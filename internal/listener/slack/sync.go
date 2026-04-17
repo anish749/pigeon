@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	gosync "sync"
 	"time"
 
 	goslack "github.com/slack-go/slack"
-	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
@@ -25,60 +22,30 @@ const (
 	activityDays = 30
 )
 
-// syncCursors maps channel ID to the last synced Slack message timestamp.
-// Stored as .sync-cursors.yaml in the workspace data directory.
-type syncCursors map[string]string
-
-func cursorsPath(acct account.Account) string {
-	return paths.DefaultDataRoot().AccountFor(acct).SyncCursorsPath()
-}
-
-func loadCursors(acct account.Account) syncCursors {
-	data, err := os.ReadFile(cursorsPath(acct))
-	if err != nil {
-		return make(syncCursors)
-	}
-	var c syncCursors
-	if err := yaml.Unmarshal(data, &c); err != nil {
-		return make(syncCursors)
-	}
-	// yaml.Unmarshal on an empty file succeeds but leaves the map nil.
-	// This happens after a reset clears message data but leaves an empty cursor file.
-	if c == nil {
-		return make(syncCursors)
-	}
-	return c
-}
-
-func saveCursors(acct account.Account, c syncCursors) error {
-	path := cursorsPath(acct)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
 // MessageStore is the single write path for Slack messages. It writes message
 // files and maintains per-channel cursors so that both sync and the real-time
 // listener stay consistent.
 type MessageStore struct {
-	acct    account.Account
-	store   store.Store
-	mu      gosync.Mutex
-	cursors syncCursors
+	acct       account.Account
+	accountDir paths.AccountDir
+	store      *store.FSStore
+	mu         gosync.Mutex
+	cursors    store.SlackCursors
 }
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
-	return &MessageStore{
-		acct:    acct,
-		store:   s,
-		cursors: loadCursors(acct),
+func NewMessageStore(acct account.Account, s *store.FSStore) (*MessageStore, error) {
+	accountDir := paths.DefaultDataRoot().AccountFor(acct)
+	cursors, err := s.LoadSlackCursors(accountDir)
+	if err != nil {
+		return nil, fmt.Errorf("load slack cursors: %w", err)
 	}
+	return &MessageStore{
+		acct:       acct,
+		accountDir: accountDir,
+		store:      s,
+		cursors:    cursors,
+	}, nil
 }
 
 // AppendReaction stores a reaction or unreaction event in the date file
@@ -167,11 +134,11 @@ func (ms *MessageStore) EnsureMeta(conversation string, meta modelv1.ConvMeta) {
 }
 
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
-func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
+func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.cursors[channelID] = slackTS
-	saveCursors(ms.acct, ms.cursors)
+	return ms.store.SaveSlackCursors(ms.accountDir, ms.cursors)
 }
 
 // Cursor returns the stored cursor for a channel.
@@ -295,7 +262,9 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "channel_not_found") || strings.Contains(errStr, "is_archived") {
-				ms.AdvanceCursor(ch.ID, oldest)
+				if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+					slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+				}
 			} else {
 				slog.WarnContext(ctx, "slack sync: fetch failed",
 					"channel", channelName, "error", err)
@@ -348,12 +317,16 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		threadsSynced := syncThreads(ctx, api, gate, resolver, ms, ch.ID, channelName, msgs)
 
 		if lastTS != "" {
-			ms.AdvanceCursor(ch.ID, lastTS)
+			if err := ms.AdvanceCursor(ch.ID, lastTS); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
 			// Mark empty channels so we don't re-probe them on next restart.
 			// Use the current oldest as a sentinel — next run will resume from here
 			// and immediately get an empty response.
-			ms.AdvanceCursor(ch.ID, oldest)
+			if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		}
 
 		if len(msgs) > 0 && written == 0 && threadsSynced == 0 {
@@ -528,9 +501,13 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		}
 
 		if lastTS != "" {
-			ms.AdvanceCursor(ch.ID, lastTS)
+			if err := ms.AdvanceCursor(ch.ID, lastTS); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
-			ms.AdvanceCursor(ch.ID, oldest)
+			if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		}
 
 		if written > 0 {
