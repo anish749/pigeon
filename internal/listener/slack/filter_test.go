@@ -16,38 +16,41 @@ import (
 
 func TestShouldKeepMessage(t *testing.T) {
 	tests := []struct {
-		name    string
-		subType string
-		text    string
-		want    bool
+		name string
+		msg  goslack.Msg
+		want bool
 	}{
 		// Kept: conversational content with text.
-		{"regular message", "", "hello", true},
-		{"bot message", "bot_message", "k8s alert", true},
-		{"thread broadcast", "thread_broadcast", "also posted to channel", true},
-		{"assistant app thread", "assistant_app_thread", "AI response", true},
+		{"regular message", goslack.Msg{Text: "hello"}, true},
+		{"bot message", goslack.Msg{SubType: "bot_message", Text: "k8s alert"}, true},
+		{"thread broadcast", goslack.Msg{SubType: "thread_broadcast", Text: "also posted"}, true},
+		{"assistant app thread", goslack.Msg{SubType: "assistant_app_thread", Text: "AI response"}, true},
+		{"huddle thread with blocks", goslack.Msg{SubType: "huddle_thread", Blocks: goslack.Blocks{BlockSet: []goslack.Block{goslack.NewSectionBlock(nil, nil, nil)}}}, true},
+		{"file share with files", goslack.Msg{SubType: "file_share", Files: []goslack.File{{Name: "doc.pdf"}}}, true},
+
+		// Kept: empty text but has content in blocks/attachments/files.
+		{"empty text with files", goslack.Msg{Files: []goslack.File{{Name: "img.png"}}}, true},
+		{"empty text with attachments", goslack.Msg{Attachments: []goslack.Attachment{{Title: "link"}}}, true},
+		{"empty text with blocks", goslack.Msg{Blocks: goslack.Blocks{BlockSet: []goslack.Block{goslack.NewSectionBlock(nil, nil, nil)}}}, true},
 
 		// Skipped: system/structural events.
-		{"channel join", "channel_join", "joined", false},
-		{"channel leave", "channel_leave", "left", false},
-		{"channel topic", "channel_topic", "set topic", false},
-		{"channel purpose", "channel_purpose", "set purpose", false},
-		{"file share", "file_share", "uploaded a file", false},
-		{"me message", "me_message", "is typing", false},
-		{"pinned item", "pinned_item", "pinned a message", false},
-		{"unpinned item", "unpinned_item", "unpinned a message", false},
-		{"huddle thread", "huddle_thread", "huddle started", false},
+		{"channel join", goslack.Msg{SubType: "channel_join", Text: "joined"}, false},
+		{"channel leave", goslack.Msg{SubType: "channel_leave", Text: "left"}, false},
+		{"channel topic", goslack.Msg{SubType: "channel_topic", Text: "set topic"}, false},
+		{"channel purpose", goslack.Msg{SubType: "channel_purpose", Text: "set purpose"}, false},
+		{"me message", goslack.Msg{SubType: "me_message", Text: "is typing"}, false},
+		{"pinned item", goslack.Msg{SubType: "pinned_item", Text: "pinned"}, false},
+		{"unpinned item", goslack.Msg{SubType: "unpinned_item", Text: "unpinned"}, false},
 
-		// Skipped: empty text regardless of subtype.
-		{"empty text regular", "", "", false},
-		{"empty text bot", "bot_message", "", false},
-		{"empty text broadcast", "thread_broadcast", "", false},
+		// Skipped: no content at all.
+		{"empty everything", goslack.Msg{}, false},
+		{"system event no content", goslack.Msg{SubType: "channel_join"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldKeepMessage(tt.subType, tt.text)
+			got := shouldKeepMessage(tt.msg)
 			if got != tt.want {
-				t.Errorf("shouldKeepMessage(%q, %q) = %v, want %v", tt.subType, tt.text, got, tt.want)
+				t.Errorf("shouldKeepMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}

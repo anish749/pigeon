@@ -52,7 +52,10 @@ type MsgLine struct {
 	ReplyTo     string       `json:"replyTo,omitempty"` // quoted message ID (WhatsApp quote-reply), empty if not a reply
 	Text        string       `json:"text,omitempty"`    // message body (may contain newlines)
 	Reply       bool         `json:"reply,omitempty"`   // thread reply
-	Attachments []Attachment `json:"attach,omitempty"`  // zero or more attachments
+	Attachments []Attachment `json:"attach,omitempty"`  // zero or more attachments -- slack attachements are not stored in this.
+
+	// Platform specific raw fields.
+	Raw map[string]any `json:"raw,omitempty"` // raw fields from the platform API response, can be partial or the full response.
 }
 
 // Attachment references a file stored in the conversation's attachments/ directory.

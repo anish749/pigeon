@@ -14,7 +14,8 @@ import (
 // has content in blocks, attachments, or files. Helps identify messages we
 // should start handling. Never logs actual message text.
 func logDroppedContent(ctx context.Context, msg goslack.Msg, channel, source string) {
-	if len(msg.Attachments) == 0 && len(msg.Blocks.BlockSet) == 0 && len(msg.Files) == 0 {
+	hasContent := msg.Text != "" || len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0
+	if !hasContent {
 		return
 	}
 	slog.WarnContext(ctx, source+": dropping message with content",
@@ -48,8 +49,8 @@ func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeSt
 }
 
 // shouldKeepMessage reports whether a Slack message should be stored.
-// Messages with empty text are always skipped. The subtype determines whether
-// the message is conversational content (keep) or a system/structural event (skip).
+// A message is kept if it has an allowed subtype AND has content (text,
+// blocks, attachments, or files). Messages with no content at all are skipped.
 //
 // Known subtypes and their handling:
 //
@@ -59,6 +60,8 @@ func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeSt
 //	"bot_message"         legacy bot or incoming webhook post (e.g. CI alerts, k8s notifications)
 //	"thread_broadcast"    thread reply also posted to the channel ("Also send to #channel")
 //	"assistant_app_thread" app assistant conversation (e.g. Slack AI, custom app threads)
+//	"huddle_thread"       huddle start/end notifications — contextually useful timeline signal
+//	"file_share"          file uploaded — may have empty text but files are stored in raw
 //
 // Skipped (system/structural events):
 //
@@ -82,15 +85,14 @@ func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeSt
 //	"unpinned_item"       system: item unpinned
 //	"ekm_access_denied"   system: message hidden by EKM
 //	"me_message"          /me slash command — could be kept but rare in practice
-//	"huddle_thread"       huddle-related system message
 //	"tombstone"           placeholder for deleted messages in history
-//	"file_share"          file uploaded — has empty text unless user added a comment
-func shouldKeepMessage(subType, text string) bool {
-	if text == "" {
+func shouldKeepMessage(msg goslack.Msg) bool {
+	hasContent := msg.Text != "" || len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0
+	if !hasContent {
 		return false
 	}
-	switch subType {
-	case "", "bot_message", "thread_broadcast", "assistant_app_thread":
+	switch msg.SubType {
+	case "", "bot_message", "thread_broadcast", "assistant_app_thread", "huddle_thread", "file_share":
 		return true
 	default:
 		return false
