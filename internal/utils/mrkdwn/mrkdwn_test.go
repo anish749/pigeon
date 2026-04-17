@@ -134,6 +134,36 @@ func TestToSlackMarkdown(t *testing.T) {
 			want: "*first* and *second*\n\n*third* too",
 		},
 
+		// === Slack mrkdwn input ===
+		// The converter assumes standard Markdown input. When Slack mrkdwn
+		// is passed directly, most syntax survives unchanged because the
+		// Markdown parser doesn't recognise it. The one known exception is
+		// *bold* — Markdown parses single * as italic and converts it to _.
+		{
+			name: "slack mrkdwn: known bug — *bold* is treated as italic",
+			in:   "*bold*",
+			want: "_bold_",
+		},
+		{
+			name: "slack mrkdwn: _italic_ passes through",
+			in:   "_italic_",
+			want: "_italic_",
+		},
+		{
+			name: "slack mrkdwn: ~strike~ passes through",
+			in:   "~strike~",
+			want: "~strike~",
+		},
+		{
+			name: "slack mrkdwn: inline code passes through",
+			in:   "`code`",
+			want: "`code`",
+		},
+		{
+			name: "slack mrkdwn: link passes through",
+			in:   "<https://example.com|click here>",
+			want: "<https://example.com|click here>",
+		},
 	}
 
 	for _, tt := range tests {
