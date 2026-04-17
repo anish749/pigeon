@@ -336,18 +336,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	}
 	ts := time.Now().UTC()
 
-	line := modelv1.Line{
-		Type: modelv1.LineEdit,
-		Edit: &modelv1.EditLine{
-			Ts:       ts,
-			MsgID:    msg.Message.Timestamp,
-			Sender:   userName,
-			SenderID: userID,
-			Text:     text,
-		},
-	}
-
-	if err := l.messages.AppendEdit(channelName, line); err != nil {
+	if err := l.messages.AppendEdit(channelName, msg.Message.Timestamp, userName, userID, text, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
@@ -389,17 +378,7 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		senderID = id
 	}
 
-	line := modelv1.Line{
-		Type: modelv1.LineDelete,
-		Delete: &modelv1.DeleteLine{
-			Ts:       ts,
-			MsgID:    deletedTS,
-			Sender:   senderName,
-			SenderID: senderID,
-		},
-	}
-
-	if err := l.messages.AppendDelete(channelName, line); err != nil {
+	if err := l.messages.AppendDelete(channelName, deletedTS, senderName, senderID, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
 	}
 

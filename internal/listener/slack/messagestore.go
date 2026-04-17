@@ -81,12 +81,31 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 
 // AppendEdit stores a message edit event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(channelName string, line modelv1.Line) error {
+func (ms *MessageStore) AppendEdit(channelName, msgTS, sender, senderID, text string, ts time.Time) error {
+	line := modelv1.Line{
+		Type: modelv1.LineEdit,
+		Edit: &modelv1.EditLine{
+			Ts:       ts,
+			MsgID:    msgTS,
+			Sender:   sender,
+			SenderID: senderID,
+			Text:     text,
+		},
+	}
 	return ms.store.Append(ms.acct, channelName, line)
 }
 
 // AppendDelete stores a message delete event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(channelName string, line modelv1.Line) error {
+func (ms *MessageStore) AppendDelete(channelName, msgTS, sender, senderID string, ts time.Time) error {
+	line := modelv1.Line{
+		Type: modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{
+			Ts:       ts,
+			MsgID:    msgTS,
+			Sender:   sender,
+			SenderID: senderID,
+		},
+	}
 	return ms.store.Append(ms.acct, channelName, line)
 }
