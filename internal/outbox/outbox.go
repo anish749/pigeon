@@ -22,11 +22,16 @@ type Item struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
+// SubmitFunc is called when a new item is added to the outbox.
+// Implementations must not block; use a goroutine for slow work.
+type SubmitFunc func(item *Item)
+
 // Outbox is an in-memory queue of items pending review.
 type Outbox struct {
-	mu    sync.RWMutex
-	items map[string]*Item
-	order []string // insertion order
+	mu       sync.RWMutex
+	items    map[string]*Item
+	order    []string // insertion order
+	onSubmit SubmitFunc
 }
 
 // New creates an empty Outbox.
@@ -34,6 +39,13 @@ func New() *Outbox {
 	return &Outbox{
 		items: make(map[string]*Item),
 	}
+}
+
+// OnSubmit registers a callback that fires when a new item is submitted.
+func (o *Outbox) OnSubmit(fn SubmitFunc) {
+	o.mu.Lock()
+	o.onSubmit = fn
+	o.mu.Unlock()
 }
 
 // Submit adds a new item to the outbox and returns it.
@@ -48,7 +60,12 @@ func (o *Outbox) Submit(sessionID string, payload json.RawMessage) *Item {
 	o.mu.Lock()
 	o.items[item.ID] = item
 	o.order = append(o.order, item.ID)
+	fn := o.onSubmit
 	o.mu.Unlock()
+
+	if fn != nil {
+		fn(item)
+	}
 
 	return item
 }

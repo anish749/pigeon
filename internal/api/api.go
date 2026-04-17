@@ -60,6 +60,7 @@ type Server struct {
 	gws         map[string]struct{}        // account slug → present
 	hub         *hub.Hub
 	outbox      *outbox.Outbox
+	obHandler   *outbox.Handler
 	store       store.Store
 	syncTracker *syncstatus.Tracker
 	version     string
@@ -68,7 +69,7 @@ type Server struct {
 
 // NewServer creates a new API server.
 func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
-	return &Server{
+	srv := &Server{
 		whatsapp:    make(map[string]*WhatsAppSender),
 		slack:       make(map[string]*SlackSender),
 		gws:         make(map[string]struct{}),
@@ -79,6 +80,14 @@ func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syn
 		version:     version,
 		startedAt:   time.Now(),
 	}
+	srv.obHandler = outbox.NewHandler(ob, srv.executeSend, h.NotifySession)
+	return srv
+}
+
+// OutboxHandler returns the shared outbox handler for use by listeners
+// and other components that need to approve or give feedback on items.
+func (s *Server) OutboxHandler() *outbox.Handler {
+	return s.obHandler
 }
 
 // RegisterWhatsApp registers a WhatsApp client for sending.
@@ -121,15 +130,13 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 
-	obHandler := outbox.NewHandler(s.outbox, s.executeSend, s.hub.NotifySession)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
 	mux.HandleFunc("POST /api/react", s.handleReact)
 	mux.HandleFunc("POST /api/delete", s.handleDeleteMsg)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
-	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
-	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
+	mux.HandleFunc("GET /api/outbox", s.obHandler.HandleList)
+	mux.HandleFunc("POST /api/outbox/action", s.obHandler.HandleAction)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 
@@ -262,7 +269,19 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// All real sends go through the outbox for human review. Dry-run is
+	// Sends to the owner's own DM skip the outbox — the owner doesn't
+	// need to approve messages to themselves.
+	if !req.DryRun && s.isOwnerTarget(req) {
+		resp := s.dispatchSend(r.Context(), req)
+		status := http.StatusOK
+		if !resp.OK {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, resp)
+		return
+	}
+
+	// All other sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
 	if !req.DryRun {
