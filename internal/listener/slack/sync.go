@@ -236,7 +236,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(rs, text, ts, msg.Timestamp, viaFromMetadata(msg.Metadata)); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -410,10 +410,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}
-			via := modelv1.ViaToPigeon
-			if msg.BotID != "" {
-				via = modelv1.ViaPigeonAsBot
-			}
+			via := DetermineVia(msg.Msg, true)
 			if err := ms.Write(rs, text, ts, msg.Timestamp, via); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
@@ -581,7 +578,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, viaFromMetadata(reply.Metadata)); err != nil {
+			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {

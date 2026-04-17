@@ -17,14 +17,17 @@ func PigeonSendMetadata(via modelv1.Via) goslack.SlackMetadata {
 	}
 }
 
-// viaFromMetadata extracts the pigeon via field from Slack message metadata.
-// Returns ViaOrganic if the message was not sent by pigeon.
-func viaFromMetadata(md goslack.SlackMetadata) modelv1.Via {
-	if md.EventType != pigeonSendEventType {
-		return modelv1.ViaOrganic
+// DetermineVia returns the via identity for an incoming Slack message.
+// Pigeon-sent messages carry metadata with the via field. Messages sent
+// to the pigeon bot (isBotDM=true) that lack pigeon metadata are ViaToPigeon.
+func DetermineVia(msg goslack.Msg, isBotDM bool) modelv1.Via {
+	if msg.Metadata.EventType == pigeonSendEventType {
+		if v, ok := msg.Metadata.EventPayload["via"].(string); ok {
+			return modelv1.Via(v)
+		}
 	}
-	if v, ok := md.EventPayload["via"].(string); ok {
-		return modelv1.Via(v)
+	if isBotDM {
+		return modelv1.ViaToPigeon
 	}
 	return modelv1.ViaOrganic
 }

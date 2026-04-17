@@ -150,12 +150,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 	l.messages.EnsureMeta(rs.ChannelName, l.resolver.ConvMeta(msg.Channel, rs.ChannelName))
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
-	var via modelv1.Via
-	if isBotDM {
-		via = modelv1.ViaToPigeon
-	} else if msg.Message != nil {
-		via = viaFromMetadata(msg.Message.Metadata)
-	}
+	via := DetermineVia(*msg.Message, isBotDM)
 	text, err := l.resolver.ResolveText(ctx, msg.Text)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
