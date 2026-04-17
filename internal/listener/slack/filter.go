@@ -81,6 +81,7 @@ func shouldAutoReply(pigeonBotUID string, msg *slackevents.MessageEvent, routeSt
 //	"unpinned_item"       system: item unpinned
 //	"ekm_access_denied"   system: message hidden by EKM
 //	"me_message"          /me slash command — could be kept but rare in practice
+//	"mpdm_move"           system: user added/removed from a group DM
 //	"tombstone"           placeholder for deleted messages in history
 func shouldKeepMessage(msg goslack.Msg) bool {
 	hasContent := msg.Text != "" || len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0
