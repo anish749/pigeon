@@ -54,6 +54,34 @@ func TestCompact_DedupReactions_KeepsFirst(t *testing.T) {
 	}
 }
 
+func TestCompact_DedupMessages_PreservesRaw(t *testing.T) {
+	raw := map[string]any{
+		"files": []any{
+			map[string]any{"name": "doc.pdf", "size": float64(999)},
+		},
+	}
+	f := &modelv1.DateFile{
+		Messages: []modelv1.MsgLine{
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
+		},
+	}
+	got := compact.Compact(f)
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages count = %d, want 1", len(got.Messages))
+	}
+	if got.Messages[0].Raw == nil {
+		t.Fatal("raw is nil after dedup, want preserved")
+	}
+	files, ok := got.Messages[0].Raw["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("raw[files] = %v, want slice of 1", got.Messages[0].Raw["files"])
+	}
+	if files[0].(map[string]any)["name"] != "doc.pdf" {
+		t.Errorf("file name = %v, want doc.pdf", files[0].(map[string]any)["name"])
+	}
+}
+
 func TestCompact_NoDuplicates_Unchanged(t *testing.T) {
 	f := &modelv1.DateFile{
 		Messages: []modelv1.MsgLine{
