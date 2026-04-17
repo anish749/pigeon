@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 	"github.com/anish749/pigeon/internal/syncstatus"
@@ -32,6 +33,7 @@ type Listener struct {
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
 	onMessage    hub.MessageNotifyFunc
 	onReaction   hub.ReactionNotifyFunc
+	obHandler    *outbox.Handler // nil if outbox review is not wired up
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -55,6 +57,12 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		onReaction:   onReaction,
 		syncTracker:  syncTracker,
 	}
+}
+
+// SetOutboxHandler wires the listener to handle outbox interactive events
+// (approve/feedback buttons and modals) from Slack.
+func (l *Listener) SetOutboxHandler(h *outbox.Handler) {
+	l.obHandler = h
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -82,6 +90,12 @@ func (l *Listener) Run(ctx context.Context) {
 				}
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
+			case socketmode.EventTypeInteractive:
+				if l.obHandler != nil {
+					l.handleInteractive(ctx, &evt)
+				} else {
+					l.client.Ack(*evt.Request)
+				}
 			case socketmode.EventTypeErrorBadMessage:
 				slog.WarnContext(ctx, "slack: bad message", "account", l.acct)
 			case socketmode.EventTypeIncomingError:
