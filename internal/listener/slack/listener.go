@@ -209,7 +209,8 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	if shouldAutoReply(l.pigeonBotUID, msg, result.State, isBotDM) {
 		botAPI := goslack.New(l.botToken)
 		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
-			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false))
+			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false),
+			goslack.MsgOptionMetadata(PigeonSendMetadata(modelv1.ViaPigeonAsBot)))
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to send auto-reply", "error", err, "account", l.acct)
 		}
