@@ -26,13 +26,13 @@ func TestToSlackMarkdown(t *testing.T) {
 			want: "*bold start* of line",
 		},
 
-		// === Italic ===
-		// Markdown *text* is italic, but in Slack * means bold.
-		// Must convert to Slack's italic delimiter: _text_
+		// === Italic / emphasis passthrough ===
+		// Single * is ambiguous: Markdown italic vs Slack bold.
+		// We preserve the original delimiter so Slack mrkdwn passes through.
 		{
-			name: "asterisk italic to underscore italic",
-			in:   "this is *italic* text",
-			want: "this is _italic_ text",
+			name: "asterisk emphasis preserved as asterisk",
+			in:   "this is *emphasized* text",
+			want: "this is *emphasized* text",
 		},
 		{
 			name: "underscore italic stays as underscore",
@@ -134,6 +134,19 @@ func TestToSlackMarkdown(t *testing.T) {
 			name: "bold at line start does not become bullet",
 			in:   "**first** and **second**\n\n**third** too",
 			want: "*first* and *second*\n\n*third* too",
+		},
+
+		// === Slack mrkdwn passthrough ===
+		// If the input is already valid Slack mrkdwn, it should not be mangled.
+		{
+			name: "slack mrkdwn bold passes through",
+			in:   "*bold* and _italic_ and ~strike~",
+			want: "*bold* and _italic_ and ~strike~",
+		},
+		{
+			name: "slack mrkdwn link passes through",
+			in:   "<https://example.com|click here>",
+			want: "<https://example.com|click here>",
 		},
 	}
 
