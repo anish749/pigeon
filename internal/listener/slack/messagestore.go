@@ -6,7 +6,12 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-type writeParams struct {
+// ResolvedSender holds the resolver-derived fields common to all incoming
+// Slack events (messages, reactions, edits, deletes).
+type ResolvedSender struct {
+	ChannelName string
+	SenderName  string
+	SenderID    string
 }
 
 // Write persists a message to the appropriate date file. Does not advance the
@@ -60,7 +65,7 @@ func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, sender
 
 // AppendReaction stores a reaction or unreaction event in the date file
 // corresponding to the target message's timestamp.
-func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emoji string, remove bool) error {
+func (ms *MessageStore) AppendReaction(rs ResolvedSender, msgTS, emoji string, remove bool) error {
 	lineType := modelv1.LineReaction
 	if remove {
 		lineType = modelv1.LineUnreaction
@@ -70,42 +75,42 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 		React: &modelv1.ReactLine{
 			Ts:       ParseTimestamp(msgTS),
 			MsgID:    msgTS,
-			Sender:   sender,
-			SenderID: senderID,
+			Sender:   rs.SenderName,
+			SenderID: rs.SenderID,
 			Emoji:    emoji,
 			Remove:   remove,
 		},
 	}
-	return ms.store.Append(ms.acct, channelName, line)
+	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
 
 // AppendEdit stores a message edit event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(channelName, msgTS, sender, senderID, text string, ts time.Time) error {
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time) error {
 	line := modelv1.Line{
 		Type: modelv1.LineEdit,
 		Edit: &modelv1.EditLine{
 			Ts:       ts,
 			MsgID:    msgTS,
-			Sender:   sender,
-			SenderID: senderID,
+			Sender:   rs.SenderName,
+			SenderID: rs.SenderID,
 			Text:     text,
 		},
 	}
-	return ms.store.Append(ms.acct, channelName, line)
+	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
 
 // AppendDelete stores a message delete event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(channelName, msgTS, sender, senderID string, ts time.Time) error {
+func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS string, ts time.Time) error {
 	line := modelv1.Line{
 		Type: modelv1.LineDelete,
 		Delete: &modelv1.DeleteLine{
 			Ts:       ts,
 			MsgID:    msgTS,
-			Sender:   sender,
-			SenderID: senderID,
+			Sender:   rs.SenderName,
+			SenderID: rs.SenderID,
 		},
 	}
-	return ms.store.Append(ms.acct, channelName, line)
+	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }

@@ -282,19 +282,20 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 			"channel", item.Channel, "error", err, "account", l.acct)
 		return
 	}
-	userName, err := l.resolver.UserName(ctx, userID)
+	userName, _, err := l.resolver.SenderName(ctx, userID, "", "")
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve user",
 			"user_id", userID, "channel", channelName, "error", err, "account", l.acct)
 		return
 	}
+	rs := ResolvedSender{ChannelName: channelName, SenderName: userName, SenderID: userID}
 
-	if err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
+	if err := l.messages.AppendReaction(rs, item.Timestamp, emoji, remove); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 	}
 
 	slog.InfoContext(ctx, "slack reaction saved",
-		"emoji", emoji, "from", userName, "channel", channelName, "remove", remove, "account", l.acct)
+		"emoji", emoji, "from", rs.SenderName, "channel", rs.ChannelName, "remove", remove, "account", l.acct)
 
 	// Route the reaction to the connected session. The listener only sees
 	// reactions for channels the bot has visibility into (DMs/MPDMs and
@@ -321,27 +322,28 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 			"channel", msg.Channel, "error", err, "account", l.acct)
 		return
 	}
-	userName, userID, err := l.resolver.SenderName(ctx, msg.Message.User, msg.Message.BotID, msg.Message.Username)
+	senderName, senderID, err := l.resolver.SenderName(ctx, msg.Message.User, msg.Message.BotID, msg.Message.Username)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve sender",
 			"user_id", msg.Message.User, "bot_id", msg.Message.BotID, "username", msg.Message.Username,
 			"channel", channelName, "error", err, "account", l.acct)
 		return
 	}
+	rs := ResolvedSender{ChannelName: channelName, SenderName: senderName, SenderID: senderID}
 	text, err := l.resolver.ResolveText(ctx, msg.Message.Text)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve text",
-			"channel", channelName, "error", err, "account", l.acct)
+			"channel", rs.ChannelName, "error", err, "account", l.acct)
 		return
 	}
 	ts := time.Now().UTC()
 
-	if err := l.messages.AppendEdit(channelName, msg.Message.Timestamp, userName, userID, text, ts); err != nil {
+	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
 	slog.InfoContext(ctx, "slack edit saved",
-		"msg_id", msg.Message.Timestamp, "channel", channelName, "account", l.acct)
+		"msg_id", msg.Message.Timestamp, "channel", rs.ChannelName, "account", l.acct)
 }
 
 // handleDelete stores a message delete event.
@@ -365,7 +367,7 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		return
 	}
 
-	var senderName, senderID string
+	rs := ResolvedSender{ChannelName: channelName}
 	if msg.PreviousMessage != nil {
 		name, id, err := l.resolver.SenderName(ctx, msg.PreviousMessage.User, msg.PreviousMessage.BotID, msg.PreviousMessage.Username)
 		if err != nil {
@@ -374,14 +376,14 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 				"channel", channelName, "error", err, "account", l.acct)
 			return
 		}
-		senderName = name
-		senderID = id
+		rs.SenderName = name
+		rs.SenderID = id
 	}
 
-	if err := l.messages.AppendDelete(channelName, deletedTS, senderName, senderID, ts); err != nil {
+	if err := l.messages.AppendDelete(rs, deletedTS, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
 	}
 
 	slog.InfoContext(ctx, "slack delete saved",
-		"msg_id", deletedTS, "channel", channelName, "account", l.acct)
+		"msg_id", deletedTS, "channel", rs.ChannelName, "account", l.acct)
 }
