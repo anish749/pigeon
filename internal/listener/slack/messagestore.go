@@ -81,7 +81,7 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 
 // AppendEdit stores a message edit event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time) error {
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw map[string]any) error {
 	line := modelv1.Line{
 		Type: modelv1.LineEdit,
 		Edit: &modelv1.EditLine{
@@ -90,6 +90,7 @@ func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts tim
 			Sender:   rs.SenderName,
 			SenderID: rs.SenderID,
 			Text:     text,
+			Raw:      raw,
 		},
 	}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)

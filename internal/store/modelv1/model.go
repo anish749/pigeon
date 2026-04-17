@@ -77,13 +77,14 @@ type ReactLine struct {
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts          time.Time    `json:"ts"`               // when the edit happened
-	MsgID       string       `json:"msg"`              // target message ID
-	Sender      string       `json:"sender"`           // who edited (display name)
-	SenderID    string       `json:"from"`             // who edited (platform ID)
-	Via         Via          `json:"via,omitempty"`    // message pathway
-	Text        string       `json:"text,omitempty"`   // new message text
-	Attachments []Attachment `json:"attach,omitempty"` // complete attachment set after edit
+	Ts          time.Time      `json:"ts"`               // when the edit happened
+	MsgID       string         `json:"msg"`              // target message ID
+	Sender      string         `json:"sender"`           // who edited (display name)
+	SenderID    string         `json:"from"`             // who edited (platform ID)
+	Via         Via            `json:"via,omitempty"`    // message pathway
+	Text        string         `json:"text,omitempty"`   // new message text
+	Attachments []Attachment   `json:"attach,omitempty"` // complete attachment set after edit
+	Raw         map[string]any `json:"raw,omitempty"`    // updated platform-specific raw fields
 }
 
 // DeleteLine represents a message delete event.

@@ -246,6 +246,7 @@ func applyEdits(msgs []modelv1.MsgLine, edits []modelv1.EditLine) []modelv1.MsgL
 		if e, ok := latest[m.ID]; ok {
 			out[i].Text = e.Text
 			out[i].Attachments = cloneAttachments(e.Attachments)
+			out[i].Raw = e.Raw
 		}
 	}
 	return out

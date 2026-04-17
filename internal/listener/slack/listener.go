@@ -316,7 +316,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	}
 	ts := time.Now().UTC()
 
-	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts); err != nil {
+	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts, ExtractRaw(*msg.Message)); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
