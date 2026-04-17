@@ -98,6 +98,10 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 		opts.Last = 25
 	}
 
+	if len(selected) == 0 {
+		return &modelv1.ResolvedDateFile{}, nil
+	}
+
 	merged := &modelv1.DateFile{}
 	for _, f := range selected {
 		data, err := os.ReadFile(f)
@@ -211,21 +215,15 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		}
 	}
 
-	// Append thread replies whose parent message wasn't in the selected date
-	// files (e.g. the parent is older than the --since cutoff). Without this,
-	// real-time thread replies to old messages are silently dropped from the
-	// output because there is no parent to attach them to.
+	// Report threads whose parent message wasn't in the selected date files.
+	// This can happen when thread replies exist without a corresponding date
+	// file entry. Rather than dumping all threads, report the mismatch and
+	// let the caller decide.
 	for parentID, tf := range threads {
 		if matched[parentID] || parentID == "" {
 			continue
 		}
-		// Include the parent so the reader knows which message the replies
-		// belong to, then append all replies.
-		result = append(result, tf.Parent)
-		for _, r := range tf.Replies {
-			r.Reply = true
-			result = append(result, r)
-		}
+		errs = append(errs, fmt.Errorf("thread %s has %d replies but parent is not in selected date files", tf.Parent.ID, len(tf.Replies)))
 	}
 
 	return &modelv1.ResolvedDateFile{Messages: result}, errors.Join(errs...)
