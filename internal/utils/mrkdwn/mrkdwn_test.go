@@ -26,13 +26,11 @@ func TestToSlackMarkdown(t *testing.T) {
 			want: "*bold start* of line",
 		},
 
-		// === Italic / emphasis passthrough ===
-		// Single * is ambiguous: Markdown italic vs Slack bold.
-		// We preserve the original delimiter so Slack mrkdwn passes through.
+		// === Italic ===
 		{
-			name: "asterisk emphasis preserved as asterisk",
-			in:   "this is *emphasized* text",
-			want: "this is *emphasized* text",
+			name: "asterisk italic to underscore",
+			in:   "this is *italic* text",
+			want: "this is _italic_ text",
 		},
 		{
 			name: "underscore italic stays as underscore",
@@ -136,18 +134,6 @@ func TestToSlackMarkdown(t *testing.T) {
 			want: "*first* and *second*\n\n*third* too",
 		},
 
-		// === Slack mrkdwn passthrough ===
-		// If the input is already valid Slack mrkdwn, it should not be mangled.
-		{
-			name: "slack mrkdwn bold passes through",
-			in:   "*bold* and _italic_ and ~strike~",
-			want: "*bold* and _italic_ and ~strike~",
-		},
-		{
-			name: "slack mrkdwn link passes through",
-			in:   "<https://example.com|click here>",
-			want: "<https://example.com|click here>",
-		},
 	}
 
 	for _, tt := range tests {

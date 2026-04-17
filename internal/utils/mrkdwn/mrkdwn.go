@@ -208,31 +208,14 @@ func (r *nodeRenderer) renderString(w util.BufWriter, _ []byte, n ast.Node, ente
 	return ast.WalkContinue, nil
 }
 
-func (r *nodeRenderer) renderEmphasis(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+func (r *nodeRenderer) renderEmphasis(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	em := n.(*ast.Emphasis)
 	if em.Level == 2 {
-		// bold: **text** → *text*  (always Markdown bold → Slack bold)
 		_ = w.WriteByte('*')
 	} else {
-		// Level 1 is ambiguous: Markdown *italic* vs Slack mrkdwn *bold*.
-		// Preserve the original delimiter so Slack mrkdwn passes through
-		// unchanged — *text* stays *text* (bold), _text_ stays _text_ (italic).
-		_ = w.WriteByte(emphasisDelim(n, source))
+		_ = w.WriteByte('_')
 	}
 	return ast.WalkContinue, nil
-}
-
-// emphasisDelim returns the delimiter character (* or _) used in the source
-// for a Level-1 emphasis node.
-func emphasisDelim(n ast.Node, source []byte) byte {
-	if first := n.FirstChild(); first != nil {
-		if t, ok := first.(*ast.Text); ok && t.Segment.Start > 0 {
-			if source[t.Segment.Start-1] == '*' {
-				return '*'
-			}
-		}
-	}
-	return '_'
 }
 
 func (r *nodeRenderer) renderCodeSpan(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
