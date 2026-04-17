@@ -211,8 +211,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			if !shouldKeepMessage(msg.SubType, msg.Text) {
-				logDroppedContent(ctx, msg.Msg, channelName, "slack sync")
+			if !shouldKeepMessage(msg.Msg) {
+				logDroppedMessage(ctx, msg.Msg, channelName, "slack sync")
 				continue
 			}
 
@@ -230,7 +230,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false)); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false), ExtractRaw(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -386,8 +386,8 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		for _, msg := range msgs {
 			lastTS = msg.Timestamp
 
-			if !shouldKeepMessage(msg.SubType, msg.Text) {
-				logDroppedContent(ctx, msg.Msg, channelName, "slack sync bot DM")
+			if !shouldKeepMessage(msg.Msg) {
+				logDroppedMessage(ctx, msg.Msg, channelName, "slack sync bot DM")
 				continue
 			}
 
@@ -406,7 +406,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			via := DetermineVia(msg.Msg, true)
-			if err := ms.Write(rs, text, ts, msg.Timestamp, via); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, via, ExtractRaw(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -556,8 +556,8 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if !shouldKeepMessage(reply.SubType, reply.Text) {
-				logDroppedContent(ctx, reply.Msg, channelName, "slack sync thread")
+			if !shouldKeepMessage(reply.Msg) {
+				logDroppedMessage(ctx, reply.Msg, channelName, "slack sync thread")
 				continue
 			}
 			rs, err := resolver.ResolveSender(ctx, channelID, reply.Msg)
@@ -574,7 +574,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false)); err != nil {
+			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), ExtractRaw(reply.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -598,8 +598,8 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if !shouldKeepMessage(ctxMsg.SubType, ctxMsg.Text) {
-						logDroppedContent(ctx, ctxMsg.Msg, channelName, "slack sync thread context")
+					if !shouldKeepMessage(ctxMsg.Msg) {
+						logDroppedMessage(ctx, ctxMsg.Msg, channelName, "slack sync thread context")
 						continue
 					}
 					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.Msg)

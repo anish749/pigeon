@@ -10,15 +10,11 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 )
 
-// logDroppedContent logs a warning when a message is being filtered out but
-// has content in blocks, attachments, or files. Helps identify messages we
-// should start handling. Never logs actual message text.
-func logDroppedContent(ctx context.Context, msg goslack.Msg, channel, source string) {
-	hasContent := msg.Text != "" || len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0
-	if !hasContent {
-		return
-	}
-	slog.WarnContext(ctx, source+": dropping message with content",
+// logDroppedMessage logs a warning when a message is filtered out.
+// Includes content counts to help identify messages we should start handling.
+// Never logs actual message text.
+func logDroppedMessage(ctx context.Context, msg goslack.Msg, channel, source string) {
+	slog.WarnContext(ctx, source+": dropping message",
 		"channel", channel, "ts", msg.Timestamp,
 		"subType", msg.SubType, "user", msg.User,
 		"botID", msg.BotID, "username", msg.Username,
