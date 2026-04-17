@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -33,7 +34,7 @@ func RunRead(p ReadParams) error {
 	acct := account.New(p.Platform, p.Account)
 	aliases := loadAliases(acct)
 
-	conv, err := findConversation(s, acct, p.Contact, aliases)
+	matches, err := findConversations(s, acct, p.Contact, aliases)
 	if err != nil {
 		return err
 	}
@@ -50,31 +51,45 @@ func RunRead(p ReadParams) error {
 		opts.Since = d
 	}
 
-	df, readErr := s.ReadConversation(acct, conv.dirName, opts)
-	if df == nil || len(df.Messages) == 0 {
-		if readErr != nil {
-			return readErr
+	printed := 0
+	var errs []error
+	for _, conv := range matches {
+		df, readErr := s.ReadConversation(acct, conv.dirName, opts)
+		if df == nil || len(df.Messages) == 0 {
+			if readErr != nil {
+				errs = append(errs, readErr)
+			}
+			continue
+		}
+
+		lines := modelv1.FormatDateFile(df, time.Local, readErr)
+
+		convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
+		header := fmt.Sprintf("--- %s/%s", acct.Display(), conv.displayName)
+		if meta, err := s.ReadMeta(acct, conv.dirName); err != nil {
+			errs = append(errs, fmt.Errorf("read metadata for %s: %w", conv.dirName, err))
+		} else if meta != nil {
+			if ids := modelv1.FormatConvMeta(meta); ids != "" {
+				header += " " + ids
+			}
+		}
+		header += " ---"
+		if printed > 0 {
+			fmt.Println()
+		}
+		fmt.Println(header)
+		fmt.Printf("    %s\n", convDir.Path())
+		fmt.Println(strings.Join(lines, "\n"))
+		printed++
+	}
+
+	if printed == 0 {
+		if err := errors.Join(errs...); err != nil {
+			return err
 		}
 		fmt.Println("No messages found.")
-		return nil
 	}
-
-	lines := modelv1.FormatDateFile(df, time.Local, readErr)
-
-	convDir := paths.DefaultDataRoot().AccountFor(acct).Conversation(conv.dirName)
-	header := fmt.Sprintf("--- %s/%s", acct.Display(), conv.displayName)
-	if meta, err := s.ReadMeta(acct, conv.dirName); err != nil {
-		return fmt.Errorf("read metadata for %s: %w", conv.dirName, err)
-	} else if meta != nil {
-		if ids := modelv1.FormatConvMeta(meta); ids != "" {
-			header += " " + ids
-		}
-	}
-	header += " ---"
-	fmt.Println(header)
-	fmt.Printf("    %s\n", convDir.Path())
-	fmt.Println(strings.Join(lines, "\n"))
-	return nil
+	return errors.Join(errs...)
 }
 
 
@@ -84,19 +99,22 @@ type conversation struct {
 	displayName string
 }
 
-// findConversation searches for a conversation matching the query by directory name,
-// display name, or alias. Returns the first match. Case-insensitive.
-func findConversation(s store.Store, acct account.Account, query string, aliases map[string][]string) (*conversation, error) {
+// findConversations returns all conversations matching the query by substring on
+// directory name, display name, or alias. Case-insensitive.
+func findConversations(s store.Store, acct account.Account, query string, aliases map[string][]string) ([]*conversation, error) {
 	convs, err := s.ListConversations(acct)
 	if err != nil {
 		return nil, err
 	}
 	q := strings.ToLower(query)
+
+	var matches []*conversation
 	for _, dirName := range convs {
 		displayName := parseDisplayName(dirName)
 		if strings.Contains(strings.ToLower(dirName), q) ||
 			strings.Contains(strings.ToLower(displayName), q) {
-			return &conversation{dirName: dirName, displayName: displayName}, nil
+			matches = append(matches, &conversation{dirName: dirName, displayName: displayName})
+			continue
 		}
 		for _, name := range aliases[dirName] {
 			if strings.Contains(strings.ToLower(name), q) {
@@ -104,11 +122,15 @@ func findConversation(s store.Store, acct account.Account, query string, aliases
 				if len(aliases[dirName]) > 0 {
 					dn = aliases[dirName][0]
 				}
-				return &conversation{dirName: dirName, displayName: dn}, nil
+				matches = append(matches, &conversation{dirName: dirName, displayName: dn})
+				break
 			}
 		}
 	}
-	return nil, fmt.Errorf("no conversation matching %q in %s", query, acct.Display())
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no conversation matching %q in %s", query, acct.Display())
+	}
+	return matches, nil
 }
 
 // parseDisplayName extracts a display name from a conversation directory name.
