@@ -124,10 +124,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	// Skip system events (channel_join, channel_topic, etc.) and messages with
-	// empty text. Allow bot_message and thread_broadcast subtypes through —
-	// bot messages contain valuable info (alerts, CI, integrations).
-	if msg.Text == "" || !allowedSubType(msg.SubType) {
+	if !shouldKeepMessage(msg.SubType, msg.Text) {
 		slog.WarnContext(ctx, "slack: skipping message",
 			"channel", msg.Channel, "ts", msg.TimeStamp,
 			"botID", msg.BotID, "subType", msg.SubType,
