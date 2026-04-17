@@ -650,10 +650,10 @@ func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error 
 
 	acct := account.New(req.Platform, req.Account)
 	s.mu.RLock()
-	sender := s.slack[acct.NameSlug()]
+	sender, ok := s.slack[acct.NameSlug()]
 	s.mu.RUnlock()
-	if sender == nil {
-		return nil
+	if !ok {
+		return fmt.Errorf("no Slack workspace %q registered", acct.Display())
 	}
 
 	channelID, _, err := sender.Resolver.FindChannelID(ctx, req.Slack.Channel)
