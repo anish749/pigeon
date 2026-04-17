@@ -125,10 +125,9 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 
 	if !shouldKeepMessage(msg.SubType, msg.Text) {
-		slog.WarnContext(ctx, "slack: skipping message",
-			"channel", msg.Channel, "ts", msg.TimeStamp,
-			"botID", msg.BotID, "subType", msg.SubType,
-			"emptyText", msg.Text == "", "account", l.acct)
+		if msg.Message != nil {
+			logDroppedContent(ctx, *msg.Message, msg.Channel, "slack listener")
+		}
 		return
 	}
 

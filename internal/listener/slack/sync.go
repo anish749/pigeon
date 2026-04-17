@@ -211,24 +211,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Log messages being dropped that have content in blocks/attachments/files
-			// despite empty text — helps identify cases we should start handling.
-			if msg.Text == "" && (len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0) {
-				slog.InfoContext(ctx, "slack sync: empty-text message with content",
-					"channel", channelName, "ts", msg.Timestamp,
-					"subType", msg.SubType, "user", msg.User,
-					"botID", msg.BotID, "username", msg.Username,
-					"attachments", len(msg.Attachments),
-					"blocks", len(msg.Blocks.BlockSet),
-					"files", len(msg.Files),
-					"account", acct)
-			}
-
 			if !shouldKeepMessage(msg.SubType, msg.Text) {
-				slog.WarnContext(ctx, "slack sync: skipping message",
-					"channel", channelName, "ts", msg.Timestamp,
-					"botID", msg.BotID, "subType", msg.SubType,
-					"emptyText", msg.Text == "")
+				logDroppedContent(ctx, msg.Msg, channelName, "slack sync")
 				continue
 			}
 
@@ -403,6 +387,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			lastTS = msg.Timestamp
 
 			if !shouldKeepMessage(msg.SubType, msg.Text) {
+				logDroppedContent(ctx, msg.Msg, channelName, "slack sync bot DM")
 				continue
 			}
 
@@ -572,6 +557,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Then write each reply indented
 		for _, reply := range replies {
 			if !shouldKeepMessage(reply.SubType, reply.Text) {
+				logDroppedContent(ctx, reply.Msg, channelName, "slack sync thread")
 				continue
 			}
 			rs, err := resolver.ResolveSender(ctx, channelID, reply.Msg)
@@ -613,6 +599,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						break
 					}
 					if !shouldKeepMessage(ctxMsg.SubType, ctxMsg.Text) {
+						logDroppedContent(ctx, ctxMsg.Msg, channelName, "slack sync thread context")
 						continue
 					}
 					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.Msg)

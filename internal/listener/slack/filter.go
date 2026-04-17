@@ -1,10 +1,31 @@
 package slack
 
 import (
+	"context"
+	"log/slog"
+
+	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/anish749/pigeon/internal/hub"
 )
+
+// logDroppedContent logs a warning when a message is being filtered out but
+// has content in blocks, attachments, or files. Helps identify messages we
+// should start handling. Never logs actual message text.
+func logDroppedContent(ctx context.Context, msg goslack.Msg, channel, source string) {
+	if len(msg.Attachments) == 0 && len(msg.Blocks.BlockSet) == 0 && len(msg.Files) == 0 {
+		return
+	}
+	slog.WarnContext(ctx, source+": dropping message with content",
+		"channel", channel, "ts", msg.Timestamp,
+		"subType", msg.SubType, "user", msg.User,
+		"botID", msg.BotID, "username", msg.Username,
+		"text_len", len(msg.Text),
+		"attachments", len(msg.Attachments),
+		"blocks", len(msg.Blocks.BlockSet),
+		"files", len(msg.Files))
+}
 
 // shouldAutoReply reports whether a no-session auto-reply should be sent for
 // this message. It requires all three conditions:
