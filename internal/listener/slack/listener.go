@@ -162,6 +162,8 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	if isBotDM {
 		userName = "sent to pigeon by " + userName
 		via = modelv1.ViaToPigeon
+	} else if msg.Message != nil {
+		via = viaFromMetadata(msg.Message.Metadata)
 	}
 	text, err := l.resolver.ResolveText(ctx, msg.Text)
 	if err != nil {

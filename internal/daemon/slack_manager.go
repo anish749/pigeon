@@ -27,7 +27,7 @@ type SlackManager struct {
 	apiServer   *api.Server
 	onMessage   hub.MessageNotifyFunc
 	onReaction  hub.ReactionNotifyFunc
-	store       store.Store
+	store       *store.FSStore
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
 	syncTracker *syncstatus.Tracker
@@ -45,7 +45,7 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
 	return &SlackManager{
 		apiServer:   apiServer,
 		onMessage:   onMessage,
@@ -157,7 +157,10 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages := slacklistener.NewMessageStore(acct, m.store)
+	messages, err := slacklistener.NewMessageStore(acct, m.store)
+	if err != nil {
+		return fmt.Errorf("create message store for %s: %w", acct, err)
+	}
 	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.syncTracker)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{

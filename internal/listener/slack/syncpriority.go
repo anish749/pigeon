@@ -9,6 +9,8 @@ import (
 	"time"
 
 	goslack "github.com/slack-go/slack"
+
+	"github.com/anish749/pigeon/internal/store"
 )
 
 const (
@@ -37,7 +39,7 @@ type slackPrioritizer interface {
 // On first sync (no cursors) or for small workspaces, all channels are returned.
 // On subsequent syncs, search.messages discovers which channels had activity
 // since the last sync, and only those are returned.
-func prioritizeChannels(ctx context.Context, api slackPrioritizer, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) []goslack.Channel {
+func prioritizeChannels(ctx context.Context, api slackPrioritizer, gate *rateLimitGate, cursors store.SlackCursors, conversations []goslack.Channel) []goslack.Channel {
 	// Filter out muted channels before any other prioritization.
 	conversations = filterMuted(ctx, api, conversations)
 
@@ -97,7 +99,7 @@ func syncAll(reason string) *activeChannelSet {
 // discoverActiveChannels queries search.messages to find which channels had
 // activity since the most recent cursor. Returns nil if all channels should
 // be synced (first sync, few channels, search error, too many active).
-func discoverActiveChannels(ctx context.Context, searcher slackPrioritizer, gate *rateLimitGate, cursors syncCursors, conversations []goslack.Channel) *activeChannelSet {
+func discoverActiveChannels(ctx context.Context, searcher slackPrioritizer, gate *rateLimitGate, cursors store.SlackCursors, conversations []goslack.Channel) *activeChannelSet {
 	if len(cursors) == 0 {
 		return syncAll("first sync, no cursors")
 	}
@@ -218,7 +220,7 @@ func searchWithRetry(ctx context.Context, searcher slackPrioritizer, gate *rateL
 }
 
 // maxCursorTime finds the most recent cursor timestamp across all channels.
-func maxCursorTime(cursors syncCursors) time.Time {
+func maxCursorTime(cursors store.SlackCursors) time.Time {
 	var max time.Time
 	for _, ts := range cursors {
 		t := ParseTimestamp(ts)
