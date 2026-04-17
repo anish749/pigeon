@@ -10,6 +10,20 @@ import (
 
 const tsLayout = "2006-01-02 15:04:05"
 
+// displaySender decorates a sender name based on the via field.
+func displaySender(sender string, via Via) string {
+	switch via {
+	case ViaPigeonAsBot:
+		return "sent by pigeon"
+	case ViaToPigeon:
+		return "sent to pigeon by " + sender
+	case ViaPigeonAsUser:
+		return sender + " (via pigeon)"
+	default:
+		return sender
+	}
+}
+
 // FormatMsg renders a resolved message with its reactions as display lines.
 // loc controls the timezone for display (pass time.Local for user's timezone).
 func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
@@ -19,8 +33,9 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	}
 
 	tsStr := m.Ts.In(loc).Format(tsLayout)
+	sender := displaySender(m.Sender, m.Via)
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, m.Sender, m.SenderID, m.Text))
+	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, sender, m.SenderID, m.Text))
 
 	if len(m.Reactions) > 0 {
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))
@@ -38,7 +53,7 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s: %s", m.Sender, m.Text))
+	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
 
 	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
 	if m.Via != "" {
