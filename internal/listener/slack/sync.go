@@ -222,7 +222,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 
-			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.User, msg.BotID, msg.Username)
+			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.Msg)
 			if err != nil {
 				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
@@ -408,7 +408,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			var senderID string
 			var via modelv1.Via
 			if msg.BotID != "" {
-				name, _, err := resolver.SenderName(ctx, "", msg.BotID, msg.Username)
+				name, err := resolver.BotName(ctx, msg.BotID)
 				if err != nil {
 					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve bot",
 						"channel", channelName, "ts", msg.Timestamp, "error", err)
@@ -583,7 +583,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			if reply.Text == "" || !allowedSubType(reply.SubType) {
 				continue
 			}
-			rs, err := resolver.ResolveSender(ctx, channelID, reply.User, reply.BotID, reply.Username)
+			rs, err := resolver.ResolveSender(ctx, channelID, reply.Msg)
 			if err != nil {
 				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve",
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
@@ -624,7 +624,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
 						continue
 					}
-					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
+					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.Msg)
 					if err != nil {
 						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve",
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)

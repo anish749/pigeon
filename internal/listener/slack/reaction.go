@@ -20,8 +20,7 @@ func writeReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, c
 				errs = append(errs, err)
 				continue
 			}
-			rs := ResolvedSender{ChannelName: channelName, SenderName: userName, SenderID: userID}
-			if err := ms.AppendReaction(rs, msg.Timestamp, reaction.Name, false); err != nil {
+			if err := ms.AppendReaction(channelName, msg.Timestamp, userName, userID, reaction.Name, false); err != nil {
 				errs = append(errs, err)
 			}
 		}

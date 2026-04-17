@@ -142,7 +142,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, msg.User, msg.BotID, msg.Username)
+	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, *msg.Message)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve",
 			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
@@ -242,7 +242,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, threadTS s
 	if parent.Text == "" {
 		return
 	}
-	parentRS, err := l.resolver.ResolveSender(ctx, channelID, parent.User, parent.BotID, parent.Username)
+	parentRS, err := l.resolver.ResolveSender(ctx, channelID, parent.Msg)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to resolve thread parent sender", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
@@ -267,27 +267,33 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	rs, err := l.resolver.ResolveSender(ctx, item.Channel, userID, "", "")
+	channelName, err := l.resolver.ChannelName(ctx, item.Channel)
 	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve",
-			"channel", item.Channel, "user_id", userID, "error", err, "account", l.acct)
+		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve channel",
+			"channel", item.Channel, "error", err, "account", l.acct)
+		return
+	}
+	userName, err := l.resolver.UserName(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "slack: skipping reaction, cannot resolve user",
+			"user_id", userID, "channel", channelName, "error", err, "account", l.acct)
 		return
 	}
 
-	if err := l.messages.AppendReaction(rs, item.Timestamp, emoji, remove); err != nil {
+	if err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 	}
 
 	slog.InfoContext(ctx, "slack reaction saved",
-		"emoji", emoji, "from", rs.SenderName, "channel", rs.ChannelName, "remove", remove, "account", l.acct)
+		"emoji", emoji, "from", userName, "channel", channelName, "remove", remove, "account", l.acct)
 
 	// Route the reaction to the connected session. The listener only sees
 	// reactions for channels the bot has visibility into (DMs/MPDMs and
 	// channels it's a member of), so there is no additional filter here.
-	res := l.onReaction(l.acct, rs.ChannelName, hub.ReactionInfo{
+	res := l.onReaction(l.acct, channelName, hub.ReactionInfo{
 		MsgID:    item.Timestamp,
-		Sender:   rs.SenderName,
-		SenderID: rs.SenderID,
+		Sender:   userName,
+		SenderID: userID,
 		Emoji:    emoji,
 		Remove:   remove,
 	})
@@ -300,7 +306,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		return
 	}
 
-	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, msg.Message.User, msg.Message.BotID, msg.Message.Username)
+	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, *msg.Message)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping edit, cannot resolve",
 			"channel", msg.Channel, "user_id", msg.Message.User,
@@ -347,7 +353,7 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 
 	rs := ResolvedSender{ChannelName: channelName}
 	if msg.PreviousMessage != nil {
-		name, id, err := l.resolver.SenderName(ctx, msg.PreviousMessage.User, msg.PreviousMessage.BotID, msg.PreviousMessage.Username)
+		name, id, err := l.resolver.SenderName(ctx, *msg.PreviousMessage)
 		if err != nil {
 			slog.WarnContext(ctx, "slack: skipping delete, cannot resolve sender",
 				"user_id", msg.PreviousMessage.User, "bot_id", msg.PreviousMessage.BotID, "username", msg.PreviousMessage.Username,

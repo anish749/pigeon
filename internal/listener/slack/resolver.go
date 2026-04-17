@@ -341,9 +341,9 @@ func (r *Resolver) UserName(ctx context.Context, userID string) (string, error) 
 	return sig.Name, nil
 }
 
-// botName resolves a Slack bot ID to a display name. Checks identity first,
+// BotName resolves a Slack bot ID to a display name. Checks identity first,
 // then falls back to the bot API and pushes a signal.
-func (r *Resolver) botName(ctx context.Context, botID string) (string, error) {
+func (r *Resolver) BotName(ctx context.Context, botID string) (string, error) {
 	// Check identity service first.
 	person, err := r.writer.LookupBySlackID(r.workspace, botID)
 	if err != nil {
@@ -381,12 +381,12 @@ type ResolvedSender struct {
 }
 
 // ResolveSender resolves both the channel and sender for an incoming event.
-func (r *Resolver) ResolveSender(ctx context.Context, channelID, userID, botID, username string) (ResolvedSender, error) {
+func (r *Resolver) ResolveSender(ctx context.Context, channelID string, msg goslack.Msg) (ResolvedSender, error) {
 	channelName, err := r.ChannelName(ctx, channelID)
 	if err != nil {
 		return ResolvedSender{}, fmt.Errorf("resolve channel %s: %w", channelID, err)
 	}
-	senderName, senderID, err := r.SenderName(ctx, userID, botID, username)
+	senderName, senderID, err := r.SenderName(ctx, msg)
 	if err != nil {
 		return ResolvedSender{}, err
 	}
@@ -395,23 +395,23 @@ func (r *Resolver) ResolveSender(ctx context.Context, channelID, userID, botID, 
 
 // SenderName resolves a message sender to (name, id). Tries the user ID first,
 // then the message's Username field (common for bots), then a bot API lookup.
-func (r *Resolver) SenderName(ctx context.Context, userID, botID, username string) (string, string, error) {
-	if userID != "" {
-		name, err := r.UserName(ctx, userID)
+func (r *Resolver) SenderName(ctx context.Context, msg goslack.Msg) (string, string, error) {
+	if msg.User != "" {
+		name, err := r.UserName(ctx, msg.User)
 		if err != nil {
 			return "", "", err
 		}
-		return name, userID, nil
+		return name, msg.User, nil
 	}
-	if username != "" {
-		return username, botID, nil
+	if msg.Username != "" {
+		return msg.Username, msg.BotID, nil
 	}
-	if botID != "" {
-		name, err := r.botName(ctx, botID)
+	if msg.BotID != "" {
+		name, err := r.BotName(ctx, msg.BotID)
 		if err != nil {
 			return "", "", err
 		}
-		return name, botID, nil
+		return name, msg.BotID, nil
 	}
 	return "", "", fmt.Errorf("message has no user, bot, or username")
 }
