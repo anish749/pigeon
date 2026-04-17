@@ -222,9 +222,9 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 				continue
 			}
 
-			userName, userID, err := resolver.SenderName(ctx, msg.User, msg.BotID, msg.Username)
+			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.User, msg.BotID, msg.Username)
 			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve sender",
+				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}
@@ -236,7 +236,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, viaFromMetadata(msg.Metadata)); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, viaFromMetadata(msg.Metadata)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -423,7 +423,8 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				via = modelv1.ViaToPigeon
 			}
 
-			if err := ms.Write(ch.ID, channelName, senderName, senderID, text, ts, msg.Timestamp, via); err != nil {
+			rs := ResolvedSender{ChannelName: channelName, SenderName: senderName, SenderID: senderID}
+			if err := ms.Write(rs, text, ts, msg.Timestamp, via); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -576,9 +577,9 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			if reply.Text == "" || !allowedSubType(reply.SubType) {
 				continue
 			}
-			userName, userID, err := resolver.SenderName(ctx, reply.User, reply.BotID, reply.Username)
+			rs, err := resolver.ResolveSender(ctx, channelID, reply.User, reply.BotID, reply.Username)
 			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve sender",
+				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve",
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 				continue
 			}
@@ -590,7 +591,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, viaFromMetadata(reply.Metadata)); err != nil {
+			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, viaFromMetadata(reply.Metadata)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -617,9 +618,9 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
 						continue
 					}
-					userName, userID, err := resolver.SenderName(ctx, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
+					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
 					if err != nil {
-						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve sender",
+						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve",
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 						continue
 					}
@@ -630,7 +631,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						continue
 					}
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, userID, text, ts, ctxMsg.Timestamp); err != nil {
+					if err := ms.WriteThreadContext(ctxRS, msg.Timestamp, text, ts, ctxMsg.Timestamp); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}

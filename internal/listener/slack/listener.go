@@ -142,25 +142,19 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 
-	userName, userID, err := l.resolver.SenderName(ctx, msg.User, msg.BotID, msg.Username)
+	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, msg.User, msg.BotID, msg.Username)
 	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping message, cannot resolve sender",
+		slog.WarnContext(ctx, "slack: skipping message, cannot resolve",
 			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
 		return
 	}
-	channelName, err := l.resolver.ChannelName(ctx, msg.Channel)
-	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping message, cannot resolve channel",
-			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
-		return
-	}
-	l.messages.EnsureMeta(channelName, l.resolver.ConvMeta(msg.Channel, channelName))
+	l.messages.EnsureMeta(rs.ChannelName, l.resolver.ConvMeta(msg.Channel, rs.ChannelName))
 	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
 	// channel to the same "@Username" as the user's DM, so messages interleave.
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
 	var via modelv1.Via
 	if isBotDM {
-		userName = "sent to pigeon by " + userName
+		rs.SenderName = "sent to pigeon by " + rs.SenderName
 		via = modelv1.ViaToPigeon
 	} else if msg.Message != nil {
 		via = viaFromMetadata(msg.Message.Metadata)
@@ -168,7 +162,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	text, err := l.resolver.ResolveText(ctx, msg.Text)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
-			"channel", channelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
+			"channel", rs.ChannelName, "ts", msg.TimeStamp, "error", err, "account", l.acct)
 		return
 	}
 	ts := ParseTimestamp(msg.TimeStamp)
@@ -178,7 +172,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(msg.Channel, channelName, userName, userID, text, ts, msg.TimeStamp, via); err != nil {
+		if err := l.messages.Write(rs, text, ts, msg.TimeStamp, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
@@ -187,18 +181,18 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write thread replies to the thread file
 	if isThreadReply {
 		// Only fetch the parent from Slack API if the thread file doesn't exist yet.
-		if !l.messages.ThreadExists(channelName, msg.ThreadTimeStamp) {
-			l.ensureThreadParent(ctx, msg.Channel, channelName, msg.ThreadTimeStamp)
+		if !l.messages.ThreadExists(rs.ChannelName, msg.ThreadTimeStamp) {
+			l.ensureThreadParent(ctx, msg.Channel, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(channelName, msg.ThreadTimeStamp, userName, userID, text, ts, msg.TimeStamp, true, via); err != nil {
+		if err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
 	}
 
 	slog.InfoContext(ctx, "slack message saved",
-		"from", userName, "channel", channelName, "account", l.acct, "text_len", len(msg.Text))
+		"from", rs.SenderName, "channel", rs.ChannelName, "account", l.acct, "text_len", len(msg.Text))
 
 	// Notify the hub for messages the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always
@@ -207,16 +201,16 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
-		result = l.onMessage(l.acct, channelName)
+		result = l.onMessage(l.acct, rs.ChannelName)
 	case "group":
-		result = l.onMessage(l.acct, channelName)
+		result = l.onMessage(l.acct, rs.ChannelName)
 	case "channel":
 		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
-			result = l.onMessage(l.acct, channelName)
+			result = l.onMessage(l.acct, rs.ChannelName)
 		}
 	default:
 		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
-			"channel_type", msg.ChannelType, "channel", channelName, "account", l.acct)
+			"channel_type", msg.ChannelType, "channel", rs.ChannelName, "account", l.acct)
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
@@ -232,7 +226,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 // ensureThreadParent fetches the parent message of a thread and writes it to the
 // thread file. Called when a real-time thread reply arrives but no thread file exists.
-func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelName, threadTS string) {
+func (l *Listener) ensureThreadParent(ctx context.Context, channelID, threadTS string) {
 	api := goslack.New(l.userToken)
 	msgs, _, _, err := api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
 		ChannelID: channelID,
@@ -251,7 +245,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 	if parent.Text == "" {
 		return
 	}
-	userName, userID, err := l.resolver.SenderName(ctx, parent.User, parent.BotID, parent.Username)
+	parentRS, err := l.resolver.ResolveSender(ctx, channelID, parent.User, parent.BotID, parent.Username)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to resolve thread parent sender", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
@@ -264,7 +258,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, channelNam
 		return
 	}
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(channelName, threadTS, userName, userID, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
+	if err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}
