@@ -149,12 +149,9 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 		return
 	}
 	l.messages.EnsureMeta(rs.ChannelName, l.resolver.ConvMeta(msg.Channel, rs.ChannelName))
-	// For bot DMs, label the sender. ChannelName already resolves the bot's DM
-	// channel to the same "@Username" as the user's DM, so messages interleave.
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
 	var via modelv1.Via
 	if isBotDM {
-		rs.SenderName = "sent to pigeon by " + rs.SenderName
 		via = modelv1.ViaToPigeon
 	} else if msg.Message != nil {
 		via = viaFromMetadata(msg.Message.Metadata)

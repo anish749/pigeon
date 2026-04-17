@@ -312,8 +312,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 }
 
 // syncBotDMs syncs the bot's DM conversations. Messages are written to the same
-// contact directory as the user's DMs, with "sent to pigeon by" / "sent by pigeon"
-// labels so they interleave in the unified timeline.
+// contact directory as the user's DMs. The via field distinguishes direction
+// (ViaPigeonAsBot vs ViaToPigeon) and the read path decorates the sender.
 func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore, gate *rateLimitGate, defaultOldest string, activityCutoff time.Time) error {
 	botAPI := goslack.New(botToken)
 
@@ -408,7 +408,13 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			var senderID string
 			var via modelv1.Via
 			if msg.BotID != "" {
-				senderName = "sent by pigeon"
+				name, _, err := resolver.SenderName(ctx, "", msg.BotID, msg.Username)
+				if err != nil {
+					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve bot",
+						"channel", channelName, "ts", msg.Timestamp, "error", err)
+					continue
+				}
+				senderName = name
 				senderID = msg.BotID
 				via = modelv1.ViaPigeonAsBot
 			} else {
@@ -418,7 +424,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 						"channel", channelName, "ts", msg.Timestamp, "error", err)
 					continue
 				}
-				senderName = "sent to pigeon by " + userName
+				senderName = userName
 				senderID = msg.User
 				via = modelv1.ViaToPigeon
 			}
