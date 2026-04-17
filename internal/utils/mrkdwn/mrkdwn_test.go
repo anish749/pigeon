@@ -2,7 +2,7 @@ package mrkdwn
 
 import "testing"
 
-func TestFromMarkdown(t *testing.T) {
+func TestToSlackMarkdown(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -139,9 +139,9 @@ func TestFromMarkdown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FromMarkdown(tt.in)
+			got := ToSlackMarkdown(tt.in)
 			if got != tt.want {
-				t.Errorf("FromMarkdown(%q)\n  got:  %q\n  want: %q", tt.in, got, tt.want)
+				t.Errorf("ToSlackMarkdown(%q)\n  got:  %q\n  want: %q", tt.in, got, tt.want)
 			}
 		})
 	}

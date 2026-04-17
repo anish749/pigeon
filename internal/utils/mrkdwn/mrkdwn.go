@@ -20,8 +20,8 @@ import (
 	"github.com/yuin/goldmark/parser"
 )
 
-// FromMarkdown converts standard Markdown text to Slack mrkdwn.
-func FromMarkdown(s string) string {
+// ToSlackMarkdown converts standard Markdown text to Slack mrkdwn.
+func ToSlackMarkdown(s string) string {
 	source := []byte(s)
 	md := goldmark.New(
 		// Add the strikethrough parser only (not the HTML renderer that comes
