@@ -395,6 +395,12 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		))
 	}
 
+	// Attach metadata so the listener can identify pigeon-sent messages.
+	opts = append(opts, goslack.MsgOptionMetadata(goslack.SlackMetadata{
+		EventType:    "pigeon_send",
+		EventPayload: map[string]any{"via": string(req.Via)},
+	}))
+
 	if req.Thread != "" {
 		opts = append(opts, goslack.MsgOptionTS(req.Thread))
 		if req.Broadcast {
