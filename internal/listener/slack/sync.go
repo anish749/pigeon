@@ -211,6 +211,19 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
+			// Log messages being dropped that have content in blocks/attachments/files
+			// despite empty text — helps identify cases we should start handling.
+			if msg.Text == "" && (len(msg.Attachments) > 0 || len(msg.Blocks.BlockSet) > 0 || len(msg.Files) > 0) {
+				slog.InfoContext(ctx, "slack sync: empty-text message with content",
+					"channel", channelName, "ts", msg.Timestamp,
+					"subType", msg.SubType, "user", msg.User,
+					"botID", msg.BotID, "username", msg.Username,
+					"attachments", len(msg.Attachments),
+					"blocks", len(msg.Blocks.BlockSet),
+					"files", len(msg.Files),
+					"account", acct)
+			}
+
 			if !shouldKeepMessage(msg.SubType, msg.Text) {
 				slog.WarnContext(ctx, "slack sync: skipping message",
 					"channel", channelName, "ts", msg.Timestamp,
