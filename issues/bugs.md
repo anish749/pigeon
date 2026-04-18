@@ -65,10 +65,6 @@ write path handled the clock.
 
 `pigeon read` now rejects GWS and Linear platforms with a clear error (#198) instead of silently returning wrong output. The underlying limitation remains — there is no supported way to read GWS data via `pigeon read`. The design for GWS read semantics is tracked as a feature.
 
-## Slack: edits and deletes skipped when user_id is empty
-
-The Slack listener skips `message_changed` and `message_deleted` events when the event carries an empty `user_id`. These are logged as warnings (`slack: skipping edit/delete, cannot resolve user`) but the edit or delete is silently dropped. This appears to happen for bot or app-authored messages where Slack omits the user field. The data on disk retains the original message with no indication it was edited or deleted.
-
 ## Slack: missing_scope errors on every sync cycle
 
 Every sync cycle logs `failed to fetch muted channels, skipping mute filter` and `search failed: missing_scope`. The bot tokens lack the OAuth scope needed for muted-channel filtering and search. The daemon degrades gracefully — it syncs all channels instead of prioritizing unmuted ones — but the warnings are emitted on every cycle for every workspace, making the logs very noisy.
@@ -85,13 +81,6 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
-## Gmail: keyring backend stdout pollution causes poll failure
-
-The GWS Gmail poller fails to fetch a message because the underlying `gws` CLI prints `Using keyring backend: keyring` to stdout, which gets mixed into the API response. The poller treats the corrupted response as an error. This means individual emails can be silently skipped during polling.
-
-## Slack: send fails to MPDM channels with channel_not_found
-
-`pigeon hub send` fails when targeting a multi-party DM (MPDM) channel, returning `channel_not_found`. The bot is not a member of the group DM and cannot join it programmatically. The outbox marks the message as failed on approve, but the user gets no actionable guidance beyond the raw error.
 
 ## Slack: @Slackbot DM fetch fails on every sync
 

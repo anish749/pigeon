@@ -35,3 +35,15 @@ Rejected: rewriting date files during sync is too expensive — the poller doesn
 ## ~~Root help omits GWS~~ — fixed in #163
 
 Added GWS to config example, data layout tree, JSON fields, setup workflow, and grep examples in `pigeon help`.
+
+## ~~Slack: edits and deletes skipped when user_id is empty~~ — fixed in #215
+
+Sender resolution for edit and delete handlers now uses three-way lookup (user ID, bot ID, username), matching the approach for new messages. Bot-authored edits/deletes are no longer silently dropped.
+
+## ~~Gmail: keyring backend stdout pollution causes poll failure~~ — fixed in #217
+
+GWS CLI handler now captures stdout and stderr separately. Error parsing tries stdout first where the gws CLI writes structured errors.
+
+## ~~Slack: send fails to MPDM channels with channel_not_found~~ — fixed in #230
+
+Bot sends to MPDMs are now rejected early with actionable guidance to use `--via pigeon-as-user` instead of failing after outbox review.
