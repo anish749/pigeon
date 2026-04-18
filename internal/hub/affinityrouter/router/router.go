@@ -59,6 +59,13 @@ func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger
 type RouteResult struct {
 	Decision models.RoutingDecision
 
+	// BurstDecisions contains routing decisions for all signals in a classified
+	// burst. When the classifier runs at a burst boundary, it produces decisions
+	// for the entire burst — not just the triggering signal. The caller should
+	// observe all of these to ensure every signal in the burst gets correctly
+	// tagged. Empty when the fast path handles the signal (no classification).
+	BurstDecisions []models.RoutingDecision
+
 	// Set if the classifier proposes a new workstream.
 	// The Router does NOT create it — the caller passes this to the Manager.
 	NewWorkstreamName  string
@@ -174,12 +181,24 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
 	}
 
+	// Build routing decisions for ALL signals in the classified burst.
+	burstDecisions := make([]models.RoutingDecision, len(signals))
+	for i, s := range signals {
+		burstDecisions[i] = models.RoutingDecision{
+			SignalID:      s.ID,
+			WorkstreamIDs: wsIDs,
+			Ts:            s.Ts,
+		}
+	}
+
 	routeResult := &RouteResult{
+		// Decision for the triggering signal (the one that crossed the gap).
 		Decision: models.RoutingDecision{
 			SignalID:      sig.ID,
 			WorkstreamIDs: wsIDs,
 			Ts:            now,
 		},
+		BurstDecisions:     burstDecisions,
 		NewWorkstreamName:  result.NewWorkstreamName,
 		NewWorkstreamFocus: result.NewWorkstreamFocus,
 	}
@@ -277,12 +296,22 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 			r.mu.Unlock()
 		}
 
+		burstDecisions := make([]models.RoutingDecision, len(signals))
+		for i, s := range signals {
+			burstDecisions[i] = models.RoutingDecision{
+				SignalID:      s.ID,
+				WorkstreamIDs: wsIDs,
+				Ts:            s.Ts,
+			}
+		}
+
 		rr := &RouteResult{
 			Decision: models.RoutingDecision{
 				SignalID:      signals[0].ID,
 				WorkstreamIDs: wsIDs,
 				Ts:            signals[len(signals)-1].Ts,
 			},
+			BurstDecisions:     burstDecisions,
 			NewWorkstreamName:  result.NewWorkstreamName,
 			NewWorkstreamFocus: result.NewWorkstreamFocus,
 		}

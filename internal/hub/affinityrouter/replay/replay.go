@@ -138,7 +138,21 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(wsName)}
 		}
 
-		// Manager records to ledger and runs lifecycle checks.
+		// If the classifier ran (burst boundary), observe all burst signals
+		// so every signal in the burst gets correctly tagged — not just the
+		// triggering signal.
+		if len(result.BurstDecisions) > 0 {
+			for _, bd := range result.BurstDecisions {
+				if len(bd.WorkstreamIDs) == 0 {
+					bd.WorkstreamIDs = result.Decision.WorkstreamIDs
+				}
+				if err := mgr.ObserveRouting(ctx, models.Signal{ID: bd.SignalID, Ts: bd.Ts}, bd); err != nil {
+					logger.Warn("burst observe failed", "error", err)
+				}
+			}
+		}
+
+		// Manager records the triggering signal's decision and runs lifecycle checks.
 		if err := mgr.ObserveRouting(ctx, sig, result.Decision); err != nil {
 			logger.Warn("manager observe failed", "error", err, "index", i)
 		}
@@ -173,10 +187,18 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		if result.NewWorkstreamName != "" {
 			if id, err := mgr.ProposeNew(ctx, result.NewWorkstreamName, result.NewWorkstreamFocus, wsName, nil); err == nil && id != "" {
 				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, id)
+				// Propagate the new workstream ID to all burst decisions.
+				for i := range result.BurstDecisions {
+					result.BurstDecisions[i].WorkstreamIDs = append(result.BurstDecisions[i].WorkstreamIDs, id)
+				}
 			}
 		}
-		if len(result.Decision.WorkstreamIDs) > 0 {
-			if err := mgr.ObserveRouting(ctx, models.Signal{}, result.Decision); err != nil {
+		// Observe all burst signals so they get correctly tagged.
+		for _, bd := range result.BurstDecisions {
+			if len(bd.WorkstreamIDs) == 0 {
+				bd.WorkstreamIDs = result.Decision.WorkstreamIDs
+			}
+			if err := mgr.ObserveRouting(ctx, models.Signal{ID: bd.SignalID, Ts: bd.Ts}, bd); err != nil {
 				logger.Warn("flush observe failed", "error", err)
 			}
 		}
