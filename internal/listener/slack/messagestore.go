@@ -19,7 +19,7 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 			SenderID: rs.SenderID,
 			Via:      via,
 			Text:     text,
-			Raw:      raw.AsSerializable()	,
+			Raw:      raw.AsSerializable(),
 		},
 	}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
@@ -111,4 +111,3 @@ func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS string, ts time.Ti
 	}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
-

@@ -210,4 +210,3 @@ func TestSlackRawContent_RoundTripViaSerializable(t *testing.T) {
 		t.Errorf("fallback = %q, want PR #42 - Fix the bug", restored.Attachments[0].Fallback)
 	}
 }
-
