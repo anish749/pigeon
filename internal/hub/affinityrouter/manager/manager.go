@@ -22,7 +22,7 @@ import (
 type Manager struct {
 	mu     sync.RWMutex
 	client *clients.Client
-	ledger *Ledger
+	sc *StatCollector
 	cfg    models.Config
 	logger *slog.Logger
 
@@ -42,12 +42,12 @@ type Manager struct {
 	dormancyChanges int
 }
 
-// New creates a workstream manager. The manager owns the ledger internally —
-// callers interact with routing history through the manager's query methods.
-func New(client *clients.Client, cfg models.Config, logger *slog.Logger) *Manager {
+// New creates a workstream manager. The StatCollector is injected so the
+// caller can also query it directly (e.g. for report building).
+func New(client *clients.Client, sc *StatCollector, cfg models.Config, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
-		ledger:             newLedger(),
+		sc:                 sc,
 		cfg:                cfg,
 		logger:             logger,
 		workstreams:        make(map[string]models.Workstream),
@@ -156,12 +156,12 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus, workspace string, t
 	return "", nil
 }
 
-// ObserveRouting records the routing decision in the ledger and triggers
+// ObserveRouting records the routing decision in the stat collector and triggers
 // lifecycle operations (focus updates, dormancy). This is the single entry
-// point — the manager owns the ledger, so recording happens here.
+// point — the manager owns the stat collector, so recording happens here.
 func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decision models.RoutingDecision) error {
-	// Record in the ledger — single source of truth.
-	m.ledger.Record(decision, sig)
+	// Record in the stat collector — single source of truth.
+	m.sc.Record(decision, sig)
 
 	// Buffer the signal for focus update context.
 	m.recentSignals = append(m.recentSignals, sig)
@@ -237,7 +237,7 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 		return nil
 	}
 
-	prompt := buildFocusPrompt(ws, recentSignals, m.ledger)
+	prompt := buildFocusPrompt(ws, recentSignals)
 	newFocus, err := m.client.Text(ctx, prompt)
 	if err != nil {
 		return fmt.Errorf("update focus for %s: %w", ws.ID, err)
@@ -264,7 +264,7 @@ func (m *Manager) detectDormancy(now time.Time) {
 		if ws.IsDefault() || ws.State != models.StateActive {
 			continue
 		}
-		lastSig := m.ledger.LastSignal(id)
+		lastSig := m.sc.LastSignal(id)
 		if !lastSig.IsZero() && now.Sub(lastSig) > m.cfg.DormancyThreshold {
 			m.workstreams[id] = ws.WithState(models.StateDormant)
 			m.dormancyChanges++
@@ -276,30 +276,36 @@ func (m *Manager) detectDormancy(now time.Time) {
 	}
 }
 
-func buildFocusPrompt(ws models.Workstream, signals []models.Signal, l *Ledger) string {
+func buildFocusPrompt(ws models.Workstream, signals []models.Signal) string {
 	var b strings.Builder
 
-	b.WriteString("You are updating the focus description for a workstream. The focus is used by a classifier to route incoming messages to the right workstream, so it needs to be specific and current.\n\n")
+	b.WriteString(`You are writing the "focus description" for a workstream.
 
-	fmt.Fprintf(&b, "Workstream: %s\n", ws.Name)
-	fmt.Fprintf(&b, "Workspace: %s\n", ws.Workspace)
-	fmt.Fprintf(&b, "Current focus: %s\n", ws.Focus)
-	fmt.Fprintf(&b, "Total signals: %d\n", l.SignalCount(ws.ID))
-	fmt.Fprintf(&b, "Participants: %s\n", strings.Join(l.Participants(ws.ID), ", "))
-	fmt.Fprintf(&b, "Created: %s\n\n", ws.Created.Format("2006-01-02"))
+WHAT A FOCUS DESCRIPTION IS:
+A focus description is a short paragraph that a classifier reads to decide whether an incoming message belongs to this workstream. When a new Slack message, email, or notification arrives, the classifier compares it against the focus descriptions of all active workstreams to determine where it should be routed.
 
-	b.WriteString("Recent signals:\n")
+WHAT MAKES A GOOD FOCUS DESCRIPTION:
+- Specific enough that RELATED messages match: mention the key technical terms, system names, people, tickets, repos, and concepts that appear in this workstream's messages.
+- Distinct enough that UNRELATED messages don't match: avoid generic terms that could apply to any workstream.
+- Current: reflect what the workstream is about RIGHT NOW, not what it was about a month ago. If the work has shifted from planning to debugging to deployment, say so.
+
+WHAT TO AVOID:
+- Generic descriptions like "engineering work" or "product discussion"
+- Listing every detail — focus on the distinguishing characteristics
+- Past tense summaries — describe the current state
+
+`)
+
+	fmt.Fprintf(&b, "WORKSTREAM: %s\n", ws.Name)
+	fmt.Fprintf(&b, "WORKSPACE: %s\n", ws.Workspace)
+	fmt.Fprintf(&b, "CURRENT FOCUS (may be outdated): %s\n\n", ws.Focus)
+
+	b.WriteString("RECENT MESSAGES (use these to understand what the workstream is about now):\n")
 	for _, sig := range signals {
 		fmt.Fprintf(&b, "[%s] [%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Conversation, sig.Sender, truncate(sig.Text, 200))
 	}
 
-	b.WriteString(`
-Write an updated focus description (1-3 sentences) that:
-1. Captures the current state/phase of this workstream
-2. Mentions key technical terms, entities, or people that would help a classifier match new signals
-3. Is specific enough to distinguish this workstream from others in the same workspace
-
-Respond with ONLY the focus description text, nothing else.`)
+	b.WriteString("\nWrite an updated focus description (1-3 sentences). Respond with ONLY the description, nothing else.")
 
 	return b.String()
 }
@@ -345,19 +351,3 @@ func (m *Manager) Stats() Stats {
 	}
 }
 
-// --- Ledger query methods (delegate to internal ledger) ---
-
-// SignalCount returns the number of signals routed to a workstream.
-func (m *Manager) SignalCount(workstreamID string) int {
-	return m.ledger.SignalCount(workstreamID)
-}
-
-// Participants returns distinct sender names for signals routed to a workstream.
-func (m *Manager) Participants(workstreamID string) []string {
-	return m.ledger.Participants(workstreamID)
-}
-
-// LastSignal returns the timestamp of the most recent signal routed to a workstream.
-func (m *Manager) LastSignal(workstreamID string) time.Time {
-	return m.ledger.LastSignal(workstreamID)
-}

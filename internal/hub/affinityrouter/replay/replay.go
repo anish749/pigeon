@@ -96,8 +96,9 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	// Set up components.
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	cls := classifier.New(claude, logger)
+	sc := manager.NewStatCollector()
 	rtr := router.New(cls, cfg, logger)
-	mgr := manager.New(claude, cfg, logger)
+	mgr := manager.New(claude, sc, cfg, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).
 	for i, sig := range signals {
@@ -187,10 +188,10 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			Workspace:    ws.Workspace,
 			State:        ws.State,
 			Focus:        ws.Focus,
-			SignalCount:  mgr.SignalCount(ws.ID),
-			Participants: mgr.Participants(ws.ID),
+			SignalCount:  sc.SignalCount(ws.ID),
+			Participants: sc.Participants(ws.ID),
 			Created:      ws.Created,
-			LastSignal:   mgr.LastSignal(ws.ID),
+			LastSignal:   sc.LastSignal(ws.ID),
 			IsDefault:    ws.IsDefault(),
 		})
 	}
