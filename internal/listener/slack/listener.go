@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 	"github.com/anish749/pigeon/internal/syncstatus"
@@ -27,11 +28,13 @@ type Listener struct {
 	messages     *MessageStore
 	userToken    string
 	botToken     string
+	botAPI       *goslack.Client
 	acct         account.Account
 	teamID       string
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
 	onMessage    hub.MessageNotifyFunc
 	onReaction   hub.ReactionNotifyFunc
+	obHandler    *outbox.Handler // nil if outbox review is not wired up
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -41,18 +44,20 @@ type Listener struct {
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called when a reaction or unreaction event arrives.
 // Both callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, obHandler *outbox.Handler, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
 		messages:     messages,
 		userToken:    userToken,
 		botToken:     botToken,
+		botAPI:       goslack.New(botToken),
 		acct:         acct,
 		teamID:       teamID,
 		pigeonBotUID: pigeonBotUID,
 		onMessage:    onMessage,
 		onReaction:   onReaction,
+		obHandler:    obHandler,
 		syncTracker:  syncTracker,
 	}
 }
@@ -82,6 +87,8 @@ func (l *Listener) Run(ctx context.Context) {
 				}
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
+			case socketmode.EventTypeInteractive:
+				l.handleInteractive(ctx, &evt)
 			case socketmode.EventTypeErrorBadMessage:
 				slog.WarnContext(ctx, "slack: bad message", "account", l.acct)
 			case socketmode.EventTypeIncomingError:
