@@ -37,7 +37,6 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	var burstGap time.Duration
 	var detectorType, embedModel string
 	var embedWindowSize int
-	var embedThreshold float64
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -88,7 +87,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 					return fmt.Errorf("start embedding sidecar: %w", err)
 				}
 				defer client.Close()
-				factory = embedding.NewCosineFactory(client, embedWindowSize, embedThreshold, logger)
+				factory = embedding.NewCosineFactory(client, embedWindowSize, 0.6, logger)
 			default:
 				return fmt.Errorf("unknown detector type: %s (use burstgap or cosine)", detectorType)
 			}
@@ -114,7 +113,5 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
 	cmd.Flags().StringVar(&embedModel, "embed-model", "all-MiniLM-L6-v2", "Sentence-transformers model for cosine detector")
 	cmd.Flags().IntVar(&embedWindowSize, "embed-window", 5, "Sliding window size (messages) for cosine detector")
-	cmd.Flags().Float64Var(&embedThreshold, "embed-threshold", 0.6, "Fallback similarity threshold before calibration")
-
 	return cmd
 }
