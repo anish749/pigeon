@@ -4,11 +4,13 @@
 package embedding
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,10 +18,11 @@ import (
 )
 
 // Client manages the Python embedding sidecar process and communicates
-// with it over a Unix domain socket. Creating a Client starts the sidecar;
-// closing it shuts the process down.
+// with it over HTTP on a Unix domain socket. Creating a Client starts
+// the sidecar; closing it shuts the process down.
 type Client struct {
 	socketPath string
+	httpClient *http.Client
 	proc       *os.Process
 }
 
@@ -35,12 +38,21 @@ func NewClient(socketPath, modelName string) (*Client, error) {
 		return nil, fmt.Errorf("start embed sidecar: %w", err)
 	}
 
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socketPath)
+			},
+		},
+	}
+
 	c := &Client{
 		socketPath: socketPath,
+		httpClient: httpClient,
 		proc:       cmd.Process,
 	}
 
-	// Wait for the socket to appear.
 	if err := c.waitReady(30 * time.Second); err != nil {
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("embed sidecar not ready: %w", err)
@@ -59,41 +71,38 @@ func (c *Client) Close() error {
 
 // Embed returns the embedding vector for text.
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
-	req := struct {
+	body, err := json.Marshal(struct {
 		Text string `json:"text"`
-	}{Text: text}
-
-	data, err := json.Marshal(req)
+	}{Text: text})
 	if err != nil {
 		return nil, fmt.Errorf("marshal embed request: %w", err)
 	}
-	data = append(data, '\n')
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", c.socketPath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost/embed", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("dial embed sidecar: %w", err)
+		return nil, fmt.Errorf("create embed request: %w", err)
 	}
-	defer conn.Close()
+	req.Header.Set("Content-Type", "application/json")
 
-	if _, err := conn.Write(data); err != nil {
-		return nil, fmt.Errorf("write embed request: %w", err)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embed request: %w", err)
 	}
-	if uc, ok := conn.(*net.UnixConn); ok {
-		uc.CloseWrite()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct{ Error string }
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("embed sidecar: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
-	var resp struct {
+	var result struct {
 		Embedding []float32 `json:"embedding"`
-		Error     string    `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode embed response: %w", err)
 	}
-	if resp.Error != "" {
-		return nil, fmt.Errorf("embed sidecar: %s", resp.Error)
-	}
-	return resp.Embedding, nil
+	return result.Embedding, nil
 }
 
 // CosineSimilarity returns the cosine similarity between two vectors.
@@ -115,7 +124,6 @@ func (c *Client) waitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(c.socketPath); err == nil {
-			// Socket file exists — try a test connection.
 			conn, err := net.DialTimeout("unix", c.socketPath, time.Second)
 			if err == nil {
 				conn.Close()
@@ -128,7 +136,6 @@ func (c *Client) waitReady(timeout time.Duration) error {
 }
 
 func findRepoRoot() string {
-	// Walk up from executable or cwd to find embed/sidecar.py.
 	dir, _ := os.Getwd()
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "embed", "sidecar.py")); err == nil {
