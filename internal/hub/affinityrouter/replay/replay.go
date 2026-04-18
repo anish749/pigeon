@@ -185,7 +185,15 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	}
 	for _, result := range flushResults {
 		if result.NewWorkstreamName != "" {
-			if id, err := mgr.ProposeNew(ctx, result.NewWorkstreamName, result.NewWorkstreamFocus, wsName, nil); err == nil && id != "" {
+			// Build trigger signals from burst decisions for the proposal timestamp.
+			var triggerSignals []models.Signal
+			for _, bd := range result.BurstDecisions {
+				triggerSignals = append(triggerSignals, models.Signal{ID: bd.SignalID, Ts: bd.Ts})
+			}
+			if len(triggerSignals) == 0 {
+				triggerSignals = []models.Signal{{Ts: result.Decision.Ts}}
+			}
+			if id, err := mgr.ProposeNew(ctx, result.NewWorkstreamName, result.NewWorkstreamFocus, wsName, triggerSignals); err == nil && id != "" {
 				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, id)
 				// Propagate the new workstream ID to all burst decisions.
 				for i := range result.BurstDecisions {
