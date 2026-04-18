@@ -48,6 +48,8 @@ func TestSlackTargetDisplay(t *testing.T) {
 		{name: "channel", target: SlackTarget{Channel: "#eng"}, want: "#eng"},
 		{name: "both prefers user_id", target: SlackTarget{UserID: "U123", Channel: "#eng"}, want: "U123"},
 		{name: "empty", target: SlackTarget{}, want: ""},
+		{name: "name prefers resolved name", target: SlackTarget{UserID: "U123", Name: "Alice"}, want: "Alice"},
+		{name: "name with channel", target: SlackTarget{Channel: "#eng", Name: "engineering"}, want: "engineering"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,6 +105,7 @@ func TestSendRequestTarget(t *testing.T) {
 	}{
 		{name: "slack user", req: SendRequest{Slack: &SlackTarget{UserID: "U123"}}, want: "U123"},
 		{name: "slack channel", req: SendRequest{Slack: &SlackTarget{Channel: "#eng"}}, want: "#eng"},
+		{name: "slack user with name", req: SendRequest{Slack: &SlackTarget{UserID: "U123", Name: "Alice"}}, want: "Alice"},
 		{name: "whatsapp contact", req: SendRequest{Contact: "Alice"}, want: "Alice"},
 		{name: "empty", req: SendRequest{}, want: ""},
 	}
