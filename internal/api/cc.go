@@ -43,6 +43,7 @@ func (s *Server) postCCMessage(item *outbox.Item) {
 	}
 
 	if req.Platform != "slack" {
+		slog.Debug("cc: skipping non-Slack outbox item", "platform", req.Platform, "id", item.ID)
 		return
 	}
 
