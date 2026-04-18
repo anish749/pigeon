@@ -44,7 +44,8 @@ func newSendSlackCmd() *cobra.Command {
 		Short: "Send a Slack message",
 		Long: `Send a Slack DM, channel message, group DM, or thread reply.
 
-Message text supports Slack mrkdwn: *bold*, _italic_, ~strike~, ` + "`code`" + `.
+Message text supports Markdown: **bold**, *italic*, ~~strike~~, ` + "`code`" + `,
+[links](url), # headings, and - lists.
 
 By default, messages are sent as the bot. Use --via pigeon-as-user to send as
 the account owner who connected pigeon (uses their user token).

@@ -18,6 +18,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/slack-go/slack v0.19.0
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.2
 	go.mau.fi/whatsmeow v0.0.0-20260305215846-fc65416c22c4
 	golang.org/x/sync v0.20.0
 	google.golang.org/api v0.275.0

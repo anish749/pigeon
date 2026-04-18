@@ -113,7 +113,7 @@ func RunSetupSlack(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, nil)
+	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken)
 
 	go func() {
 		if err := srv.Start(ctx); err != nil {

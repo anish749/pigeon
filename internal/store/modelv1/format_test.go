@@ -7,6 +7,74 @@ import (
 	"time"
 )
 
+func TestDisplaySender(t *testing.T) {
+	tests := []struct {
+		name   string
+		sender string
+		via    Via
+		want   string
+	}{
+		{"organic", "Alice", ViaOrganic, "Alice"},
+		{"pigeon-as-bot", "Anish's Pigeon", ViaPigeonAsBot, "sent by pigeon"},
+		{"pigeon-as-user", "Anish Chakraborty", ViaPigeonAsUser, "Anish Chakraborty (via pigeon)"},
+		{"to-pigeon", "Jeremiah Lu", ViaToPigeon, "sent to pigeon by Jeremiah Lu"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := displaySender(tt.sender, tt.via)
+			if got != tt.want {
+				t.Errorf("displaySender(%q, %q) = %q, want %q", tt.sender, tt.via, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatMsg_Via(t *testing.T) {
+	tests := []struct {
+		name       string
+		via        Via
+		sender     string
+		wantSender string
+	}{
+		{"pigeon-as-bot", ViaPigeonAsBot, "Anish's Pigeon", "sent by pigeon"},
+		{"pigeon-as-user", ViaPigeonAsUser, "Anish", "Anish (via pigeon)"},
+		{"to-pigeon", ViaToPigeon, "Jeremiah", "sent to pigeon by Jeremiah"},
+		{"organic", ViaOrganic, "Alice", "Alice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := ResolvedMsg{
+				MsgLine: MsgLine{
+					ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+					Sender: tt.sender, SenderID: "U1", Text: "hello",
+					Via: tt.via,
+				},
+			}
+			lines := FormatMsg(m, time.UTC)
+			if !strings.Contains(lines[0], tt.wantSender+" (U1)") {
+				t.Errorf("got %q, want sender %q", lines[0], tt.wantSender)
+			}
+		})
+	}
+}
+
+func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
+	m := ResolvedMsg{
+		MsgLine: MsgLine{
+			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+			Sender: "Alice", SenderID: "U1", Text: "hello",
+			Via: ViaToPigeon,
+		},
+	}
+	lines := formatMsgNotification(m, time.UTC, nil)
+	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
+		t.Errorf("expected decorated sender in display line, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "[via:to-pigeon]") {
+		t.Errorf("expected via tag in metadata, got %q", lines[1])
+	}
+}
+
 func TestFormatConvMeta_SlackDM(t *testing.T) {
 	meta := &ConvMeta{Name: "@Magnus", Type: ConvDM, ChannelID: "D08J1DUQ11Q", UserID: "U08H20E757W"}
 	got := FormatConvMeta(meta)
@@ -176,6 +244,9 @@ func TestNotificationFormat_Via(t *testing.T) {
 		},
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
+	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
+		t.Errorf("expected decorated sender, got %q", lines[0])
+	}
 	if !strings.Contains(lines[1], "[via:to-pigeon]") {
 		t.Errorf("expected via tag, got %q", lines[1])
 	}
@@ -204,6 +275,9 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 		},
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
+	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
+		t.Errorf("expected decorated sender, got %q", lines[0])
+	}
 	if !strings.Contains(lines[1], "[via:pigeon-as-user]") || !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected both optional tags, got %q", lines[1])
 	}
@@ -349,4 +423,3 @@ func TestFormatDateFile_NilErrorNoWarning(t *testing.T) {
 		t.Errorf("lines = %d, want 1 (nil error should not add warning)", len(lines))
 	}
 }
-

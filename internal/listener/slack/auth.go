@@ -52,28 +52,23 @@ var userScopes = []string{
 	"users:read",
 }
 
-// OnInstall is called when a new workspace is successfully installed via OAuth.
-type OnInstall func(entry config.SlackConfig)
-
 // AuthServer runs a localhost HTTP server that handles the Slack OAuth redirect flow.
 type AuthServer struct {
 	clientID     string
 	clientSecret string
 	appToken     string
 	port         int
-	onInstall    OnInstall
 	installed    chan config.SlackConfig
 }
 
 // NewAuthServer creates an OAuth server. appToken is saved into the resulting SlackConfig
 // so the entry has all credentials needed to start a listener.
-func NewAuthServer(clientID, clientSecret, appToken string, onInstall OnInstall) *AuthServer {
+func NewAuthServer(clientID, clientSecret, appToken string) *AuthServer {
 	return &AuthServer{
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		appToken:     appToken,
 		port:         defaultPort,
-		onInstall:    onInstall,
 		installed:    make(chan config.SlackConfig, 1),
 	}
 }
@@ -178,9 +173,6 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		if s.onInstall != nil {
-			s.onInstall(entry)
-		}
 		select {
 		case s.installed <- entry:
 		default:

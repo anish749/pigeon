@@ -257,6 +257,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	// literal backslash-bang that wasn't intended.
 	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
 
+	if err := s.checkMPDMBotAccess(r.Context(), req); err != nil {
+		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
+		return
+	}
+
 	// All real sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
@@ -395,6 +400,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		))
 	}
 
+	// Attach metadata so the listener can identify pigeon-sent messages.
+	opts = append(opts, goslack.MsgOptionMetadata(slacklistener.PigeonSendMetadata(req.Via)))
+
 	if req.Thread != "" {
 		opts = append(opts, goslack.MsgOptionTS(req.Thread))
 		if req.Broadcast {
@@ -424,40 +432,9 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v%s", channelName, err, hint)}
 	}
 
-	// Ensure .meta.json exists for this conversation.
-	slackMeta := sender.Resolver.ConvMeta(channelID, channelName)
-	if _, err := s.store.WriteMetaIfNotExists(sender.Acct, channelName, slackMeta); err != nil {
-		slog.ErrorContext(ctx, "write meta failed", "channel", channelName, "error", err)
-	}
-
-	// Store locally.
+	// The listener will pick up this message via Socket Mode and write it to
+	// the store with the via field extracted from the pigeon_send metadata.
 	msgTS := slacklistener.ParseTimestamp(ts)
-	senderID := sender.BotUserID
-	if req.Via == modelv1.ViaPigeonAsUser {
-		senderID = sender.UserID
-	}
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       ts,
-			Ts:       msgTS,
-			Sender:   senderName,
-			SenderID: senderID,
-			Via:      req.Via,
-			Text:     req.Message,
-		},
-	}
-	if req.Thread != "" {
-		line.Msg.Reply = true
-		if err := s.store.AppendThread(sender.Acct, channelName, req.Thread, line); err != nil {
-			slog.ErrorContext(ctx, "failed to store sent thread message", "error", err)
-		}
-	} else {
-		if err := s.store.Append(sender.Acct, channelName, line); err != nil {
-			slog.ErrorContext(ctx, "failed to store sent message", "error", err)
-		}
-	}
-
 	return SendResponse{OK: true, Timestamp: msgTS.Format(time.RFC3339), SendAs: senderName}
 }
 
@@ -625,6 +602,38 @@ func validateTarget(platform string, slack *SlackTarget, contact string) error {
 		if !hasContact {
 			return fmt.Errorf("use contact for WhatsApp, not slack target")
 		}
+	}
+	return nil
+}
+
+// checkMPDMBotAccess rejects bot-token sends to group DMs where the bot is
+// not a member. Bots cannot access MPDMs they haven't been invited to, so we
+// fail early before the message enters the outbox.
+func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error {
+	if req.Platform != "slack" || req.Slack == nil {
+		return nil
+	}
+	if !strings.HasPrefix(req.Slack.Channel, "@mpdm-") {
+		return nil
+	}
+	if req.Via == modelv1.ViaPigeonAsUser {
+		return nil
+	}
+
+	acct := account.New(req.Platform, req.Account)
+	s.mu.RLock()
+	sender, ok := s.slack[acct.NameSlug()]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("no Slack workspace %q registered", acct.Display())
+	}
+
+	channelID, _, err := sender.Resolver.FindChannelID(ctx, req.Slack.Channel)
+	if err != nil {
+		return fmt.Errorf("resolve MPDM channel: %w", err)
+	}
+	if !sender.Resolver.IsMember(channelID) {
+		return fmt.Errorf("bot is not a member of this group DM — use --via pigeon-as-user to send as yourself")
 	}
 	return nil
 }

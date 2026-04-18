@@ -586,6 +586,25 @@ func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) err
 	return s.saveCursors(acct.SyncCursorsPath(), c)
 }
 
+// LoadSlackCursors reads Slack per-channel cursors for the given account.
+// Returns an empty map if the file does not exist yet (first-run case).
+func (s *FSStore) LoadSlackCursors(acct paths.AccountDir) (SlackCursors, error) {
+	c, err := loadCursors[SlackCursors](acct.SyncCursorsPath())
+	if err != nil {
+		return nil, err
+	}
+	// loadCursors returns *SlackCursors; dereference so callers get a usable map.
+	if *c == nil {
+		return make(SlackCursors), nil
+	}
+	return *c, nil
+}
+
+// SaveSlackCursors writes Slack per-channel cursors for the given account.
+func (s *FSStore) SaveSlackCursors(acct paths.AccountDir, c SlackCursors) error {
+	return s.saveCursors(acct.SyncCursorsPath(), c)
+}
+
 // loadCursors reads a YAML cursor file into a typed struct. Returns a zero
 // value of T if the file does not exist yet (first-run case).
 func loadCursors[T any](path string) (*T, error) {

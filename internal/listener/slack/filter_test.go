@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -13,22 +14,45 @@ import (
 	"github.com/anish749/pigeon/internal/store"
 )
 
-func TestAllowedSubType(t *testing.T) {
-	allowed := []string{"", "thread_broadcast", "bot_message"}
-	for _, st := range allowed {
-		if !allowedSubType(st) {
-			t.Errorf("allowedSubType(%q) = false, want true", st)
-		}
-	}
+func TestShouldKeepMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  goslack.Msg
+		want bool
+	}{
+		// Kept: conversational content with text.
+		{"regular message", goslack.Msg{Text: "hello"}, true},
+		{"bot message", goslack.Msg{SubType: "bot_message", Text: "k8s alert"}, true},
+		{"thread broadcast", goslack.Msg{SubType: "thread_broadcast", Text: "also posted"}, true},
+		{"assistant app thread", goslack.Msg{SubType: "assistant_app_thread", Text: "AI response"}, true},
+		{"huddle thread with blocks", goslack.Msg{SubType: "huddle_thread", Blocks: goslack.Blocks{BlockSet: []goslack.Block{goslack.NewSectionBlock(nil, nil, nil)}}}, true},
+		{"file share with files", goslack.Msg{SubType: "file_share", Files: []goslack.File{{Name: "doc.pdf"}}}, true},
 
-	blocked := []string{
-		"channel_join", "channel_leave", "channel_topic",
-		"channel_purpose", "file_share", "me_message",
+		// Kept: empty text but has content in blocks/attachments/files.
+		{"empty text with files", goslack.Msg{Files: []goslack.File{{Name: "img.png"}}}, true},
+		{"empty text with attachments", goslack.Msg{Attachments: []goslack.Attachment{{Title: "link"}}}, true},
+		{"empty text with blocks", goslack.Msg{Blocks: goslack.Blocks{BlockSet: []goslack.Block{goslack.NewSectionBlock(nil, nil, nil)}}}, true},
+
+		// Skipped: system/structural events.
+		{"channel join", goslack.Msg{SubType: "channel_join", Text: "joined"}, false},
+		{"channel leave", goslack.Msg{SubType: "channel_leave", Text: "left"}, false},
+		{"channel topic", goslack.Msg{SubType: "channel_topic", Text: "set topic"}, false},
+		{"channel purpose", goslack.Msg{SubType: "channel_purpose", Text: "set purpose"}, false},
+		{"me message", goslack.Msg{SubType: "me_message", Text: "is typing"}, false},
+		{"pinned item", goslack.Msg{SubType: "pinned_item", Text: "pinned"}, false},
+		{"unpinned item", goslack.Msg{SubType: "unpinned_item", Text: "unpinned"}, false},
+
+		// Skipped: no content at all.
+		{"empty everything", goslack.Msg{}, false},
+		{"system event no content", goslack.Msg{SubType: "channel_join"}, false},
 	}
-	for _, st := range blocked {
-		if allowedSubType(st) {
-			t.Errorf("allowedSubType(%q) = true, want false", st)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldKeepMessage(tt.msg)
+			if got != tt.want {
+				t.Errorf("shouldKeepMessage() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -135,7 +159,7 @@ func TestSenderName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, id, err := r.SenderName(context.Background(), tt.userID, tt.botID, tt.username)
+			name, id, err := r.SenderName(context.Background(), goslack.Msg{User: tt.userID, BotID: tt.botID, Username: tt.username})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got name=%q id=%q", name, id)

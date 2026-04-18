@@ -4,19 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	gosync "sync"
 	"time"
 
 	goslack "github.com/slack-go/slack"
-	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
@@ -25,127 +23,30 @@ const (
 	activityDays = 30
 )
 
-// syncCursors maps channel ID to the last synced Slack message timestamp.
-// Stored as .sync-cursors.yaml in the workspace data directory.
-type syncCursors map[string]string
-
-func cursorsPath(acct account.Account) string {
-	return paths.DefaultDataRoot().AccountFor(acct).SyncCursorsPath()
-}
-
-func loadCursors(acct account.Account) syncCursors {
-	data, err := os.ReadFile(cursorsPath(acct))
-	if err != nil {
-		return make(syncCursors)
-	}
-	var c syncCursors
-	if err := yaml.Unmarshal(data, &c); err != nil {
-		return make(syncCursors)
-	}
-	// yaml.Unmarshal on an empty file succeeds but leaves the map nil.
-	// This happens after a reset clears message data but leaves an empty cursor file.
-	if c == nil {
-		return make(syncCursors)
-	}
-	return c
-}
-
-func saveCursors(acct account.Account, c syncCursors) error {
-	path := cursorsPath(acct)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
 // MessageStore is the single write path for Slack messages. It writes message
 // files and maintains per-channel cursors so that both sync and the real-time
 // listener stay consistent.
 type MessageStore struct {
-	acct    account.Account
-	store   store.Store
-	mu      gosync.Mutex
-	cursors syncCursors
+	acct       account.Account
+	accountDir paths.AccountDir
+	store      *store.FSStore
+	mu         gosync.Mutex
+	cursors    store.SlackCursors
 }
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account, s store.Store) *MessageStore {
+func NewMessageStore(acct account.Account, s *store.FSStore) (*MessageStore, error) {
+	accountDir := paths.DefaultDataRoot().AccountFor(acct)
+	cursors, err := s.LoadSlackCursors(accountDir)
+	if err != nil {
+		return nil, fmt.Errorf("load slack cursors: %w", err)
+	}
 	return &MessageStore{
-		acct:    acct,
-		store:   s,
-		cursors: loadCursors(acct),
-	}
-}
-
-// AppendReaction stores a reaction or unreaction event in the date file
-// corresponding to the target message's timestamp.
-func (ms *MessageStore) AppendReaction(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// AppendEdit stores a message edit event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// AppendDelete stores a message delete event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(channelName string, line modelv1.Line) error {
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// Write persists a message to the appropriate date file. Does not advance the
-// cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(channelID, channelName, sender, senderID, text string, ts time.Time, slackTS string, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-		},
-	}
-	return ms.store.Append(ms.acct, channelName, line)
-}
-
-// WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Via:      via,
-			Text:     text,
-			Reply:    isReply,
-		},
-	}
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
-}
-
-// WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(channelName, threadTS, sender, senderID, text string, ts time.Time, slackTS string) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   sender,
-			SenderID: senderID,
-			Text:     text,
-		},
-	}
-	return ms.store.AppendThread(ms.acct, channelName, threadTS, line)
+		acct:       acct,
+		accountDir: accountDir,
+		store:      s,
+		cursors:    cursors,
+	}, nil
 }
 
 // EnsureThreadContextSeparator writes the separator line to a thread file.
@@ -167,11 +68,11 @@ func (ms *MessageStore) EnsureMeta(conversation string, meta modelv1.ConvMeta) {
 }
 
 // AdvanceCursor updates the cursor without writing a message (e.g. for skipped bot messages).
-func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) {
+func (ms *MessageStore) AdvanceCursor(channelID, slackTS string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.cursors[channelID] = slackTS
-	saveCursors(ms.acct, ms.cursors)
+	return ms.store.SaveSlackCursors(ms.accountDir, ms.cursors)
 }
 
 // Cursor returns the stored cursor for a channel.
@@ -295,7 +196,9 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "channel_not_found") || strings.Contains(errStr, "is_archived") {
-				ms.AdvanceCursor(ch.ID, oldest)
+				if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+					slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+				}
 			} else {
 				slog.WarnContext(ctx, "slack sync: fetch failed",
 					"channel", channelName, "error", err)
@@ -309,20 +212,14 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			// Track the latest timestamp regardless of whether we write the message
 			lastTS = msg.Timestamp
 
-			// Skip system events (channel_join, channel_topic, etc.) and messages
-			// with empty text. Allow bot messages through — they contain valuable
-			// info (alerts, CI, integrations).
-			if msg.Text == "" || !allowedSubType(msg.SubType) {
-				slog.WarnContext(ctx, "slack sync: skipping message",
-					"channel", channelName, "ts", msg.Timestamp,
-					"botID", msg.BotID, "subType", msg.SubType,
-					"emptyText", msg.Text == "")
+			if !shouldKeepMessage(msg.Msg) {
+				logDroppedMessage(ctx, msg.Msg, channelName, "slack sync")
 				continue
 			}
 
-			userName, userID, err := resolver.SenderName(ctx, msg.User, msg.BotID, msg.Username)
+			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.Msg)
 			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve sender",
+				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}
@@ -334,7 +231,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(ch.ID, channelName, userName, userID, text, ts, msg.Timestamp, modelv1.ViaOrganic); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false), slackraw.NewSlackRawContent(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -348,12 +245,16 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		threadsSynced := syncThreads(ctx, api, gate, resolver, ms, ch.ID, channelName, msgs)
 
 		if lastTS != "" {
-			ms.AdvanceCursor(ch.ID, lastTS)
+			if err := ms.AdvanceCursor(ch.ID, lastTS); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
 			// Mark empty channels so we don't re-probe them on next restart.
 			// Use the current oldest as a sentinel — next run will resume from here
 			// and immediately get an empty response.
-			ms.AdvanceCursor(ch.ID, oldest)
+			if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		}
 
 		if len(msgs) > 0 && written == 0 && threadsSynced == 0 {
@@ -406,8 +307,8 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 }
 
 // syncBotDMs syncs the bot's DM conversations. Messages are written to the same
-// contact directory as the user's DMs, with "sent to pigeon by" / "sent by pigeon"
-// labels so they interleave in the unified timeline.
+// contact directory as the user's DMs. The via field distinguishes direction
+// (ViaPigeonAsBot vs ViaToPigeon) and the read path decorates the sender.
 func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct account.Account, ms *MessageStore, gate *rateLimitGate, defaultOldest string, activityCutoff time.Time) error {
 	botAPI := goslack.New(botToken)
 
@@ -486,7 +387,8 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		for _, msg := range msgs {
 			lastTS = msg.Timestamp
 
-			if (msg.SubType != "" && msg.SubType != "thread_broadcast") || msg.Text == "" {
+			if !shouldKeepMessage(msg.Msg) {
+				logDroppedMessage(ctx, msg.Msg, channelName, "slack sync bot DM")
 				continue
 			}
 
@@ -498,26 +400,14 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			var senderName string
-			var senderID string
-			var via modelv1.Via
-			if msg.BotID != "" {
-				senderName = "sent by pigeon"
-				senderID = msg.BotID
-				via = modelv1.ViaPigeonAsBot
-			} else {
-				userName, err := resolver.UserName(ctx, msg.User)
-				if err != nil {
-					slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve user",
-						"channel", channelName, "ts", msg.Timestamp, "error", err)
-					continue
-				}
-				senderName = "sent to pigeon by " + userName
-				senderID = msg.User
-				via = modelv1.ViaToPigeon
+			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.Msg)
+			if err != nil {
+				slog.WarnContext(ctx, "slack sync: skipping bot DM message, cannot resolve",
+					"channel", channelName, "ts", msg.Timestamp, "error", err)
+				continue
 			}
-
-			if err := ms.Write(ch.ID, channelName, senderName, senderID, text, ts, msg.Timestamp, via); err != nil {
+			via := DetermineVia(msg.Msg, true)
+			if err := ms.Write(rs, text, ts, msg.Timestamp, via, slackraw.NewSlackRawContent(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -528,9 +418,13 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 		}
 
 		if lastTS != "" {
-			ms.AdvanceCursor(ch.ID, lastTS)
+			if err := ms.AdvanceCursor(ch.ID, lastTS); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		} else if _, hasCursor := ms.Cursor(ch.ID); !hasCursor {
-			ms.AdvanceCursor(ch.ID, oldest)
+			if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
+				slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
+			}
 		}
 
 		if written > 0 {
@@ -592,10 +486,11 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 		}
 
 		resp, err := api.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
-			ChannelID: channelID,
-			Oldest:    oldest,
-			Limit:     1000,
-			Cursor:    cursor,
+			ChannelID:          channelID,
+			Oldest:             oldest,
+			Limit:              1000,
+			Cursor:             cursor,
+			IncludeAllMetadata: true,
 		})
 		if gate.update(err) {
 			continue
@@ -662,12 +557,13 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write parent message (first reply from conversations.replies is the parent)
 		// Then write each reply indented
 		for _, reply := range replies {
-			if reply.Text == "" || !allowedSubType(reply.SubType) {
+			if !shouldKeepMessage(reply.Msg) {
+				logDroppedMessage(ctx, reply.Msg, channelName, "slack sync thread")
 				continue
 			}
-			userName, userID, err := resolver.SenderName(ctx, reply.User, reply.BotID, reply.Username)
+			rs, err := resolver.ResolveSender(ctx, channelID, reply.Msg)
 			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve sender",
+				slog.WarnContext(ctx, "slack sync: skipping thread reply, cannot resolve",
 					"channel", channelName, "thread_ts", msg.Timestamp, "ts", reply.Timestamp, "error", err)
 				continue
 			}
@@ -679,7 +575,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(channelName, msg.Timestamp, userName, userID, text, ts, reply.Timestamp, isReply, modelv1.ViaOrganic); err != nil {
+			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), slackraw.NewSlackRawContent(reply.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -703,12 +599,13 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 					if ctxMsg.ReplyCount > 0 {
 						break
 					}
-					if ctxMsg.Text == "" || !allowedSubType(ctxMsg.SubType) {
+					if !shouldKeepMessage(ctxMsg.Msg) {
+						logDroppedMessage(ctx, ctxMsg.Msg, channelName, "slack sync thread context")
 						continue
 					}
-					userName, userID, err := resolver.SenderName(ctx, ctxMsg.User, ctxMsg.BotID, ctxMsg.Username)
+					ctxRS, err := resolver.ResolveSender(ctx, channelID, ctxMsg.Msg)
 					if err != nil {
-						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve sender",
+						slog.WarnContext(ctx, "slack sync: skipping thread context msg, cannot resolve",
 							"channel", channelName, "thread_ts", msg.Timestamp, "ts", ctxMsg.Timestamp, "error", err)
 						continue
 					}
@@ -719,7 +616,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						continue
 					}
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(channelName, msg.Timestamp, userName, userID, text, ts, ctxMsg.Timestamp); err != nil {
+					if err := ms.WriteThreadContext(ctxRS, msg.Timestamp, text, ts, ctxMsg.Timestamp, slackraw.NewSlackRawContent(ctxMsg.Msg)); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}
@@ -741,10 +638,11 @@ func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimi
 			return all, err
 		}
 		msgs, hasMore, nextCursor, err := api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
-			ChannelID: channelID,
-			Timestamp: threadTS,
-			Limit:     1000,
-			Cursor:    cursor,
+			ChannelID:          channelID,
+			Timestamp:          threadTS,
+			Limit:              1000,
+			Cursor:             cursor,
+			IncludeAllMetadata: true,
 		})
 		if gate.update(err) {
 			continue
@@ -760,4 +658,3 @@ func fetchThreadReplies(ctx context.Context, api *goslack.Client, gate *rateLimi
 	}
 	return all, nil
 }
-
