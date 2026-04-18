@@ -25,36 +25,39 @@ from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("embed-sidecar")
 
-model: SentenceTransformer = None  # set in main before serving
 
+def make_handler(model: SentenceTransformer):
+    """Create a request handler class bound to the given model."""
 
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        if self.path != "/embed":
-            self.send_error(404)
-            return
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path != "/embed":
+                self.send_error(404)
+                return
 
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length))
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
 
-        text = body.get("text")
-        if not text:
-            self._json_response(400, {"error": "missing 'text' field"})
-            return
+            text = body.get("text")
+            if not text:
+                self._json_response(400, {"error": "missing 'text' field"})
+                return
 
-        embedding = model.encode(text, show_progress_bar=False)
-        self._json_response(200, {"embedding": embedding.tolist()})
+            embedding = model.encode(text, show_progress_bar=False)
+            self._json_response(200, {"embedding": embedding.tolist()})
 
-    def _json_response(self, status, obj):
-        data = json.dumps(obj).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        def _json_response(self, status, obj):
+            data = json.dumps(obj).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
-    def log_message(self, fmt, *args):
-        logger.debug(fmt, *args)
+        def log_message(self, fmt, *args):
+            logger.debug(fmt, *args)
+
+    return Handler
 
 
 class UnixHTTPServer(HTTPServer):
@@ -73,8 +76,6 @@ class UnixHTTPServer(HTTPServer):
 
 
 def main():
-    global model
-
     parser = argparse.ArgumentParser(description="Embedding sidecar server")
     parser.add_argument("--socket", required=True, help="Unix socket path")
     parser.add_argument("--model", required=True, help="sentence-transformers model name")
@@ -86,7 +87,7 @@ def main():
     model = SentenceTransformer(args.model)
     logger.info("model loaded: %d dims", model.get_sentence_embedding_dimension())
 
-    srv = UnixHTTPServer(args.socket, Handler)
+    srv = UnixHTTPServer(args.socket, make_handler(model))
     logger.info("listening on %s", args.socket)
 
     def shutdown(signum, frame):
