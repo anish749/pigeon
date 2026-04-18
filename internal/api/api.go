@@ -67,20 +67,21 @@ type Server struct {
 	startedAt   time.Time
 }
 
-// NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
+// NewServer creates a new API server. The outbox is created internally
+// with a submit callback that posts C&C review messages to the owner's DM.
+func NewServer(h *hub.Hub, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
 	srv := &Server{
 		whatsapp:    make(map[string]*WhatsAppSender),
 		slack:       make(map[string]*SlackSender),
 		gws:         make(map[string]struct{}),
 		hub:         h,
-		outbox:      ob,
 		store:       s,
 		syncTracker: syncTracker,
 		version:     version,
 		startedAt:   time.Now(),
 	}
-	srv.obHandler = outbox.NewHandler(ob, srv.executeSend, h.NotifySession)
+	srv.outbox = outbox.New(srv.CCNotifier())
+	srv.obHandler = outbox.NewHandler(srv.outbox, srv.executeSend, h.NotifySession)
 	return srv
 }
 

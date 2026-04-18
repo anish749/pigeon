@@ -164,8 +164,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 	if err != nil {
 		return fmt.Errorf("create message store for %s: %w", acct, err)
 	}
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.syncTracker)
-	listener.SetOutboxHandler(m.obHandler)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.obHandler, m.syncTracker)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:    botAPI,

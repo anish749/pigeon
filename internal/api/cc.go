@@ -27,12 +27,12 @@ func (s *Server) isOwnerTarget(req SendRequest) bool {
 	return req.Slack.UserID == sender.UserID
 }
 
-// RegisterCCNotifier sets up the outbox submit callback to post a C&C
-// review message to the owner's DM in Slack when a new item arrives.
-func (s *Server) RegisterCCNotifier() {
-	s.outbox.OnSubmit(func(item *outbox.Item) {
+// CCNotifier returns an outbox.SubmitFunc that posts a C&C review message
+// to the owner's DM in Slack when a new item arrives.
+func (s *Server) CCNotifier() outbox.SubmitFunc {
+	return func(item *outbox.Item) {
 		go s.postCCMessage(item)
-	})
+	}
 }
 
 func (s *Server) postCCMessage(item *outbox.Item) {

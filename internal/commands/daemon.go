@@ -18,7 +18,6 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/logging"
-	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store"
@@ -162,17 +161,14 @@ func DaemonRun(version string) error {
 	}
 	defer msgHub.Stop()
 
-	ob := outbox.New()
 	tracker := syncstatus.NewTracker()
-	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
+	apiServer := api.NewServer(msgHub, store, version, tracker)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
 	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.Route, msgHub.RouteReaction, apiServer.OutboxHandler(), store, dataRoot, tracker)
 	go slackMgr.Run(ctx, cfg.Slack)
-
-	apiServer.RegisterCCNotifier()
 
 	gwsMgr := daemon.NewGWSManager(apiServer, store, store, dataRoot, tracker)
 	go gwsMgr.Run(ctx, cfg.GWS)
