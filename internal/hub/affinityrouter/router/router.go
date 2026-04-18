@@ -110,18 +110,19 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		r.stats.FastPathRouted++
 	}
 
-	// Always buffer the signal.
+	// Get or create the buffer for this conversation.
 	buf := r.buffers[key]
 	if buf == nil {
 		buf = &buffer{}
 		r.buffers[key] = buf
 	}
-	buf.signals = append(buf.signals, sig)
-	r.stats.BufferedSignals++
 
-	// Check if buffer is ready for classification.
+	// Check if a burst boundary was crossed BEFORE adding the new signal.
+	// The gap is between the last buffered signal and the incoming signal.
 	if !r.bufferReady(buf, now) {
-		// Buffer not ready — return affinity result or default.
+		// Still within the same burst — buffer the signal and return.
+		buf.signals = append(buf.signals, sig)
+		r.stats.BufferedSignals++
 		if affinityResult != nil {
 			return affinityResult, nil
 		}
@@ -134,10 +135,12 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		}, nil
 	}
 
-	// Drain the buffer and classify.
+	// Burst boundary detected — classify the completed burst, then start
+	// a new buffer with the incoming signal.
 	signals := buf.signals
-	buf.signals = nil
+	buf.signals = []models.Signal{sig} // new signal starts the next burst
 	buf.lastClassified = now
+	r.stats.BufferedSignals++
 
 	var currentAffinityIDs []string
 	if entries, ok := r.affinities[key]; ok {
