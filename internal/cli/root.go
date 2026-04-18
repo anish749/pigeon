@@ -287,6 +287,7 @@ MAINTENANCE
 		newSetupSlackCmd(),
 		newSetupGWSCmd(),
 		newSetupLinearCmd(),
+		newWorkspaceCmd(),
 
 		// Daemon
 		newDaemonCmd(version),
