@@ -89,6 +89,7 @@ def main():
 
     srv = UnixHTTPServer(args.socket, make_handler(model))
     logger.info("listening on %s", args.socket)
+    print("READY", flush=True)
 
     def shutdown(signum, frame):
         logger.info("shutting down")

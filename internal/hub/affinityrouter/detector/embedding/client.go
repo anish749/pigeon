@@ -4,6 +4,7 @@
 package embedding
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 )
 
 // Client manages the Python embedding sidecar process and communicates
@@ -30,34 +30,23 @@ type Client struct {
 func NewClient(socketPath, modelName string) (*Client, error) {
 	sidecarScript := filepath.Join(findRepoRoot(), "embed", "sidecar.py")
 
-	cmd := exec.Command("uv", "run", sidecarScript, "--socket", socketPath, "--model", modelName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start embed sidecar: %w", err)
+	proc, err := startSidecar(sidecarScript, socketPath, modelName)
+	if err != nil {
+		return nil, err
 	}
 
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", socketPath)
+	return &Client{
+		socketPath: socketPath,
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					var d net.Dialer
+					return d.DialContext(ctx, "unix", socketPath)
+				},
 			},
 		},
-	}
-
-	c := &Client{
-		socketPath: socketPath,
-		httpClient: httpClient,
-		proc:       cmd.Process,
-	}
-
-	if err := c.waitReady(30 * time.Second); err != nil {
-		cmd.Process.Kill()
-		return nil, fmt.Errorf("embed sidecar not ready: %w", err)
-	}
-
-	return c, nil
+		proc: proc,
+	}, nil
 }
 
 // Close sends SIGTERM to the sidecar process.
@@ -104,19 +93,30 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	return result.Embedding, nil
 }
 
-func (c *Client) waitReady(timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(c.socketPath); err == nil {
-			conn, err := net.DialTimeout("unix", c.socketPath, time.Second)
-			if err == nil {
-				conn.Close()
-				return nil
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
+// startSidecar launches the Python sidecar process and blocks until it
+// prints READY to stdout, indicating the socket is listening.
+func startSidecar(script, socketPath, modelName string) (*os.Process, error) {
+	cmd := exec.Command("uv", "run", script, "--socket", socketPath, "--model", modelName)
+	cmd.Stderr = os.Stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-	return fmt.Errorf("socket %s not available after %s", c.socketPath, timeout)
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start embed sidecar: %w", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if scanner.Text() == "READY" {
+			return cmd.Process, nil
+		}
+	}
+
+	cmd.Process.Kill()
+	return nil, fmt.Errorf("embed sidecar exited without becoming ready")
 }
 
 func findRepoRoot() string {
