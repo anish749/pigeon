@@ -62,6 +62,8 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 
+	c.logger.Info("classifier response", "account", acct.Display(), "conversation", conversation, "returned_workstreams", raw.Workstreams, "new_name", raw.NewWorkstreamName, "new_focus", raw.NewWorkstreamFocus)
+
 	// Validate returned workstream IDs.
 	var newIDs []string
 	if len(raw.Workstreams) > 0 {
@@ -73,7 +75,7 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 			if activeIDs[id] {
 				newIDs = append(newIDs, id)
 			} else {
-				c.logger.Warn("classifier returned unknown workstream ID", "id", id)
+				c.logger.Warn("classifier returned unknown workstream ID", "id", id, "account", acct.Display(), "conversation", conversation)
 			}
 		}
 	}
@@ -87,8 +89,8 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 				Signal:        s,
 				WorkstreamIDs: newIDs,
 			})
+			c.logger.Info("reclassified signal", "signal_id", s.ID, "sender", s.Sender, "text", s.Text, "from", prev, "to", newIDs)
 		}
-		// Update tracking to reflect the classification.
 		c.decisions[s.ID] = newIDs
 	}
 

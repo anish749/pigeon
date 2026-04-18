@@ -101,10 +101,27 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	var affinityIDs []string
 	if entries, ok := r.affinities[key]; ok && len(entries) > 0 {
 		affinityIDs = make([]string, len(entries))
+		strengths := make([]int, len(entries))
 		for i, e := range entries {
 			affinityIDs[i] = e.WorkstreamID
+			strengths[i] = e.Strength
 		}
 		r.stats.FastPathRouted++
+		r.logger.Info("fast path: affinity hit",
+			"account", sig.Account.Display(),
+			"conversation", sig.Conversation,
+			"workstreams", affinityIDs,
+			"strengths", strengths,
+			"sender", sig.Sender,
+			"text", sig.Text,
+		)
+	} else {
+		r.logger.Info("no affinity",
+			"account", sig.Account.Display(),
+			"conversation", sig.Conversation,
+			"sender", sig.Sender,
+			"text", sig.Text,
+		)
 	}
 
 	// Get or create the detector and classifier for this conversation.
@@ -134,9 +151,9 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	}
 
 	if !shifted {
-		// No shift detected — observe the signal with the router's decision.
 		cls.Observe(sig, decision)
 		r.stats.BufferedSignals++
+		r.logger.Info("no shift: buffered", "account", sig.Account.Display(), "conversation", sig.Conversation, "routed_to", decision.WorkstreamIDs, "buffered", cls.Buffered())
 		return &RouteResult{Decision: decision}, nil
 	}
 
@@ -174,13 +191,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		NewWorkstreamFocus: result.NewWorkstreamFocus,
 	}
 
-	r.logger.Info("classified batch",
-		"account", key.Account.Display(),
-		"conversation", key.Conversation,
-		"window", cls.Buffered(),
-		"reclassified", len(result.Routings),
-		"new_workstream", result.NewWorkstreamName,
-	)
+	r.logger.Info("classified batch", "account", sig.Account.Display(), "conversation", key.Conversation, "window", cls.Buffered(), "reclassified", len(result.Routings), "new_workstream", result.NewWorkstreamName, "new_workstream_focus", result.NewWorkstreamFocus)
 
 	return routeResult, nil
 }
@@ -197,6 +208,7 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 			entries[i].Strength++
 			entries[i].LastSignal = ts
 			r.affinities[key] = entries
+			r.logger.Info("affinity strengthened", "conversation", key.Conversation, "workstream", workstreamID, "strength", entries[i].Strength)
 			return
 		}
 	}
@@ -205,6 +217,7 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 		Strength:     1,
 		LastSignal:   ts,
 	})
+	r.logger.Info("affinity created", "conversation", key.Conversation, "workstream", workstreamID, "strength", 1)
 }
 
 // Stats holds routing statistics.
