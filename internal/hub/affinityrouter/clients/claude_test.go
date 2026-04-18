@@ -3,6 +3,7 @@ package clients
 import (
 	"context"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 )
@@ -49,10 +50,12 @@ func TestStripCodeFences(t *testing.T) {
 	}
 }
 
-// TestClient_Classify calls the real claude CLI. Skip with -short.
+// TestClient_Classify calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
+//
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_Classify -v
 func TestClient_Classify(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: requires claude CLI")
+	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
+		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
 
 	c := New("haiku", 120*time.Second, slog.Default())
@@ -103,10 +106,12 @@ Respond with ONLY the JSON object, no other text.`
 		resp.Workstream, resp.NewWorkstreamName, resp.Confidence, resp.Reasoning)
 }
 
-// TestClient_UpdateFocus calls the real claude CLI. Skip with -short.
+// TestClient_UpdateFocus calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
+//
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_UpdateFocus -v
 func TestClient_UpdateFocus(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: requires claude CLI")
+	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
+		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
 
 	c := New("haiku", 120*time.Second, slog.Default())
