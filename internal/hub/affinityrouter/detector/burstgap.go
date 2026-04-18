@@ -28,7 +28,7 @@ func (d *BurstGapDetector) Observe(sig models.Signal) bool {
 // NewBurstGapFactory returns a Factory that creates BurstGapDetectors
 // with the given gap duration.
 func NewBurstGapFactory(gap time.Duration) Factory {
-	return func() ShiftDetector {
+	return func() ConversationShiftDetector {
 		return &BurstGapDetector{gap: gap}
 	}
 }

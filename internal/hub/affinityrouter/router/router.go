@@ -29,7 +29,7 @@ type Router struct {
 	// Internal state.
 	affinities map[models.ConversationKey][]models.AffinityEntry   // conversation → workstream weights
 	buffers    map[models.ConversationKey]*buffer                  // pending signals per conversation
-	detectors  map[models.ConversationKey]detector.ShiftDetector   // per-conversation shift detectors
+	detectors  map[models.ConversationKey]detector.ConversationShiftDetector   // per-conversation shift detectors
 
 	// Config.
 	workspace config.WorkspaceName
@@ -53,7 +53,7 @@ func New(cls *classifier.BatchClassifier, factory detector.Factory, cfg models.C
 		logger:      logger,
 		affinities:  make(map[models.ConversationKey][]models.AffinityEntry),
 		buffers:     make(map[models.ConversationKey]*buffer),
-		detectors:   make(map[models.ConversationKey]detector.ShiftDetector),
+		detectors:   make(map[models.ConversationKey]detector.ConversationShiftDetector),
 		workspace:   cfg.Workspace.Name,
 	}
 }

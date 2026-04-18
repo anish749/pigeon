@@ -110,7 +110,7 @@ func NewCosineFactory(res *CosineResources, cfg CosineConfig) Factory {
 	if cfg.ThresholdStd == 0 {
 		cfg.ThresholdStd = defaultThresholdStd
 	}
-	return func() ShiftDetector {
+	return func() ConversationShiftDetector {
 		return &CosineDetector{
 			model:        res.model,
 			windowSize:   cfg.WindowSize,
