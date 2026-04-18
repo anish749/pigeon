@@ -30,8 +30,9 @@ func NewHandler(ob *Outbox, send SendFunc, notify NotifyFunc) *Handler {
 // ActionRequest is the payload for POST /api/outbox/action.
 type ActionRequest struct {
 	ID     string `json:"id"`
-	Action string `json:"action"` // "approve" or "feedback"
+	Action string `json:"action"` // "approve", "feedback", or "set_via"
 	Note   string `json:"note,omitempty"`
+	Via    string `json:"via,omitempty"`
 }
 
 // HandleList returns all pending outbox items as JSON.
@@ -62,8 +63,10 @@ func (h *Handler) HandleAction(w http.ResponseWriter, r *http.Request) {
 		h.approve(w, r, item)
 	case "feedback":
 		h.feedback(w, item, req.Note)
+	case "set_via":
+		h.setVia(w, item, req.Via)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'approve' or 'feedback'"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'approve', 'feedback', or 'set_via'"})
 	}
 }
 
@@ -116,6 +119,28 @@ func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
 
 	h.outbox.Remove(item.ID)
 	slog.Info("outbox feedback delivered", "id", item.ID, "session_id", item.SessionID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) setVia(w http.ResponseWriter, item *Item, via string) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "parse payload: " + err.Error()})
+		return
+	}
+	viaJSON, err := json.Marshal(via)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "marshal via: " + err.Error()})
+		return
+	}
+	payload["via"] = viaJSON
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "marshal payload: " + err.Error()})
+		return
+	}
+	h.outbox.UpdatePayload(item.ID, updated)
+	slog.Info("outbox item via updated", "id", item.ID, "via", via)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

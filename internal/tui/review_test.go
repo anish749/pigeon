@@ -94,3 +94,25 @@ func itemFromReq(t *testing.T, req api.SendRequest) *outbox.Item {
 	}
 	return &outbox.Item{Payload: payload}
 }
+
+func TestCycleVia(t *testing.T) {
+	tests := []struct {
+		name string
+		req  api.SendRequest
+		want modelv1.Via
+	}{
+		{name: "slack bot to user", req: api.SendRequest{Platform: "slack", Via: modelv1.ViaPigeonAsBot}, want: modelv1.ViaPigeonAsUser},
+		{name: "slack empty to user", req: api.SendRequest{Platform: "slack"}, want: modelv1.ViaPigeonAsUser},
+		{name: "slack user to bot", req: api.SendRequest{Platform: "slack", Via: modelv1.ViaPigeonAsUser}, want: modelv1.ViaPigeonAsBot},
+		{name: "whatsapp always empty", req: api.SendRequest{Platform: "whatsapp"}, want: ""},
+		{name: "whatsapp via bot still empty", req: api.SendRequest{Platform: "whatsapp", Via: modelv1.ViaPigeonAsBot}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := itemFromReq(t, tt.req)
+			if got := cycleVia(item); got != tt.want {
+				t.Fatalf("cycleVia() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
