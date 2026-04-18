@@ -227,6 +227,76 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 	})
 }
 
+// FlushBuffers classifies all remaining buffered signals regardless of gap.
+// Call at the end of a replay to ensure the last burst in every conversation
+// gets classified.
+func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstream) ([]*RouteResult, error) {
+	r.mu.Lock()
+	keys := make([]models.ConversationKey, 0, len(r.buffers))
+	for key, buf := range r.buffers {
+		if len(buf.signals) > 0 {
+			keys = append(keys, key)
+		}
+	}
+	r.mu.Unlock()
+
+	var results []*RouteResult
+	var errs []error
+	for _, key := range keys {
+		r.mu.Lock()
+		buf := r.buffers[key]
+		if buf == nil || len(buf.signals) == 0 {
+			r.mu.Unlock()
+			continue
+		}
+		signals := buf.signals
+		buf.signals = nil
+
+		var currentAffinityIDs []string
+		if entries, ok := r.affinities[key]; ok {
+			for _, e := range entries {
+				currentAffinityIDs = append(currentAffinityIDs, e.WorkstreamID)
+			}
+		}
+		r.stats.ClassifierCalls++
+		r.mu.Unlock()
+
+		result, err := r.classifier.Classify(ctx, key, signals, workstreams, currentAffinityIDs)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		wsIDs := result.WorkstreamIDs
+		if len(wsIDs) == 0 && result.NewWorkstreamName == "" {
+			r.mu.Lock()
+			wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
+			r.mu.Unlock()
+		}
+
+		rr := &RouteResult{
+			Decision: models.RoutingDecision{
+				SignalID:      signals[0].ID,
+				WorkstreamIDs: wsIDs,
+				Ts:            signals[len(signals)-1].Ts,
+			},
+			NewWorkstreamName:  result.NewWorkstreamName,
+			NewWorkstreamFocus: result.NewWorkstreamFocus,
+		}
+
+		r.logger.Info("flush classified",
+			"conversation", key.Conversation,
+			"signals", len(signals),
+			"workstreams", wsIDs,
+			"new_workstream", result.NewWorkstreamName,
+		)
+
+		results = append(results, rr)
+	}
+
+	return results, nil
+}
+
 // Stats holds routing statistics.
 type Stats struct {
 	FastPathRouted  int

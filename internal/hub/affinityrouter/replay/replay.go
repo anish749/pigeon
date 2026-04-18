@@ -163,6 +163,25 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		}
 	}
 
+	// Flush remaining buffers — classify the last burst in every conversation.
+	active := mgr.ActiveWorkstreams(wsName)
+	flushResults, err := rtr.FlushBuffers(ctx, active)
+	if err != nil {
+		logger.Warn("flush buffers failed", "error", err)
+	}
+	for _, result := range flushResults {
+		if result.NewWorkstreamName != "" {
+			if id, err := mgr.ProposeNew(ctx, result.NewWorkstreamName, result.NewWorkstreamFocus, wsName, nil); err == nil && id != "" {
+				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, id)
+			}
+		}
+		if len(result.Decision.WorkstreamIDs) > 0 {
+			if err := mgr.ObserveRouting(ctx, models.Signal{}, result.Decision); err != nil {
+				logger.Warn("flush observe failed", "error", err)
+			}
+		}
+	}
+
 	// Build report.
 	report := &Report{
 		Since:        cfg.Since,
