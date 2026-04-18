@@ -16,43 +16,43 @@ import (
 func TestCosineSimilarity(t *testing.T) {
 	tests := []struct {
 		name string
-		a, b []float32
+		a, b []float64
 		want float64
 	}{
 		{
 			name: "identical vectors",
-			a:    []float32{1, 2, 3},
-			b:    []float32{1, 2, 3},
+			a:    []float64{1, 2, 3},
+			b:    []float64{1, 2, 3},
 			want: 1.0,
 		},
 		{
 			name: "opposite vectors",
-			a:    []float32{1, 0, 0},
-			b:    []float32{-1, 0, 0},
+			a:    []float64{1, 0, 0},
+			b:    []float64{-1, 0, 0},
 			want: -1.0,
 		},
 		{
 			name: "orthogonal vectors",
-			a:    []float32{1, 0, 0},
-			b:    []float32{0, 1, 0},
+			a:    []float64{1, 0, 0},
+			b:    []float64{0, 1, 0},
 			want: 0.0,
 		},
 		{
 			name: "scaled vectors are identical",
-			a:    []float32{1, 2, 3},
-			b:    []float32{2, 4, 6},
+			a:    []float64{1, 2, 3},
+			b:    []float64{2, 4, 6},
 			want: 1.0,
 		},
 		{
 			name: "45 degree angle",
-			a:    []float32{1, 0},
-			b:    []float32{1, 1},
+			a:    []float64{1, 0},
+			b:    []float64{1, 1},
 			want: 1 / math.Sqrt(2),
 		},
 		{
 			name: "zero vector",
-			a:    []float32{0, 0, 0},
-			b:    []float32{1, 2, 3},
+			a:    []float64{0, 0, 0},
+			b:    []float64{1, 2, 3},
 			want: 0.0,
 		},
 	}
@@ -67,80 +67,10 @@ func TestCosineSimilarity(t *testing.T) {
 	}
 }
 
-// --- RunningStats (Welford) tests ---
-
-func TestRunningStats_ConstantValues(t *testing.T) {
-	var s RunningStats
-	for i := 0; i < 5; i++ {
-		s.Observe(0.8)
-	}
-	if s.N != 5 {
-		t.Errorf("n = %d, want 5", s.N)
-	}
-	if math.Abs(s.Mean-0.8) > 1e-9 {
-		t.Errorf("mean = %v, want 0.8", s.Mean)
-	}
-	if math.Abs(s.Std()) > 1e-9 {
-		t.Errorf("std = %v, want 0.0", s.Std())
-	}
-}
-
-func TestRunningStats_TwoValues(t *testing.T) {
-	var s RunningStats
-	s.Observe(0.6)
-	s.Observe(0.8)
-	if math.Abs(s.Mean-0.7) > 1e-9 {
-		t.Errorf("mean = %v, want 0.7", s.Mean)
-	}
-	if math.Abs(s.Std()-0.1) > 1e-9 {
-		t.Errorf("std = %v, want 0.1", s.Std())
-	}
-}
-
-func TestRunningStats_SingleValue(t *testing.T) {
-	var s RunningStats
-	s.Observe(0.5)
-	if s.N != 1 {
-		t.Errorf("n = %d, want 1", s.N)
-	}
-	if s.Std() != 0 {
-		t.Errorf("std = %v, want 0.0 for single value", s.Std())
-	}
-}
-
-func TestRunningStats_MatchesBatchCalculation(t *testing.T) {
-	vals := []float64{0.95, 0.87, 0.92, 0.78, 0.91, 0.85, 0.60}
-
-	var s RunningStats
-	for _, v := range vals {
-		s.Observe(v)
-	}
-
-	// Batch calculation for comparison.
-	var sum float64
-	for _, v := range vals {
-		sum += v
-	}
-	batchMean := sum / float64(len(vals))
-	var sqDiff float64
-	for _, v := range vals {
-		diff := v - batchMean
-		sqDiff += diff * diff
-	}
-	batchStd := math.Sqrt(sqDiff / float64(len(vals)))
-
-	if math.Abs(s.Mean-batchMean) > 1e-9 {
-		t.Errorf("welford mean = %v, batch mean = %v", s.Mean, batchMean)
-	}
-	if math.Abs(s.Std()-batchStd) > 1e-9 {
-		t.Errorf("welford std = %v, batch std = %v", s.Std(), batchStd)
-	}
-}
-
 // --- fakeEmbedder ---
 
 type embedResponse struct {
-	vec []float32
+	vec []float64
 	err error
 }
 
@@ -149,7 +79,7 @@ type fakeEmbedder struct {
 	idx       int
 }
 
-func (f *fakeEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, _ string) ([]float64, error) {
 	if f.idx >= len(f.responses) {
 		return nil, fmt.Errorf("unexpected embed call %d", f.idx)
 	}
@@ -200,7 +130,7 @@ func TestObserve_FirstFullWindow(t *testing.T) {
 	// First full window caches embedding, returns false (nothing to compare).
 	emb := &fakeEmbedder{
 		responses: []embedResponse{
-			{vec: []float32{1, 0, 0, 0}},
+			{vec: []float64{1, 0, 0, 0}},
 		},
 	}
 	d := newTestDetector(emb, 2, 0.5)
@@ -220,8 +150,8 @@ func TestObserve_NoShift(t *testing.T) {
 	// Two very similar embeddings — no shift.
 	emb := &fakeEmbedder{
 		responses: []embedResponse{
-			{vec: []float32{1, 0, 0, 0}},     // first window
-			{vec: []float32{0.99, 0.1, 0, 0}}, // second window — very similar
+			{vec: []float64{1, 0, 0, 0}},     // first window
+			{vec: []float64{0.99, 0.1, 0, 0}}, // second window — very similar
 		},
 	}
 	d := newTestDetector(emb, 2, 0.5)
@@ -239,8 +169,8 @@ func TestObserve_ShiftDetected(t *testing.T) {
 	// Orthogonal embeddings — clear shift.
 	emb := &fakeEmbedder{
 		responses: []embedResponse{
-			{vec: []float32{1, 0, 0, 0}}, // first window
-			{vec: []float32{0, 0, 1, 0}}, // second window — orthogonal
+			{vec: []float64{1, 0, 0, 0}}, // first window
+			{vec: []float64{0, 0, 1, 0}}, // second window — orthogonal
 		},
 	}
 	d := newTestDetector(emb, 2, 0.5)
@@ -258,9 +188,9 @@ func TestObserve_EmbedError_TriggersReclassification(t *testing.T) {
 	// When embedding fails, Observe returns true to trigger LLM fallback.
 	emb := &fakeEmbedder{
 		responses: []embedResponse{
-			{vec: []float32{1, 0, 0, 0}},               // first window succeeds
+			{vec: []float64{1, 0, 0, 0}},                   // first window succeeds
 			{err: fmt.Errorf("sidecar connection refused")}, // second window fails
-			{vec: []float32{0.95, 0.05, 0, 0}},          // third window succeeds, compares against first
+			{vec: []float64{0.95, 0.05, 0, 0}},             // third window succeeds, compares against first
 		},
 	}
 	d := newTestDetector(emb, 2, 0.5)
@@ -289,19 +219,19 @@ func TestObserve_SelfCalibratingThreshold(t *testing.T) {
 	// We need windowSize=2, so each new signal after the first two produces
 	// one embed call and one similarity observation.
 	// Total: 1 initial embed + 6 comparison embeds = 7 embed calls.
-	highSim := []float32{1, 0, 0, 0}
-	slightlyDiff := []float32{0.98, 0.2, 0, 0} // cos with highSim ≈ 0.98
-	moderateDiff := []float32{0.6, 0.8, 0, 0}   // cos with highSim ≈ 0.6
+	highSim := []float64{1, 0, 0, 0}
+	slightlyDiff := []float64{0.98, 0.2, 0, 0} // cos with highSim ≈ 0.98
+	moderateDiff := []float64{0.6, 0.8, 0, 0}   // cos with highSim ≈ 0.6
 
 	emb := &fakeEmbedder{
 		responses: []embedResponse{
-			{vec: highSim},       // window 1 — cached
-			{vec: slightlyDiff},  // window 2 — sim ≈ 0.98
-			{vec: highSim},       // window 3 — sim ≈ 0.98
-			{vec: slightlyDiff},  // window 4 — sim ≈ 0.98
-			{vec: highSim},       // window 5 — sim ≈ 0.98
-			{vec: slightlyDiff},  // window 6 — sim ≈ 0.98 (5 observations, calibrated)
-			{vec: moderateDiff},  // window 7 — sim ≈ 0.6 (below calibrated threshold)
+			{vec: highSim},      // window 1 — cached
+			{vec: slightlyDiff}, // window 2 — sim ≈ 0.98
+			{vec: highSim},      // window 3 — sim ≈ 0.98
+			{vec: slightlyDiff}, // window 4 — sim ≈ 0.98
+			{vec: highSim},      // window 5 — sim ≈ 0.98
+			{vec: slightlyDiff}, // window 6 — sim ≈ 0.98 (5 observations, calibrated)
+			{vec: moderateDiff}, // window 7 — sim ≈ 0.6 (below calibrated threshold)
 		},
 	}
 	d := newTestDetector(emb, 2, 0.5) // fallback=0.5, so 0.6 would NOT trigger under fallback
@@ -317,8 +247,8 @@ func TestObserve_SelfCalibratingThreshold(t *testing.T) {
 		}
 	}
 
-	if d.stats.N != 5 {
-		t.Fatalf("expected 5 similarity observations, got %d", d.stats.N)
+	if len(d.sims) != 5 {
+		t.Fatalf("expected 5 similarity observations, got %d", len(d.sims))
 	}
 
 	// Threshold should now be calibrated: mean(~0.98) - 1*std(~0.0) ≈ 0.98.

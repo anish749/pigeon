@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
+
+	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/stat"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
@@ -13,7 +15,7 @@ import (
 
 // Embedder produces embedding vectors from text.
 type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float32, error)
+	Embed(ctx context.Context, text string) ([]float64, error)
 }
 
 // CosineDetector implements ConversationShiftDetector using embedding
@@ -28,16 +30,15 @@ type CosineDetector struct {
 	embedder Embedder
 	logger   *slog.Logger
 
-	// Self-calibrating threshold using Welford's online algorithm.
-	// After minCalibration observations, threshold = mean - stdMultiplier*std.
+	// Self-calibrating threshold parameters.
 	fallbackThreshold float64
 	stdMultiplier     float64
 	minCalibration    int
-	stats             RunningStats
+	sims              []float64
 
 	windowSize int
 	window     []models.Signal
-	prevEmbed  []float32
+	prevEmbed  []float64
 }
 
 func (d *CosineDetector) Observe(sig models.Signal) bool {
@@ -73,7 +74,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 
 	sim := cosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
-	d.stats.Observe(sim)
+	d.sims = append(d.sims, sim)
 
 	threshold := d.currentThreshold()
 	shifted := sim < threshold
@@ -81,7 +82,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		d.logger.Info("topic shift detected",
 			"sim", fmt.Sprintf("%.3f", sim),
 			"threshold", fmt.Sprintf("%.3f", threshold),
-			"calibrated", d.stats.N >= d.minCalibration,
+			"calibrated", len(d.sims) >= d.minCalibration,
 		)
 	}
 	return shifted
@@ -90,49 +91,21 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 // currentThreshold returns the self-calibrating threshold if enough
 // observations have been collected, otherwise the fallback.
 func (d *CosineDetector) currentThreshold() float64 {
-	if d.stats.N < d.minCalibration {
+	if len(d.sims) < d.minCalibration {
 		return d.fallbackThreshold
 	}
-	return d.stats.Mean - d.stdMultiplier*d.stats.Std()
+	mean, std := stat.PopMeanStdDev(d.sims, nil)
+	return mean - d.stdMultiplier*std
 }
 
-// RunningStats tracks mean and standard deviation incrementally using
-// Welford's online algorithm. O(1) per observation, no slice allocation.
-type RunningStats struct {
-	N    int
-	Mean float64
-	M2   float64 // sum of squared differences from the running mean
-}
-
-// Observe records a new value, updating the running mean and variance.
-func (s *RunningStats) Observe(x float64) {
-	s.N++
-	delta := x - s.Mean
-	s.Mean += delta / float64(s.N)
-	delta2 := x - s.Mean
-	s.M2 += delta * delta2
-}
-
-// Std returns the population standard deviation of all observed values.
-func (s *RunningStats) Std() float64 {
-	if s.N < 2 {
-		return 0
-	}
-	return math.Sqrt(s.M2 / float64(s.N))
-}
-
-func cosineSimilarity(a, b []float32) float64 {
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	denom := math.Sqrt(normA) * math.Sqrt(normB)
+// cosineSimilarity returns the cosine similarity between two vectors
+// using gonum's BLAS-optimized Dot and Norm.
+func cosineSimilarity(a, b []float64) float64 {
+	denom := floats.Norm(a, 2) * floats.Norm(b, 2)
 	if denom == 0 {
 		return 0
 	}
-	return dot / denom
+	return floats.Dot(a, b) / denom
 }
 
 func windowText(signals []models.Signal) string {
@@ -163,3 +136,4 @@ func NewCosineFactory(embedder Embedder, windowSize int, fallbackThreshold float
 		}
 	}
 }
+

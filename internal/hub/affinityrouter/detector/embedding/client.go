@@ -61,7 +61,7 @@ func (c *Client) Close() error {
 }
 
 // Embed returns the embedding vector for text.
-func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
+func (c *Client) Embed(ctx context.Context, text string) ([]float64, error) {
 	body, err := json.Marshal(struct {
 		Text string `json:"text"`
 	}{Text: text})
@@ -88,7 +88,7 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	}
 
 	var result struct {
-		Embedding []float32 `json:"embedding"`
+		Embedding []float64 `json:"embedding"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode embed response: %w", err)
