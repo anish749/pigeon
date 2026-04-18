@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/anish749/pigeon/internal/workspace"
+)
 
 // Config holds all configuration for the affinity router system.
 // A single instance is created at startup and passed to all components.
@@ -23,7 +27,7 @@ type Config struct {
 	LLMCallTimeout time.Duration // per-call timeout for each LLM subprocess invocation
 
 	// Filters.
-	Workspace string // if set, only process this workspace
+	Workspace *workspace.Workspace // if set, only process accounts in this workspace
 }
 
 // DefaultConfig returns a Config with sensible defaults.

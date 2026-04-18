@@ -9,9 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
+	"github.com/anish749/pigeon/internal/workspace"
 )
 
 func newWorkstreamCmd() *cobra.Command {
@@ -26,7 +28,7 @@ func newWorkstreamCmd() *cobra.Command {
 
 func newWorkstreamReplayCmd() *cobra.Command {
 	cfg := models.DefaultConfig()
-	var sinceStr, untilStr string
+	var sinceStr, untilStr, workspaceFlag string
 	var interactive bool
 
 	cmd := &cobra.Command{
@@ -53,6 +55,18 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				cfg.ApprovalMode = models.Interactive
 			}
 
+			if workspaceFlag != "" {
+				appCfg, err := config.Load()
+				if err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+				ws, err := workspace.GetCurrentWorkspace(appCfg, workspaceFlag)
+				if err != nil {
+					return err
+				}
+				cfg.Workspace = ws
+			}
+
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
@@ -69,7 +83,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
-	cmd.Flags().StringVar(&cfg.Workspace, "workspace", "", "Filter to specific workspace")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
 	cmd.Flags().IntVar(&cfg.BatchMinSignals, "batch-size", 8, "Signals per batch classification")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")

@@ -82,15 +82,19 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
 	}
 
-	if cfg.Workspace != "" {
+	if cfg.Workspace != nil {
+		allowed := make(map[string]bool, len(cfg.Workspace.Accounts))
+		for _, a := range cfg.Workspace.Accounts {
+			allowed[a.String()] = true
+		}
 		var filtered []models.Signal
 		for _, sig := range signals {
-			if sig.Account.Name == cfg.Workspace {
+			if allowed[sig.Account.String()] {
 				filtered = append(filtered, sig)
 			}
 		}
 		signals = filtered
-		logger.Info("filtered to workspace", "workspace", cfg.Workspace, "count", len(signals))
+		logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 	}
 
 	// Set up components.
