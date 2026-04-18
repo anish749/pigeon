@@ -27,7 +27,7 @@ type Config struct {
 	LLMCallTimeout time.Duration // per-call timeout for each LLM subprocess invocation
 
 	// Filters.
-	Workspace *workspace.Workspace // if set, only process accounts in this workspace
+	Workspace workspace.Workspace // resolved workspace — scopes signals to its accounts
 }
 
 // DefaultConfig returns a Config with sensible defaults.

@@ -1,10 +1,14 @@
 package models
 
-import "time"
+import (
+	"time"
 
-// ConversationKey uniquely identifies a conversation within a workspace.
+	"github.com/anish749/pigeon/internal/account"
+)
+
+// ConversationKey uniquely identifies a conversation within an account.
 type ConversationKey struct {
-	Workspace    string
+	Account      account.Account
 	Conversation string
 }
 

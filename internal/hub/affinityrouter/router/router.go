@@ -84,7 +84,7 @@ type RouteResult struct {
 // on the returned RouteResult will be set, but the Router does NOT create it.
 func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []models.Workstream) (*RouteResult, error) {
 	key := models.ConversationKey{
-		Workspace:    sig.Account.Name,
+		Account:      sig.Account,
 		Conversation: sig.Conversation,
 	}
 	now := time.Now()
@@ -127,7 +127,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		return &RouteResult{
 			Decision: models.RoutingDecision{
 				SignalID:      sig.ID,
-				WorkstreamIDs: []string{models.DefaultWorkstreamID(key.Workspace)},
+				WorkstreamIDs: []string{models.DefaultWorkstreamID(key.Account.String())},
 				Ts:            now,
 			},
 		}, nil
@@ -175,7 +175,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	}
 
 	r.logger.Info("classified batch",
-		"workspace", key.Workspace,
+		"account", key.Account.Display(),
 		"conversation", key.Conversation,
 		"signals", len(signals),
 		"workstreams", result.WorkstreamIDs,

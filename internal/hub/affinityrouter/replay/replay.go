@@ -82,7 +82,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
 	}
 
-	if cfg.Workspace != nil {
+	{
 		allowed := make(map[string]bool, len(cfg.Workspace.Accounts))
 		for _, a := range cfg.Workspace.Accounts {
 			allowed[a.String()] = true
@@ -94,7 +94,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			}
 		}
 		signals = filtered
-		logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
+		logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "accounts", len(allowed), "count", len(signals))
 	}
 
 	// Set up components.
@@ -106,11 +106,11 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 
 	// Replay: for each signal, route → observe (manager records + manages).
 	for i, sig := range signals {
-		workspace := sig.Account.Name
-		mgr.EnsureDefaultWorkstream(workspace)
+		acctKey := sig.Account.String()
+		mgr.EnsureDefaultWorkstream(acctKey)
 
 		// Route the signal.
-		active := mgr.ActiveWorkstreams(workspace)
+		active := mgr.ActiveWorkstreams(acctKey)
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
@@ -122,7 +122,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			newID, err := mgr.ProposeNew(ctx,
 				result.NewWorkstreamName,
 				result.NewWorkstreamFocus,
-				workspace,
+				acctKey,
 				[]models.Signal{sig},
 			)
 			if err != nil {
@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 
 		// Ensure decision has at least the default workstream.
 		if len(result.Decision.WorkstreamIDs) == 0 {
-			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(workspace)}
+			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(acctKey)}
 		}
 
 		// Manager records to ledger and runs lifecycle checks.
@@ -144,7 +144,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 
 		// Update router affinities from the decision.
 		key := models.ConversationKey{
-			Workspace:    workspace,
+			Account:      sig.Account,
 			Conversation: sig.Conversation,
 		}
 		for _, wsID := range result.Decision.WorkstreamIDs {

@@ -55,17 +55,15 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				cfg.ApprovalMode = models.Interactive
 			}
 
-			if workspaceFlag != "" {
-				appCfg, err := config.Load()
-				if err != nil {
-					return fmt.Errorf("load config: %w", err)
-				}
-				ws, err := workspace.GetCurrentWorkspace(appCfg, workspaceFlag)
-				if err != nil {
-					return err
-				}
-				cfg.Workspace = ws
+			appCfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
 			}
+			ws, err := workspace.GetCurrentWorkspace(appCfg, workspaceFlag)
+			if err != nil {
+				return err
+			}
+			cfg.Workspace = *ws
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,

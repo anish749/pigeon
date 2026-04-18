@@ -53,7 +53,7 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 	prompt := buildClassifyPrompt(key, signals, active, currentAffinityIDs)
 
 	c.logger.Info("classifying batch",
-		"workspace", key.Workspace,
+		"account", key.Account.Display(),
 		"conversation", key.Conversation,
 		"signals", len(signals),
 		"active_workstreams", len(active),
@@ -88,7 +88,7 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 
 	// If classifier returned nothing valid, route to default.
 	if len(result.WorkstreamIDs) == 0 && result.NewWorkstreamName == "" {
-		result.WorkstreamIDs = []string{models.DefaultWorkstreamID(key.Workspace)}
+		result.WorkstreamIDs = []string{models.DefaultWorkstreamID(key.Account.String())}
 	}
 
 	return result, nil
@@ -110,8 +110,8 @@ KEY CONCEPTS:
 
 `)
 
-	// Workspace and conversation context.
-	fmt.Fprintf(&b, "WORKSPACE: %s\n", key.Workspace)
+	// Account and conversation context.
+	fmt.Fprintf(&b, "ACCOUNT: %s\n", key.Account.Display())
 	fmt.Fprintf(&b, "CONVERSATION: %s\n", key.Conversation)
 	convType := "channel"
 	if strings.HasPrefix(key.Conversation, "@") {
