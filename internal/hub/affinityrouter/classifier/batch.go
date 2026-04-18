@@ -62,7 +62,7 @@ func New(client *clients.Client, logger *slog.Logger) *BatchClassifier {
 
 // Classify classifies a batch of signals against active workstreams.
 // Returns which workstream(s) the signals belong to, or proposes a new one.
-func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []*models.Workstream, currentAffinityIDs []string) (*Result, error) {
+func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) (*Result, error) {
 	prompt := buildClassifyPrompt(key, signals, active, currentAffinityIDs)
 
 	c.logger.Debug("classifying batch",
@@ -110,7 +110,7 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 	return result, nil
 }
 
-func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []*models.Workstream, currentAffinityIDs []string) string {
+func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "You are a workstream classifier for the %q workspace.\n\n", key.Workspace)
@@ -123,9 +123,8 @@ func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, ac
 
 	b.WriteString("\nActive workstreams:\n")
 	for _, ws := range active {
-		fmt.Fprintf(&b, "- ID: %s\n  Name: %s\n  Focus: %s\n  Signals: %d | People: %s\n\n",
-			ws.ID, ws.Name, ws.Focus, ws.SignalCount,
-			strings.Join(limitSlice(ws.Participants, 5), ", "))
+		fmt.Fprintf(&b, "- ID: %s\n  Name: %s\n  Focus: %s\n\n",
+			ws.ID, ws.Name, ws.Focus)
 	}
 	if len(active) == 0 {
 		b.WriteString("(none — all signals are in the default stream)\n\n")

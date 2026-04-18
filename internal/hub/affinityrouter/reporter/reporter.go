@@ -28,10 +28,9 @@ func Print(w io.Writer, r *replay.Report) {
 
 	// Routing stats.
 	fmt.Fprintf(w, "\nRouting stats:\n")
-	fmt.Fprintf(w, "  Fast-path routed:  %d\n", r.AccumulatorStats.FastPathRouted)
-	fmt.Fprintf(w, "  Batch classified:  %d\n", r.AccumulatorStats.BatchClassified)
-	fmt.Fprintf(w, "  Classifier calls:  %d\n", r.ClassifierCalls)
-	fmt.Fprintf(w, "  Focus updates:     %d\n", r.FocusUpdates)
+	fmt.Fprintf(w, "  Fast-path routed:  %d\n", r.RouterStats.FastPathRouted)
+	fmt.Fprintf(w, "  Classifier calls:  %d\n", r.RouterStats.ClassifierCalls)
+	fmt.Fprintf(w, "  Focus updates:     %d\n", r.ManagerStats.FocusUpdates)
 
 	// Proposal stats.
 	if r.ProposalsTotal > 0 {
