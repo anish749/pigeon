@@ -14,6 +14,7 @@ import (
 
 	"github.com/gosimple/slug"
 
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
@@ -68,13 +69,13 @@ func (m *Manager) GetWorkstream(id string) (models.Workstream, bool) {
 }
 
 // ActiveWorkstreams returns non-default, active workstreams for a workspace.
-func (m *Manager) ActiveWorkstreams(workspace string) []models.Workstream {
+func (m *Manager) ActiveWorkstreams(ws config.WorkspaceName) []models.Workstream {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var result []models.Workstream
-	for _, ws := range m.workstreams {
-		if ws.Workspace == workspace && ws.State == models.StateActive && !ws.IsDefault() {
-			result = append(result, ws)
+	for _, w := range m.workstreams {
+		if w.Workspace == ws && w.State == models.StateActive && !w.IsDefault() {
+			result = append(result, w)
 		}
 	}
 	return result
@@ -93,12 +94,12 @@ func (m *Manager) AllWorkstreams() []models.Workstream {
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
 // if it doesn't exist.
-func (m *Manager) EnsureDefaultWorkstream(workspace string) {
-	id := models.DefaultWorkstreamID(workspace)
+func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName) {
+	id := models.DefaultWorkstreamID(ws)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workstreams[id]; !ok {
-		m.workstreams[id] = models.NewDefaultWorkstream(workspace)
+		m.workstreams[id] = models.NewDefaultWorkstream(ws)
 	}
 }
 
@@ -106,41 +107,41 @@ func (m *Manager) EnsureDefaultWorkstream(workspace string) {
 
 // ProposeNew queues a proposal to create a new workstream. In AutoApprove
 // mode, creates immediately. Returns the new workstream ID if created.
-func (m *Manager) ProposeNew(_ context.Context, name, focus, workspace string, triggerSignals []models.Signal) (string, error) {
+func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.WorkspaceName, triggerSignals []models.Signal) (string, error) {
 	proposal := &models.Proposal{
 		Type:           models.ProposalCreate,
 		SuggestedName:  name,
 		SuggestedFocus: focus,
-		Workspace:      workspace,
+		Workspace:      ws,
 		ProposedAt:     time.Now(),
 	}
 
 	if m.cfg.ApprovalMode == models.AutoApprove {
-		ws := models.Workstream{
+		w := models.Workstream{
 			ID:        generateWorkstreamID(name),
 			Name:      name,
-			Workspace: workspace,
+			Workspace: ws,
 			State:     models.StateActive,
 			Focus:     focus,
 			Created:   triggerSignals[0].Ts,
 		}
 
 		m.mu.Lock()
-		if _, exists := m.workstreams[ws.ID]; exists {
+		if _, exists := m.workstreams[w.ID]; exists {
 			m.mu.Unlock()
-			return ws.ID, nil // already exists, reuse
+			return w.ID, nil // already exists, reuse
 		}
-		m.workstreams[ws.ID] = ws
+		m.workstreams[w.ID] = w
 		proposal.State = models.ProposalApproved
 		m.proposals = append(m.proposals, proposal)
 		m.mu.Unlock()
 
 		m.logger.Info("workstream created (auto-approved)",
-			"workspace", workspace,
+			"workspace", string(ws),
 			"name", name,
-			"id", ws.ID,
+			"id", w.ID,
 		)
-		return ws.ID, nil
+		return w.ID, nil
 	}
 
 	// Queue for user confirmation.
@@ -152,7 +153,7 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus, workspace string, t
 	m.mu.Unlock()
 
 	m.logger.Info("workstream proposed (pending confirmation)",
-		"workspace", workspace,
+		"workspace", string(ws),
 		"name", name,
 	)
 	return "", nil
@@ -299,7 +300,7 @@ WHAT TO AVOID:
 `)
 
 	fmt.Fprintf(&b, "WORKSTREAM: %s\n", ws.Name)
-	fmt.Fprintf(&b, "WORKSPACE: %s\n", ws.Workspace)
+	fmt.Fprintf(&b, "WORKSPACE: %s\n", string(ws.Workspace))
 	fmt.Fprintf(&b, "CURRENT FOCUS (may be outdated): %s\n\n", ws.Focus)
 
 	b.WriteString("RECENT MESSAGES (use these to understand what the workstream is about now):\n")

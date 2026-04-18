@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
@@ -46,7 +47,7 @@ type Report struct {
 type WorkstreamReport struct {
 	ID           string
 	Name         string
-	Workspace    string
+	Workspace    config.WorkspaceName
 	State        models.WorkstreamState
 	Focus        string
 	SignalCount  int
@@ -105,12 +106,12 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	mgr := manager.New(claude, sc, cfg, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).
+	wsName := cfg.Workspace.Name
 	for i, sig := range signals {
-		acctKey := sig.Account.String()
-		mgr.EnsureDefaultWorkstream(acctKey)
+		mgr.EnsureDefaultWorkstream(wsName)
 
 		// Route the signal.
-		active := mgr.ActiveWorkstreams(acctKey)
+		active := mgr.ActiveWorkstreams(wsName)
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
@@ -122,7 +123,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			newID, err := mgr.ProposeNew(ctx,
 				result.NewWorkstreamName,
 				result.NewWorkstreamFocus,
-				acctKey,
+				wsName,
 				[]models.Signal{sig},
 			)
 			if err != nil {
@@ -134,7 +135,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 
 		// Ensure decision has at least the default workstream.
 		if len(result.Decision.WorkstreamIDs) == 0 {
-			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(acctKey)}
+			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(wsName)}
 		}
 
 		// Manager records to ledger and runs lifecycle checks.

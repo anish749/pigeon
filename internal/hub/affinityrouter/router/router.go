@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
@@ -28,6 +29,7 @@ type Router struct {
 	buffers    map[models.ConversationKey]*buffer                // pending signals per conversation
 
 	// Config.
+	workspace       config.WorkspaceName
 	batchMinSignals int
 	batchMaxAge     time.Duration
 
@@ -49,6 +51,7 @@ func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger
 		logger:          logger,
 		affinities:      make(map[models.ConversationKey][]models.AffinityEntry),
 		buffers:         make(map[models.ConversationKey]*buffer),
+		workspace:       cfg.Workspace.Name,
 		batchMinSignals: cfg.BatchMinSignals,
 		batchMaxAge:     cfg.BatchMaxAge,
 	}
@@ -127,7 +130,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		return &RouteResult{
 			Decision: models.RoutingDecision{
 				SignalID:      sig.ID,
-				WorkstreamIDs: []string{models.DefaultWorkstreamID(key.Account.String())},
+				WorkstreamIDs: []string{models.DefaultWorkstreamID(r.workspace)},
 				Ts:            now,
 			},
 		}, nil

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/anish749/pigeon/internal/config"
+)
 
 // ProposalType classifies a workstream lifecycle proposal.
 type ProposalType string
@@ -29,8 +33,8 @@ type Proposal struct {
 
 	// For create proposals.
 	SuggestedName  string // proposed workstream name
-	SuggestedFocus string // proposed focus description
-	Workspace      string
+	SuggestedFocus string               // proposed focus description
+	Workspace      config.WorkspaceName
 
 	// For merge proposals.
 	MergeSourceIDs []string // workstream IDs to merge

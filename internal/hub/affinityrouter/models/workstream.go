@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/anish749/pigeon/internal/config"
+)
 
 // WorkstreamState represents the lifecycle state of a workstream.
 type WorkstreamState string
@@ -16,25 +20,25 @@ const (
 // RoutingLedger. State changes (focus update, dormancy) produce a new
 // Workstream value via the With* methods.
 type Workstream struct {
-	ID        string          // unique identifier
-	Name      string          // human-readable name
-	Workspace string          // which workspace this belongs to
-	State     WorkstreamState // active, dormant, resolved
-	Focus     string          // LLM-generated description, used for routing
-	Created   time.Time       // when this workstream was first created
+	ID        string               // unique identifier
+	Name      string               // human-readable name
+	Workspace config.WorkspaceName // which workspace this belongs to
+	State     WorkstreamState      // active, dormant, resolved
+	Focus     string               // LLM-generated description, used for routing
+	Created   time.Time            // when this workstream was first created
 }
 
 // DefaultWorkstreamID returns the ID for a workspace's default workstream.
-func DefaultWorkstreamID(workspace string) string {
-	return "_default_" + workspace
+func DefaultWorkstreamID(ws config.WorkspaceName) string {
+	return "_default_" + string(ws)
 }
 
 // NewDefaultWorkstream creates the default catch-all workstream for a workspace.
-func NewDefaultWorkstream(workspace string) Workstream {
+func NewDefaultWorkstream(ws config.WorkspaceName) Workstream {
 	return Workstream{
-		ID:        DefaultWorkstreamID(workspace),
+		ID:        DefaultWorkstreamID(ws),
 		Name:      "General",
-		Workspace: workspace,
+		Workspace: ws,
 		State:     StateActive,
 		Focus:     "Unclassified signals — general conversation, coordination that doesn't belong to a specific workstream.",
 		Created:   time.Now(),

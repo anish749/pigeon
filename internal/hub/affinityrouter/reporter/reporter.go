@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 )
@@ -42,17 +43,17 @@ func Print(w io.Writer, r *replay.Report) {
 	}
 
 	// Group workstreams by workspace.
-	byWorkspace := make(map[string][]replay.WorkstreamReport)
+	byWorkspace := make(map[config.WorkspaceName][]replay.WorkstreamReport)
 	for _, ws := range r.Workstreams {
 		byWorkspace[ws.Workspace] = append(byWorkspace[ws.Workspace], ws)
 	}
 
 	// Sort workspace names.
-	var workspaces []string
+	var workspaces []config.WorkspaceName
 	for ws := range byWorkspace {
 		workspaces = append(workspaces, ws)
 	}
-	sort.Strings(workspaces)
+	sort.Slice(workspaces, func(i, j int) bool { return workspaces[i] < workspaces[j] })
 
 	for _, workspace := range workspaces {
 		wsList := byWorkspace[workspace]
@@ -66,7 +67,7 @@ func Print(w io.Writer, r *replay.Report) {
 		})
 
 		fmt.Fprintf(w, "\n═══════════════════════════════════════\n")
-		fmt.Fprintf(w, "WORKSPACE: %s\n", workspace)
+		fmt.Fprintf(w, "WORKSPACE: %s\n", string(workspace))
 		fmt.Fprintf(w, "═══════════════════════════════════════\n")
 
 		nonDefault := 0

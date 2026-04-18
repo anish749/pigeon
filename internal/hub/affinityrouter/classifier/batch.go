@@ -86,11 +86,6 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 		result.NewWorkstreamFocus = raw.NewWorkstreamFocus
 	}
 
-	// If classifier returned nothing valid, route to default.
-	if len(result.WorkstreamIDs) == 0 && result.NewWorkstreamName == "" {
-		result.WorkstreamIDs = []string{models.DefaultWorkstreamID(key.Account.String())}
-	}
-
 	return result, nil
 }
 
