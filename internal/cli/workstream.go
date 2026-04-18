@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
@@ -30,6 +31,8 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cfg := models.DefaultConfig()
 	var sinceStr, untilStr, workspaceFlag string
 	var interactive bool
+	var detectorType, onnxRuntime string
+	var burstGap time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -69,7 +72,23 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			report, err := replay.Run(context.Background(), cfg, logger)
+			// Create the detector factory based on --detector flag.
+			var factory detector.Factory
+			switch detectorType {
+			case "burst-gap":
+				factory = detector.NewBurstGapFactory(burstGap)
+			case "cosine":
+				res, err := detector.NewCosineResources(onnxRuntime)
+				if err != nil {
+					return fmt.Errorf("init cosine detector: %w", err)
+				}
+				defer res.Close()
+				factory = detector.NewCosineFactory(res, detector.CosineConfig{})
+			default:
+				return fmt.Errorf("unknown detector type %q (use burst-gap or cosine)", detectorType)
+			}
+
+			report, err := replay.Run(context.Background(), cfg, factory, logger)
 			if err != nil {
 				return err
 			}
@@ -82,10 +101,11 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
-	cmd.Flags().DurationVar(&cfg.BurstGap, "burst-gap", 90*time.Minute, "Gap between messages that triggers burst classification")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
-	cmd.Flags().StringVar(&cfg.OnnxRuntimePath, "onnx-runtime", "", "Path to ONNX runtime library (auto-detects from ONNXRUNTIME_LIB_PATH or common paths)")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
+	cmd.Flags().StringVar(&detectorType, "detector", "burst-gap", "Shift detector: burst-gap or cosine")
+	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
+	cmd.Flags().StringVar(&onnxRuntime, "onnx-runtime", "", "Path to ONNX runtime library (for cosine detector)")
 
 	return cmd
 }
