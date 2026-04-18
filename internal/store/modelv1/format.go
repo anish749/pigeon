@@ -37,7 +37,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, sender, m.SenderID, m.Text))
 
-	lines = append(lines, formatRaw(m.RawType, m.Raw, prefix+"    ")...)
+	lines = append(lines, formatRaw(m.Raw, prefix+"    ")...)
 
 	if len(m.Reactions) > 0 {
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))
@@ -55,7 +55,7 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
-	lines = append(lines, formatRaw(m.RawType, m.Raw, "  ")...)
+	lines = append(lines, formatRaw(m.Raw, "  ")...)
 
 	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
 	if m.Via != "" {

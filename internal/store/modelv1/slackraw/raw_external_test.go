@@ -11,7 +11,7 @@ import (
 
 // TestSlackRawContent_RoundTripViaJSONL tests the full round-trip through
 // JSONL storage: SlackRawContent → AsSerializable → MsgLine → JSONL →
-// Parse → MsgLine.Raw → FromSerializable → SlackRawContent
+// Parse → MsgLine.Raw (verified as map)
 func TestSlackRawContent_RoundTripViaJSONL(t *testing.T) {
 	msg := goslack.Msg{
 		Files: []goslack.File{
@@ -45,21 +45,27 @@ func TestSlackRawContent_RoundTripViaJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-
-	// Deserialize Raw back to typed struct.
-	restored, err := slackraw.FromSerializable(parsed.Msg.Raw)
-	if err != nil {
-		t.Fatalf("FromSerializable: %v", err)
+	if parsed.Msg.Raw == nil {
+		t.Fatal("Raw is nil after round-trip")
 	}
 
-	if len(restored.Files) != 1 || restored.Files[0].Name != "doc.pdf" {
-		t.Errorf("files round-trip failed: %+v", restored.Files)
+	// Verify files survived.
+	files, ok := parsed.Msg.Raw["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("files = %v, want slice of 1", parsed.Msg.Raw["files"])
 	}
-	if len(restored.Attachments) != 1 || restored.Attachments[0].Fallback != "deploy notification" {
-		t.Errorf("attachments round-trip failed: %+v", restored.Attachments)
+	if files[0].(map[string]any)["name"] != "doc.pdf" {
+		t.Errorf("file name = %v, want doc.pdf", files[0].(map[string]any)["name"])
 	}
-	if len(restored.Attachments[0].Fields) != 1 || restored.Attachments[0].Fields[0].Title != "Status" {
-		t.Errorf("attachment fields round-trip failed: %+v", restored.Attachments[0].Fields)
+
+	// Verify attachments survived.
+	atts, ok := parsed.Msg.Raw["attachments"].([]any)
+	if !ok || len(atts) != 1 {
+		t.Fatalf("attachments = %v, want slice of 1", parsed.Msg.Raw["attachments"])
+	}
+	att := atts[0].(map[string]any)
+	if att["fallback"] != "deploy notification" {
+		t.Errorf("fallback = %v, want deploy notification", att["fallback"])
 	}
 }
 

@@ -51,14 +51,3 @@ func (c SlackRawContent) AsSerializable() SerializableSlackRaw {
 	return raw
 }
 
-func FromSerializable(raw map[string]any) (SlackRawContent, error) {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return SlackRawContent{}, err
-	}
-	var rc SlackRawContent
-	if err := json.Unmarshal(data, &rc); err != nil {
-		return SlackRawContent{}, err
-	}
-	return rc, nil
-}
