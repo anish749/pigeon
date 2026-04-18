@@ -50,10 +50,10 @@ func TestStripCodeFences(t *testing.T) {
 	}
 }
 
-// TestClient_Classify calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
+// TestClient_JSON calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
 //
-// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_Classify -v
-func TestClient_Classify(t *testing.T) {
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_JSON -v
+func TestClient_JSON(t *testing.T) {
 	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
@@ -86,9 +86,15 @@ Respond with a JSON object:
 }
 Respond with ONLY the JSON object, no other text.`
 
-	resp, err := c.Classify(context.Background(), prompt)
-	if err != nil {
-		t.Fatalf("Classify: %v", err)
+	var resp struct {
+		Workstreams          []string `json:"workstreams"`
+		NewWorkstreamName    string   `json:"new_workstream_name"`
+		NewWorkstreamFocus   string   `json:"new_workstream_focus"`
+		Confidence           float64  `json:"confidence"`
+		Reasoning            string   `json:"reasoning"`
+	}
+	if err := c.JSON(context.Background(), prompt, &resp); err != nil {
+		t.Fatalf("JSON: %v", err)
 	}
 
 	if resp.Confidence < 0 || resp.Confidence > 1 {
@@ -102,10 +108,10 @@ Respond with ONLY the JSON object, no other text.`
 		resp.Workstreams, resp.NewWorkstreamName, resp.Confidence, resp.Reasoning)
 }
 
-// TestClient_UpdateFocus calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
+// TestClient_Text calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
 //
-// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_UpdateFocus -v
-func TestClient_UpdateFocus(t *testing.T) {
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_Text -v
+func TestClient_Text(t *testing.T) {
 	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
@@ -122,9 +128,9 @@ Current focus: "Server reliability, deployments, and on-call incidents."
 
 Write an updated 1-3 sentence focus description that incorporates the new signals. Reply with the description only, no other text.`
 
-	focus, err := c.UpdateFocus(context.Background(), prompt)
+	focus, err := c.Text(context.Background(), prompt)
 	if err != nil {
-		t.Fatalf("UpdateFocus: %v", err)
+		t.Fatalf("Text: %v", err)
 	}
 	if focus == "" {
 		t.Error("focus is empty")

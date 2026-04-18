@@ -12,6 +12,20 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
+// llmClassifyJSON is the JSON shape the classifier prompt asks the model to return.
+type llmClassifyJSON struct {
+	// Workstreams lists the IDs of existing workstreams these signals belong to.
+	Workstreams []string `json:"workstreams"`
+
+	NewWorkstreamName string `json:"new_workstream_name,omitempty"`
+
+	NewWorkstreamFocus string `json:"new_workstream_focus,omitempty"`
+
+	Confidence float64 `json:"confidence"`
+
+	Reasoning string `json:"reasoning"`
+}
+
 // Result is the classification outcome for a batch of signals.
 type Result struct {
 	// WorkstreamIDs lists existing workstreams these signals belong to.
@@ -58,23 +72,23 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 		"active_workstreams", len(active),
 	)
 
-	resp, err := c.client.Classify(ctx, prompt)
-	if err != nil {
+	var raw llmClassifyJSON
+	if err := c.client.JSON(ctx, prompt, &raw); err != nil {
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 
 	result := &Result{
-		Confidence: resp.Confidence,
-		Reasoning:  resp.Reasoning,
+		Confidence: raw.Confidence,
+		Reasoning:  raw.Reasoning,
 	}
 
-	if len(resp.Workstreams) > 0 {
+	if len(raw.Workstreams) > 0 {
 		// Verify all returned workstream IDs exist.
 		activeIDs := make(map[string]bool, len(active))
 		for _, ws := range active {
 			activeIDs[ws.ID] = true
 		}
-		for _, id := range resp.Workstreams {
+		for _, id := range raw.Workstreams {
 			if activeIDs[id] {
 				result.WorkstreamIDs = append(result.WorkstreamIDs, id)
 			} else {
@@ -83,9 +97,9 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 		}
 	}
 
-	if resp.NewWorkstreamName != "" {
-		result.NewWorkstreamName = resp.NewWorkstreamName
-		result.NewWorkstreamFocus = resp.NewWorkstreamFocus
+	if raw.NewWorkstreamName != "" {
+		result.NewWorkstreamName = raw.NewWorkstreamName
+		result.NewWorkstreamFocus = raw.NewWorkstreamFocus
 	}
 
 	// If classifier returned nothing valid, route to default.

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Client wraps the claude CLI for making LLM calls.
+// Client wraps the claude CLI for non-interactive LLM calls.
 type Client struct {
 	model   string
 	timeout time.Duration
@@ -24,26 +24,6 @@ func New(model string, timeout time.Duration, logger *slog.Logger) *Client {
 	return &Client{model: model, timeout: timeout, logger: logger}
 }
 
-// ClassifyResponse is the structured output from a classification call.
-type ClassifyResponse struct {
-	// Workstreams lists the IDs of existing workstreams these signals belong to.
-	// A signal can belong to multiple workstreams (multi-routing).
-	// Empty means "propose new workstream."
-	Workstreams []string `json:"workstreams"`
-
-	// NewWorkstreamName is set when proposing a new workstream.
-	NewWorkstreamName string `json:"new_workstream_name,omitempty"`
-
-	// NewWorkstreamFocus is set when proposing a new workstream.
-	NewWorkstreamFocus string `json:"new_workstream_focus,omitempty"`
-
-	// Confidence is 0-1 indicating routing confidence.
-	Confidence float64 `json:"confidence"`
-
-	// Reasoning explains the classification decision (for debugging).
-	Reasoning string `json:"reasoning"`
-}
-
 // cliEnvelope is the outer JSON wrapper returned by claude --output-format json.
 type cliEnvelope struct {
 	Type    string `json:"type"`
@@ -52,31 +32,30 @@ type cliEnvelope struct {
 	Result  string `json:"result"`
 }
 
-// Classify sends a classification prompt and returns the structured response.
+// Text returns the assistant reply as plain text (the envelope's result string).
+// Same CLI invocation as JSON — only the post-processing differs.
 // It runs: claude -p --model <model> --output-format json --no-session-persistence -- <prompt>
-func (c *Client) Classify(ctx context.Context, prompt string) (*ClassifyResponse, error) {
+func (c *Client) Text(ctx context.Context, prompt string) (string, error) {
 	result, err := c.run(ctx, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("classify: %w", err)
-	}
-
-	// Strip markdown code fences if present (LLMs often wrap JSON in ```json ... ```).
-	cleaned := stripCodeFences(result)
-
-	var resp ClassifyResponse
-	if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
-		return nil, fmt.Errorf("classify: parse response JSON: %w", err)
-	}
-	return &resp, nil
-}
-
-// UpdateFocus sends a focus-update prompt and returns the new focus description.
-func (c *Client) UpdateFocus(ctx context.Context, prompt string) (string, error) {
-	result, err := c.run(ctx, prompt)
-	if err != nil {
-		return "", fmt.Errorf("update focus: %w", err)
+		return "", fmt.Errorf("text: %w", err)
 	}
 	return strings.TrimSpace(result), nil
+}
+
+// JSON unmarshals the assistant reply (the envelope's result string) into out.
+// Same CLI invocation as Text — callers supply the destination type.
+// It runs: claude -p --model <model> --output-format json --no-session-persistence -- <prompt>
+func (c *Client) JSON(ctx context.Context, prompt string, out any) error {
+	result, err := c.run(ctx, prompt)
+	if err != nil {
+		return fmt.Errorf("json: %w", err)
+	}
+	cleaned := stripCodeFences(result)
+	if err := json.Unmarshal([]byte(cleaned), out); err != nil {
+		return fmt.Errorf("json: parse response: %w", err)
+	}
+	return nil
 }
 
 // run executes the claude CLI and returns the result text from the response envelope.

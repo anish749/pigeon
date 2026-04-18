@@ -30,26 +30,28 @@ type Config struct {
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		FocusUpdateInterval: 50,
-		DormancyThreshold:   7 * 24 * time.Hour, // 7 days
+		FocusUpdateInterval: 25,
+		DormancyThreshold:   7 * 24 * time.Hour,
 	}
 }
 
-// Manager owns the lifecycle of all workstreams: focus updates, dormancy
-// detection, merge proposals, and proposal resolution.
+// Manager owns the lifecycle of all workstreams. The only public entry
+// point is ObserveSignal — the manager decides internally when to run
+// focus updates, dormancy checks, and merge proposals.
 type Manager struct {
 	store  *affinityrouter.Store
 	client *clients.Client
 	cfg    Config
 	logger *slog.Logger
 
-	// Track signals per workstream since last focus update.
-	signalsSinceUpdate map[string]int
+	// Internal state.
+	signalsSinceUpdate map[string]int    // workstreamID → signals since last focus update
+	recentSignals      []models.Signal   // rolling buffer for focus update context
 
 	// Stats
-	focusUpdates     int
-	dormancyChanges  int
-	mergesProposed   int
+	focusUpdates    int
+	dormancyChanges int
+	mergesProposed  int
 }
 
 // New creates a workstream manager.
@@ -63,37 +65,24 @@ func New(store *affinityrouter.Store, client *clients.Client, cfg Config, logger
 	}
 }
 
-// ObserveSignal tells the manager that a signal has been routed. The manager
-// uses this to track when focus updates are due. Call this from the
-// accumulator after each signal is processed.
-func (m *Manager) ObserveSignal(sig models.Signal) {
+// ObserveSignal is the single entry point. Call it for every routed signal.
+// The manager tracks signal counts, buffers recent signals, and triggers
+// lifecycle operations (focus updates, dormancy) when thresholds are met.
+func (m *Manager) ObserveSignal(ctx context.Context, sig models.Signal) error {
+	// Buffer the signal for focus update context.
+	m.recentSignals = append(m.recentSignals, sig)
+	if len(m.recentSignals) > m.cfg.FocusUpdateInterval*2 {
+		// Keep the buffer bounded — retain the most recent signals.
+		m.recentSignals = m.recentSignals[len(m.recentSignals)-m.cfg.FocusUpdateInterval:]
+	}
+
+	// Track per-workstream signal counts.
 	for _, wsID := range sig.WorkstreamIDs {
 		m.signalsSinceUpdate[wsID]++
 	}
-}
 
-// Review runs a lifecycle review pass. Call this periodically (e.g. every
-// N signals during replay, or on a timer in production). It:
-//   1. Updates focus descriptions for workstreams with enough new signals
-//   2. Detects dormant workstreams
-//   3. Proposes merges for overlapping workstreams
-func (m *Manager) Review(ctx context.Context, now time.Time, recentSignals []models.Signal) error {
+	// Check if any workstream needs a focus update.
 	var errs []error
-
-	if err := m.updateStaleWorkstreams(ctx, recentSignals); err != nil {
-		errs = append(errs, fmt.Errorf("update focus: %w", err))
-	}
-
-	m.detectDormancy(now)
-
-	return joinErrors(errs)
-}
-
-// updateStaleWorkstreams refreshes focus descriptions for workstreams that
-// have accumulated enough new signals since the last update.
-func (m *Manager) updateStaleWorkstreams(ctx context.Context, recentSignals []models.Signal) error {
-	var errs []error
-
 	for wsID, count := range m.signalsSinceUpdate {
 		if count < m.cfg.FocusUpdateInterval {
 			continue
@@ -105,12 +94,12 @@ func (m *Manager) updateStaleWorkstreams(ctx context.Context, recentSignals []mo
 			continue
 		}
 
-		// Collect recent signals for this workstream.
+		// Collect signals relevant to this workstream from the buffer.
 		var relevant []models.Signal
-		for _, sig := range recentSignals {
-			for _, id := range sig.WorkstreamIDs {
+		for _, s := range m.recentSignals {
+			for _, id := range s.WorkstreamIDs {
 				if id == wsID {
-					relevant = append(relevant, sig)
+					relevant = append(relevant, s)
 					break
 				}
 			}
@@ -122,7 +111,13 @@ func (m *Manager) updateStaleWorkstreams(ctx context.Context, recentSignals []mo
 		m.signalsSinceUpdate[wsID] = 0
 	}
 
-	return joinErrors(errs)
+	// Dormancy check (cheap — just timestamp comparisons).
+	m.detectDormancy(sig.Ts)
+
+	if len(errs) > 0 {
+		return fmt.Errorf("manager: %w", errs[0])
+	}
+	return nil
 }
 
 // updateFocus refreshes the focus description for a single workstream.
@@ -132,7 +127,7 @@ func (m *Manager) updateFocus(ctx context.Context, ws *models.Workstream, recent
 	}
 
 	prompt := buildFocusPrompt(ws, recentSignals)
-	newFocus, err := m.client.UpdateFocus(ctx, prompt)
+	newFocus, err := m.client.Text(ctx, prompt)
 	if err != nil {
 		return fmt.Errorf("update focus for %s: %w", ws.ID, err)
 	}
@@ -200,19 +195,6 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
-}
-
-func joinErrors(errs []error) error {
-	var nonNil []error
-	for _, e := range errs {
-		if e != nil {
-			nonNil = append(nonNil, e)
-		}
-	}
-	if len(nonNil) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%d errors: %v", len(nonNil), nonNil)
 }
 
 // Stats returns lifecycle management statistics.

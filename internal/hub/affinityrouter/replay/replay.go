@@ -29,9 +29,6 @@ type Config struct {
 	BatchMinSignals int           // default: 8
 	BatchMaxAge     time.Duration // default: 30m
 
-	// Focus update interval — how many signals between focus refreshes.
-	FocusUpdateInterval int // default: 50
-
 	// Claude model to use.
 	Model string // default: "haiku"
 
@@ -50,10 +47,9 @@ func DefaultConfig() Config {
 	return Config{
 		Since:               time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Until:               time.Now(),
-		BatchMinSignals:     8,
-		BatchMaxAge:         30 * time.Minute,
-		FocusUpdateInterval: 50,
-		Model:               "haiku",
+		BatchMinSignals: 8,
+		BatchMaxAge:     30 * time.Minute,
+		Model:           "haiku",
 		Timeout:             60 * time.Second,
 	}
 }
@@ -147,36 +143,19 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		MinSignals: cfg.BatchMinSignals,
 		MaxAge:     cfg.BatchMaxAge,
 	}
-	mgrCfg := manager.Config{
-		FocusUpdateInterval: cfg.FocusUpdateInterval,
-		DormancyThreshold:   7 * 24 * time.Hour,
-	}
+	mgrCfg := manager.DefaultConfig()
 	acc := accumulator.New(wsStore, batchClassifier, threshold, cfg.ApprovalMode, logger)
 	mgr := manager.New(wsStore, claude, mgrCfg, logger)
 
 	// Replay signals chronologically.
-	// The manager tracks signal counts internally via ObserveSignal.
-	reviewInterval := 100 // run manager review every N signals
 	for i, sig := range signals {
 		if err := acc.Receive(ctx, sig); err != nil {
 			logger.Warn("receive signal failed", "error", err, "index", i)
-			continue
+		}
+		if err := mgr.ObserveSignal(ctx, sig); err != nil {
+			logger.Warn("manager observe failed", "error", err, "index", i)
 		}
 
-		// Tell the manager about the signal so it can track focus staleness.
-		mgr.ObserveSignal(sig)
-
-		// Periodically run manager review (focus updates, dormancy, merges).
-		if (i+1)%reviewInterval == 0 {
-			// Collect recent signals for focus update context.
-			start := max(i-reviewInterval, 0)
-			recent := signals[start : i+1]
-			if err := mgr.Review(ctx, sig.Ts, recent); err != nil {
-				logger.Warn("manager review failed", "error", err)
-			}
-		}
-
-		// Progress logging.
 		if (i+1)%1000 == 0 || i == len(signals)-1 {
 			stats := wsStore.Stats()
 			logger.Info("replay progress",
@@ -185,13 +164,6 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 				"workstreams", stats.NonDefault,
 				"conversations", stats.Conversations,
 			)
-		}
-	}
-
-	// Final manager review.
-	if len(signals) > 0 {
-		if err := mgr.Review(ctx, signals[len(signals)-1].Ts, signals); err != nil {
-			logger.Warn("final manager review failed", "error", err)
 		}
 	}
 
