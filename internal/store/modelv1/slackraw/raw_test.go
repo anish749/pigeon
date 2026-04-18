@@ -1,4 +1,4 @@
-package model
+package slackraw
 
 import (
 	"encoding/json"

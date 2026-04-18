@@ -6,13 +6,13 @@ import (
 
 	goslack "github.com/slack-go/slack"
 
-	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
+	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
 // formatRaw renders raw content (attachments, files) as indented display
 // lines below the message text. Returns nil if there is nothing to render.
 func formatRaw(raw map[string]any, indent string) []string {
-	rc, err := slackmodel.FromSerializable(raw)
+	rc, err := slackraw.FromSerializable(raw)
 	if err != nil {
 		return nil
 	}

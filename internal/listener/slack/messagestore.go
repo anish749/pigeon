@@ -3,13 +3,13 @@ package slack
 import (
 	"time"
 
-	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
 // Write persists a message to the appropriate date file. Does not advance the
 // cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackmodel.SlackRawContent) error {
+func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) error {
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -26,7 +26,7 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 }
 
 // WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via, raw slackmodel.SlackRawContent) error {
+func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via, raw slackraw.SlackRawContent) error {
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -44,7 +44,7 @@ func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text str
 }
 
 // WriteThreadContext writes a channel context message to a thread file.
-func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, raw slackmodel.SlackRawContent) error {
+func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, raw slackraw.SlackRawContent) error {
 	line := modelv1.Line{
 		Type: modelv1.LineMessage,
 		Msg: &modelv1.MsgLine{
@@ -82,7 +82,7 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 
 // AppendEdit stores a message edit event in the date file corresponding
 // to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw slackmodel.SlackRawContent) error {
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
 	line := modelv1.Line{
 		Type: modelv1.LineEdit,
 		Edit: &modelv1.EditLine{

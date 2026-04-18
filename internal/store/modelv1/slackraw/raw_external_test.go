@@ -1,12 +1,12 @@
-package model_test
+package slackraw_test
 
 import (
 	"testing"
 
 	goslack "github.com/slack-go/slack"
 
-	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
 // TestSlackRawContent_RoundTripViaJSONL tests the full round-trip through
@@ -23,7 +23,7 @@ func TestSlackRawContent_RoundTripViaJSONL(t *testing.T) {
 			}},
 		},
 	}
-	original := slackmodel.NewSlackRawContent(msg)
+	original := slackraw.NewSlackRawContent(msg)
 
 	// Write through MsgLine → JSONL.
 	line := modelv1.Line{
@@ -47,7 +47,7 @@ func TestSlackRawContent_RoundTripViaJSONL(t *testing.T) {
 	}
 
 	// Deserialize Raw back to typed struct.
-	restored, err := slackmodel.FromSerializable(parsed.Msg.Raw)
+	restored, err := slackraw.FromSerializable(parsed.Msg.Raw)
 	if err != nil {
 		t.Fatalf("FromSerializable: %v", err)
 	}
