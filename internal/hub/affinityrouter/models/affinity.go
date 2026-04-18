@@ -16,8 +16,8 @@ type AffinityEntry struct {
 // A conversation can be affiliated with multiple workstreams simultaneously
 // (e.g. an incident channel that feeds both "ES Upgrade" and "Paid vs Organic").
 type ConversationAffinities struct {
-	Conversation string // conversation directory name (e.g. "@alice", "#eng")
-	Workspace    string // which workspace
+	Conversation string                    // conversation directory name (e.g. "@alice", "#eng")
+	Workspace    string                    // which workspace
 	Entries      map[string]*AffinityEntry // workstreamID → entry
 }
 

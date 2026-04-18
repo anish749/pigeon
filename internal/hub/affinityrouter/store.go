@@ -245,10 +245,10 @@ func (s *Store) AllProposals() []*models.Proposal {
 
 // Stats returns summary statistics for the store.
 type Stats struct {
-	Workstreams     int
-	NonDefault      int
-	TotalSignals    int
-	Conversations   int
+	Workstreams      int
+	NonDefault       int
+	TotalSignals     int
+	Conversations    int
 	PendingProposals int
 }
 
