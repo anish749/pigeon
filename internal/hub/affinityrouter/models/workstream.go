@@ -34,14 +34,15 @@ func DefaultWorkstreamID(ws config.WorkspaceName) string {
 }
 
 // NewDefaultWorkstream creates the default catch-all workstream for a workspace.
-func NewDefaultWorkstream(ws config.WorkspaceName) Workstream {
+// The ts parameter should be the timestamp of the first signal in this workspace.
+func NewDefaultWorkstream(ws config.WorkspaceName, ts time.Time) Workstream {
 	return Workstream{
 		ID:        DefaultWorkstreamID(ws),
 		Name:      "General",
 		Workspace: ws,
 		State:     StateActive,
 		Focus:     "Unclassified signals — general conversation, coordination that doesn't belong to a specific workstream.",
-		Created:   time.Now(),
+		Created:   ts,
 	}
 }
 

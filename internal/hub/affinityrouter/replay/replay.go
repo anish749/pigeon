@@ -108,7 +108,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	// Replay: for each signal, route → observe (manager records + manages).
 	wsName := cfg.Workspace.Name
 	for i, sig := range signals {
-		mgr.EnsureDefaultWorkstream(wsName)
+		mgr.EnsureDefaultWorkstream(wsName, sig.Ts)
 
 		// Route the signal.
 		active := mgr.ActiveWorkstreams(wsName)
