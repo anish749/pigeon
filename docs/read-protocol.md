@@ -14,25 +14,26 @@ Every read operation has four orthogonal dimensions:
 
 | Dimension | What it answers | Required |
 |-----------|----------------|----------|
-| **Context** | Which group of accounts? | No (default or inferred) |
+| **Workspace** | Which group of accounts? | No (default or inferred) |
 | **Source** | What kind of data? | Yes (always explicit) |
 | **Selector** | Which resource within the source? | Depends on source |
 | **Filters** | What slice of the data? | No (defaults apply) |
 
-These dimensions are independent. Context narrows the account set.
+These dimensions are independent. Workspace narrows the account set.
 Source picks the data type. Selector picks a resource within that type.
 Filters narrow the time range or quantity.
 
-### Context
+### Workspace
 
-A context is a named set of accounts that forms a workspace boundary.
-When a context is active, all pigeon commands — read, list, grep, glob,
-send — operate only on accounts within that context.
+A workspace is a named set of accounts that forms a boundary for all
+pigeon operations. When a workspace is active, all pigeon commands —
+read, list, grep, glob, send — operate only on accounts within that
+workspace.
 
-Contexts are configured in `config.yaml`:
+Workspaces are configured in `config.yaml`:
 
 ```yaml
-contexts:
+workspaces:
   work:
     gws: work@company.com
     slack: acme-corp
@@ -41,32 +42,32 @@ contexts:
     slack: side-project
     whatsapp: "+15551234567"
   project-x:
-    gws: work@company.com       # same account can appear in multiple contexts
+    gws: work@company.com       # same account can appear in multiple workspaces
     slack: [acme-corp, vendor-ws]
-    whatsapp: "+15551234567"     # same WhatsApp across contexts
+    whatsapp: "+15551234567"     # same WhatsApp across workspaces
 
-default_context: personal
+default_workspace: personal
 ```
 
-An account can appear in multiple contexts. A context can contain
+An account can appear in multiple workspaces. A workspace can contain
 multiple accounts of the same platform type (e.g. two Slack workspaces).
 
 **Resolution order:**
 
-1. `PIGEON_CONTEXT` environment variable
-2. `--context` flag (per-command override)
-3. `default_context` in config
-4. No context — all accounts visible, explicit `-a` required when
+1. `PIGEON_WORKSPACE` environment variable
+2. `--workspace` flag (per-command override)
+3. `default_workspace` in config
+4. No workspace — all accounts visible, explicit `-a` required when
    ambiguous
 
-Setting a context is a soft restriction — pigeon can always access files
-directly via `rg` or `jq` regardless of context. The context boundary
-scopes pigeon's own commands only.
+Setting a workspace is a soft restriction — pigeon can always access
+files directly via `rg` or `jq` regardless of workspace. The workspace
+boundary scopes pigeon's own commands only.
 
-When no context is set and only one account exists for a given source
+When no workspace is set and only one account exists for a given source
 type, the account is inferred automatically. When multiple accounts
-exist and no context or `-a` flag resolves the ambiguity, pigeon errors
-with a message listing the available accounts.
+exist and no workspace or `-a` flag resolves the ambiguity, pigeon
+errors with a message listing the available accounts.
 
 ### Source
 
@@ -85,11 +86,11 @@ Source is always explicit — there is no flag that doubles as a source
 selector. `pigeon read gmail` and `pigeon read calendar` are different
 subcommands, not different values of a `--contact` flag.
 
-**Context × Source → Account.** Within a context, the source type
-resolves to the account(s) for that platform. If the context has one
+**Workspace × Source → Account.** Within a workspace, the source type
+resolves to the account(s) for that platform. If the workspace has one
 GWS account, `gmail`, `calendar`, and `drive` all resolve to it. If the
-context has two Slack workspaces, `slack` requires a selector or `-a` to
-disambiguate.
+workspace has two Slack workspaces, `slack` requires a selector or `-a`
+to disambiguate.
 
 ### Selector
 
@@ -195,19 +196,19 @@ pigeon read whatsapp Alice --since=2h
 pigeon read whatsapp "Book Club" --last=20
 ```
 
-**Cross-context override:**
+**Cross-workspace override:**
 
 ```
-pigeon read gmail --context=work --since=24h    # override active context
-pigeon read calendar -a work@company.com        # bypass context entirely
+pigeon read gmail --workspace=work --since=24h    # override active workspace
+pigeon read calendar -a work@company.com          # bypass workspace entirely
 ```
 
 ### List
 
-`pigeon list` respects the active context:
+`pigeon list` respects the active workspace:
 
 ```
-$ export PIGEON_CONTEXT=work
+$ export PIGEON_WORKSPACE=work
 $ pigeon list
 Sources for work:
 
@@ -220,30 +221,30 @@ Sources for work:
   slack/@alice                             acme-corp
 ```
 
-When no context is set, `pigeon list` shows all accounts grouped by
+When no workspace is set, `pigeon list` shows all accounts grouped by
 platform as it does today.
 
 `pigeon list --since=DURATION` filters to sources with recent activity.
 
 ### Grep
 
-`pigeon grep` searches content within the active context:
+`pigeon grep` searches content within the active workspace:
 
 ```
-pigeon grep "deploy" --since=7d            # all sources in context
+pigeon grep "deploy" --since=7d            # all sources in workspace
 pigeon grep "deploy" --source=slack        # only Slack sources
 pigeon grep "quarterly" --source=drive     # only Drive docs
 ```
 
 The `--source` flag on grep is optional. When omitted, all sources in
-the context are searched.
+the workspace are searched.
 
 ### Glob
 
-`pigeon glob` returns file paths within the active context:
+`pigeon glob` returns file paths within the active workspace:
 
 ```
-pigeon glob --since=7d                     # all data files in context
+pigeon glob --since=7d                     # all data files in workspace
 pigeon glob --since=7d --source=gmail      # only Gmail JSONL files
 ```
 
@@ -254,31 +255,31 @@ pigeon glob --since=7d --source=gmail      # only Gmail JSONL files
 Given a command like:
 
 ```
-PIGEON_CONTEXT=work pigeon read calendar --since=7d
+PIGEON_WORKSPACE=work pigeon read calendar --since=7d
 ```
 
 Resolution proceeds as follows:
 
-1. **Context**: `PIGEON_CONTEXT=work` → load the `work` context from
-   config → accounts: `{gws: work@company.com, slack: acme-corp}`
+1. **Workspace**: `PIGEON_WORKSPACE=work` → load the `work` workspace
+   from config → accounts: `{gws: work@company.com, slack: acme-corp}`
 2. **Source**: `calendar` → GWS service → look for GWS accounts in
-   context → `work@company.com`
+   workspace → `work@company.com`
 3. **Selector**: none provided → default: `primary` calendar
 4. **Filters**: `--since=7d` → events from the last 7 days
 5. **Read**: open `gws/{account-slug}/gcalendar/primary/` → parse
    JSONL date files in range → deduplicate by ID → exclude cancelled →
    sort by start time → format output
 
-If step 2 finds zero GWS accounts in the context:
+If step 2 finds zero GWS accounts in the workspace:
 
 ```
-error: no GWS account in context "work" — cannot read calendar
+error: no GWS account in workspace "work" — cannot read calendar
 ```
 
-If step 2 finds multiple GWS accounts (context has two):
+If step 2 finds multiple GWS accounts (workspace has two):
 
 ```
-error: 2 GWS accounts in context "work" (work@company.com, team@company.com)
+error: 2 GWS accounts in workspace "work" (work@company.com, team@company.com)
        specify one with -a
 ```
 
@@ -323,7 +324,7 @@ not depend on maintenance having run.
 
 ### Slack
 
-1. Resolve channel/DM name in the context's Slack workspace(s).
+1. Resolve channel/DM name in the workspace's Slack workspace(s).
 2. Read from the messaging storage protocol (see `protocol.md`):
    parse date files, deduplicate, reconcile edits/deletes, attach
    reactions, sort by timestamp.
@@ -385,8 +386,8 @@ requested data exists but the selection is wrong. Specific error cases:
 | Condition | Behavior |
 |-----------|----------|
 | Source type not recognized | Error: `unknown source "gcalendar" — valid sources: gmail, calendar, drive, slack, whatsapp` |
-| No account for source in context | Error: list available accounts and suggest `-a` |
-| Multiple accounts, no disambiguator | Error: list accounts, suggest `-a` or context |
+| No account for source in workspace | Error: list available accounts and suggest `-a` |
+| Multiple accounts, no disambiguator | Error: list accounts, suggest `-a` or workspace |
 | Selector required but missing | Error: `pigeon read drive requires a document name` |
 | Selector matches nothing | Error: `no channel matching "eng" in acme-corp` with candidates if close matches exist |
 | Filters match no data | Empty result (this is a valid outcome — the data genuinely doesn't exist for that range) |
