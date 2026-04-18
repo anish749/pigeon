@@ -67,23 +67,73 @@ func TestCosineSimilarity(t *testing.T) {
 	}
 }
 
-// --- meanStd tests ---
+// --- RunningStats (Welford) tests ---
 
-func TestMeanStd(t *testing.T) {
-	mean, std := meanStd([]float64{0.8, 0.8, 0.8, 0.8, 0.8})
-	if math.Abs(mean-0.8) > 1e-9 {
-		t.Errorf("mean = %v, want 0.8", mean)
+func TestRunningStats_ConstantValues(t *testing.T) {
+	var s RunningStats
+	for i := 0; i < 5; i++ {
+		s.Observe(0.8)
 	}
-	if math.Abs(std) > 1e-9 {
-		t.Errorf("std = %v, want 0.0", std)
+	if s.N != 5 {
+		t.Errorf("n = %d, want 5", s.N)
+	}
+	if math.Abs(s.Mean-0.8) > 1e-9 {
+		t.Errorf("mean = %v, want 0.8", s.Mean)
+	}
+	if math.Abs(s.Std()) > 1e-9 {
+		t.Errorf("std = %v, want 0.0", s.Std())
+	}
+}
+
+func TestRunningStats_TwoValues(t *testing.T) {
+	var s RunningStats
+	s.Observe(0.6)
+	s.Observe(0.8)
+	if math.Abs(s.Mean-0.7) > 1e-9 {
+		t.Errorf("mean = %v, want 0.7", s.Mean)
+	}
+	if math.Abs(s.Std()-0.1) > 1e-9 {
+		t.Errorf("std = %v, want 0.1", s.Std())
+	}
+}
+
+func TestRunningStats_SingleValue(t *testing.T) {
+	var s RunningStats
+	s.Observe(0.5)
+	if s.N != 1 {
+		t.Errorf("n = %d, want 1", s.N)
+	}
+	if s.Std() != 0 {
+		t.Errorf("std = %v, want 0.0 for single value", s.Std())
+	}
+}
+
+func TestRunningStats_MatchesBatchCalculation(t *testing.T) {
+	vals := []float64{0.95, 0.87, 0.92, 0.78, 0.91, 0.85, 0.60}
+
+	var s RunningStats
+	for _, v := range vals {
+		s.Observe(v)
 	}
 
-	mean, std = meanStd([]float64{0.6, 0.8})
-	if math.Abs(mean-0.7) > 1e-9 {
-		t.Errorf("mean = %v, want 0.7", mean)
+	// Batch calculation for comparison.
+	var sum float64
+	for _, v := range vals {
+		sum += v
 	}
-	if math.Abs(std-0.1) > 1e-9 {
-		t.Errorf("std = %v, want 0.1", std)
+	batchMean := sum / float64(len(vals))
+	var sqDiff float64
+	for _, v := range vals {
+		diff := v - batchMean
+		sqDiff += diff * diff
+	}
+	batchStd := math.Sqrt(sqDiff / float64(len(vals)))
+
+	if math.Abs(s.Mean-batchMean) > 1e-9 {
+		t.Errorf("welford mean = %v, batch mean = %v", s.Mean, batchMean)
+	}
+	if math.Abs(s.Std()-batchStd) > 1e-9 {
+		t.Errorf("welford std = %v, batch std = %v", s.Std(), batchStd)
 	}
 }
 
@@ -267,8 +317,8 @@ func TestObserve_SelfCalibratingThreshold(t *testing.T) {
 		}
 	}
 
-	if len(d.sims) != 5 {
-		t.Fatalf("expected 5 similarity observations, got %d", len(d.sims))
+	if d.stats.N != 5 {
+		t.Fatalf("expected 5 similarity observations, got %d", d.stats.N)
 	}
 
 	// Threshold should now be calibrated: mean(~0.98) - 1*std(~0.0) ≈ 0.98.

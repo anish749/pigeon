@@ -28,11 +28,12 @@ type CosineDetector struct {
 	embedder Embedder
 	logger   *slog.Logger
 
-	// Self-calibrating threshold parameters.
+	// Self-calibrating threshold using Welford's online algorithm.
+	// After minCalibration observations, threshold = mean - stdMultiplier*std.
 	fallbackThreshold float64
 	stdMultiplier     float64
 	minCalibration    int
-	sims              []float64
+	stats             RunningStats
 
 	windowSize int
 	window     []models.Signal
@@ -72,7 +73,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 
 	sim := cosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
-	d.sims = append(d.sims, sim)
+	d.stats.Observe(sim)
 
 	threshold := d.currentThreshold()
 	shifted := sim < threshold
@@ -80,7 +81,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		d.logger.Info("topic shift detected",
 			"sim", fmt.Sprintf("%.3f", sim),
 			"threshold", fmt.Sprintf("%.3f", threshold),
-			"calibrated", len(d.sims) >= d.minCalibration,
+			"calibrated", d.stats.N >= d.minCalibration,
 		)
 	}
 	return shifted
@@ -89,26 +90,35 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 // currentThreshold returns the self-calibrating threshold if enough
 // observations have been collected, otherwise the fallback.
 func (d *CosineDetector) currentThreshold() float64 {
-	if len(d.sims) < d.minCalibration {
+	if d.stats.N < d.minCalibration {
 		return d.fallbackThreshold
 	}
-	mean, std := meanStd(d.sims)
-	return mean - d.stdMultiplier*std
+	return d.stats.Mean - d.stdMultiplier*d.stats.Std()
 }
 
-func meanStd(vals []float64) (float64, float64) {
-	n := float64(len(vals))
-	var sum float64
-	for _, v := range vals {
-		sum += v
+// RunningStats tracks mean and standard deviation incrementally using
+// Welford's online algorithm. O(1) per observation, no slice allocation.
+type RunningStats struct {
+	N    int
+	Mean float64
+	M2   float64 // sum of squared differences from the running mean
+}
+
+// Observe records a new value, updating the running mean and variance.
+func (s *RunningStats) Observe(x float64) {
+	s.N++
+	delta := x - s.Mean
+	s.Mean += delta / float64(s.N)
+	delta2 := x - s.Mean
+	s.M2 += delta * delta2
+}
+
+// Std returns the population standard deviation of all observed values.
+func (s *RunningStats) Std() float64 {
+	if s.N < 2 {
+		return 0
 	}
-	mean := sum / n
-	var sqDiff float64
-	for _, v := range vals {
-		d := v - mean
-		sqDiff += d * d
-	}
-	return mean, math.Sqrt(sqDiff / n)
+	return math.Sqrt(s.M2 / float64(s.N))
 }
 
 func cosineSimilarity(a, b []float32) float64 {
