@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
 )
@@ -26,6 +27,7 @@ func newWorkstreamCmd() *cobra.Command {
 func newWorkstreamReplayCmd() *cobra.Command {
 	cfg := replay.DefaultConfig()
 	var sinceStr, untilStr string
+	var interactive bool
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -47,6 +49,10 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				cfg.Until = t
 			}
 
+			if interactive {
+				cfg.ApprovalMode = models.Interactive
+			}
+
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
@@ -66,6 +72,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Workspace, "workspace", "", "Filter to specific workspace")
 	cmd.Flags().IntVar(&cfg.BatchMinSignals, "batch-size", 8, "Signals per batch classification")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
 
 	return cmd
 }

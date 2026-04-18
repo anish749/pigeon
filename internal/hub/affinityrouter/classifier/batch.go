@@ -14,9 +14,9 @@ import (
 
 // Result is the classification outcome for a batch of signals.
 type Result struct {
-	// WorkstreamID is the ID of the existing workstream these signals belong to.
-	// Empty if proposing a new workstream.
-	WorkstreamID string
+	// WorkstreamIDs lists existing workstreams these signals belong to.
+	// A signal can belong to multiple workstreams (multi-routing).
+	WorkstreamIDs []string
 
 	// NewWorkstreamName is set when proposing a new workstream.
 	NewWorkstreamName string
@@ -47,9 +47,9 @@ func New(client *clients.Client, logger *slog.Logger) *BatchClassifier {
 }
 
 // Classify classifies a batch of signals against active workstreams.
-// Returns which workstream the signals belong to, or proposes a new one.
-func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []*models.Workstream) (*Result, error) {
-	prompt := buildClassifyPrompt(key, signals, active)
+// Returns which workstream(s) the signals belong to, or proposes a new one.
+func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []*models.Workstream, currentAffinityIDs []string) (*Result, error) {
+	prompt := buildClassifyPrompt(key, signals, active, currentAffinityIDs)
 
 	c.logger.Debug("classifying batch",
 		"workspace", key.Workspace,
@@ -68,74 +68,77 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 		Reasoning:  resp.Reasoning,
 	}
 
-	if resp.Workstream != "" {
-		// Verify the workstream ID exists in the active list.
-		found := false
+	if len(resp.Workstreams) > 0 {
+		// Verify all returned workstream IDs exist.
+		activeIDs := make(map[string]bool, len(active))
 		for _, ws := range active {
-			if ws.ID == resp.Workstream {
-				found = true
-				break
+			activeIDs[ws.ID] = true
+		}
+		for _, id := range resp.Workstreams {
+			if activeIDs[id] {
+				result.WorkstreamIDs = append(result.WorkstreamIDs, id)
+			} else {
+				c.logger.Warn("classifier returned unknown workstream ID", "id", id)
 			}
 		}
-		if found {
-			result.WorkstreamID = resp.Workstream
-		} else {
-			// Classifier returned an unknown ID — treat as default.
-			c.logger.Warn("classifier returned unknown workstream ID",
-				"id", resp.Workstream,
-				"workspace", key.Workspace,
-			)
-			result.WorkstreamID = models.DefaultWorkstreamID(key.Workspace)
-		}
-	} else if resp.NewWorkstreamName != "" {
+	}
+
+	if resp.NewWorkstreamName != "" {
 		result.NewWorkstreamName = resp.NewWorkstreamName
 		result.NewWorkstreamFocus = resp.NewWorkstreamFocus
-	} else {
-		// No workstream and no proposal — route to default.
-		result.WorkstreamID = models.DefaultWorkstreamID(key.Workspace)
+	}
+
+	// If classifier returned nothing valid, route to default.
+	if len(result.WorkstreamIDs) == 0 && result.NewWorkstreamName == "" {
+		result.WorkstreamIDs = []string{models.DefaultWorkstreamID(key.Workspace)}
 	}
 
 	return result, nil
 }
 
-func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []*models.Workstream) string {
+func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []*models.Workstream, currentAffinityIDs []string) string {
 	var b strings.Builder
 
-	b.WriteString("You are a workstream classifier. Given a batch of messages from a conversation and a list of active workstreams, determine which workstream these messages belong to.\n\n")
+	fmt.Fprintf(&b, "You are a workstream classifier for the %q workspace.\n\n", key.Workspace)
+	fmt.Fprintf(&b, "Conversation: %s\n", key.Conversation)
 
-	b.WriteString(fmt.Sprintf("Workspace: %s\n", key.Workspace))
-	b.WriteString(fmt.Sprintf("Conversation: %s\n\n", key.Conversation))
+	if len(currentAffinityIDs) > 0 {
+		fmt.Fprintf(&b, "Current affinities: %s\n", strings.Join(currentAffinityIDs, ", "))
+		b.WriteString("(This conversation has historically been affiliated with these workstreams. Only change this if the messages clearly indicate a different topic.)\n")
+	}
 
-	b.WriteString("Active workstreams:\n")
+	b.WriteString("\nActive workstreams:\n")
 	for _, ws := range active {
-		b.WriteString(fmt.Sprintf("- ID: %s\n  Name: %s\n  Focus: %s\n  Signals so far: %d\n\n", ws.ID, ws.Name, ws.Focus, ws.SignalCount))
+		fmt.Fprintf(&b, "- ID: %s\n  Name: %s\n  Focus: %s\n  Signals: %d | People: %s\n\n",
+			ws.ID, ws.Name, ws.Focus, ws.SignalCount,
+			strings.Join(limitSlice(ws.Participants, 5), ", "))
 	}
 	if len(active) == 0 {
-		b.WriteString("(none — all signals are currently in the default/general stream)\n\n")
+		b.WriteString("(none — all signals are in the default stream)\n\n")
 	}
 
 	b.WriteString("Messages to classify:\n")
 	for _, sig := range signals {
-		b.WriteString(fmt.Sprintf("[%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Sender, truncate(sig.Text, 300)))
+		fmt.Fprintf(&b, "[%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Sender, truncate(sig.Text, 300))
 	}
 
 	b.WriteString(`
 Respond with a JSON object:
 {
-  "workstream": "<workstream ID if these messages belong to an existing workstream, empty string if proposing new>",
-  "new_workstream_name": "<short name for the new workstream, only if workstream is empty>",
-  "new_workstream_focus": "<1-3 sentence description of what this workstream is about, only if workstream is empty>",
-  "confidence": <0.0 to 1.0>,
-  "reasoning": "<brief explanation of your decision>"
+  "workstreams": ["<workstream_id_1>", "<workstream_id_2>"],
+  "new_workstream_name": "",
+  "new_workstream_focus": "",
+  "confidence": 0.0,
+  "reasoning": ""
 }
 
 Rules:
-- If the messages clearly continue an existing workstream, use its ID.
-- If the messages are about a topic that doesn't match any existing workstream AND the topic seems substantive enough to be its own workstream (not just casual chat), propose a new workstream.
-- If the messages are casual/generic ("ok", "sounds good", lunch plans), use the default workstream for this workspace (don't propose a new workstream).
-- A workstream should represent a coherent ongoing effort — a project, a bug investigation, a deal, a feature build. Not a single message topic.
-- The conversation name gives strong signal: DMs with a specific person often map to a consistent workstream. Channel names hint at the domain.
-- When in doubt, keep signals in the default stream. It's better to miss a workstream than to create false ones.
+- MULTI-ROUTING: A signal can belong to MULTIPLE workstreams. If an incident, API change, deprecation notice, or status update affects multiple ongoing efforts, list ALL affected workstream IDs.
+- If messages continue existing workstreams, list those IDs in "workstreams".
+- Only propose a NEW workstream if the topic is genuinely novel AND substantive (an ongoing effort, not a one-off message). Set "new_workstream_name" and "new_workstream_focus". You can ALSO list existing workstream IDs alongside a new proposal if the signals touch both.
+- Casual messages ("ok", "sounds good", lunch plans) should stay in the default stream — return an empty "workstreams" array.
+- A workstream is a coherent ongoing effort — a project, a bug investigation, a deal, a feature. Not a single conversation topic.
+- Respect existing affinities: if this conversation has been affiliated with a workstream for many signals, that affinity should persist unless there's clear evidence the topic has changed.
 
 Respond with ONLY the JSON object, no other text.`)
 
@@ -147,4 +150,11 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func limitSlice(s []string, max int) []string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }

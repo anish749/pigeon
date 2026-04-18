@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter"
@@ -40,6 +41,9 @@ type Config struct {
 
 	// Workspace filter — if set, only replay this workspace.
 	Workspace string
+
+	// ApprovalMode controls how workstream proposals are handled.
+	ApprovalMode models.ApprovalMode
 }
 
 // DefaultConfig returns a config with sensible defaults.
@@ -71,6 +75,12 @@ type Report struct {
 	// Routing stats.
 	AccumulatorStats accumulator.AccumulatorStats
 	ManagerStats     manager.ManagerStats
+
+	// Proposals
+	ProposalsTotal    int
+	ProposalsApproved int
+	ProposalsRejected int
+	ProposalsPending  int
 
 	// Cost estimates.
 	ClassifierCalls int
@@ -138,7 +148,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		MinSignals: cfg.BatchMinSignals,
 		MaxAge:     cfg.BatchMaxAge,
 	}
-	acc := accumulator.New(wsStore, batchClassifier, threshold, logger)
+	acc := accumulator.New(wsStore, batchClassifier, threshold, cfg.ApprovalMode, logger)
 	mgr := manager.New(wsStore, claude, logger)
 
 	// Track signals per workstream for focus updates.
@@ -152,19 +162,17 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		}
 
 		// Periodically update focus for active workstreams.
-		if sig.WorkstreamID != "" {
-			signalsSinceUpdate[sig.WorkstreamID]++
+		for _, wsID := range sig.WorkstreamIDs {
+			signalsSinceUpdate[wsID]++
 		}
 		for wsID, count := range signalsSinceUpdate {
 			if count >= cfg.FocusUpdateInterval {
 				ws := wsStore.GetWorkstream(wsID)
 				if ws != nil && !ws.IsDefault() {
-					// Collect recent signals for this workstream.
-					// For now, use a sample from the replay window.
 					var recent []models.Signal
 					start := max(i-cfg.FocusUpdateInterval, 0)
 					for j := start; j <= i; j++ {
-						if signals[j].WorkstreamID == wsID {
+						if slices.Contains(signals[j].WorkstreamIDs, wsID) {
 							recent = append(recent, signals[j])
 						}
 					}
@@ -207,6 +215,19 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		ClassifierCalls:  acc.Stats().ClassifierCalls,
 		FocusUpdates:     mgr.Stats().FocusUpdates,
 		Duration:         time.Since(startTime),
+	}
+
+	// Count proposals by state.
+	for _, p := range wsStore.AllProposals() {
+		report.ProposalsTotal++
+		switch p.State {
+		case models.ProposalApproved:
+			report.ProposalsApproved++
+		case models.ProposalRejected:
+			report.ProposalsRejected++
+		case models.ProposalPending:
+			report.ProposalsPending++
+		}
 	}
 
 	for _, ws := range wsStore.ListWorkstreams("") {

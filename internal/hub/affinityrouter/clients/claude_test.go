@@ -78,9 +78,9 @@ Messages to classify:
 
 Respond with a JSON object:
 {
-  "workstream": "<workstream ID if these messages belong to an existing workstream, empty string if proposing new>",
-  "new_workstream_name": "<short name for the new workstream, only if workstream is empty>",
-  "new_workstream_focus": "<1-3 sentence description, only if workstream is empty>",
+  "workstreams": ["<workstream_id>"],
+  "new_workstream_name": "<short name for new workstream, only if proposing new>",
+  "new_workstream_focus": "<1-3 sentence description, only if proposing new>",
   "confidence": <0.0 to 1.0>,
   "reasoning": "<brief explanation>"
 }
@@ -97,13 +97,9 @@ Respond with ONLY the JSON object, no other text.`
 	if resp.Reasoning == "" {
 		t.Error("Reasoning is empty")
 	}
-	// The model should route to ws-infra or propose a new workstream — not both.
-	if resp.Workstream != "" && resp.NewWorkstreamName != "" {
-		t.Errorf("got both Workstream=%q and NewWorkstreamName=%q", resp.Workstream, resp.NewWorkstreamName)
-	}
 
-	t.Logf("routed to workstream=%q new_name=%q confidence=%.2f reasoning=%s",
-		resp.Workstream, resp.NewWorkstreamName, resp.Confidence, resp.Reasoning)
+	t.Logf("routed to workstreams=%v new_name=%q confidence=%.2f reasoning=%s",
+		resp.Workstreams, resp.NewWorkstreamName, resp.Confidence, resp.Reasoning)
 }
 
 // TestClient_UpdateFocus calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.

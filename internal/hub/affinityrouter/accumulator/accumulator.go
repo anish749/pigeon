@@ -19,34 +19,33 @@ import (
 // Accumulator receives signals, applies fast-path affinity routing, and
 // triggers batch classification when thresholds are reached.
 type Accumulator struct {
-	store      *affinityrouter.Store
-	classifier *classifier.BatchClassifier
-	threshold  models.BatchThreshold
-	logger     *slog.Logger
+	store        *affinityrouter.Store
+	classifier   *classifier.BatchClassifier
+	threshold    models.BatchThreshold
+	approvalMode models.ApprovalMode
+	logger       *slog.Logger
 
 	// Stats
-	totalSignals     int
-	fastPathRouted   int
-	batchClassified  int
-	classifierCalls  int
+	totalSignals    int
+	fastPathRouted  int
+	batchClassified int
+	classifierCalls int
 }
 
 // New creates an accumulator.
-func New(store *affinityrouter.Store, cls *classifier.BatchClassifier, threshold models.BatchThreshold, logger *slog.Logger) *Accumulator {
+func New(store *affinityrouter.Store, cls *classifier.BatchClassifier, threshold models.BatchThreshold, approvalMode models.ApprovalMode, logger *slog.Logger) *Accumulator {
 	return &Accumulator{
-		store:      store,
-		classifier: cls,
-		threshold:  threshold,
-		logger:     logger,
+		store:        store,
+		classifier:   cls,
+		threshold:    threshold,
+		approvalMode: approvalMode,
+		logger:       logger,
 	}
 }
 
 // Receive processes a single incoming signal. It applies the fast path
 // (conversation affinity) to tag the signal, buffers it, and triggers
 // batch classification if the threshold is reached.
-//
-// In replay mode, call ProcessPending after all signals have been received
-// to classify any remaining buffers.
 func (a *Accumulator) Receive(ctx context.Context, sig models.Signal) error {
 	a.totalSignals++
 
@@ -54,28 +53,30 @@ func (a *Accumulator) Receive(ctx context.Context, sig models.Signal) error {
 	workspace := sig.Account.Name
 	a.store.EnsureDefaultWorkstream(workspace)
 
-	// Fast path: look up conversation affinity.
+	// Fast path: look up conversation affinities (multi-routing).
 	key := models.ConversationKey{
 		Workspace:    workspace,
 		Conversation: sig.Conversation,
 	}
-	aff := a.store.GetAffinity(key)
-	if aff != nil && aff.WorkstreamID != "" {
-		// Conversation has an existing affinity — tag the signal.
-		sig.WorkstreamID = aff.WorkstreamID
-		a.fastPathRouted++
-	} else {
-		// No affinity — route to default.
-		sig.WorkstreamID = models.DefaultWorkstreamID(workspace)
+	aff := a.store.GetAffinities(key)
+	if aff != nil {
+		ids := aff.WorkstreamIDs()
+		if len(ids) > 0 {
+			sig.WorkstreamIDs = ids
+			a.fastPathRouted++
+		}
+	}
+	if len(sig.WorkstreamIDs) == 0 {
+		sig.WorkstreamIDs = []string{models.DefaultWorkstreamID(workspace)}
 	}
 
-	// Record the signal (updates workstream counters + affinity).
+	// Record the signal against all affiliated workstreams.
 	a.store.RecordSignal(sig)
 
 	// Buffer for batch classification.
 	a.store.BufferSignal(sig)
 
-	// Check if this conversation's buffer is ready for classification.
+	// Check if any conversation's buffer is ready for classification.
 	ready := a.store.ReadyBuffers(a.threshold, sig.Ts)
 	var errs []error
 	for _, rk := range ready {
@@ -89,7 +90,6 @@ func (a *Accumulator) Receive(ctx context.Context, sig models.Signal) error {
 // ProcessPending classifies all remaining buffers that have pending signals.
 // Call this at the end of a replay to flush everything.
 func (a *Accumulator) ProcessPending(ctx context.Context, now models.Signal) error {
-	// Use a zero threshold to force all non-empty buffers.
 	forceThreshold := models.BatchThreshold{MinSignals: 1}
 	ready := a.store.ReadyBuffers(forceThreshold, now.Ts)
 	var errs []error
@@ -110,86 +110,92 @@ func (a *Accumulator) classifyBuffer(ctx context.Context, key models.Conversatio
 
 	a.classifierCalls++
 
-	// Get active workstreams for this workspace.
+	// Get active workstreams and current affinities for context.
 	active := a.store.ActiveWorkstreams(key.Workspace)
+	var currentAffinityIDs []string
+	if aff := a.store.GetAffinities(key); aff != nil {
+		currentAffinityIDs = aff.WorkstreamIDs()
+	}
 
-	// Run classification.
-	result, err := a.classifier.Classify(ctx, key, signals, active)
+	result, err := a.classifier.Classify(ctx, key, signals, active, currentAffinityIDs)
 	if err != nil {
-		// On failure, put signals back? No — they're already recorded.
-		// Just log and move on. The signals stay tagged with their fast-path affinity.
 		return fmt.Errorf("classifier: %w", err)
 	}
 
 	a.batchClassified += len(signals)
-
-	// Apply the classification result.
 	return a.applyResult(ctx, key, signals, result)
 }
 
 func (a *Accumulator) applyResult(_ context.Context, key models.ConversationKey, signals []models.Signal, result *classifier.Result) error {
-	switch {
-	case result.WorkstreamID != "":
-		// Signals belong to an existing workstream.
-		// If this is different from the fast-path assignment, update the affinity.
-		currentAff := a.store.GetAffinity(key)
-		if currentAff == nil || currentAff.WorkstreamID != result.WorkstreamID {
-			a.logger.Info("affinity updated",
+	// Handle new workstream proposal — queue for user confirmation.
+	if result.NewWorkstreamName != "" {
+		proposal := &models.Proposal{
+			Type:              models.ProposalCreate,
+			SuggestedName:     result.NewWorkstreamName,
+			SuggestedFocus:    result.NewWorkstreamFocus,
+			Workspace:         key.Workspace,
+			TriggeringSignals: signals,
+			Confidence:        result.Confidence,
+			Reasoning:         result.Reasoning,
+		}
+
+		if a.approvalMode == models.AutoApprove {
+			// Auto-approve: create immediately.
+			ws := &models.Workstream{
+				ID:        generateWorkstreamID(result.NewWorkstreamName),
+				Name:      result.NewWorkstreamName,
+				Workspace: key.Workspace,
+				State:     models.StateActive,
+				Focus:     result.NewWorkstreamFocus,
+				Created:   signals[0].Ts,
+			}
+			if err := a.store.CreateWorkstream(ws); err != nil {
+				// ID collision — use existing.
+				ws = a.store.GetWorkstream(ws.ID)
+				if ws == nil {
+					return fmt.Errorf("create workstream failed: %s", result.NewWorkstreamName)
+				}
+			} else {
+				a.logger.Info("new workstream created (auto-approved)",
+					"workspace", key.Workspace,
+					"name", ws.Name,
+					"id", ws.ID,
+				)
+			}
+			proposal.State = models.ProposalApproved
+			// Add the new workstream to the routing set.
+			result.WorkstreamIDs = append(result.WorkstreamIDs, ws.ID)
+		} else {
+			// Queue for user confirmation.
+			a.store.AddProposal(proposal)
+			a.logger.Info("workstream proposed (pending confirmation)",
 				"workspace", key.Workspace,
-				"conversation", key.Conversation,
-				"from", currentAffID(currentAff),
-				"to", result.WorkstreamID,
+				"name", result.NewWorkstreamName,
 				"confidence", result.Confidence,
 			)
 		}
-		// Re-record all signals with the correct workstream.
+	}
+
+	// Route signals to the classified workstream(s).
+	if len(result.WorkstreamIDs) > 0 {
 		for i := range signals {
-			signals[i].WorkstreamID = result.WorkstreamID
+			signals[i].WorkstreamIDs = result.WorkstreamIDs
 			a.store.RecordSignal(signals[i])
 		}
 
-	case result.NewWorkstreamName != "":
-		// Classifier proposes a new workstream.
-		ws := &models.Workstream{
-			ID:        generateWorkstreamID(key.Workspace, result.NewWorkstreamName),
-			Name:      result.NewWorkstreamName,
-			Workspace: key.Workspace,
-			State:     models.StateActive,
-			Focus:     result.NewWorkstreamFocus,
-			Created:   signals[0].Ts,
-		}
-		if err := a.store.CreateWorkstream(ws); err != nil {
-			// ID collision — workstream already exists, route there.
-			ws = a.store.GetWorkstream(ws.ID)
-			if ws == nil {
-				return fmt.Errorf("create workstream failed and get returned nil: %s", result.NewWorkstreamName)
-			}
-		}
-		a.logger.Info("new workstream created",
+		a.logger.Info("batch classified",
 			"workspace", key.Workspace,
-			"name", ws.Name,
-			"id", ws.ID,
 			"conversation", key.Conversation,
+			"workstreams", strings.Join(result.WorkstreamIDs, ", "),
 			"signals", len(signals),
+			"confidence", result.Confidence,
 		)
-		// Re-record signals under the new workstream.
-		for i := range signals {
-			signals[i].WorkstreamID = ws.ID
-			a.store.RecordSignal(signals[i])
-		}
 	}
 
 	return nil
 }
 
-func currentAffID(aff *models.ConversationAffinity) string {
-	if aff == nil {
-		return "(none)"
-	}
-	return aff.WorkstreamID
-}
-
-func generateWorkstreamID(_, name string) string {
+func generateWorkstreamID(name string) string {
 	var b strings.Builder
 	b.WriteString("ws-")
 	for _, c := range name {

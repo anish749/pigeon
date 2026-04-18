@@ -26,14 +26,15 @@ func New(model string, timeout time.Duration, logger *slog.Logger) *Client {
 
 // ClassifyResponse is the structured output from a classification call.
 type ClassifyResponse struct {
-	// Workstream is the ID of the workstream these signals belong to.
-	// Empty string means "propose new workstream."
-	Workstream string `json:"workstream"`
+	// Workstreams lists the IDs of existing workstreams these signals belong to.
+	// A signal can belong to multiple workstreams (multi-routing).
+	// Empty means "propose new workstream."
+	Workstreams []string `json:"workstreams"`
 
-	// NewWorkstreamName is set when Workstream is empty — the suggested name.
+	// NewWorkstreamName is set when proposing a new workstream.
 	NewWorkstreamName string `json:"new_workstream_name,omitempty"`
 
-	// NewWorkstreamFocus is set when Workstream is empty — the suggested focus description.
+	// NewWorkstreamFocus is set when proposing a new workstream.
 	NewWorkstreamFocus string `json:"new_workstream_focus,omitempty"`
 
 	// Confidence is 0-1 indicating routing confidence.

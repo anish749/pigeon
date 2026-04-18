@@ -11,24 +11,26 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
-// Store holds all workstream and affinity state in memory. During replay it
-// accumulates state as signals are processed; in production it would be
-// persisted to disk.
+// Store holds all workstream, affinity, and proposal state in memory.
 type Store struct {
 	mu          sync.RWMutex
-	workstreams map[string]*models.Workstream              // id → workstream
-	affinities  map[models.ConversationKey]*models.ConversationAffinity // conversation → affinity
-	buffers     map[models.ConversationKey]*models.Buffer  // conversation → pending signals
+	workstreams map[string]*models.Workstream
+	affinities  map[models.ConversationKey]*models.ConversationAffinities
+	buffers     map[models.ConversationKey]*models.Buffer
+	proposals   []*models.Proposal
+	proposalSeq int
 }
 
 // NewStore creates an empty workstream store.
 func NewStore() *Store {
 	return &Store{
 		workstreams: make(map[string]*models.Workstream),
-		affinities:  make(map[models.ConversationKey]*models.ConversationAffinity),
+		affinities:  make(map[models.ConversationKey]*models.ConversationAffinities),
 		buffers:     make(map[models.ConversationKey]*models.Buffer),
 	}
 }
+
+// --- Workstream CRUD ---
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace if
 // it doesn't exist. Returns the default workstream.
@@ -96,44 +98,48 @@ func (s *Store) UpdateWorkstream(ws *models.Workstream) {
 	s.workstreams[ws.ID] = ws
 }
 
-// RecordSignal increments counters on the workstream and updates the
-// conversation affinity. Called after a signal is routed.
+// --- Signal recording (multi-routing) ---
+
+// RecordSignal increments counters on all affiliated workstreams and updates
+// conversation affinities. A signal can belong to multiple workstreams.
 func (s *Store) RecordSignal(sig models.Signal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update workstream counters.
-	if ws, ok := s.workstreams[sig.WorkstreamID]; ok {
-		ws.SignalCount++
-		if sig.Ts.After(ws.LastSignal) {
-			ws.LastSignal = sig.Ts
-		}
-		// Track participant.
-		if sig.Sender != "" && !slices.Contains(ws.Participants, sig.Sender) {
-			ws.Participants = append(ws.Participants, sig.Sender)
-		}
-	}
-
-	// Update conversation affinity.
 	key := models.ConversationKey{
 		Workspace:    sig.Account.Name,
 		Conversation: sig.Conversation,
 	}
-	aff, ok := s.affinities[key]
-	if !ok {
-		aff = &models.ConversationAffinity{
-			Conversation: sig.Conversation,
-			Workspace:    sig.Account.Name,
+
+	for _, wsID := range sig.WorkstreamIDs {
+		// Update workstream counters.
+		if ws, ok := s.workstreams[wsID]; ok {
+			ws.SignalCount++
+			if sig.Ts.After(ws.LastSignal) {
+				ws.LastSignal = sig.Ts
+			}
+			if sig.Sender != "" && !slices.Contains(ws.Participants, sig.Sender) {
+				ws.Participants = append(ws.Participants, sig.Sender)
+			}
 		}
-		s.affinities[key] = aff
+
+		// Update conversation affinity for this workstream.
+		aff, ok := s.affinities[key]
+		if !ok {
+			aff = &models.ConversationAffinities{
+				Conversation: sig.Conversation,
+				Workspace:    sig.Account.Name,
+			}
+			s.affinities[key] = aff
+		}
+		aff.Record(wsID, sig.Ts)
 	}
-	aff.WorkstreamID = sig.WorkstreamID
-	aff.Strength++
-	aff.LastSignal = sig.Ts
 }
 
-// GetAffinity returns the current affinity for a conversation, or nil.
-func (s *Store) GetAffinity(key models.ConversationKey) *models.ConversationAffinity {
+// --- Affinity queries ---
+
+// GetAffinities returns all workstream affinities for a conversation, or nil.
+func (s *Store) GetAffinities(key models.ConversationKey) *models.ConversationAffinities {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.affinities[key]
@@ -186,13 +192,64 @@ func (s *Store) ReadyBuffers(threshold models.BatchThreshold, now time.Time) []m
 	return ready
 }
 
+// --- Proposal management ---
+
+// AddProposal queues a proposal for user review.
+func (s *Store) AddProposal(p *models.Proposal) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.proposalSeq++
+	p.ID = fmt.Sprintf("p-%d", s.proposalSeq)
+	p.State = models.ProposalPending
+	p.ProposedAt = time.Now()
+	s.proposals = append(s.proposals, p)
+}
+
+// PendingProposals returns all proposals that haven't been resolved.
+func (s *Store) PendingProposals() []*models.Proposal {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var pending []*models.Proposal
+	for _, p := range s.proposals {
+		if p.State == models.ProposalPending {
+			pending = append(pending, p)
+		}
+	}
+	return pending
+}
+
+// ResolveProposal marks a proposal as approved or rejected.
+func (s *Store) ResolveProposal(id string, state models.ProposalState) *models.Proposal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.proposals {
+		if p.ID == id {
+			p.State = state
+			p.ResolvedAt = time.Now()
+			return p
+		}
+	}
+	return nil
+}
+
+// AllProposals returns all proposals (for reporting).
+func (s *Store) AllProposals() []*models.Proposal {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*models.Proposal, len(s.proposals))
+	copy(result, s.proposals)
+	return result
+}
+
+// --- Stats ---
+
 // Stats returns summary statistics for the store.
 type Stats struct {
-	Workstreams    int // total workstreams (including defaults)
-	NonDefault     int // workstreams that aren't the default
-	TotalSignals   int // total signals across all workstreams
-	Conversations  int // conversations with affinities
-	PendingBuffers int // buffers with pending signals
+	Workstreams     int
+	NonDefault      int
+	TotalSignals    int
+	Conversations   int
+	PendingProposals int
 }
 
 // Stats returns summary statistics.
@@ -200,14 +257,18 @@ func (s *Store) Stats() Stats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	st := Stats{
-		Workstreams:    len(s.workstreams),
-		Conversations:  len(s.affinities),
-		PendingBuffers: len(s.buffers),
+		Workstreams:   len(s.workstreams),
+		Conversations: len(s.affinities),
 	}
 	for _, ws := range s.workstreams {
 		st.TotalSignals += ws.SignalCount
 		if !ws.IsDefault() {
 			st.NonDefault++
+		}
+	}
+	for _, p := range s.proposals {
+		if p.State == models.ProposalPending {
+			st.PendingProposals++
 		}
 	}
 	return st
