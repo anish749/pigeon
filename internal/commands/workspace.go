@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -15,9 +16,18 @@ func RunWorkspaceList(cfg *config.Config) error {
 		return nil
 	}
 
-	for name, ws := range cfg.Workspaces {
+	names := make([]config.WorkspaceName, 0, len(cfg.Workspaces))
+	for name := range cfg.Workspaces {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b config.WorkspaceName) int {
+		return cmp.Compare(a, b)
+	})
+
+	for _, name := range names {
+		ws := cfg.Workspaces[name]
 		marker := ""
-		if config.WorkspaceName(name) == cfg.DefaultWorkspace {
+		if name == cfg.DefaultWorkspace {
 			marker = " (default)"
 		}
 		fmt.Printf("%s%s\n", name, marker)
@@ -83,18 +93,19 @@ func RunWorkspaceRemove(cfg *config.Config, workspace, platform, account string)
 		return fmt.Errorf("workspace %q not found", workspace)
 	}
 
-	var found bool
+	lenBefore := len(ws.Slack) + len(ws.GWS) + len(ws.WhatsApp)
+	match := func(v string) bool { return v == account }
 	switch platform {
 	case "slack":
-		ws.Slack, found = removeString(ws.Slack, account)
+		ws.Slack = slices.DeleteFunc(ws.Slack, match)
 	case "gws":
-		ws.GWS, found = removeString(ws.GWS, account)
+		ws.GWS = slices.DeleteFunc(ws.GWS, match)
 	case "whatsapp":
-		ws.WhatsApp, found = removeString(ws.WhatsApp, account)
+		ws.WhatsApp = slices.DeleteFunc(ws.WhatsApp, match)
 	default:
 		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp)", platform)
 	}
-	if !found {
+	if len(ws.Slack)+len(ws.GWS)+len(ws.WhatsApp) == lenBefore {
 		return fmt.Errorf("%s/%s not in workspace %q", platform, account, workspace)
 	}
 
@@ -155,58 +166,35 @@ func RunWorkspaceDefault(cfg *config.Config, workspace string) error {
 
 // validateAccountExists checks that the given platform/account is configured.
 func validateAccountExists(cfg *config.Config, platform, account string) error {
+	var configured []string
 	switch platform {
 	case "slack":
 		for _, s := range cfg.Slack {
 			if s.Workspace == account {
 				return nil
 			}
+			configured = append(configured, s.Workspace)
 		}
 	case "gws":
 		for _, g := range cfg.GWS {
 			if g.Email == account {
 				return nil
 			}
+			configured = append(configured, g.Email)
 		}
 	case "whatsapp":
 		for _, w := range cfg.WhatsApp {
 			if w.Account == account {
 				return nil
 			}
+			configured = append(configured, w.Account)
 		}
 	default:
 		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp)", platform)
-	}
-
-	var configured []string
-	switch platform {
-	case "slack":
-		for _, s := range cfg.Slack {
-			configured = append(configured, s.Workspace)
-		}
-	case "gws":
-		for _, g := range cfg.GWS {
-			configured = append(configured, g.Email)
-		}
-	case "whatsapp":
-		for _, w := range cfg.WhatsApp {
-			configured = append(configured, w.Account)
-		}
 	}
 	if len(configured) == 0 {
 		return fmt.Errorf("no %s accounts configured", platform)
 	}
 	return fmt.Errorf("%s account %q not found in config (configured: %s)",
 		platform, account, strings.Join(configured, ", "))
-}
-
-// removeString removes the first occurrence of s from slice, returning the
-// updated slice and whether s was found.
-func removeString(slice []string, s string) ([]string, bool) {
-	for i, v := range slice {
-		if v == s {
-			return append(slice[:i], slice[i+1:]...), true
-		}
-	}
-	return slice, false
 }

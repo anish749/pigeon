@@ -78,11 +78,11 @@ The account must already be set up (via setup-slack, setup-gws, etc.).`,
 
 func newWorkspaceRemoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "remove <workspace>",
-		Short: "Remove an account from a workspace",
-		Long:  `Remove an account from a workspace. If the workspace becomes empty, it is deleted.`,
+		Use:     "remove <workspace>",
+		Short:   "Remove an account from a workspace",
+		Long:    `Remove an account from a workspace. If the workspace becomes empty, it is deleted.`,
 		Example: `  pigeon workspace remove work -p slack -a acme-corp`,
-		Args: cobra.ExactArgs(1),
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			platform, err := cmd.Flags().GetString("platform")
 			if err != nil {

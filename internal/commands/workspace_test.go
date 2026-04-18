@@ -272,21 +272,6 @@ func TestValidateAccountExists(t *testing.T) {
 	}
 }
 
-func TestRemoveString(t *testing.T) {
-	got, found := removeString([]string{"a", "b", "c"}, "b")
-	if !found {
-		t.Fatal("expected found=true")
-	}
-	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
-		t.Fatalf("unexpected result: %v", got)
-	}
-
-	_, found = removeString([]string{"a", "b"}, "x")
-	if found {
-		t.Fatal("expected found=false for missing element")
-	}
-}
-
 // Verify the test helper doesn't leave config files outside the temp dir.
 func TestSetupTestConfig_UsesTemp(t *testing.T) {
 	setupTestConfig(t, &config.Config{})
