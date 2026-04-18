@@ -26,14 +26,17 @@ type Client struct {
 	proc       *os.Process
 }
 
+const (
+	defaultModelName      = "all-MiniLM-L6-v2"
+	defaultStartupTimeout = 2 * time.Minute
+)
+
 // NewClient starts the Python embedding sidecar and returns a Client
 // connected to it. The caller must call Close to shut down the sidecar.
-// startupTimeout bounds how long to wait for the sidecar to become ready
-// (model download + load). 2 minutes is reasonable for cached models.
-func NewClient(socketPath, modelName string, startupTimeout time.Duration) (*Client, error) {
+func NewClient(socketPath string) (*Client, error) {
 	sidecarScript := filepath.Join(findRepoRoot(), "embed", "sidecar.py")
 
-	proc, err := startSidecar(sidecarScript, socketPath, modelName, startupTimeout)
+	proc, err := startSidecar(sidecarScript, socketPath, defaultModelName, defaultStartupTimeout)
 	if err != nil {
 		return nil, err
 	}

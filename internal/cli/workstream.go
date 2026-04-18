@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector/embedding"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
+	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
@@ -32,6 +35,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	var sinceStr, untilStr, workspaceFlag string
 	var interactive bool
 	var burstGap time.Duration
+	var detectorType string
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -71,7 +75,22 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			factory := detector.NewBurstGapFactory(burstGap)
+			var factory detector.Factory
+			switch detectorType {
+			case "burstgap":
+				factory = detector.NewBurstGapFactory(burstGap)
+			case "cosine":
+				socketPath := filepath.Join(paths.StateDir(), "embed.sock")
+				client, err := embedding.NewClient(socketPath)
+				if err != nil {
+					return fmt.Errorf("start embedding sidecar: %w", err)
+				}
+				defer client.Close()
+				factory = embedding.NewCosineFactory(client, logger)
+			default:
+				return fmt.Errorf("unknown detector type: %s (use burstgap or cosine)", detectorType)
+			}
+
 			report, err := replay.Run(context.Background(), cfg, factory, logger)
 			if err != nil {
 				return err
@@ -85,9 +104,11 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
-	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
 
+	// Detector selection.
+	cmd.Flags().StringVar(&detectorType, "detector", "burstgap", "Shift detector: burstgap or cosine")
+	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
 	return cmd
 }
