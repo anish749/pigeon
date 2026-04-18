@@ -141,7 +141,7 @@ KEY CONCEPTS:
 	// The messages to classify.
 	b.WriteString("\nMESSAGES TO CLASSIFY:\n")
 	for _, sig := range signals {
-		fmt.Fprintf(&b, "[%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Sender, truncate(sig.Text, 300))
+		fmt.Fprintf(&b, "[%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Sender, sig.Text)
 	}
 
 	// Response format.
@@ -163,11 +163,4 @@ You can set BOTH "workstreams" and "new_workstream_name" if the messages touch e
 Respond with ONLY the JSON object.`)
 
 	return b.String()
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

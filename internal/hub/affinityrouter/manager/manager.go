@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gosimple/slug"
+
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
@@ -302,7 +304,7 @@ WHAT TO AVOID:
 
 	b.WriteString("RECENT MESSAGES (use these to understand what the workstream is about now):\n")
 	for _, sig := range signals {
-		fmt.Fprintf(&b, "[%s] [%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Conversation, sig.Sender, truncate(sig.Text, 200))
+		fmt.Fprintf(&b, "[%s] [%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Conversation, sig.Sender, sig.Text)
 	}
 
 	b.WriteString("\nWrite an updated focus description (1-3 sentences). Respond with ONLY the description, nothing else.")
@@ -311,25 +313,7 @@ WHAT TO AVOID:
 }
 
 func generateWorkstreamID(name string) string {
-	var b strings.Builder
-	b.WriteString("ws-")
-	for _, c := range name {
-		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
-			b.WriteRune(c)
-		} else if c >= 'A' && c <= 'Z' {
-			b.WriteRune(c + 32)
-		} else if c == ' ' || c == '-' || c == '_' {
-			b.WriteByte('-')
-		}
-	}
-	return b.String()
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
+	return "ws-" + slug.Make(name)
 }
 
 // Stats returns lifecycle management statistics.
