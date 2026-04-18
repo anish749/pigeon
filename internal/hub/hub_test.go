@@ -3,6 +3,7 @@ package hub
 import (
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 )
@@ -95,5 +96,84 @@ func TestConnectedClaudeSessions_SessionWithNoChannel(t *testing.T) {
 	}
 	if got[0].Account != "" {
 		t.Errorf("Account = %q, want empty for orphan session", got[0].Account)
+	}
+}
+
+func TestParseSlackTimestamp(t *testing.T) {
+	tests := []struct {
+		name string
+		ts   string
+		want time.Time
+	}{
+		{
+			name: "valid timestamp",
+			ts:   "1712345678.123456",
+			want: time.Unix(1712345678, 0),
+		},
+		{
+			name: "no fractional part",
+			ts:   "1712345678",
+			want: time.Unix(1712345678, 0),
+		},
+		{
+			name: "invalid",
+			ts:   "not-a-timestamp",
+			want: time.Time{},
+		},
+		{
+			name: "empty",
+			ts:   "",
+			want: time.Time{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSlackTimestamp(tt.ts)
+			if !got.Equal(tt.want) {
+				t.Errorf("parseSlackTimestamp(%q) = %v, want %v", tt.ts, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateText(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "short text unchanged",
+			s:      "hello",
+			maxLen: 10,
+			want:   "hello",
+		},
+		{
+			name:   "exact length unchanged",
+			s:      "hello",
+			maxLen: 5,
+			want:   "hello",
+		},
+		{
+			name:   "long text truncated",
+			s:      "hello world",
+			maxLen: 5,
+			want:   "hello...",
+		},
+		{
+			name:   "empty string",
+			s:      "",
+			maxLen: 10,
+			want:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateText(tt.s, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateText(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.want)
+			}
+		})
 	}
 }
