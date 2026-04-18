@@ -14,23 +14,25 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
 // Router routes signals to workstreams.
 // It uses conversation affinity for the fast path and delegates to the
-// classifier for batch classification when the buffer threshold is met.
+// classifier for batch classification when the detector triggers.
 type Router struct {
-	classifier *classifier.BatchClassifier
-	logger     *slog.Logger
+	classifier  *classifier.BatchClassifier
+	newDetector detector.Factory
+	logger      *slog.Logger
 
 	// Internal state.
-	affinities map[models.ConversationKey][]models.AffinityEntry // conversation → workstream weights
-	buffers    map[models.ConversationKey]*buffer                // pending signals per conversation
+	affinities map[models.ConversationKey][]models.AffinityEntry              // conversation → workstream weights
+	buffers    map[models.ConversationKey]*buffer                             // pending signals per conversation
+	detectors  map[models.ConversationKey]detector.ConversationShiftDetector  // per-conversation shift detectors
 
 	// Config.
 	workspace config.WorkspaceName
-	burstGap  time.Duration
 
 	// Stats.
 	stats Stats
@@ -43,15 +45,16 @@ type buffer struct {
 	lastClassified time.Time
 }
 
-// New creates a Router.
-func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger) *Router {
+// New creates a Router with the given shift detector factory.
+func New(cls *classifier.BatchClassifier, factory detector.Factory, cfg models.Config, logger *slog.Logger) *Router {
 	return &Router{
-		classifier:      cls,
-		logger:          logger,
-		affinities:      make(map[models.ConversationKey][]models.AffinityEntry),
-		buffers:         make(map[models.ConversationKey]*buffer),
-		workspace: cfg.Workspace.Name,
-		burstGap:  cfg.BurstGap,
+		classifier:  cls,
+		newDetector: factory,
+		logger:      logger,
+		affinities:  make(map[models.ConversationKey][]models.AffinityEntry),
+		buffers:     make(map[models.ConversationKey]*buffer),
+		detectors:   make(map[models.ConversationKey]detector.ConversationShiftDetector),
+		workspace:   cfg.Workspace.Name,
 	}
 }
 
@@ -70,7 +73,7 @@ type RouteResult struct {
 // Fast path: if the conversation has affinity, return immediately with
 // Source=SourceAffinity and Confidence=1.0.
 //
-// The signal is always buffered. When the buffer threshold is met, the
+// The signal is always buffered. When the detector triggers, the
 // classifier is called and a classifier-based decision is returned.
 //
 // The workstreams parameter provides the current active workstreams for
@@ -78,8 +81,8 @@ type RouteResult struct {
 //
 // Returns one of:
 //   - Decision with affinity-based workstream IDs (fast path)
-//   - Decision with classifier-based workstream IDs (slow path, when buffer triggers)
-//   - Decision with default workstream ID (no affinity, buffer not ready)
+//   - Decision with classifier-based workstream IDs (slow path, when detector triggers)
+//   - Decision with default workstream ID (no affinity, detector not triggered)
 //
 // If the classifier proposes a new workstream, the NewWorkstream fields
 // on the returned RouteResult will be set, but the Router does NOT create it.
@@ -110,17 +113,27 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		r.stats.FastPathRouted++
 	}
 
-	// Get or create the buffer for this conversation.
+	// Get or create the buffer and detector for this conversation.
 	buf := r.buffers[key]
 	if buf == nil {
 		buf = &buffer{}
 		r.buffers[key] = buf
 	}
+	det := r.detectors[key]
+	if det == nil {
+		det = r.newDetector()
+		r.detectors[key] = det
+		// Feed existing buffered signals so the detector has context.
+		for _, s := range buf.signals {
+			det.Observe(s)
+		}
+	}
 
-	// Check if a burst boundary was crossed BEFORE adding the new signal.
-	// The gap is between the last buffered signal and the incoming signal.
-	if !r.bufferReady(buf, now) {
-		// Still within the same burst — buffer the signal and return.
+	// Ask the detector whether this signal represents a shift.
+	shifted := det.Observe(sig)
+
+	if !shifted {
+		// No shift detected — buffer the signal and return.
 		buf.signals = append(buf.signals, sig)
 		r.stats.BufferedSignals++
 		if affinityResult != nil {
@@ -135,7 +148,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		}, nil
 	}
 
-	// Burst boundary detected — classify the completed burst, then start
+	// Shift detected — classify the completed burst, then start
 	// a new buffer with the incoming signal.
 	signals := buf.signals
 	buf.signals = []models.Signal{sig} // new signal starts the next burst
@@ -193,19 +206,6 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	)
 
 	return routeResult, nil
-}
-
-// bufferReady reports whether the buffer should be drained for classification.
-// A burst boundary is detected when the gap between the last buffered signal
-// and the current signal (now) exceeds the configured burst gap threshold.
-// This captures natural conversation pauses — classify the completed burst.
-func (r *Router) bufferReady(buf *buffer, now time.Time) bool {
-	if len(buf.signals) == 0 {
-		return false
-	}
-	// The burst ended: gap from the last buffered signal to now exceeds the threshold.
-	lastSignal := buf.signals[len(buf.signals)-1].Ts
-	return now.Sub(lastSignal) >= r.burstGap
 }
 
 // UpdateAffinity updates the conversation->workstream affinity weights.
