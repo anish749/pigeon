@@ -2,28 +2,18 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "sentence-transformers>=3.0",
-#     "numpy>=1.24",
 # ]
 # ///
 """
 Embedding sidecar — stateless embedding server over a Unix domain socket.
 
-Run with: uv run embed/sidecar.py [--socket /tmp/pigeon-embed.sock] [--model all-MiniLM-L6-v2]
+Run with: uv run embed/sidecar.py --socket <path> --model <model-name>
 
-Loads a sentence-transformers model once and serves embed/compare requests.
+Loads a sentence-transformers model once and serves embed requests.
 Protocol: newline-delimited JSON, one request per connection.
 
-Requests:
-    Embed only:
-        → {"text": "..."}
-        ← {"embedding": [0.08, -0.29, ...]}
-
-    Compare (with previous embedding):
-        → {"text": "...", "prev_embedding": [0.12, -0.34, ...]}
-        ← {"embedding": [0.08, -0.29, ...], "sim": 0.43}
-
-Usage:
-    python sidecar.py [--socket /tmp/pigeon-embed.sock] [--model all-MiniLM-L6-v2]
+    → {"text": "..."}
+    ← {"embedding": [0.08, -0.29, ...]}
 """
 
 import argparse
@@ -34,13 +24,9 @@ import signal
 import socket
 import sys
 
-import numpy as np
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("embed-sidecar")
-
-DEFAULT_SOCKET = "/tmp/pigeon-embed.sock"
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
 
 class EmbedSidecar:
@@ -53,24 +39,13 @@ class EmbedSidecar:
         logger.info("model loaded: %s (%d dims)", model_name, self.dims)
 
     def handle(self, req: dict) -> dict:
-        """Handle a single request. Pure function — no side effects."""
         text = req.get("text")
         if not text:
             return {"error": "missing 'text' field"}
-
         embedding = self.model.encode(text, show_progress_bar=False)
-        resp = {"embedding": embedding.tolist()}
-
-        prev = req.get("prev_embedding")
-        if prev is not None:
-            prev = np.array(prev, dtype=np.float32)
-            sim = float(np.dot(embedding, prev) / (np.linalg.norm(embedding) * np.linalg.norm(prev)))
-            resp["sim"] = sim
-
-        return resp
+        return {"embedding": embedding.tolist()}
 
     def serve(self):
-        """Listen on Unix socket, handle one request per connection."""
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
 
@@ -79,7 +54,6 @@ class EmbedSidecar:
         srv.listen(8)
         logger.info("listening on %s", self.socket_path)
 
-        # Clean up socket file on shutdown.
         def cleanup(signum, frame):
             logger.info("shutting down")
             srv.close()
@@ -100,7 +74,6 @@ class EmbedSidecar:
                 conn.close()
 
     def _handle_conn(self, conn: socket.socket):
-        """Read one JSON request, write one JSON response, close."""
         data = b""
         while True:
             chunk = conn.recv(4096)
@@ -121,8 +94,8 @@ class EmbedSidecar:
 
 def main():
     parser = argparse.ArgumentParser(description="Embedding sidecar server")
-    parser.add_argument("--socket", default=DEFAULT_SOCKET, help="Unix socket path")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="sentence-transformers model name")
+    parser.add_argument("--socket", required=True, help="Unix socket path")
+    parser.add_argument("--model", required=True, help="sentence-transformers model name")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")

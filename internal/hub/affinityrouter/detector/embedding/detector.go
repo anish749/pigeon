@@ -11,17 +11,17 @@ import (
 )
 
 // CosineDetector implements ConversationShiftDetector using embedding
-// cosine similarity. It buffers the last N signals into a sliding window,
-// embeds the window text via the sidecar, and compares against the
-// previous window's embedding to detect topic shifts.
+// cosine similarity. It buffers signals into a sliding window, embeds
+// window text via the sidecar, and compares against the previous
+// window's embedding to detect topic shifts.
 type CosineDetector struct {
 	client    *Client
 	logger    *slog.Logger
 	threshold float64
 
 	windowSize int
-	window     []models.Signal    // current sliding window of signals
-	prevEmbed  []float32          // embedding of the previous full window
+	window     []models.Signal
+	prevEmbed  []float32
 }
 
 func (d *CosineDetector) Observe(sig models.Signal) bool {
@@ -31,7 +31,6 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		return false
 	}
 
-	// Build window text.
 	text := windowText(d.window)
 
 	// Trim window for next call (keep last windowSize-1 signals as overlap).
@@ -39,27 +38,22 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		d.window = d.window[1:]
 	}()
 
-	// First full window — embed and cache, no comparison yet.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	emb, err := d.client.Embed(ctx, text)
+	if err != nil {
+		d.logger.Warn("embed failed, falling back to no-shift", "err", err)
+		return false
+	}
+
+	// First full window — cache embedding, no comparison yet.
 	if d.prevEmbed == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		emb, err := d.client.Embed(ctx, text)
-		if err != nil {
-			d.logger.Warn("embed failed, falling back to no-shift", "err", err)
-			return false
-		}
 		d.prevEmbed = emb
 		return false
 	}
 
-	// Compare against previous window.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	emb, sim, err := d.client.Compare(ctx, text, d.prevEmbed)
-	if err != nil {
-		d.logger.Warn("compare failed, falling back to no-shift", "err", err)
-		return false
-	}
+	sim := CosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
 
 	shifted := sim < d.threshold
