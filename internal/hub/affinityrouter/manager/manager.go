@@ -17,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 )
 
 // Manager owns the lifecycle of all workstreams. It is the only component
@@ -26,6 +27,7 @@ type Manager struct {
 	mu     sync.RWMutex
 	client *clients.Client
 	sc     *StatCollector
+	store  store.Store
 	cfg    models.Config
 	logger *slog.Logger
 
@@ -47,15 +49,40 @@ type Manager struct {
 
 // New creates a workstream manager. The StatCollector is injected so the
 // caller can also query it directly (e.g. for report building).
-func New(client *clients.Client, sc *StatCollector, cfg models.Config, logger *slog.Logger) *Manager {
+// If st is non-nil, workstreams and proposals are loaded from it on creation
+// and persisted after each mutation.
+func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, logger *slog.Logger) (*Manager, error) {
+	workstreams := make(map[string]models.Workstream)
+	var proposals []*models.Proposal
+	var proposalSeq int
+
+	if st != nil {
+		ws, err := st.LoadWorkstreams()
+		if err != nil {
+			return nil, fmt.Errorf("load workstreams: %w", err)
+		}
+		if ws != nil {
+			workstreams = ws
+		}
+		p, seq, err := st.LoadProposals()
+		if err != nil {
+			return nil, fmt.Errorf("load proposals: %w", err)
+		}
+		proposals = p
+		proposalSeq = seq
+	}
+
 	return &Manager{
 		client:             client,
 		sc:                 sc,
+		store:              st,
 		cfg:                cfg,
 		logger:             logger,
-		workstreams:        make(map[string]models.Workstream),
+		workstreams:        workstreams,
+		proposals:          proposals,
+		proposalSeq:        proposalSeq,
 		signalsSinceUpdate: make(map[string]int),
-	}
+	}, nil
 }
 
 // --- Workstream queries (read-only) ---
@@ -95,13 +122,15 @@ func (m *Manager) AllWorkstreams() []models.Workstream {
 // EnsureDefaultWorkstream creates the default workstream for a workspace
 // if it doesn't exist. The ts should be the timestamp of the first signal
 // in this workspace.
-func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time) {
+func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time) error {
 	id := models.DefaultWorkstreamID(ws)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workstreams[id]; !ok {
 		m.workstreams[id] = models.NewDefaultWorkstream(ws, ts)
+		return m.persistWorkstreams()
 	}
+	return nil
 }
 
 // --- Lifecycle operations ---
@@ -135,6 +164,14 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 		m.workstreams[w.ID] = w
 		proposal.State = models.ProposalApproved
 		m.proposals = append(m.proposals, proposal)
+		if err := m.persistWorkstreams(); err != nil {
+			m.mu.Unlock()
+			return "", err
+		}
+		if err := m.persistProposals(); err != nil {
+			m.mu.Unlock()
+			return "", err
+		}
 		m.mu.Unlock()
 
 		m.logger.Info("workstream created (auto-approved)",
@@ -151,6 +188,10 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	proposal.ID = fmt.Sprintf("p-%d", m.proposalSeq)
 	proposal.State = models.ProposalPending
 	m.proposals = append(m.proposals, proposal)
+	if err := m.persistProposals(); err != nil {
+		m.mu.Unlock()
+		return "", err
+	}
 	m.mu.Unlock()
 
 	m.logger.Info("workstream proposed (pending confirmation)",
@@ -197,7 +238,9 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 	}
 
 	// Dormancy check.
-	m.detectDormancy(sig.Ts)
+	if err := m.detectDormancy(sig.Ts); err != nil {
+		errs = append(errs, err)
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("manager: %w", errs[0])
@@ -245,6 +288,10 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	updated := ws.WithFocus(strings.TrimSpace(newFocus))
 	m.mu.Lock()
 	m.workstreams[ws.ID] = updated
+	if err := m.persistWorkstreams(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	m.mu.Unlock()
 	m.focusUpdates++
 
@@ -256,9 +303,10 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	return nil
 }
 
-func (m *Manager) detectDormancy(now time.Time) {
+func (m *Manager) detectDormancy(now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	changed := false
 	for id, ws := range m.workstreams {
 		if ws.IsDefault() || ws.State != models.StateActive {
 			continue
@@ -267,12 +315,33 @@ func (m *Manager) detectDormancy(now time.Time) {
 		if !lastSig.IsZero() && now.Sub(lastSig) > m.cfg.DormancyThreshold {
 			m.workstreams[id] = ws.WithState(models.StateDormant)
 			m.dormancyChanges++
+			changed = true
 			m.logger.Info("workstream marked dormant",
 				"workstream", ws.Name,
 				"last_signal", lastSig.Format("2006-01-02"),
 			)
 		}
 	}
+	if changed {
+		return m.persistWorkstreams()
+	}
+	return nil
+}
+
+// persistWorkstreams saves workstreams to the store. Must be called with mu held.
+func (m *Manager) persistWorkstreams() error {
+	if m.store == nil {
+		return nil
+	}
+	return m.store.SaveWorkstreams(m.workstreams)
+}
+
+// persistProposals saves proposals to the store. Must be called with mu held.
+func (m *Manager) persistProposals() error {
+	if m.store == nil {
+		return nil
+	}
+	return m.store.SaveProposals(m.proposals, m.proposalSeq)
 }
 
 func buildFocusPrompt(ws models.Workstream, signals []models.Signal) string {

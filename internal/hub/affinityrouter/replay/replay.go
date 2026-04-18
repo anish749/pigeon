@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/anish749/pigeon/internal/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/router"
+	arstore "github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -103,13 +105,25 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	classifierFactory := classifier.NewBatchFactory(claude, logger)
 	sc := manager.NewStatCollector()
-	rtr := router.New(detectorFactory, classifierFactory, cfg, logger)
-	mgr := manager.New(claude, sc, cfg, logger)
+
+	storeDir := filepath.Join(root.Path(), ".affinityrouter")
+	st := arstore.NewFS(storeDir)
+
+	rtr, err := router.New(detectorFactory, classifierFactory, cfg, st, logger)
+	if err != nil {
+		return nil, fmt.Errorf("create router: %w", err)
+	}
+	mgr, err := manager.New(claude, sc, cfg, st, logger)
+	if err != nil {
+		return nil, fmt.Errorf("create manager: %w", err)
+	}
 
 	// Replay: for each signal, route → observe (manager records + manages).
 	wsName := cfg.Workspace.Name
 	for i, sig := range signals {
-		mgr.EnsureDefaultWorkstream(wsName, sig.Ts)
+		if err := mgr.EnsureDefaultWorkstream(wsName, sig.Ts); err != nil {
+			return nil, fmt.Errorf("ensure default workstream: %w", err)
+		}
 
 		// Route the signal.
 		active := mgr.ActiveWorkstreams(wsName)
@@ -165,7 +179,9 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 			Conversation: sig.Conversation,
 		}
 		for _, wsID := range result.Decision.WorkstreamIDs {
-			rtr.UpdateAffinity(key, wsID, sig.Ts)
+			if err := rtr.UpdateAffinity(key, wsID, sig.Ts); err != nil {
+				logger.Warn("update affinity failed", "error", err)
+			}
 		}
 
 		// Progress logging.

@@ -27,12 +27,12 @@ const (
 // It carries NO routing information. Routing decisions are recorded
 // separately in the RoutingLedger.
 type Signal struct {
-	ID           string          // platform-specific ID
-	Type         SignalType      // what kind of signal
-	Account      account.Account // platform + workspace
-	Conversation string          // channel/DM/email-thread/etc.
-	ThreadID     string          // thread within conversation
-	Ts           time.Time       // when the signal occurred
-	Sender       string          // display name of the sender
-	Text         string          // message body / subject / title
+	ID           string          `json:"id"`
+	Type         SignalType      `json:"type"`
+	Account      account.Account `json:"account"`
+	Conversation string          `json:"conversation"`
+	ThreadID     string          `json:"thread_id,omitempty"`
+	Ts           time.Time       `json:"ts"`
+	Sender       string          `json:"sender"`
+	Text         string          `json:"text"`
 }

@@ -8,6 +8,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 )
 
 // Router routes signals to workstreams.
@@ -24,6 +26,7 @@ import (
 type Router struct {
 	newDetector   detector.Factory
 	newClassifier classifier.Factory
+	store         store.Store
 	logger        *slog.Logger
 
 	// Internal state.
@@ -41,16 +44,29 @@ type Router struct {
 }
 
 // New creates a Router with the given shift detector and classifier factories.
-func New(detectorFactory detector.Factory, classifierFactory classifier.Factory, cfg models.Config, logger *slog.Logger) *Router {
+// If st is non-nil, affinities are loaded from it on creation and persisted
+// after each UpdateAffinity call.
+func New(detectorFactory detector.Factory, classifierFactory classifier.Factory, cfg models.Config, st store.Store, logger *slog.Logger) (*Router, error) {
+	affinities := make(map[models.ConversationKey][]models.AffinityEntry)
+	if st != nil {
+		loaded, err := st.LoadAffinities()
+		if err != nil {
+			return nil, fmt.Errorf("load affinities: %w", err)
+		}
+		if loaded != nil {
+			affinities = loaded
+		}
+	}
 	return &Router{
 		newDetector:   detectorFactory,
 		newClassifier: classifierFactory,
+		store:         st,
 		logger:        logger,
-		affinities:    make(map[models.ConversationKey][]models.AffinityEntry),
+		affinities:    affinities,
 		detectors:     make(map[models.ConversationKey]detector.ConversationShiftDetector),
 		classifiers:   make(map[models.ConversationKey]classifier.WorkstreamClassifier),
 		workspace:     cfg.Workspace.Name,
-	}
+	}, nil
 }
 
 // RouteResult bundles the routing decision with classification results.
@@ -187,7 +203,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 
 // UpdateAffinity updates the conversation->workstream affinity weights.
 // Called by the orchestrator after recording a routing decision in the ledger.
-func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string, ts time.Time) {
+func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string, ts time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -197,7 +213,7 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 			entries[i].Strength++
 			entries[i].LastSignal = ts
 			r.affinities[key] = entries
-			return
+			return r.persistAffinities()
 		}
 	}
 	r.affinities[key] = append(entries, models.AffinityEntry{
@@ -205,6 +221,15 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 		Strength:     1,
 		LastSignal:   ts,
 	})
+	return r.persistAffinities()
+}
+
+// persistAffinities saves affinities to the store. Must be called with mu held.
+func (r *Router) persistAffinities() error {
+	if r.store == nil {
+		return nil
+	}
+	return r.store.SaveAffinities(r.affinities)
 }
 
 // Stats holds routing statistics.

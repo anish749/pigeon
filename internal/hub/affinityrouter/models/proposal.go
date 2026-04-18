@@ -27,25 +27,25 @@ const (
 // Proposal represents a suggested workstream lifecycle change that needs
 // user confirmation before taking effect.
 type Proposal struct {
-	ID    string       // unique proposal ID
-	Type  ProposalType // create, merge, split
-	State ProposalState
+	ID    string        `json:"id"`
+	Type  ProposalType  `json:"type"`
+	State ProposalState `json:"state"`
 
 	// For create proposals.
-	SuggestedName  string // proposed workstream name
-	SuggestedFocus string               // proposed focus description
-	Workspace      config.WorkspaceName
+	SuggestedName  string               `json:"suggested_name"`
+	SuggestedFocus string               `json:"suggested_focus"`
+	Workspace      config.WorkspaceName `json:"workspace"`
 
 	// For merge proposals.
-	MergeSourceIDs []string // workstream IDs to merge
-	MergeTargetID  string   // resulting workstream ID (or new)
+	MergeSourceIDs []string `json:"merge_source_ids,omitempty"`
+	MergeTargetID  string   `json:"merge_target_id,omitempty"`
 
 	// Context — what triggered this proposal.
-	TriggeringSignals []Signal
+	TriggeringSignals []Signal `json:"triggering_signals,omitempty"`
 
 	// Timestamps
-	ProposedAt time.Time
-	ResolvedAt time.Time
+	ProposedAt time.Time `json:"proposed_at"`
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 }
 
 // ApprovalMode controls how proposals are handled during replay.
