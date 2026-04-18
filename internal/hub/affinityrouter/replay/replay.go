@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter"
@@ -74,7 +73,7 @@ type Report struct {
 
 	// Routing stats.
 	AccumulatorStats accumulator.AccumulatorStats
-	ManagerStats     manager.ManagerStats
+	ManagerStats     manager.Stats
 
 	// Proposals
 	ProposalsTotal    int
@@ -148,39 +147,32 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		MinSignals: cfg.BatchMinSignals,
 		MaxAge:     cfg.BatchMaxAge,
 	}
+	mgrCfg := manager.Config{
+		FocusUpdateInterval: cfg.FocusUpdateInterval,
+		DormancyThreshold:   7 * 24 * time.Hour,
+	}
 	acc := accumulator.New(wsStore, batchClassifier, threshold, cfg.ApprovalMode, logger)
-	mgr := manager.New(wsStore, claude, logger)
-
-	// Track signals per workstream for focus updates.
-	signalsSinceUpdate := make(map[string]int)
+	mgr := manager.New(wsStore, claude, mgrCfg, logger)
 
 	// Replay signals chronologically.
+	// The manager tracks signal counts internally via ObserveSignal.
+	reviewInterval := 100 // run manager review every N signals
 	for i, sig := range signals {
 		if err := acc.Receive(ctx, sig); err != nil {
 			logger.Warn("receive signal failed", "error", err, "index", i)
 			continue
 		}
 
-		// Periodically update focus for active workstreams.
-		for _, wsID := range sig.WorkstreamIDs {
-			signalsSinceUpdate[wsID]++
-		}
-		for wsID, count := range signalsSinceUpdate {
-			if count >= cfg.FocusUpdateInterval {
-				ws := wsStore.GetWorkstream(wsID)
-				if ws != nil && !ws.IsDefault() {
-					var recent []models.Signal
-					start := max(i-cfg.FocusUpdateInterval, 0)
-					for j := start; j <= i; j++ {
-						if slices.Contains(signals[j].WorkstreamIDs, wsID) {
-							recent = append(recent, signals[j])
-						}
-					}
-					if _, err := mgr.UpdateFocus(ctx, ws, recent); err != nil {
-						logger.Warn("focus update failed", "workstream", wsID, "error", err)
-					}
-				}
-				signalsSinceUpdate[wsID] = 0
+		// Tell the manager about the signal so it can track focus staleness.
+		mgr.ObserveSignal(sig)
+
+		// Periodically run manager review (focus updates, dormancy, merges).
+		if (i+1)%reviewInterval == 0 {
+			// Collect recent signals for focus update context.
+			start := max(i-reviewInterval, 0)
+			recent := signals[start : i+1]
+			if err := mgr.Review(ctx, sig.Ts, recent); err != nil {
+				logger.Warn("manager review failed", "error", err)
 			}
 		}
 
@@ -193,6 +185,13 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 				"workstreams", stats.NonDefault,
 				"conversations", stats.Conversations,
 			)
+		}
+	}
+
+	// Final manager review.
+	if len(signals) > 0 {
+		if err := mgr.Review(ctx, signals[len(signals)-1].Ts, signals); err != nil {
+			logger.Warn("final manager review failed", "error", err)
 		}
 	}
 
