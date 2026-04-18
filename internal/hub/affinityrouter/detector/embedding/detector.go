@@ -11,14 +11,28 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
+// Embedder produces embedding vectors from text.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
+
 // CosineDetector implements ConversationShiftDetector using embedding
 // cosine similarity. It buffers signals into a sliding window, embeds
 // window text via the sidecar, and compares against the previous
 // window's embedding to detect topic shifts.
+//
+// The threshold is self-calibrating: after minCalibration similarity
+// observations, it switches from fallbackThreshold to mean - stdMultiplier*std
+// computed over all observed similarities for this conversation.
 type CosineDetector struct {
-	client    *Client
-	logger    *slog.Logger
-	threshold float64
+	embedder Embedder
+	logger   *slog.Logger
+
+	// Self-calibrating threshold parameters.
+	fallbackThreshold float64
+	stdMultiplier     float64
+	minCalibration    int
+	sims              []float64
 
 	windowSize int
 	window     []models.Signal
@@ -42,10 +56,12 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	emb, err := d.client.Embed(ctx, text)
+	emb, err := d.embedder.Embed(ctx, text)
 	if err != nil {
-		d.logger.Warn("embed failed, falling back to no-shift", "err", err)
-		return false
+		// Embedding failed — trigger reclassification so the LLM classifier
+		// handles this batch. prevEmbed is kept for the next successful embed.
+		d.logger.Error("embed failed, triggering reclassification", "err", err)
+		return true
 	}
 
 	// First full window — cache embedding, no comparison yet.
@@ -56,15 +72,43 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 
 	sim := cosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
+	d.sims = append(d.sims, sim)
 
-	shifted := sim < d.threshold
+	threshold := d.currentThreshold()
+	shifted := sim < threshold
 	if shifted {
 		d.logger.Info("topic shift detected",
 			"sim", fmt.Sprintf("%.3f", sim),
-			"threshold", fmt.Sprintf("%.3f", d.threshold),
+			"threshold", fmt.Sprintf("%.3f", threshold),
+			"calibrated", len(d.sims) >= d.minCalibration,
 		)
 	}
 	return shifted
+}
+
+// currentThreshold returns the self-calibrating threshold if enough
+// observations have been collected, otherwise the fallback.
+func (d *CosineDetector) currentThreshold() float64 {
+	if len(d.sims) < d.minCalibration {
+		return d.fallbackThreshold
+	}
+	mean, std := meanStd(d.sims)
+	return mean - d.stdMultiplier*std
+}
+
+func meanStd(vals []float64) (float64, float64) {
+	n := float64(len(vals))
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	mean := sum / n
+	var sqDiff float64
+	for _, v := range vals {
+		d := v - mean
+		sqDiff += d * d
+	}
+	return mean, math.Sqrt(sqDiff / n)
 }
 
 func cosineSimilarity(a, b []float32) float64 {
@@ -93,15 +137,19 @@ func windowText(signals []models.Signal) string {
 }
 
 // NewCosineFactory returns a detector.Factory that creates CosineDetectors.
-// The client and threshold are shared across all detectors; each detector
-// maintains its own sliding window and previous embedding.
-func NewCosineFactory(client *Client, windowSize int, threshold float64, logger *slog.Logger) detector.Factory {
+// The embedder and fallbackThreshold are shared across all detectors; each
+// detector maintains its own sliding window, previous embedding, and
+// self-calibrating threshold that adapts to the conversation's similarity
+// distribution after 5 observations.
+func NewCosineFactory(embedder Embedder, windowSize int, fallbackThreshold float64, logger *slog.Logger) detector.Factory {
 	return func() detector.ConversationShiftDetector {
 		return &CosineDetector{
-			client:     client,
-			logger:     logger,
-			threshold:  threshold,
-			windowSize: windowSize,
+			embedder:          embedder,
+			logger:            logger,
+			fallbackThreshold: fallbackThreshold,
+			stdMultiplier:     1.0,
+			minCalibration:    5,
+			windowSize:        windowSize,
 		}
 	}
 }
