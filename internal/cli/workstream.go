@@ -82,7 +82,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
-	cmd.Flags().IntVar(&cfg.BatchMinSignals, "batch-size", 8, "Signals per batch classification")
+	cmd.Flags().DurationVar(&cfg.BurstGap, "burst-gap", 90*time.Minute, "Gap between messages that triggers burst classification")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
 

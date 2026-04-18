@@ -13,9 +13,8 @@ type Config struct {
 	Since time.Time
 	Until time.Time
 
-	// Router — batch classification thresholds.
-	BatchMinSignals int           // trigger classifier after this many signals per conversation
-	BatchMaxAge     time.Duration // trigger classifier after this much time with pending signals
+	// Router — burst detection.
+	BurstGap time.Duration // gap between messages that marks a burst boundary (triggers classification)
 
 	// Manager — workstream lifecycle.
 	FocusUpdateInterval int           // update focus after this many signals per workstream
@@ -35,8 +34,7 @@ func DefaultConfig() Config {
 	return Config{
 		Since:               time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Until:               time.Now(),
-		BatchMinSignals:     8,
-		BatchMaxAge:         30 * time.Minute,
+		BurstGap:            90 * time.Minute,
 		FocusUpdateInterval: 25,
 		DormancyThreshold:   7 * 24 * time.Hour,
 		Model:               "haiku",

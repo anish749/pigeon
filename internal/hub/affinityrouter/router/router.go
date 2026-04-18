@@ -29,9 +29,8 @@ type Router struct {
 	buffers    map[models.ConversationKey]*buffer                // pending signals per conversation
 
 	// Config.
-	workspace       config.WorkspaceName
-	batchMinSignals int
-	batchMaxAge     time.Duration
+	workspace config.WorkspaceName
+	burstGap  time.Duration
 
 	// Stats.
 	stats Stats
@@ -51,9 +50,8 @@ func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger
 		logger:          logger,
 		affinities:      make(map[models.ConversationKey][]models.AffinityEntry),
 		buffers:         make(map[models.ConversationKey]*buffer),
-		workspace:       cfg.Workspace.Name,
-		batchMinSignals: cfg.BatchMinSignals,
-		batchMaxAge:     cfg.BatchMaxAge,
+		workspace: cfg.Workspace.Name,
+		burstGap:  cfg.BurstGap,
 	}
 }
 
@@ -195,27 +193,16 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 }
 
 // bufferReady reports whether the buffer should be drained for classification.
+// A burst boundary is detected when the gap between the last buffered signal
+// and the current signal (now) exceeds the configured burst gap threshold.
+// This captures natural conversation pauses — classify the completed burst.
 func (r *Router) bufferReady(buf *buffer, now time.Time) bool {
 	if len(buf.signals) == 0 {
 		return false
 	}
-
-	// Enough signals accumulated.
-	if len(buf.signals) >= r.batchMinSignals {
-		return true
-	}
-
-	// Enough time since last classification.
-	if !buf.lastClassified.IsZero() && now.Sub(buf.lastClassified) >= r.batchMaxAge {
-		return true
-	}
-
-	// First batch: enough time since first signal.
-	if buf.lastClassified.IsZero() && now.Sub(buf.signals[0].Ts) >= r.batchMaxAge {
-		return true
-	}
-
-	return false
+	// The burst ended: gap from the last buffered signal to now exceeds the threshold.
+	lastSignal := buf.signals[len(buf.signals)-1].Ts
+	return now.Sub(lastSignal) >= r.burstGap
 }
 
 // UpdateAffinity updates the conversation->workstream affinity weights.
