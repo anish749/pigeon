@@ -23,10 +23,13 @@ import (
 //
 //	go test -run TestBenchmarkDetectors -v -timeout 5m ./internal/hub/affinityrouter/detector/embedding/
 //
-// Requires the embedding sidecar — start it first or skip with -short.
+// Requires local data and the embedding sidecar. Skipped unless
+// PIGEON_BENCHMARK=1 is set. Run with:
+//
+//	PIGEON_BENCHMARK=1 go test -run TestBenchmarkDetectors -v -timeout 5m ./internal/hub/affinityrouter/detector/embedding/
 func TestBenchmarkDetectors(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping benchmark: requires embedding sidecar")
+	if os.Getenv("PIGEON_BENCHMARK") == "" {
+		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires local data and uv)")
 	}
 
 	socketPath := filepath.Join(paths.StateDir(), "embed-benchmark.sock")
@@ -166,10 +169,9 @@ func TestBenchmarkDetectors(t *testing.T) {
 	}
 }
 
-// embedClient is a test helper to verify the sidecar is reachable.
 func TestSidecarSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: requires embedding sidecar")
+	if os.Getenv("PIGEON_BENCHMARK") == "" {
+		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires uv)")
 	}
 
 	socketPath := filepath.Join(paths.StateDir(), "embed-smoke.sock")
