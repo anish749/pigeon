@@ -1,28 +1,19 @@
 package modelv1
 
 import (
-	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
+	"encoding/json"
 )
 
-// RawFormatter formats platform-specific raw content for display.
-type RawFormatter interface {
-	FormatRaw(raw map[string]any, indent string) []string
-}
-
-var rawFormatters = map[RawType]RawFormatter{
-	RawTypeSlack: &slackraw.Formatter{},
-}
-
-// formatRaw looks up the appropriate RawFormatter for the given raw type
-// and delegates rendering. Returns nil if there is no formatter or no
-// content to render.
-func formatRaw(rawType RawType, raw map[string]any, indent string) []string {
+// formatRaw serializes raw platform content as a JSON line. AI agent
+// consumers parse JSON natively, so no platform-specific formatting is
+// needed — the raw data is strictly more informative than any summary.
+func formatRaw(raw map[string]any, indent string) []string {
 	if len(raw) == 0 {
 		return nil
 	}
-	f, ok := rawFormatters[rawType]
-	if !ok {
+	data, err := json.Marshal(raw)
+	if err != nil {
 		return nil
 	}
-	return f.FormatRaw(raw, indent)
+	return []string{indent + string(data)}
 }
