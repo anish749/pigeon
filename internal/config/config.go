@@ -26,9 +26,6 @@ type Config struct {
 // WorkspaceName is the resolved name of the active workspace.
 type WorkspaceName string
 
-// WorkspaceAll means no workspace is active — all accounts are visible.
-const WorkspaceAll WorkspaceName = ""
-
 // WorkspaceConfig lists the accounts that belong to a named workspace. Each
 // field holds account slugs (the same slug used in storage paths:
 // workspace slug for Slack, email slug for GWS, account slug for WhatsApp).

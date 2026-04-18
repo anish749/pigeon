@@ -1,0 +1,79 @@
+// Package workspace resolves the active workspace from config, environment,
+// and CLI flags. A workspace is a named set of accounts that scopes all
+// pigeon commands. See docs/read-protocol.md.
+package workspace
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/config"
+)
+
+// EnvWorkspace is the environment variable that sets the active workspace.
+const EnvWorkspace = "PIGEON_WORKSPACE"
+
+// Workspace is the resolved active workspace with its accounts.
+type Workspace struct {
+	Name     config.WorkspaceName
+	Accounts []account.Account
+}
+
+// GetCurrentWorkspace determines the active workspace and resolves its accounts.
+//
+// Resolution order:
+//  1. flagOverride (--workspace CLI flag)
+//  2. PIGEON_WORKSPACE environment variable
+//  3. default_workspace in config
+//  4. No workspace — all configured accounts
+func GetCurrentWorkspace(cfg *config.Config, flagOverride string) (*Workspace, error) {
+	if flagOverride != "" {
+		return resolve(cfg, config.WorkspaceName(flagOverride), "--workspace flag")
+	}
+	if env := os.Getenv(EnvWorkspace); env != "" {
+		return resolve(cfg, config.WorkspaceName(env), EnvWorkspace)
+	}
+	if cfg.DefaultWorkspace != "" {
+		return resolve(cfg, cfg.DefaultWorkspace, "default_workspace in config")
+	}
+	return &Workspace{Accounts: allAccounts(cfg)}, nil
+}
+
+// resolve looks up a workspace by name and maps its account slugs to
+// concrete account.Account values.
+func resolve(cfg *config.Config, ws config.WorkspaceName, source string) (*Workspace, error) {
+	wsCfg, ok := cfg.Workspaces[ws]
+	if !ok {
+		return nil, fmt.Errorf("unknown workspace %q (%s)", ws, source)
+	}
+	var accounts []account.Account
+	for _, slug := range wsCfg.Slack {
+		accounts = append(accounts, account.New("slack", slug))
+	}
+	for _, slug := range wsCfg.GWS {
+		accounts = append(accounts, account.New("gws", slug))
+	}
+	for _, slug := range wsCfg.WhatsApp {
+		accounts = append(accounts, account.New("whatsapp", slug))
+	}
+	return &Workspace{Name: ws, Accounts: accounts}, nil
+}
+
+// allAccounts returns every configured account across all platforms.
+func allAccounts(cfg *config.Config) []account.Account {
+	var accounts []account.Account
+	for _, s := range cfg.Slack {
+		accounts = append(accounts, account.New("slack", s.Workspace))
+	}
+	for _, g := range cfg.GWS {
+		accounts = append(accounts, account.New("gws", g.Email))
+	}
+	for _, w := range cfg.WhatsApp {
+		accounts = append(accounts, account.New("whatsapp", w.Account))
+	}
+	for _, l := range cfg.Linear {
+		accounts = append(accounts, account.New("linear", l.Workspace))
+	}
+	return accounts
+}
