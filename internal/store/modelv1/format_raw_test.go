@@ -46,14 +46,14 @@ func TestFormatMsg_File(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "ally", SenderID: "U85", Text: "check this screenshot",
+			Sender: "Alice", SenderID: "U1", Text: "check this screenshot",
 			Raw: map[string]any{
 				"files": []any{
 					map[string]any{
 						"name":      "screenshot.png",
 						"mimetype":  "image/png",
 						"size":      float64(197770),
-						"permalink": "https://tubular.slack.com/files/U85/F0AE/screenshot.png",
+						"permalink": "https://example.slack.com/files/U1/F0AE/screenshot.png",
 					},
 				},
 			},
@@ -81,14 +81,14 @@ func TestFormatMsg_FilePermalink(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "ally", SenderID: "U85", Text: "here",
+			Sender: "Alice", SenderID: "U1", Text: "here",
 			Raw: map[string]any{
 				"files": []any{
 					map[string]any{
 						"name":      "doc.pdf",
 						"mimetype":  "application/pdf",
 						"size":      float64(1048576),
-						"permalink": "https://slack.com/files/doc.pdf",
+						"permalink": "https://example.slack.com/files/U1/F1/doc.pdf",
 					},
 				},
 			},
@@ -97,7 +97,7 @@ func TestFormatMsg_FilePermalink(t *testing.T) {
 	lines := FormatMsg(m, time.UTC)
 	found := false
 	for _, l := range lines {
-		if strings.Contains(l, "https://slack.com/files/doc.pdf") {
+		if strings.Contains(l, "https://example.slack.com/files/U1/F1/doc.pdf") {
 			found = true
 		}
 	}
@@ -123,7 +123,7 @@ func TestFormatMsg_AttachmentAndFile(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
 			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Andrew", SenderID: "U036", Text: "see below",
+			Sender: "Bob", SenderID: "U2", Text: "see below",
 			Raw: map[string]any{
 				"attachments": []any{
 					map[string]any{"fallback": "JIRA link preview"},
@@ -235,55 +235,3 @@ func TestHumanSize(t *testing.T) {
 	}
 }
 
-func TestParseRawContent(t *testing.T) {
-	raw := map[string]any{
-		"attachments": []any{
-			map[string]any{
-				"fallback": "test fallback",
-				"pretext":  "test pretext",
-				"fields": []any{
-					map[string]any{"title": "Key", "value": "Val"},
-				},
-			},
-		},
-		"files": []any{
-			map[string]any{
-				"name":      "test.png",
-				"mimetype":  "image/png",
-				"size":      float64(1024),
-				"permalink": "https://example.com/test.png",
-			},
-		},
-	}
-	rc, ok := parseRawContent(raw)
-	if !ok {
-		t.Fatal("expected parseRawContent to succeed")
-	}
-	if len(rc.Attachments) != 1 {
-		t.Fatalf("attachments = %d, want 1", len(rc.Attachments))
-	}
-	att := rc.Attachments[0]
-	if att.Fallback != "test fallback" {
-		t.Errorf("fallback = %q", att.Fallback)
-	}
-	if len(att.Fields) != 1 || att.Fields[0].Title != "Key" {
-		t.Errorf("fields = %v", att.Fields)
-	}
-	if len(rc.Files) != 1 {
-		t.Fatalf("files = %d, want 1", len(rc.Files))
-	}
-	f := rc.Files[0]
-	if f.Name != "test.png" || f.Mimetype != "image/png" || f.Size != 1024 {
-		t.Errorf("file = %+v", f)
-	}
-	if f.Permalink != "https://example.com/test.png" {
-		t.Errorf("permalink = %q", f.Permalink)
-	}
-}
-
-func TestParseRawContent_Empty(t *testing.T) {
-	_, ok := parseRawContent(map[string]any{})
-	if ok {
-		t.Error("expected false for empty map")
-	}
-}

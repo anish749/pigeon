@@ -16,8 +16,8 @@ type SlackRawContent struct {
 	Files       []goslack.File       `json:"files,omitempty"`
 }
 
-// ExtractRaw converts the Slack-specific content (blocks, attachments, files)
-// from a message into a map for storage in the Raw field. Returns nil if the
+// NewSlackRawContent extracts Slack-specific content (blocks, attachments,
+// files) from a message into a typed struct. Returns an empty struct if the
 // message has no extra content beyond text.
 func NewSlackRawContent(msg goslack.Msg) SlackRawContent {
 	if len(msg.Attachments) == 0 && len(msg.Blocks.BlockSet) == 0 && len(msg.Files) == 0 {
@@ -36,7 +36,10 @@ func NewSlackRawContent(msg goslack.Msg) SlackRawContent {
 	return content
 }
 
-func (c *SlackRawContent) AsSerializable() SerailiableSlackRaw {
+func (c SlackRawContent) AsSerializable() SerailiableSlackRaw {
+	if c.Blocks == nil && len(c.Attachments) == 0 && len(c.Files) == 0 {
+		return nil
+	}
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil
@@ -46,4 +49,16 @@ func (c *SlackRawContent) AsSerializable() SerailiableSlackRaw {
 		return nil
 	}
 	return raw
+}
+
+func FromSerializable(raw map[string]any) (SlackRawContent, error) {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return SlackRawContent{}, err
+	}
+	var rc SlackRawContent
+	if err := json.Unmarshal(data, &rc); err != nil {
+		return SlackRawContent{}, err
+	}
+	return rc, nil
 }

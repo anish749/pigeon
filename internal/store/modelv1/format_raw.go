@@ -1,63 +1,19 @@
 package modelv1
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	goslack "github.com/slack-go/slack"
+
+	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
 )
-
-// rawContent mirrors the structure serialized by ExtractRaw in the Slack
-// listener. Only the fields needed for display formatting are included;
-// unknown fields are silently ignored by json.Unmarshal.
-type rawContent struct {
-	Attachments []rawAttachment `json:"attachments,omitempty"`
-	Files       []rawFile       `json:"files,omitempty"`
-}
-
-type rawAttachment struct {
-	Fallback string              `json:"fallback"`
-	Pretext  string              `json:"pretext"`
-	Fields   []rawAttachmentField `json:"fields"`
-}
-
-type rawAttachmentField struct {
-	Title string `json:"title"`
-	Value string `json:"value"`
-}
-
-type rawFile struct {
-	Name      string `json:"name"`
-	Title     string `json:"title"`
-	Mimetype  string `json:"mimetype"`
-	Size      int64  `json:"size"`
-	Permalink string `json:"permalink"`
-}
-
-// parseRawContent deserializes a Raw map back into typed structs via JSON
-// round-trip, mirroring the serialization path in ExtractRaw.
-func parseRawContent(raw map[string]any) (rawContent, bool) {
-	if len(raw) == 0 {
-		return rawContent{}, false
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return rawContent{}, false
-	}
-	var rc rawContent
-	if err := json.Unmarshal(data, &rc); err != nil {
-		return rawContent{}, false
-	}
-	if len(rc.Attachments) == 0 && len(rc.Files) == 0 {
-		return rawContent{}, false
-	}
-	return rc, true
-}
 
 // formatRaw renders raw content (attachments, files) as indented display
 // lines below the message text. Returns nil if there is nothing to render.
 func formatRaw(raw map[string]any, indent string) []string {
-	rc, ok := parseRawContent(raw)
-	if !ok {
+	rc, err := slackmodel.FromSerializable(raw)
+	if err != nil {
 		return nil
 	}
 	var lines []string
@@ -68,7 +24,7 @@ func formatRaw(raw map[string]any, indent string) []string {
 
 // formatRawAttachments renders attachments (Jira unfurls, Jenkins
 // notifications, etc.) as indented lines showing fallback text and fields.
-func formatRawAttachments(atts []rawAttachment, indent string) []string {
+func formatRawAttachments(atts []goslack.Attachment, indent string) []string {
 	var lines []string
 	for _, att := range atts {
 		fallback := att.Fallback
@@ -98,7 +54,7 @@ func formatRawAttachments(atts []rawAttachment, indent string) []string {
 // formatAttachmentFields renders attachment fields as "Key: Value · Key: Value".
 // Fields whose value duplicates the fallback are skipped (some bots like
 // Jenkins put identical content in both).
-func formatAttachmentFields(att rawAttachment) string {
+func formatAttachmentFields(att goslack.Attachment) string {
 	var parts []string
 	for _, f := range att.Fields {
 		if f.Title == "" && f.Value == "" {
@@ -118,7 +74,7 @@ func formatAttachmentFields(att rawAttachment) string {
 
 // formatRawFiles renders file attachments as indented lines showing
 // file name, MIME type, human-readable size, and permalink.
-func formatRawFiles(files []rawFile, indent string) []string {
+func formatRawFiles(files []goslack.File, indent string) []string {
 	var lines []string
 	for _, f := range files {
 		name := f.Name
@@ -130,7 +86,7 @@ func formatRawFiles(files []rawFile, indent string) []string {
 		}
 		var sizePart string
 		if f.Size > 0 {
-			sizePart = humanSize(f.Size)
+			sizePart = humanSize(int64(f.Size))
 		}
 
 		info := name

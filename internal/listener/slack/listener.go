@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
@@ -148,7 +149,6 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	l.messages.EnsureMeta(rs.ChannelName, l.resolver.ConvMeta(msg.Channel, rs.ChannelName))
 	isBotDM := (msg.ChannelType == "im" || msg.ChannelType == "mpim") && !l.resolver.IsMember(msg.Channel)
 	via := DetermineVia(*msg.Message, isBotDM)
-	raw := ExtractRaw(*msg.Message)
 	text, err := l.resolver.ResolveText(ctx, msg.Text)
 	if err != nil {
 		slog.WarnContext(ctx, "slack: skipping message, cannot resolve text",
@@ -162,7 +162,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, raw); err != nil {
+		if err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, slackmodel.NewSlackRawContent(*msg.Message)); err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
@@ -175,7 +175,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			l.ensureThreadParent(ctx, msg.Channel, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, raw); err != nil {
+		if err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, slackmodel.NewSlackRawContent(*msg.Message)); err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
 		}
@@ -249,7 +249,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, threadTS s
 		return
 	}
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, ExtractRaw(parent.Msg)); err != nil {
+	if err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, slackmodel.NewSlackRawContent(parent.Msg)); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}
@@ -316,7 +316,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	}
 	ts := time.Now().UTC()
 
-	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts, ExtractRaw(*msg.Message)); err != nil {
+	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts, slackmodel.NewSlackRawContent(*msg.Message)); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 

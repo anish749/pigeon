@@ -11,6 +11,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/account"
+	slackmodel "github.com/anish749/pigeon/internal/listener/slack/model"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
@@ -230,7 +231,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 			}
 			ts := ParseTimestamp(msg.Timestamp)
 
-			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false), ExtractRaw(msg.Msg)); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, DetermineVia(msg.Msg, false), slackmodel.NewSlackRawContent(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: write failed", "error", err)
 				continue
 			}
@@ -406,7 +407,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 				continue
 			}
 			via := DetermineVia(msg.Msg, true)
-			if err := ms.Write(rs, text, ts, msg.Timestamp, via, ExtractRaw(msg.Msg)); err != nil {
+			if err := ms.Write(rs, text, ts, msg.Timestamp, via, slackmodel.NewSlackRawContent(msg.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: bot DM write failed", "error", err)
 				continue
 			}
@@ -574,7 +575,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), ExtractRaw(reply.Msg)); err != nil {
+			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), slackmodel.NewSlackRawContent(reply.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
@@ -615,7 +616,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 						continue
 					}
 					ts := ParseTimestamp(ctxMsg.Timestamp)
-					if err := ms.WriteThreadContext(ctxRS, msg.Timestamp, text, ts, ctxMsg.Timestamp, ExtractRaw(ctxMsg.Msg)); err != nil {
+					if err := ms.WriteThreadContext(ctxRS, msg.Timestamp, text, ts, ctxMsg.Timestamp, slackmodel.NewSlackRawContent(ctxMsg.Msg)); err != nil {
 						slog.WarnContext(ctx, "slack sync: thread context write failed", "error", err)
 					}
 				}
