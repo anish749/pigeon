@@ -313,6 +313,9 @@ MAINTENANCE
 		newResetCmd(),
 		newUnlinkCmd(),
 		newUpdateCmd(version),
+
+		// Workstream
+		newWorkstreamCmd(),
 	)
 
 	return root
