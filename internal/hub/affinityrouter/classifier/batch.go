@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -120,24 +120,11 @@ func (c *BatchClassifier) appendToWindow(sig models.Signal) {
 // equalStringSlices reports whether two string slices contain the same
 // elements regardless of order.
 func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	if len(a) == 0 {
-		return true
-	}
-	sa := make([]string, len(a))
-	copy(sa, a)
-	sort.Strings(sa)
-	sb := make([]string, len(b))
-	copy(sb, b)
-	sort.Strings(sb)
-	for i := range sa {
-		if sa[i] != sb[i] {
-			return false
-		}
-	}
-	return true
+	sa := slices.Clone(a)
+	sb := slices.Clone(b)
+	slices.Sort(sa)
+	slices.Sort(sb)
+	return slices.Equal(sa, sb)
 }
 
 // NewBatchFactory returns a Factory that creates BatchClassifiers sharing
