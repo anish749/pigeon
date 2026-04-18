@@ -53,9 +53,14 @@ func New(detectorFactory detector.Factory, classifierFactory classifier.Factory,
 	}
 }
 
-// RouteResult bundles the routing decision with an optional new workstream proposal.
+// RouteResult bundles the routing decision with classification results.
 type RouteResult struct {
+	// Decision is the routing decision for the current signal.
 	Decision models.RoutingDecision
+
+	// Reclassified contains signals whose workstream assignment changed
+	// as a result of classification. Empty when the detector did not trigger.
+	Reclassified []classifier.SignalRouting
 
 	// Set if the classifier proposes a new workstream.
 	// The Router does NOT create it — the caller passes this to the Manager.
@@ -68,14 +73,15 @@ type RouteResult struct {
 // Fast path: if the conversation has affinity, return immediately with
 // Source=SourceAffinity and Confidence=1.0.
 //
-// The signal is always sent to the classifier's buffer. When the detector
-// triggers, the classifier is called and a classifier-based decision is returned.
+// The signal is always sent to the classifier via Observe or
+// ObserveAndClassify. When the detector triggers, ObserveAndClassify
+// runs LLM classification and returns reclassification results.
 //
 // The workstreams parameter provides the current active workstreams for
 // the signal's workspace (needed by the classifier).
 //
 // Returns one of:
-//   - Decision with affinity-based workstream IDs (fast path)
+//   - Decision with affinity-based workstream IDs (fast path, no classification)
 //   - Decision with classifier-based workstream IDs (slow path, when detector triggers)
 //   - Decision with default workstream ID (no affinity, detector not triggered)
 //
@@ -92,18 +98,11 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	defer r.mu.Unlock()
 
 	// Fast path: conversation has affinity.
-	var affinityResult *RouteResult
+	var affinityIDs []string
 	if entries, ok := r.affinities[key]; ok && len(entries) > 0 {
-		ids := make([]string, len(entries))
+		affinityIDs = make([]string, len(entries))
 		for i, e := range entries {
-			ids[i] = e.WorkstreamID
-		}
-		affinityResult = &RouteResult{
-			Decision: models.RoutingDecision{
-				SignalID:      sig.ID,
-				WorkstreamIDs: ids,
-				Ts:            now,
-			},
+			affinityIDs[i] = e.WorkstreamID
 		}
 		r.stats.FastPathRouted++
 	}
@@ -123,77 +122,54 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	// Ask the detector whether this signal represents a shift.
 	shifted := det.Observe(sig)
 
+	// Determine the routing decision for this signal.
+	wsIDs := affinityIDs
+	if len(wsIDs) == 0 {
+		wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
+	}
+	decision := models.RoutingDecision{
+		SignalID:      sig.ID,
+		WorkstreamIDs: wsIDs,
+		Ts:            now,
+	}
+
 	if !shifted {
-		// No shift detected — buffer the signal in the classifier and return.
-		cls.Observe(sig)
+		// No shift detected — observe the signal with the router's decision.
+		cls.Observe(sig, decision)
 		r.stats.BufferedSignals++
-		if affinityResult != nil {
-			return affinityResult, nil
-		}
-		return &RouteResult{
-			Decision: models.RoutingDecision{
-				SignalID:      sig.ID,
-				WorkstreamIDs: []string{models.DefaultWorkstreamID(r.workspace)},
-				Ts:            now,
-			},
-		}, nil
+		return &RouteResult{Decision: decision}, nil
 	}
 
-	// Shift detected — classify the completed burst. The new signal starts
-	// the next burst, so we classify before observing it.
-	var currentAffinityIDs []string
-	if entries, ok := r.affinities[key]; ok {
-		for _, e := range entries {
-			currentAffinityIDs = append(currentAffinityIDs, e.WorkstreamID)
-		}
-	}
-
+	// Shift detected — observe and classify the full window.
 	r.stats.ClassifierCalls++
+	r.stats.BufferedSignals++
 
 	// Release the lock during the classifier call (network/LLM).
 	r.mu.Unlock()
-	result, err := cls.Classify(ctx, key, workstreams, currentAffinityIDs)
+	result, err := cls.ObserveAndClassify(ctx, sig, sig.Account, sig.Conversation, workstreams, affinityIDs)
 	r.mu.Lock()
-
-	// Buffer the new signal in the classifier — it starts the next burst.
-	cls.Observe(sig)
-	r.stats.BufferedSignals++
 
 	if err != nil {
 		r.stats.ClassifierCalls-- // don't count failed calls
-
-		if affinityResult != nil {
-			return affinityResult, nil
-		}
-		return nil, err
+		// On error, the signal was still observed by the classifier.
+		// Fall back to the router's decision.
+		return &RouteResult{Decision: decision}, err
 	}
 
-	// If classifier had nothing buffered, route to default.
-	if result == nil {
-		if affinityResult != nil {
-			return affinityResult, nil
+	// Use the classification result for the current signal's decision.
+	if len(result.Routings) > 0 {
+		// Find the current signal in the reclassified set.
+		for _, routing := range result.Routings {
+			if routing.Signal.ID == sig.ID {
+				decision.WorkstreamIDs = routing.WorkstreamIDs
+				break
+			}
 		}
-		return &RouteResult{
-			Decision: models.RoutingDecision{
-				SignalID:      sig.ID,
-				WorkstreamIDs: []string{models.DefaultWorkstreamID(r.workspace)},
-				Ts:            now,
-			},
-		}, nil
-	}
-
-	// If classifier returned nothing valid, route to default.
-	wsIDs := result.WorkstreamIDs
-	if len(wsIDs) == 0 && result.NewWorkstreamName == "" {
-		wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
 	}
 
 	routeResult := &RouteResult{
-		Decision: models.RoutingDecision{
-			SignalID:      sig.ID,
-			WorkstreamIDs: wsIDs,
-			Ts:            now,
-		},
+		Decision:           decision,
+		Reclassified:       result.Routings,
 		NewWorkstreamName:  result.NewWorkstreamName,
 		NewWorkstreamFocus: result.NewWorkstreamFocus,
 	}
@@ -201,8 +177,8 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	r.logger.Info("classified batch",
 		"account", key.Account.Display(),
 		"conversation", key.Conversation,
-		"signals", len(result.Signals),
-		"workstreams", result.WorkstreamIDs,
+		"window", cls.Buffered(),
+		"reclassified", len(result.Routings),
 		"new_workstream", result.NewWorkstreamName,
 	)
 
@@ -229,78 +205,6 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 		Strength:     1,
 		LastSignal:   ts,
 	})
-}
-
-// FlushBuffers classifies all remaining buffered signals regardless of gap.
-// Call at the end of a replay to ensure the last burst in every conversation
-// gets classified.
-func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstream) ([]*RouteResult, error) {
-	r.mu.Lock()
-	keys := make([]models.ConversationKey, 0, len(r.classifiers))
-	for key, cls := range r.classifiers {
-		if cls.Buffered() > 0 {
-			keys = append(keys, key)
-		}
-	}
-	r.mu.Unlock()
-
-	var results []*RouteResult
-	var errs []error
-	for _, key := range keys {
-		r.mu.Lock()
-		cls := r.classifiers[key]
-		if cls == nil || cls.Buffered() == 0 {
-			r.mu.Unlock()
-			continue
-		}
-
-		var currentAffinityIDs []string
-		if entries, ok := r.affinities[key]; ok {
-			for _, e := range entries {
-				currentAffinityIDs = append(currentAffinityIDs, e.WorkstreamID)
-			}
-		}
-		r.stats.ClassifierCalls++
-		r.mu.Unlock()
-
-		result, err := cls.Classify(ctx, key, workstreams, currentAffinityIDs)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-
-		if result == nil {
-			continue
-		}
-
-		wsIDs := result.WorkstreamIDs
-		if len(wsIDs) == 0 && result.NewWorkstreamName == "" {
-			r.mu.Lock()
-			wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
-			r.mu.Unlock()
-		}
-
-		rr := &RouteResult{
-			Decision: models.RoutingDecision{
-				SignalID:      result.Signals[0].ID,
-				WorkstreamIDs: wsIDs,
-				Ts:            result.Signals[len(result.Signals)-1].Ts,
-			},
-			NewWorkstreamName:  result.NewWorkstreamName,
-			NewWorkstreamFocus: result.NewWorkstreamFocus,
-		}
-
-		r.logger.Info("flush classified",
-			"conversation", key.Conversation,
-			"signals", len(result.Signals),
-			"workstreams", wsIDs,
-			"new_workstream", result.NewWorkstreamName,
-		)
-
-		results = append(results, rr)
-	}
-
-	return results, nil
 }
 
 // Stats holds routing statistics.

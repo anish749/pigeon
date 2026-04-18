@@ -144,6 +144,21 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 			logger.Warn("manager observe failed", "error", err, "index", i)
 		}
 
+		// Re-deliver reclassified signals to the manager.
+		for _, routing := range result.Reclassified {
+			if routing.Signal.ID == sig.ID {
+				continue // already handled above
+			}
+			reclassDecision := models.RoutingDecision{
+				SignalID:      routing.Signal.ID,
+				WorkstreamIDs: routing.WorkstreamIDs,
+				Ts:            routing.Signal.Ts,
+			}
+			if err := mgr.ObserveRouting(ctx, routing.Signal, reclassDecision); err != nil {
+				logger.Warn("reclassify observe failed", "error", err, "signal", routing.Signal.ID)
+			}
+		}
+
 		// Update router affinities from the decision.
 		key := models.ConversationKey{
 			Account:      sig.Account,
@@ -161,25 +176,6 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 				"total", len(signals),
 				"workstreams", mgrStats.WorkstreamCount,
 			)
-		}
-	}
-
-	// Flush remaining buffers — classify the last burst in every conversation.
-	active := mgr.ActiveWorkstreams(wsName)
-	flushResults, err := rtr.FlushBuffers(ctx, active)
-	if err != nil {
-		logger.Warn("flush buffers failed", "error", err)
-	}
-	for _, result := range flushResults {
-		if result.NewWorkstreamName != "" {
-			if id, err := mgr.ProposeNew(ctx, result.NewWorkstreamName, result.NewWorkstreamFocus, wsName, nil); err == nil && id != "" {
-				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, id)
-			}
-		}
-		if len(result.Decision.WorkstreamIDs) > 0 {
-			if err := mgr.ObserveRouting(ctx, models.Signal{}, result.Decision); err != nil {
-				logger.Warn("flush observe failed", "error", err)
-			}
 		}
 	}
 

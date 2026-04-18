@@ -3,23 +3,41 @@
 //
 // Each WorkstreamClassifier instance is scoped to a single conversation. The router
 // creates instances via a Factory and manages the conversation→classifier mapping.
-// Implementations own their internal buffer of signals and classification strategy.
+// Implementations own their internal signal window and classification strategy.
 package classifier
 
 import (
 	"context"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
-// Result is the classification outcome for a batch of signals.
-type Result struct {
-	// Signals is the batch of signals that were classified.
-	Signals []models.Signal
+// WorkstreamClassifier buffers incoming signals for a single conversation and
+// classifies them into workstreams on demand. Implementations maintain a
+// sliding window of signals and track routing decisions for reclassification.
+type WorkstreamClassifier interface {
+	// Observe buffers a signal and records the routing decision the router made.
+	// Called when the detector does not trigger — the router made a fast-path
+	// decision (affinity or default) without invoking classification.
+	Observe(sig models.Signal, decision models.RoutingDecision)
 
-	// WorkstreamIDs lists existing workstreams these signals belong to.
-	// A signal can belong to multiple workstreams (multi-routing).
-	WorkstreamIDs []string
+	// ObserveAndClassify buffers the signal, then runs classification on the
+	// full window. Returns signals whose workstream assignment differs from
+	// what was previously decided (by the router or a prior classification).
+	ObserveAndClassify(ctx context.Context, sig models.Signal,
+		account account.Account, conversation string,
+		workstreams []models.Workstream, affinityIDs []string) (*Result, error)
+
+	// Buffered returns the number of signals in the window.
+	Buffered() int
+}
+
+// Result holds the outcome of a classification round.
+type Result struct {
+	// Routings contains signals whose workstream assignment changed
+	// compared to what was previously decided.
+	Routings []SignalRouting
 
 	// NewWorkstreamName is set when proposing a new workstream.
 	NewWorkstreamName string
@@ -28,19 +46,10 @@ type Result struct {
 	NewWorkstreamFocus string
 }
 
-// WorkstreamClassifier buffers incoming signals for a single conversation and
-// classifies them into workstreams on demand. Implementations own their
-// internal buffer and classification strategy.
-type WorkstreamClassifier interface {
-	// Observe buffers a signal for future classification.
-	Observe(sig models.Signal)
-
-	// Classify classifies all buffered signals against the given workstreams
-	// and drains the buffer. Returns nil if no signals are buffered.
-	Classify(ctx context.Context, key models.ConversationKey, workstreams []models.Workstream, affinityIDs []string) (*Result, error)
-
-	// Buffered returns the number of signals currently buffered.
-	Buffered() int
+// SignalRouting maps a signal to its new workstream assignment.
+type SignalRouting struct {
+	Signal        models.Signal
+	WorkstreamIDs []string
 }
 
 // Factory creates a new WorkstreamClassifier for a conversation. The factory
