@@ -90,7 +90,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		Account:      sig.Account,
 		Conversation: sig.Conversation,
 	}
-	now := time.Now()
+	now := sig.Ts
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -167,10 +167,16 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		return nil, err
 	}
 
+	// If classifier returned nothing valid, route to default.
+	wsIDs := result.WorkstreamIDs
+	if len(wsIDs) == 0 && result.NewWorkstreamName == "" {
+		wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
+	}
+
 	routeResult := &RouteResult{
 		Decision: models.RoutingDecision{
 			SignalID:      sig.ID,
-			WorkstreamIDs: result.WorkstreamIDs,
+			WorkstreamIDs: wsIDs,
 			Ts:            now,
 		},
 		NewWorkstreamName:  result.NewWorkstreamName,

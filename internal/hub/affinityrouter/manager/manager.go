@@ -93,13 +93,14 @@ func (m *Manager) AllWorkstreams() []models.Workstream {
 }
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
-// if it doesn't exist.
-func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName) {
+// if it doesn't exist. The ts should be the timestamp of the first signal
+// in this workspace.
+func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time) {
 	id := models.DefaultWorkstreamID(ws)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workstreams[id]; !ok {
-		m.workstreams[id] = models.NewDefaultWorkstream(ws)
+		m.workstreams[id] = models.NewDefaultWorkstream(ws, ts)
 	}
 }
 
@@ -113,7 +114,7 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 		SuggestedName:  name,
 		SuggestedFocus: focus,
 		Workspace:      ws,
-		ProposedAt:     time.Now(),
+		ProposedAt:     triggerSignals[0].Ts,
 	}
 
 	if m.cfg.ApprovalMode == models.AutoApprove {
@@ -189,12 +190,7 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 			continue
 		}
 
-		var relevant []models.Signal
-		for _, s := range m.recentSignals {
-			relevant = append(relevant, s)
-		}
-
-		if err := m.updateFocus(ctx, ws, relevant); err != nil {
+		if err := m.updateFocus(ctx, ws, m.recentSignals); err != nil {
 			errs = append(errs, err)
 		}
 		m.signalsSinceUpdate[wsID] = 0
