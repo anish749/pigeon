@@ -37,9 +37,7 @@ type Proposal struct {
 	MergeTargetID  string   // resulting workstream ID (or new)
 
 	// Context — what triggered this proposal.
-	TriggeringSignals []Signal // the signals that led to this proposal
-	Confidence        float64  // classifier confidence
-	Reasoning         string   // why the classifier proposed this
+	TriggeringSignals []Signal
 
 	// Timestamps
 	ProposedAt time.Time

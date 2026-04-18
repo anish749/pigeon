@@ -10,7 +10,6 @@ import (
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/ledger"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
@@ -19,37 +18,8 @@ import (
 	"github.com/anish749/pigeon/internal/store"
 )
 
-// Config holds the replay configuration.
-type Config struct {
-	Since time.Time
-	Until time.Time
-
-	// Router config.
-	BatchMinSignals int
-	BatchMaxAge     time.Duration
-
-	// Claude model.
-	Model   string
-	Timeout time.Duration
-
-	// Filters.
-	Workspace string
-
-	// Approval mode for workstream lifecycle.
-	ApprovalMode models.ApprovalMode
-}
-
-// DefaultConfig returns a config with sensible defaults.
-func DefaultConfig() Config {
-	return Config{
-		Since:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		Until:           time.Now(),
-		BatchMinSignals: 8,
-		BatchMaxAge:     30 * time.Minute,
-		Model:           "haiku",
-		Timeout:         60 * time.Second,
-	}
-}
+// Config is an alias for the shared config — replay uses it directly.
+type Config = models.Config
 
 // Report holds the results of a replay run.
 type Report struct {
@@ -124,20 +94,12 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	}
 
 	// Set up components.
-	claude := clients.New(cfg.Model, cfg.Timeout, logger)
+	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	cls := classifier.New(claude, logger)
-	lg := ledger.New()
-	rtr := router.New(cls, router.Config{
-		BatchMinSignals: cfg.BatchMinSignals,
-		BatchMaxAge:     cfg.BatchMaxAge,
-	}, logger)
-	mgr := manager.New(claude, lg, manager.Config{
-		FocusUpdateInterval: manager.DefaultConfig().FocusUpdateInterval,
-		DormancyThreshold:   manager.DefaultConfig().DormancyThreshold,
-		ApprovalMode:        cfg.ApprovalMode,
-	}, logger)
+	rtr := router.New(cls, cfg, logger)
+	mgr := manager.New(claude, cfg, logger)
 
-	// Replay: for each signal, route → record → observe.
+	// Replay: for each signal, route → observe (manager records + manages).
 	for i, sig := range signals {
 		workspace := sig.Account.Name
 		mgr.EnsureDefaultWorkstream(workspace)
@@ -157,13 +119,10 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 				result.NewWorkstreamFocus,
 				workspace,
 				[]models.Signal{sig},
-				result.Decision.Confidence,
-				"",
 			)
 			if err != nil {
 				logger.Warn("propose new workstream failed", "error", err)
 			} else if newID != "" {
-				// Add the new workstream to the decision.
 				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, newID)
 			}
 		}
@@ -173,8 +132,10 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(workspace)}
 		}
 
-		// Record in ledger (single source of truth).
-		lg.Record(result.Decision, sig)
+		// Manager records to ledger and runs lifecycle checks.
+		if err := mgr.ObserveRouting(ctx, sig, result.Decision); err != nil {
+			logger.Warn("manager observe failed", "error", err, "index", i)
+		}
 
 		// Update router affinities from the decision.
 		key := models.ConversationKey{
@@ -183,11 +144,6 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		}
 		for _, wsID := range result.Decision.WorkstreamIDs {
 			rtr.UpdateAffinity(key, wsID, sig.Ts)
-		}
-
-		// Let the manager observe for lifecycle operations.
-		if err := mgr.ObserveRouting(ctx, sig, result.Decision); err != nil {
-			logger.Warn("manager observe failed", "error", err, "index", i)
 		}
 
 		// Progress logging.
@@ -231,10 +187,10 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 			Workspace:    ws.Workspace,
 			State:        ws.State,
 			Focus:        ws.Focus,
-			SignalCount:  lg.SignalCount(ws.ID),
-			Participants: lg.Participants(ws.ID),
+			SignalCount:  mgr.SignalCount(ws.ID),
+			Participants: mgr.Participants(ws.ID),
 			Created:      ws.Created,
-			LastSignal:   lg.LastSignal(ws.ID),
+			LastSignal:   mgr.LastSignal(ws.ID),
 			IsDefault:    ws.IsDefault(),
 		})
 	}

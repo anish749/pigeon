@@ -42,28 +42,8 @@ type buffer struct {
 	lastClassified time.Time
 }
 
-// Config for the router.
-type Config struct {
-	BatchMinSignals int           // default: 8
-	BatchMaxAge     time.Duration // default: 30m
-}
-
-// DefaultConfig returns a Config with sensible defaults.
-func DefaultConfig() Config {
-	return Config{
-		BatchMinSignals: 8,
-		BatchMaxAge:     30 * time.Minute,
-	}
-}
-
 // New creates a Router.
-func New(cls *classifier.BatchClassifier, cfg Config, logger *slog.Logger) *Router {
-	if cfg.BatchMinSignals <= 0 {
-		cfg.BatchMinSignals = DefaultConfig().BatchMinSignals
-	}
-	if cfg.BatchMaxAge <= 0 {
-		cfg.BatchMaxAge = DefaultConfig().BatchMaxAge
-	}
+func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger) *Router {
 	return &Router{
 		classifier:      cls,
 		logger:          logger,
@@ -123,8 +103,6 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 			Decision: models.RoutingDecision{
 				SignalID:      sig.ID,
 				WorkstreamIDs: ids,
-				Source:        models.SourceAffinity,
-				Confidence:    1.0,
 				Ts:            now,
 			},
 		}
@@ -150,8 +128,6 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 			Decision: models.RoutingDecision{
 				SignalID:      sig.ID,
 				WorkstreamIDs: []string{models.DefaultWorkstreamID(key.Workspace)},
-				Source:        models.SourceAffinity,
-				Confidence:    0.0,
 				Ts:            now,
 			},
 		}, nil
@@ -192,20 +168,17 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		Decision: models.RoutingDecision{
 			SignalID:      sig.ID,
 			WorkstreamIDs: result.WorkstreamIDs,
-			Source:        models.SourceClassifier,
-			Confidence:    result.Confidence,
 			Ts:            now,
 		},
 		NewWorkstreamName:  result.NewWorkstreamName,
 		NewWorkstreamFocus: result.NewWorkstreamFocus,
 	}
 
-	r.logger.Debug("classified batch",
+	r.logger.Info("classified batch",
 		"workspace", key.Workspace,
 		"conversation", key.Conversation,
 		"signals", len(signals),
 		"workstreams", result.WorkstreamIDs,
-		"confidence", result.Confidence,
 		"new_workstream", result.NewWorkstreamName,
 	)
 

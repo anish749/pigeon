@@ -16,45 +16,14 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
-// Ledger is the interface the manager needs to query routing stats.
-// Satisfied by ledger.Ledger.
-type Ledger interface {
-	SignalCount(workstreamID string) int
-	Participants(workstreamID string) []string
-	LastSignal(workstreamID string) time.Time
-}
-
-// Config controls manager behavior.
-type Config struct {
-	// FocusUpdateInterval — update a workstream's focus after this many new
-	// signals have been routed to it since the last update.
-	FocusUpdateInterval int
-
-	// DormancyThreshold — mark a workstream dormant if no signals have
-	// arrived for this duration.
-	DormancyThreshold time.Duration
-
-	// ApprovalMode controls how proposals are handled.
-	ApprovalMode models.ApprovalMode
-}
-
-// DefaultConfig returns sensible defaults.
-func DefaultConfig() Config {
-	return Config{
-		FocusUpdateInterval: 25,
-		DormancyThreshold:   7 * 24 * time.Hour,
-		ApprovalMode:        models.AutoApprove,
-	}
-}
-
 // Manager owns the lifecycle of all workstreams. It is the only component
 // that creates or modifies workstreams. Its single entry point is
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
 	mu     sync.RWMutex
 	client *clients.Client
-	ledger Ledger
-	cfg    Config
+	ledger *Ledger
+	cfg    models.Config
 	logger *slog.Logger
 
 	// Workstream storage — manager owns this.
@@ -73,11 +42,12 @@ type Manager struct {
 	dormancyChanges int
 }
 
-// New creates a workstream manager.
-func New(client *clients.Client, ledger Ledger, cfg Config, logger *slog.Logger) *Manager {
+// New creates a workstream manager. The manager owns the ledger internally —
+// callers interact with routing history through the manager's query methods.
+func New(client *clients.Client, cfg models.Config, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
-		ledger:             ledger,
+		ledger:             newLedger(),
 		cfg:                cfg,
 		logger:             logger,
 		workstreams:        make(map[string]models.Workstream),
@@ -134,14 +104,12 @@ func (m *Manager) EnsureDefaultWorkstream(workspace string) {
 
 // ProposeNew queues a proposal to create a new workstream. In AutoApprove
 // mode, creates immediately. Returns the new workstream ID if created.
-func (m *Manager) ProposeNew(ctx context.Context, name, focus, workspace string, triggerSignals []models.Signal, confidence float64, reasoning string) (string, error) {
+func (m *Manager) ProposeNew(_ context.Context, name, focus, workspace string, triggerSignals []models.Signal) (string, error) {
 	proposal := &models.Proposal{
 		Type:           models.ProposalCreate,
 		SuggestedName:  name,
 		SuggestedFocus: focus,
 		Workspace:      workspace,
-		Confidence:     confidence,
-		Reasoning:      reasoning,
 		ProposedAt:     time.Now(),
 	}
 
@@ -184,15 +152,17 @@ func (m *Manager) ProposeNew(ctx context.Context, name, focus, workspace string,
 	m.logger.Info("workstream proposed (pending confirmation)",
 		"workspace", workspace,
 		"name", name,
-		"confidence", confidence,
 	)
 	return "", nil
 }
 
-// ObserveRouting is called after each routing decision is recorded in the
-// ledger. The manager uses it to track focus staleness and trigger lifecycle
-// operations. This is the single entry point.
+// ObserveRouting records the routing decision in the ledger and triggers
+// lifecycle operations (focus updates, dormancy). This is the single entry
+// point — the manager owns the ledger, so recording happens here.
 func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decision models.RoutingDecision) error {
+	// Record in the ledger — single source of truth.
+	m.ledger.Record(decision, sig)
+
 	// Buffer the signal for focus update context.
 	m.recentSignals = append(m.recentSignals, sig)
 	if len(m.recentSignals) > m.cfg.FocusUpdateInterval*2 {
@@ -306,7 +276,7 @@ func (m *Manager) detectDormancy(now time.Time) {
 	}
 }
 
-func buildFocusPrompt(ws models.Workstream, signals []models.Signal, l Ledger) string {
+func buildFocusPrompt(ws models.Workstream, signals []models.Signal, l *Ledger) string {
 	var b strings.Builder
 
 	b.WriteString("You are updating the focus description for a workstream. The focus is used by a classifier to route incoming messages to the right workstream, so it needs to be specific and current.\n\n")
@@ -373,4 +343,21 @@ func (m *Manager) Stats() Stats {
 		WorkstreamCount: len(m.workstreams),
 		ProposalCount:   len(m.proposals),
 	}
+}
+
+// --- Ledger query methods (delegate to internal ledger) ---
+
+// SignalCount returns the number of signals routed to a workstream.
+func (m *Manager) SignalCount(workstreamID string) int {
+	return m.ledger.SignalCount(workstreamID)
+}
+
+// Participants returns distinct sender names for signals routed to a workstream.
+func (m *Manager) Participants(workstreamID string) []string {
+	return m.ledger.Participants(workstreamID)
+}
+
+// LastSignal returns the timestamp of the most recent signal routed to a workstream.
+func (m *Manager) LastSignal(workstreamID string) time.Time {
+	return m.ledger.LastSignal(workstreamID)
 }

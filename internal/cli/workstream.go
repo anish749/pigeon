@@ -25,7 +25,7 @@ func newWorkstreamCmd() *cobra.Command {
 }
 
 func newWorkstreamReplayCmd() *cobra.Command {
-	cfg := replay.DefaultConfig()
+	cfg := models.DefaultConfig()
 	var sinceStr, untilStr string
 	var interactive bool
 

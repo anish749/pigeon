@@ -1,8 +1,4 @@
-// Package ledger records routing decisions and derives stats from them.
-// It is the single source of truth for signal-to-workstream mappings.
-// All stats (signal counts, participants, last signal time per workstream)
-// are derived from the ledger, never stored on the Workstream model.
-package ledger
+package manager
 
 import (
 	"sort"
@@ -32,8 +28,8 @@ type Ledger struct {
 	byConversation map[models.ConversationKey][]int   // conversation -> entry indices
 }
 
-// New creates an empty Ledger ready to record decisions.
-func New() *Ledger {
+// newLedger creates an empty Ledger ready to record decisions.
+func newLedger() *Ledger {
 	return &Ledger{
 		bySignal:       make(map[string]int),
 		byWorkstream:   make(map[string][]int),

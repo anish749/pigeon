@@ -14,16 +14,9 @@ import (
 
 // llmClassifyJSON is the JSON shape the classifier prompt asks the model to return.
 type llmClassifyJSON struct {
-	// Workstreams lists the IDs of existing workstreams these signals belong to.
-	Workstreams []string `json:"workstreams"`
-
-	NewWorkstreamName string `json:"new_workstream_name,omitempty"`
-
-	NewWorkstreamFocus string `json:"new_workstream_focus,omitempty"`
-
-	Confidence float64 `json:"confidence"`
-
-	Reasoning string `json:"reasoning"`
+	Workstreams        []string `json:"workstreams"`
+	NewWorkstreamName  string   `json:"new_workstream_name,omitempty"`
+	NewWorkstreamFocus string   `json:"new_workstream_focus,omitempty"`
 }
 
 // Result is the classification outcome for a batch of signals.
@@ -37,12 +30,6 @@ type Result struct {
 
 	// NewWorkstreamFocus is the proposed focus description for a new workstream.
 	NewWorkstreamFocus string
-
-	// Confidence is the classifier's confidence in the routing decision (0-1).
-	Confidence float64
-
-	// Reasoning explains the classification decision.
-	Reasoning string
 }
 
 // BatchClassifier uses the Claude CLI to classify batches of signals
@@ -65,7 +52,7 @@ func New(client *clients.Client, logger *slog.Logger) *BatchClassifier {
 func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) (*Result, error) {
 	prompt := buildClassifyPrompt(key, signals, active, currentAffinityIDs)
 
-	c.logger.Debug("classifying batch",
+	c.logger.Info("classifying batch",
 		"workspace", key.Workspace,
 		"conversation", key.Conversation,
 		"signals", len(signals),
@@ -77,10 +64,7 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 
-	result := &Result{
-		Confidence: raw.Confidence,
-		Reasoning:  raw.Reasoning,
-	}
+	result := &Result{}
 
 	if len(raw.Workstreams) > 0 {
 		// Verify all returned workstream IDs exist.
@@ -113,47 +97,70 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "You are a workstream classifier for the %q workspace.\n\n", key.Workspace)
-	fmt.Fprintf(&b, "Conversation: %s\n", key.Conversation)
+	// System context — explain what the system does and what we're asking.
+	b.WriteString(`You are part of a messaging router that processes incoming signals (Slack messages, emails, calendar events, Linear issues, etc.) across a user's workspaces. The user works across multiple ongoing efforts simultaneously — projects, features, bug investigations, deals, partnerships, infrastructure work. We call each of these a "workstream."
+
+Your job: given a batch of recent messages from a single conversation, determine which workstream(s) they relate to.
+
+KEY CONCEPTS:
+- A WORKSTREAM is a sustained, coherent effort that spans days or weeks. Examples: "ES 7.17 Upgrade", "Image Upload Feature", "Meta Partnership". It is NOT a single message topic or a casual exchange.
+- A CONVERSATION is a Slack channel, DM, group DM, email thread, etc. One conversation often maps to one workstream (e.g. a DM with a colleague about a specific project), but channels can contain multiple workstreams.
+- MULTI-ROUTING: One batch of messages can belong to multiple workstreams simultaneously. A deprecation notice, incident, or API change may affect several ongoing efforts. List ALL relevant workstream IDs when this happens.
+- Messages like "ok", "sounds good", "call?", lunch plans, or general coordination that don't relate to any specific effort should NOT be assigned to a workstream — return an empty "workstreams" array so they stay in the general stream.
+
+`)
+
+	// Workspace and conversation context.
+	fmt.Fprintf(&b, "WORKSPACE: %s\n", key.Workspace)
+	fmt.Fprintf(&b, "CONVERSATION: %s\n", key.Conversation)
+	convType := "channel"
+	if strings.HasPrefix(key.Conversation, "@") {
+		if strings.Contains(key.Conversation, "mpdm") {
+			convType = "group DM"
+		} else {
+			convType = "DM"
+		}
+	}
+	fmt.Fprintf(&b, "CONVERSATION TYPE: %s\n", convType)
 
 	if len(currentAffinityIDs) > 0 {
-		fmt.Fprintf(&b, "Current affinities: %s\n", strings.Join(currentAffinityIDs, ", "))
-		b.WriteString("(This conversation has historically been affiliated with these workstreams. Only change this if the messages clearly indicate a different topic.)\n")
+		fmt.Fprintf(&b, "CURRENT AFFINITY: This conversation has historically been routed to: %s\n", strings.Join(currentAffinityIDs, ", "))
+		b.WriteString("This affinity was built over many messages. Only change it if the batch below clearly indicates a different topic.\n")
 	}
 
-	b.WriteString("\nActive workstreams:\n")
-	for _, ws := range active {
-		fmt.Fprintf(&b, "- ID: %s\n  Name: %s\n  Focus: %s\n\n",
-			ws.ID, ws.Name, ws.Focus)
-	}
+	// Active workstreams with full context.
+	b.WriteString("\nACTIVE WORKSTREAMS IN THIS WORKSPACE:\n")
 	if len(active) == 0 {
-		b.WriteString("(none — all signals are in the default stream)\n\n")
+		b.WriteString("(none yet — no workstreams have been created. If these messages represent a substantive ongoing effort, propose a new one.)\n")
+	}
+	for _, ws := range active {
+		fmt.Fprintf(&b, "\n  ID: %s\n  Name: %s\n  Focus: %s\n  Active since: %s\n",
+			ws.ID, ws.Name, ws.Focus, ws.Created.Format("2006-01-02"))
 	}
 
-	b.WriteString("Messages to classify:\n")
+	// The messages to classify.
+	b.WriteString("\nMESSAGES TO CLASSIFY:\n")
 	for _, sig := range signals {
 		fmt.Fprintf(&b, "[%s] %s: %s\n", sig.Ts.Format("2006-01-02 15:04"), sig.Sender, truncate(sig.Text, 300))
 	}
 
+	// Response format.
 	b.WriteString(`
-Respond with a JSON object:
+RESPOND with a JSON object:
 {
-  "workstreams": ["<workstream_id_1>", "<workstream_id_2>"],
+  "workstreams": ["id1", "id2"],
   "new_workstream_name": "",
-  "new_workstream_focus": "",
-  "confidence": 0.0,
-  "reasoning": ""
+  "new_workstream_focus": ""
 }
 
-Rules:
-- MULTI-ROUTING: A signal can belong to MULTIPLE workstreams. If an incident, API change, deprecation notice, or status update affects multiple ongoing efforts, list ALL affected workstream IDs.
-- If messages continue existing workstreams, list those IDs in "workstreams".
-- Only propose a NEW workstream if the topic is genuinely novel AND substantive (an ongoing effort, not a one-off message). Set "new_workstream_name" and "new_workstream_focus". You can ALSO list existing workstream IDs alongside a new proposal if the signals touch both.
-- Casual messages ("ok", "sounds good", lunch plans) should stay in the default stream — return an empty "workstreams" array.
-- A workstream is a coherent ongoing effort — a project, a bug investigation, a deal, a feature. Not a single conversation topic.
-- Respect existing affinities: if this conversation has been affiliated with a workstream for many signals, that affinity should persist unless there's clear evidence the topic has changed.
+FIELD RULES:
+- "workstreams": list the IDs of existing workstreams that these messages relate to. Can be multiple. Leave empty for general/casual messages or if proposing a new workstream that doesn't overlap with existing ones.
+- "new_workstream_name": only set this if the messages represent a NEW ongoing effort not captured by any existing workstream. Use a short, descriptive name (e.g. "Auth Migration", "Q2 Pricing Page"). Do NOT propose a new workstream for one-off messages or casual chat.
+- "new_workstream_focus": 1-2 sentence description of what the new workstream is about. Be specific — mention key technical terms, people, or systems so future messages can be matched to it.
 
-Respond with ONLY the JSON object, no other text.`)
+You can set BOTH "workstreams" and "new_workstream_name" if the messages touch existing workstreams AND introduce a new effort.
+
+Respond with ONLY the JSON object.`)
 
 	return b.String()
 }
@@ -163,11 +170,4 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
-}
-
-func limitSlice(s []string, max int) []string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
 }
