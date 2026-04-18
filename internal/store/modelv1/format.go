@@ -6,9 +6,19 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
 const tsLayout = "2006-01-02 15:04:05"
+
+type RawFormatter interface {
+	FormatRaw(raw map[string]any, indent string) []string
+}
+
+var rawFormatters = map[RawType]RawFormatter{
+	RawTypeSlack: &slackraw.Formatter{},
+}
 
 // displaySender decorates a sender name based on the via field.
 func displaySender(sender string, via Via) string {
@@ -37,7 +47,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, sender, m.SenderID, m.Text))
 
-	lines = append(lines, formatRaw(m.Raw, prefix+"    ")...)
+	lines = append(lines, formatRaw(m.RawType, m.Raw, prefix+"    ")...)
 
 	if len(m.Reactions) > 0 {
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))
@@ -55,7 +65,7 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
-	lines = append(lines, formatRaw(m.Raw, "  ")...)
+	lines = append(lines, formatRaw(m.RawType, m.Raw, "  ")...)
 
 	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
 	if m.Via != "" {

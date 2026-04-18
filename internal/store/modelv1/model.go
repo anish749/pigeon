@@ -62,7 +62,7 @@ type MsgLine struct {
 	Attachments []Attachment `json:"attach,omitempty"`  // zero or more attachments -- slack attachements are not stored in this.
 
 	// Platform specific raw fields.
-	RawType string `json:"rawType,omitempty"` // type of the raw fields
+	RawType RawType `json:"rawType,omitempty"` // type of the raw fields
 	Raw map[string]any `json:"raw,omitempty"` // raw fields from the platform API response, can be partial or the full response.
 }
 
@@ -94,8 +94,8 @@ type EditLine struct {
 	Attachments []Attachment   `json:"attach,omitempty"` // complete attachment set after edit
 
 	// Platform specific raw fields.
-	RawType string `json:"rawType,omitempty"` // type of the raw fields
-	Raw         map[string]any `json:"raw,omitempty"`    // updated platform-specific raw fields
+	RawType RawType        `json:"rawType,omitempty"` // type of the raw fields
+	Raw     map[string]any `json:"raw,omitempty"`     // updated platform-specific raw fields
 }
 
 // DeleteLine represents a message delete event.
