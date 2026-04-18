@@ -43,7 +43,7 @@ type Listener struct {
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called when a reaction or unreaction event arrives.
 // Both callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, obHandler *outbox.Handler, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
@@ -55,14 +55,9 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		pigeonBotUID: pigeonBotUID,
 		onMessage:    onMessage,
 		onReaction:   onReaction,
+		obHandler:    obHandler,
 		syncTracker:  syncTracker,
 	}
-}
-
-// SetOutboxHandler wires the listener to handle outbox interactive events
-// (approve/feedback buttons and modals) from Slack.
-func (l *Listener) SetOutboxHandler(h *outbox.Handler) {
-	l.obHandler = h
 }
 
 // Run starts the event loop. It blocks until ctx is cancelled.
@@ -91,11 +86,7 @@ func (l *Listener) Run(ctx context.Context) {
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
 			case socketmode.EventTypeInteractive:
-				if l.obHandler != nil {
-					l.handleInteractive(ctx, &evt)
-				} else {
-					l.client.Ack(*evt.Request)
-				}
+				l.handleInteractive(ctx, &evt)
 			case socketmode.EventTypeErrorBadMessage:
 				slog.WarnContext(ctx, "slack: bad message", "account", l.acct)
 			case socketmode.EventTypeIncomingError:

@@ -34,18 +34,13 @@ type Outbox struct {
 	onSubmit SubmitFunc
 }
 
-// New creates an empty Outbox.
-func New() *Outbox {
+// New creates an empty Outbox. onSubmit is called (if non-nil) each time
+// a new item is added; it must not block.
+func New(onSubmit SubmitFunc) *Outbox {
 	return &Outbox{
-		items: make(map[string]*Item),
+		items:    make(map[string]*Item),
+		onSubmit: onSubmit,
 	}
-}
-
-// OnSubmit registers a callback that fires when a new item is submitted.
-func (o *Outbox) OnSubmit(fn SubmitFunc) {
-	o.mu.Lock()
-	o.onSubmit = fn
-	o.mu.Unlock()
 }
 
 // Submit adds a new item to the outbox and returns it.
@@ -60,12 +55,9 @@ func (o *Outbox) Submit(sessionID string, payload json.RawMessage) *Item {
 	o.mu.Lock()
 	o.items[item.ID] = item
 	o.order = append(o.order, item.ID)
-	fn := o.onSubmit
 	o.mu.Unlock()
 
-	if fn != nil {
-		fn(item)
-	}
+	o.onSubmit(item)
 
 	return item
 }
