@@ -25,7 +25,7 @@ type Router struct {
 
 	// Internal state.
 	affinities map[models.ConversationKey][]models.AffinityEntry // conversation → workstream weights
-	buffers    map[models.ConversationKey]*buffer                 // pending signals per conversation
+	buffers    map[models.ConversationKey]*buffer                // pending signals per conversation
 
 	// Config.
 	batchMinSignals int

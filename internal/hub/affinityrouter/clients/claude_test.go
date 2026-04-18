@@ -87,11 +87,11 @@ Respond with a JSON object:
 Respond with ONLY the JSON object, no other text.`
 
 	var resp struct {
-		Workstreams          []string `json:"workstreams"`
-		NewWorkstreamName    string   `json:"new_workstream_name"`
-		NewWorkstreamFocus   string   `json:"new_workstream_focus"`
-		Confidence           float64  `json:"confidence"`
-		Reasoning            string   `json:"reasoning"`
+		Workstreams        []string `json:"workstreams"`
+		NewWorkstreamName  string   `json:"new_workstream_name"`
+		NewWorkstreamFocus string   `json:"new_workstream_focus"`
+		Confidence         float64  `json:"confidence"`
+		Reasoning          string   `json:"reasoning"`
 	}
 	if err := c.JSON(context.Background(), prompt, &resp); err != nil {
 		t.Fatalf("JSON: %v", err)

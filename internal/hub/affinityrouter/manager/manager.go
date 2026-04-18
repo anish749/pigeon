@@ -22,7 +22,7 @@ import (
 type Manager struct {
 	mu     sync.RWMutex
 	client *clients.Client
-	sc *StatCollector
+	sc     *StatCollector
 	cfg    models.Config
 	logger *slog.Logger
 
@@ -350,4 +350,3 @@ func (m *Manager) Stats() Stats {
 		ProposalCount:   len(m.proposals),
 	}
 }
-
