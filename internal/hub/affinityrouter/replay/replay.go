@@ -11,6 +11,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
@@ -59,7 +60,7 @@ type WorkstreamReport struct {
 
 // Run executes the replay: reads all historical signals, feeds them through
 // the routing model, and returns a benchmark report.
-func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) {
+func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logger *slog.Logger) (*Report, error) {
 	startTime := time.Now()
 
 	// Read signals.
@@ -102,7 +103,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	cls := classifier.New(claude, logger)
 	sc := manager.NewStatCollector()
-	rtr := router.New(cls, cfg, logger)
+	rtr := router.New(cls, detectorFactory, cfg, logger)
 	mgr := manager.New(claude, sc, cfg, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).

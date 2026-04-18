@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
@@ -30,6 +31,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cfg := models.DefaultConfig()
 	var sinceStr, untilStr, workspaceFlag string
 	var interactive bool
+	var burstGap time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -69,7 +71,8 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			report, err := replay.Run(context.Background(), cfg, logger)
+			factory := detector.NewBurstGapFactory(burstGap)
+			report, err := replay.Run(context.Background(), cfg, factory, logger)
 			if err != nil {
 				return err
 			}
@@ -82,7 +85,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
-	cmd.Flags().DurationVar(&cfg.BurstGap, "burst-gap", 90*time.Minute, "Gap between messages that triggers burst classification")
+	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
 

@@ -13,9 +13,6 @@ type Config struct {
 	Since time.Time
 	Until time.Time
 
-	// Router — burst detection.
-	BurstGap time.Duration // gap between messages that marks a burst boundary (triggers classification)
-
 	// Manager — workstream lifecycle.
 	FocusUpdateInterval int           // update focus after this many signals per workstream
 	DormancyThreshold   time.Duration // mark workstream dormant after this long without signals
@@ -34,7 +31,6 @@ func DefaultConfig() Config {
 	return Config{
 		Since:               time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Until:               time.Now(),
-		BurstGap:            90 * time.Minute,
 		FocusUpdateInterval: 25,
 		DormancyThreshold:   7 * 24 * time.Hour,
 		Model:               "haiku",
