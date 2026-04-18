@@ -6,19 +6,9 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
 const tsLayout = "2006-01-02 15:04:05"
-
-type RawFormatter interface {
-	FormatRaw(raw map[string]any, indent string) []string
-}
-
-var rawFormatters = map[RawType]RawFormatter{
-	RawTypeSlack: &slackraw.Formatter{},
-}
 
 // displaySender decorates a sender name based on the via field.
 func displaySender(sender string, via Via) string {
