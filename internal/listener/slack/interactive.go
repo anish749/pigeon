@@ -60,7 +60,7 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 
 	case "outbox_feedback":
 		modal := feedbackModal(outboxID)
-		_, err := goslack.New(l.botToken).OpenViewContext(ctx, cb.TriggerID, modal)
+		_, err := l.botAPI.OpenViewContext(ctx, cb.TriggerID, modal)
 		if err != nil {
 			slog.ErrorContext(ctx, "slack: failed to open feedback modal",
 				"error", err, "outbox_id", outboxID, "account", l.acct)
@@ -99,7 +99,7 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 		slog.ErrorContext(ctx, "slack: feedback delivery failed",
 			"outbox_id", outboxID, "error", err, "account", l.acct)
 		// Notify the owner that feedback couldn't be delivered.
-		botAPI := goslack.New(l.botToken)
+		botAPI := l.botAPI
 		dm, _, _, err := botAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
 			Users: []string{cb.User.ID},
 		})
@@ -116,7 +116,7 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 
 // updateCCMessage replaces the original C&C message with a status line and no buttons.
 func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string) {
-	botAPI := goslack.New(l.botToken)
+	botAPI := l.botAPI
 	_, _, _, err := botAPI.UpdateMessageContext(ctx, channelID, ts,
 		goslack.MsgOptionText(status, false),
 		goslack.MsgOptionBlocks(

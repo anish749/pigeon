@@ -28,6 +28,7 @@ type Listener struct {
 	messages     *MessageStore
 	userToken    string
 	botToken     string
+	botAPI       *goslack.Client
 	acct         account.Account
 	teamID       string
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
@@ -50,6 +51,7 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		messages:     messages,
 		userToken:    userToken,
 		botToken:     botToken,
+		botAPI:       goslack.New(botToken),
 		acct:         acct,
 		teamID:       teamID,
 		pigeonBotUID: pigeonBotUID,
