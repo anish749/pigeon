@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/router"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/sentinel"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -32,8 +33,9 @@ type Report struct {
 
 	Workstreams []WorkstreamReport
 
-	RouterStats  router.Stats
-	ManagerStats manager.Stats
+	RouterStats   router.Stats
+	SentinelStats sentinel.Stats
+	ManagerStats  manager.Stats
 
 	ProposalsTotal    int
 	ProposalsApproved int
@@ -102,7 +104,19 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	cls := classifier.New(claude, logger)
 	sc := manager.NewStatCollector()
-	rtr := router.New(cls, cfg, logger)
+
+	// Create the cosine sentinel for topic-shift detection.
+	var sent *sentinel.Sentinel
+	sent, err = sentinel.New(sentinel.Config{
+		RuntimePath: cfg.OnnxRuntimePath,
+	})
+	if err != nil {
+		logger.Warn("sentinel unavailable, falling back to burst-gap only", "error", err)
+	} else {
+		defer sent.Close()
+	}
+
+	rtr := router.New(cls, sent, cfg, logger)
 	mgr := manager.New(claude, sc, cfg, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).
@@ -188,8 +202,9 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) (*Report, error) 
 		Until:        cfg.Until,
 		TotalSignals: len(signals),
 		ByType:       countByType(signals),
-		RouterStats:  rtr.Stats(),
-		ManagerStats: mgr.Stats(),
+		RouterStats:   rtr.Stats(),
+		SentinelStats: rtr.SentinelStats(),
+		ManagerStats:  mgr.Stats(),
 		Duration:     time.Since(startTime),
 	}
 

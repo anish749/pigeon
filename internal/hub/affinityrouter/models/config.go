@@ -25,6 +25,9 @@ type Config struct {
 	Model          string        // claude model name (e.g. "haiku", "sonnet")
 	LLMCallTimeout time.Duration // per-call timeout for each LLM subprocess invocation
 
+	// Sentinel — cosine similarity topic-shift detection.
+	OnnxRuntimePath string // path to ONNX runtime shared library (empty = auto-detect)
+
 	// Filters.
 	Workspace workspace.Workspace // resolved workspace — scopes signals to its accounts
 }

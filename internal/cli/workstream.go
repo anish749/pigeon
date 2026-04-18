@@ -84,6 +84,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
 	cmd.Flags().DurationVar(&cfg.BurstGap, "burst-gap", 90*time.Minute, "Gap between messages that triggers burst classification")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
+	cmd.Flags().StringVar(&cfg.OnnxRuntimePath, "onnx-runtime", "", "Path to ONNX runtime library (auto-detects from ONNXRUNTIME_LIB_PATH or common paths)")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for confirmation on workstream creation")
 
 	return cmd

@@ -33,6 +33,15 @@ func Print(w io.Writer, r *replay.Report) {
 	fmt.Fprintf(w, "  Classifier calls:  %d\n", r.RouterStats.ClassifierCalls)
 	fmt.Fprintf(w, "  Focus updates:     %d\n", r.ManagerStats.FocusUpdates)
 
+	// Sentinel stats.
+	ss := r.SentinelStats
+	if ss.EmbeddingsComputed > 0 {
+		fmt.Fprintf(w, "\nSentinel (cosine topic-shift detection):\n")
+		fmt.Fprintf(w, "  Embeddings computed:  %d\n", ss.EmbeddingsComputed)
+		fmt.Fprintf(w, "  Similarity checks:    %d\n", ss.SimilarityChecks)
+		fmt.Fprintf(w, "  Topic shifts found:   %d\n", ss.TopicShiftsDetected)
+	}
+
 	// Proposal stats.
 	if r.ProposalsTotal > 0 {
 		fmt.Fprintf(w, "\nProposals:\n")

@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/sentinel"
 )
 
 // Router routes signals to workstreams.
@@ -22,6 +23,7 @@ import (
 // classifier for batch classification when the buffer threshold is met.
 type Router struct {
 	classifier *classifier.BatchClassifier
+	sentinel   *sentinel.Sentinel // nil if embedding model unavailable
 	logger     *slog.Logger
 
 	// Internal state.
@@ -43,15 +45,17 @@ type buffer struct {
 	lastClassified time.Time
 }
 
-// New creates a Router.
-func New(cls *classifier.BatchClassifier, cfg models.Config, logger *slog.Logger) *Router {
+// New creates a Router. The sentinel is optional — pass nil to disable
+// cosine similarity topic-shift detection (falls back to burst-gap only).
+func New(cls *classifier.BatchClassifier, sent *sentinel.Sentinel, cfg models.Config, logger *slog.Logger) *Router {
 	return &Router{
-		classifier:      cls,
-		logger:          logger,
-		affinities:      make(map[models.ConversationKey][]models.AffinityEntry),
-		buffers:         make(map[models.ConversationKey]*buffer),
-		workspace: cfg.Workspace.Name,
-		burstGap:  cfg.BurstGap,
+		classifier: cls,
+		sentinel:   sent,
+		logger:     logger,
+		affinities: make(map[models.ConversationKey][]models.AffinityEntry),
+		buffers:    make(map[models.ConversationKey]*buffer),
+		workspace:  cfg.Workspace.Name,
+		burstGap:   cfg.BurstGap,
 	}
 }
 
@@ -118,9 +122,12 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	}
 
 	// Check if a burst boundary was crossed BEFORE adding the new signal.
-	// The gap is between the last buffered signal and the incoming signal.
-	if !r.bufferReady(buf, now) {
-		// Still within the same burst — buffer the signal and return.
+	// Two triggers: (1) time gap, (2) cosine similarity drop (topic shift).
+	burstGapReady := r.burstGapReady(buf, now)
+	topicShift := r.topicShifted(key, buf, sig)
+
+	if !burstGapReady && !topicShift {
+		// Still within the same burst and same topic — buffer and return.
 		buf.signals = append(buf.signals, sig)
 		r.stats.BufferedSignals++
 		if affinityResult != nil {
@@ -195,17 +202,28 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	return routeResult, nil
 }
 
-// bufferReady reports whether the buffer should be drained for classification.
-// A burst boundary is detected when the gap between the last buffered signal
-// and the current signal (now) exceeds the configured burst gap threshold.
-// This captures natural conversation pauses — classify the completed burst.
-func (r *Router) bufferReady(buf *buffer, now time.Time) bool {
+// burstGapReady reports whether a time-based burst boundary was crossed.
+// The gap between the last buffered signal and the current signal (now)
+// exceeds the configured burst gap threshold.
+func (r *Router) burstGapReady(buf *buffer, now time.Time) bool {
 	if len(buf.signals) == 0 {
 		return false
 	}
-	// The burst ended: gap from the last buffered signal to now exceeds the threshold.
 	lastSignal := buf.signals[len(buf.signals)-1].Ts
 	return now.Sub(lastSignal) >= r.burstGap
+}
+
+// topicShifted checks whether the incoming signal represents a topic change
+// relative to the buffered signals, using the cosine similarity sentinel.
+// Returns false if the sentinel is nil or the buffer is too small.
+func (r *Router) topicShifted(key models.ConversationKey, buf *buffer, incoming models.Signal) bool {
+	if r.sentinel == nil || len(buf.signals) == 0 {
+		return false
+	}
+	// Include the incoming signal so the sentinel compares
+	// the previous window against a window that includes it.
+	signals := append(buf.signals, incoming)
+	return r.sentinel.TopicShifted(key, signals)
 }
 
 // UpdateAffinity updates the conversation->workstream affinity weights.
@@ -312,4 +330,12 @@ func (r *Router) Stats() Stats {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.stats
+}
+
+// SentinelStats returns sentinel statistics, or zero if sentinel is nil.
+func (r *Router) SentinelStats() sentinel.Stats {
+	if r.sentinel == nil {
+		return sentinel.Stats{}
+	}
+	return r.sentinel.Stats()
 }
