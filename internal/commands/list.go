@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
@@ -86,6 +88,39 @@ func RunList(platform, accountName string) error {
 			fmt.Printf("  %s\n", a)
 		}
 		fmt.Println()
+	}
+
+	// Append workspace groupings if any are configured.
+	cfg, err := config.Load()
+	if err != nil || len(cfg.Workspaces) == 0 {
+		return nil
+	}
+
+	names := make([]config.WorkspaceName, 0, len(cfg.Workspaces))
+	for name := range cfg.Workspaces {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b config.WorkspaceName) int {
+		return cmp.Compare(a, b)
+	})
+
+	fmt.Println("workspaces:")
+	for _, name := range names {
+		ws := cfg.Workspaces[name]
+		marker := ""
+		if name == cfg.DefaultWorkspace {
+			marker = " (default)"
+		}
+		fmt.Printf("\n  %s%s\n", name, marker)
+		for _, slug := range ws.Slack {
+			fmt.Printf("    slack/%s\n", slug)
+		}
+		for _, slug := range ws.GWS {
+			fmt.Printf("    gws/%s\n", slug)
+		}
+		for _, slug := range ws.WhatsApp {
+			fmt.Printf("    whatsapp/%s\n", slug)
+		}
 	}
 	return nil
 }
