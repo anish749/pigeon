@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
@@ -53,7 +54,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		return false
 	}
 
-	sim := CosineSimilarity(emb, d.prevEmbed)
+	sim := cosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
 
 	shifted := sim < d.threshold
@@ -64,6 +65,20 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		)
 	}
 	return shifted
+}
+
+func cosineSimilarity(a, b []float32) float64 {
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	denom := math.Sqrt(normA) * math.Sqrt(normB)
+	if denom == 0 {
+		return 0
+	}
+	return dot / denom
 }
 
 func windowText(signals []models.Signal) string {

@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -103,21 +102,6 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("decode embed response: %w", err)
 	}
 	return result.Embedding, nil
-}
-
-// CosineSimilarity returns the cosine similarity between two vectors.
-func CosineSimilarity(a, b []float32) float64 {
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	denom := math.Sqrt(normA) * math.Sqrt(normB)
-	if denom == 0 {
-		return 0
-	}
-	return dot / denom
 }
 
 func (c *Client) waitReady(timeout time.Duration) error {
