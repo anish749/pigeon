@@ -33,10 +33,9 @@ type cliEnvelope struct {
 }
 
 // Text returns the assistant reply as plain text (the envelope's result string).
-// Same CLI invocation as JSON — only the post-processing differs.
-// It runs: claude -p --model <model> --output-format json --no-session-persistence -- <prompt>
-func (c *Client) Text(ctx context.Context, prompt string) (string, error) {
-	result, err := c.run(ctx, prompt)
+// systemPrompt replaces the default Claude Code system prompt to reduce token usage.
+func (c *Client) Text(ctx context.Context, systemPrompt, prompt string) (string, error) {
+	result, err := c.run(ctx, systemPrompt, prompt)
 	if err != nil {
 		return "", fmt.Errorf("text: %w", err)
 	}
@@ -44,10 +43,9 @@ func (c *Client) Text(ctx context.Context, prompt string) (string, error) {
 }
 
 // JSON unmarshals the assistant reply (the envelope's result string) into out.
-// Same CLI invocation as Text — callers supply the destination type.
-// It runs: claude -p --model <model> --output-format json --no-session-persistence -- <prompt>
-func (c *Client) JSON(ctx context.Context, prompt string, out any) error {
-	result, err := c.run(ctx, prompt)
+// systemPrompt replaces the default Claude Code system prompt to reduce token usage.
+func (c *Client) JSON(ctx context.Context, systemPrompt, prompt string, out any) error {
+	result, err := c.run(ctx, systemPrompt, prompt)
 	if err != nil {
 		return fmt.Errorf("json: %w", err)
 	}
@@ -59,17 +57,23 @@ func (c *Client) JSON(ctx context.Context, prompt string, out any) error {
 }
 
 // run executes the claude CLI and returns the result text from the response envelope.
-func (c *Client) run(ctx context.Context, prompt string) (string, error) {
+func (c *Client) run(ctx context.Context, systemPrompt, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "claude",
+	args := []string{
 		"-p",
 		"--model", c.model,
 		"--output-format", "json",
 		"--no-session-persistence",
-		"--", prompt,
-	)
+		"--tools", "",
+		"--setting-sources", "",
+	}
+	if systemPrompt != "" {
+		args = append(args, "--system-prompt", systemPrompt)
+	}
+	args = append(args, "--", prompt)
+	cmd := exec.CommandContext(ctx, "claude", args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

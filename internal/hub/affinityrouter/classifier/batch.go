@@ -60,7 +60,7 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 	)
 
 	var raw llmClassifyJSON
-	if err := c.client.JSON(ctx, prompt, &raw); err != nil {
+	if err := c.client.JSON(ctx, "You are a concise workstream classifier. Respond only with the requested JSON.", prompt, &raw); err != nil {
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 

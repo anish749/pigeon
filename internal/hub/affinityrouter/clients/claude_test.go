@@ -93,7 +93,7 @@ Respond with ONLY the JSON object, no other text.`
 		Confidence         float64  `json:"confidence"`
 		Reasoning          string   `json:"reasoning"`
 	}
-	if err := c.JSON(context.Background(), prompt, &resp); err != nil {
+	if err := c.JSON(context.Background(), "You are a workstream classifier. Respond only with JSON.", prompt, &resp); err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
 
@@ -128,7 +128,7 @@ Current focus: "Server reliability, deployments, and on-call incidents."
 
 Write an updated 1-3 sentence focus description that incorporates the new signals. Reply with the description only, no other text.`
 
-	focus, err := c.Text(context.Background(), prompt)
+	focus, err := c.Text(context.Background(), "You are a concise workstream summarizer. Respond only with the requested description.", prompt)
 	if err != nil {
 		t.Fatalf("Text: %v", err)
 	}

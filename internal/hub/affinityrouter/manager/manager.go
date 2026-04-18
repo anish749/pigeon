@@ -240,7 +240,7 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	}
 
 	prompt := buildFocusPrompt(ws, recentSignals)
-	newFocus, err := m.client.Text(ctx, prompt)
+	newFocus, err := m.client.Text(ctx, "You are a concise workstream summarizer. Respond only with the requested description.", prompt)
 	if err != nil {
 		return fmt.Errorf("update focus for %s: %w", ws.ID, err)
 	}
