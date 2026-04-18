@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -518,7 +520,18 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	if r.Remove {
 		verb = "removed reaction"
 	}
-	head := fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
+
+	// Look up the original message so the session has context about what
+	// was reacted to. The MsgID is a Slack timestamp (e.g. "1712345678.123456")
+	// that encodes the date the message was posted.
+	originalText, originalSender := h.lookupMessage(ch.acct, conversation, r.MsgID)
+
+	var head string
+	if originalText != "" {
+		head = fmt.Sprintf("%s %s :%s: on %s's message: %s", r.Sender, verb, r.Emoji, originalSender, originalText)
+	} else {
+		head = fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
+	}
 	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
 
 	msg := &IncomingMsg{
@@ -531,6 +544,70 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		slog.Error("failed to deliver reaction",
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
+}
+
+// lookupMessage finds the original message text and sender for a given message
+// ID. It tries the date file first (derived from the Slack timestamp), then
+// falls back to checking the thread file. Returns empty strings if the message
+// is not found (e.g. not yet synced).
+func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (text, sender string) {
+	msgTime := parseSlackTimestamp(msgID)
+	if msgTime.IsZero() {
+		return "", ""
+	}
+
+	date := msgTime.UTC().Format("2006-01-02")
+	df, err := h.store.ReadConversation(acct, conversation, store.ReadOpts{Date: date})
+	if err != nil {
+		slog.Debug("lookup reacted message: read conversation failed",
+			"account", acct, "conversation", conversation, "date", date, "error", err)
+	}
+	if df != nil {
+		for _, m := range df.Messages {
+			if m.ID == msgID {
+				return truncateText(m.Text, 200), m.Sender
+			}
+		}
+	}
+
+	// The message might be a thread parent — try reading the thread file.
+	tf, err := h.store.ReadThread(acct, conversation, msgID)
+	if err != nil {
+		slog.Debug("lookup reacted message: read thread failed",
+			"account", acct, "conversation", conversation, "thread", msgID, "error", err)
+	}
+	if tf != nil {
+		if tf.Parent.ID == msgID {
+			return truncateText(tf.Parent.Text, 200), tf.Parent.Sender
+		}
+		for _, r := range tf.Replies {
+			if r.ID == msgID {
+				return truncateText(r.Text, 200), r.Sender
+			}
+		}
+	}
+
+	return "", ""
+}
+
+// parseSlackTimestamp converts a Slack timestamp ("1234567890.123456") to
+// time.Time. Returns the zero time if the format is invalid.
+func parseSlackTimestamp(ts string) time.Time {
+	parts := strings.SplitN(ts, ".", 2)
+	sec, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0)
+}
+
+// truncateText shortens s to at most maxLen runes, appending "..." if truncated.
+func truncateText(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // RegistrationError is returned when session registration fails.
