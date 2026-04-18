@@ -4,25 +4,41 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
+
+	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/stat"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
+// Embedder produces embedding vectors from text.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float64, error)
+}
+
 // CosineDetector implements ConversationShiftDetector using embedding
 // cosine similarity. It buffers signals into a sliding window, embeds
 // window text via the sidecar, and compares against the previous
 // window's embedding to detect topic shifts.
+//
+// The threshold is self-calibrating: after minCalibration similarity
+// observations, it switches from fallbackThreshold to mean - stdMultiplier*std
+// computed over all observed similarities for this conversation.
 type CosineDetector struct {
-	client    *Client
-	logger    *slog.Logger
-	threshold float64
+	embedder Embedder
+	logger   *slog.Logger
+
+	// Self-calibrating threshold parameters.
+	fallbackThreshold float64
+	stdMultiplier     float64
+	minCalibration    int
+	sims              []float64
 
 	windowSize int
 	window     []models.Signal
-	prevEmbed  []float32
+	prevEmbed  []float64
 }
 
 func (d *CosineDetector) Observe(sig models.Signal) bool {
@@ -42,10 +58,12 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	emb, err := d.client.Embed(ctx, text)
+	emb, err := d.embedder.Embed(ctx, text)
 	if err != nil {
-		d.logger.Warn("embed failed, falling back to no-shift", "err", err)
-		return false
+		// Embedding failed — trigger reclassification so the LLM classifier
+		// handles this batch. prevEmbed is kept for the next successful embed.
+		d.logger.Error("embed failed, triggering reclassification", "err", err)
+		return true
 	}
 
 	// First full window — cache embedding, no comparison yet.
@@ -56,29 +74,38 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 
 	sim := cosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
+	d.sims = append(d.sims, sim)
 
-	shifted := sim < d.threshold
+	threshold := d.currentThreshold()
+	shifted := sim < threshold
 	if shifted {
 		d.logger.Info("topic shift detected",
 			"sim", fmt.Sprintf("%.3f", sim),
-			"threshold", fmt.Sprintf("%.3f", d.threshold),
+			"threshold", fmt.Sprintf("%.3f", threshold),
+			"calibrated", len(d.sims) >= d.minCalibration,
 		)
 	}
 	return shifted
 }
 
-func cosineSimilarity(a, b []float32) float64 {
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
+// currentThreshold returns the self-calibrating threshold if enough
+// observations have been collected, otherwise the fallback.
+func (d *CosineDetector) currentThreshold() float64 {
+	if len(d.sims) < d.minCalibration {
+		return d.fallbackThreshold
 	}
-	denom := math.Sqrt(normA) * math.Sqrt(normB)
+	mean, std := stat.PopMeanStdDev(d.sims, nil)
+	return mean - d.stdMultiplier*std
+}
+
+// cosineSimilarity returns the cosine similarity between two vectors
+// using gonum's BLAS-optimized Dot and Norm.
+func cosineSimilarity(a, b []float64) float64 {
+	denom := floats.Norm(a, 2) * floats.Norm(b, 2)
 	if denom == 0 {
 		return 0
 	}
-	return dot / denom
+	return floats.Dot(a, b) / denom
 }
 
 func windowText(signals []models.Signal) string {
@@ -93,15 +120,20 @@ func windowText(signals []models.Signal) string {
 }
 
 // NewCosineFactory returns a detector.Factory that creates CosineDetectors.
-// The client and threshold are shared across all detectors; each detector
-// maintains its own sliding window and previous embedding.
-func NewCosineFactory(client *Client, windowSize int, threshold float64, logger *slog.Logger) detector.Factory {
+// The embedder and fallbackThreshold are shared across all detectors; each
+// detector maintains its own sliding window, previous embedding, and
+// self-calibrating threshold that adapts to the conversation's similarity
+// distribution after 5 observations.
+func NewCosineFactory(embedder Embedder, windowSize int, fallbackThreshold float64, logger *slog.Logger) detector.Factory {
 	return func() detector.ConversationShiftDetector {
 		return &CosineDetector{
-			client:     client,
-			logger:     logger,
-			threshold:  threshold,
-			windowSize: windowSize,
+			embedder:          embedder,
+			logger:            logger,
+			fallbackThreshold: fallbackThreshold,
+			stdMultiplier:     1.0,
+			minCalibration:    5,
+			windowSize:        windowSize,
 		}
 	}
 }
+

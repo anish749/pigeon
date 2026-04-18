@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // Client manages the Python embedding sidecar process and communicates
@@ -27,10 +28,12 @@ type Client struct {
 
 // NewClient starts the Python embedding sidecar and returns a Client
 // connected to it. The caller must call Close to shut down the sidecar.
-func NewClient(socketPath, modelName string) (*Client, error) {
+// startupTimeout bounds how long to wait for the sidecar to become ready
+// (model download + load). 2 minutes is reasonable for cached models.
+func NewClient(socketPath, modelName string, startupTimeout time.Duration) (*Client, error) {
 	sidecarScript := filepath.Join(findRepoRoot(), "embed", "sidecar.py")
 
-	proc, err := startSidecar(sidecarScript, socketPath, modelName)
+	proc, err := startSidecar(sidecarScript, socketPath, modelName, startupTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +61,7 @@ func (c *Client) Close() error {
 }
 
 // Embed returns the embedding vector for text.
-func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
+func (c *Client) Embed(ctx context.Context, text string) ([]float64, error) {
 	body, err := json.Marshal(struct {
 		Text string `json:"text"`
 	}{Text: text})
@@ -85,7 +88,7 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	}
 
 	var result struct {
-		Embedding []float32 `json:"embedding"`
+		Embedding []float64 `json:"embedding"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode embed response: %w", err)
@@ -94,8 +97,9 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 }
 
 // startSidecar launches the Python sidecar process and blocks until it
-// prints READY to stdout, indicating the socket is listening.
-func startSidecar(script, socketPath, modelName string) (*os.Process, error) {
+// prints READY to stdout, indicating the socket is listening. If the
+// sidecar does not become ready within the timeout, the process is killed.
+func startSidecar(script, socketPath, modelName string, timeout time.Duration) (*os.Process, error) {
 	cmd := exec.Command("uv", "run", script, "--socket", socketPath, "--model", modelName)
 	cmd.Stderr = os.Stderr
 
@@ -108,17 +112,29 @@ func startSidecar(script, socketPath, modelName string) (*os.Process, error) {
 		return nil, fmt.Errorf("start embed sidecar: %w", err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		if scanner.Text() == "READY" {
-			return cmd.Process, nil
+	ready := make(chan struct{})
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			if scanner.Text() == "READY" {
+				close(ready)
+				return
+			}
 		}
-	}
+	}()
 
-	cmd.Process.Kill()
-	return nil, fmt.Errorf("embed sidecar exited without becoming ready")
+	select {
+	case <-ready:
+		return cmd.Process, nil
+	case <-time.After(timeout):
+		cmd.Process.Kill()
+		return nil, fmt.Errorf("embed sidecar did not become ready within %s", timeout)
+	}
 }
 
+// TODO: findRepoRoot walks up from cwd looking for embed/sidecar.py — this is
+// fragile when the binary runs from a different directory or is installed
+// globally. Make the sidecar script path a config parameter instead.
 func findRepoRoot() string {
 	dir, _ := os.Getwd()
 	for {

@@ -21,6 +21,7 @@ require (
 	github.com/yuin/goldmark v1.8.2
 	go.mau.fi/whatsmeow v0.0.0-20260305215846-fc65416c22c4
 	golang.org/x/sync v0.20.0
+	gonum.org/v1/gonum v0.17.0
 	google.golang.org/api v0.275.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
