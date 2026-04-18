@@ -88,6 +88,7 @@ func CompactThread(f *modelv1.ThreadFile) *modelv1.ThreadFile {
 		if e, ok := latestEdits[t.msg.ID]; ok {
 			deduped[i].msg.Text = e.Text
 			deduped[i].msg.Attachments = cloneAttachments(e.Attachments)
+			deduped[i].msg.RawType = e.RawType
 			deduped[i].msg.Raw = e.Raw
 		}
 	}
@@ -247,6 +248,7 @@ func applyEdits(msgs []modelv1.MsgLine, edits []modelv1.EditLine) []modelv1.MsgL
 		if e, ok := latest[m.ID]; ok {
 			out[i].Text = e.Text
 			out[i].Attachments = cloneAttachments(e.Attachments)
+			out[i].RawType = e.RawType
 			out[i].Raw = e.Raw
 		}
 	}

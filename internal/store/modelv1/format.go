@@ -37,6 +37,8 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s[%s] [%s] %s (%s): %s", prefix, tsStr, m.ID, sender, m.SenderID, m.Text))
 
+	lines = append(lines, formatRaw(m.RawType, m.Raw, prefix+"    ")...)
+
 	if len(m.Reactions) > 0 {
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))
 	}
@@ -47,13 +49,13 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 // formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
-// TODO: include attachments
 // TODO: include reactions
 func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
+	lines = append(lines, formatRaw(m.RawType, m.Raw, "  ")...)
 
 	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
 	if m.Via != "" {

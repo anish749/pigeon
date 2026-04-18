@@ -20,6 +20,13 @@ const (
 	ViaPigeonAsBot  Via = "pigeon-as-bot"  // pigeon sent using the bot's identity
 )
 
+// RawType represents the type of the raw fields.
+type RawType string
+
+const (
+	RawTypeSlack RawType = "slack"
+)
+
 // LineType classifies a parsed line. Messaging types (msg, react, etc.) and
 // Google Workspace types (email, comment, etc.) share the same discriminator
 // space because they all live in the same JSONL format on disk.
@@ -55,7 +62,8 @@ type MsgLine struct {
 	Attachments []Attachment `json:"attach,omitempty"`  // zero or more attachments -- slack attachements are not stored in this.
 
 	// Platform specific raw fields.
-	Raw map[string]any `json:"raw,omitempty"` // raw fields from the platform API response, can be partial or the full response.
+	RawType RawType        `json:"rawType,omitempty"` // type of the raw fields
+	Raw     map[string]any `json:"raw,omitempty"`     // raw fields from the platform API response, can be partial or the full response.
 }
 
 // Attachment references a file stored in the conversation's attachments/ directory.
@@ -77,14 +85,17 @@ type ReactLine struct {
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts          time.Time      `json:"ts"`               // when the edit happened
-	MsgID       string         `json:"msg"`              // target message ID
-	Sender      string         `json:"sender"`           // who edited (display name)
-	SenderID    string         `json:"from"`             // who edited (platform ID)
-	Via         Via            `json:"via,omitempty"`    // message pathway
-	Text        string         `json:"text,omitempty"`   // new message text
-	Attachments []Attachment   `json:"attach,omitempty"` // complete attachment set after edit
-	Raw         map[string]any `json:"raw,omitempty"`    // updated platform-specific raw fields
+	Ts          time.Time    `json:"ts"`               // when the edit happened
+	MsgID       string       `json:"msg"`              // target message ID
+	Sender      string       `json:"sender"`           // who edited (display name)
+	SenderID    string       `json:"from"`             // who edited (platform ID)
+	Via         Via          `json:"via,omitempty"`    // message pathway
+	Text        string       `json:"text,omitempty"`   // new message text
+	Attachments []Attachment `json:"attach,omitempty"` // complete attachment set after edit
+
+	// Platform specific raw fields.
+	RawType RawType        `json:"rawType,omitempty"` // type of the raw fields
+	Raw     map[string]any `json:"raw,omitempty"`     // updated platform-specific raw fields
 }
 
 // DeleteLine represents a message delete event.

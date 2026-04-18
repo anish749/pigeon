@@ -423,4 +423,3 @@ func TestFormatDateFile_NilErrorNoWarning(t *testing.T) {
 		t.Errorf("lines = %d, want 1 (nil error should not add warning)", len(lines))
 	}
 }
-
