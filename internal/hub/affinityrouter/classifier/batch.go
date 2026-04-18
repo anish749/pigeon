@@ -1,5 +1,3 @@
-// Package classifier implements batch classification of signals against
-// active workstreams using the Claude CLI client.
 package classifier
 
 import (
@@ -19,57 +17,51 @@ type llmClassifyJSON struct {
 	NewWorkstreamFocus string   `json:"new_workstream_focus,omitempty"`
 }
 
-// Result is the classification outcome for a batch of signals.
-type Result struct {
-	// WorkstreamIDs lists existing workstreams these signals belong to.
-	// A signal can belong to multiple workstreams (multi-routing).
-	WorkstreamIDs []string
-
-	// NewWorkstreamName is set when proposing a new workstream.
-	NewWorkstreamName string
-
-	// NewWorkstreamFocus is the proposed focus description for a new workstream.
-	NewWorkstreamFocus string
-}
-
-// BatchClassifier uses the Claude CLI to classify batches of signals
-// against active workstreams.
+// BatchClassifier buffers signals and classifies them in batch against
+// active workstreams using the Claude CLI. Each instance is scoped to
+// a single conversation.
 type BatchClassifier struct {
-	client *clients.Client
-	logger *slog.Logger
+	client  *clients.Client
+	logger  *slog.Logger
+	signals []models.Signal
 }
 
-// New creates a batch classifier.
-func New(client *clients.Client, logger *slog.Logger) *BatchClassifier {
-	return &BatchClassifier{
-		client: client,
-		logger: logger,
+// Observe buffers a signal for future classification.
+func (c *BatchClassifier) Observe(sig models.Signal) {
+	c.signals = append(c.signals, sig)
+}
+
+// Classify classifies all buffered signals against active workstreams,
+// drains the buffer, and returns the result. Returns nil if empty.
+func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, workstreams []models.Workstream, affinityIDs []string) (*Result, error) {
+	if len(c.signals) == 0 {
+		return nil, nil
 	}
-}
 
-// Classify classifies a batch of signals against active workstreams.
-// Returns which workstream(s) the signals belong to, or proposes a new one.
-func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) (*Result, error) {
-	prompt := buildClassifyPrompt(key, signals, active, currentAffinityIDs)
+	signals := c.signals
+	c.signals = nil
+
+	prompt := buildClassifyPrompt(key, signals, workstreams, affinityIDs)
 
 	c.logger.Info("classifying batch",
 		"account", key.Account.Display(),
 		"conversation", key.Conversation,
 		"signals", len(signals),
-		"active_workstreams", len(active),
+		"active_workstreams", len(workstreams),
 	)
 
 	var raw llmClassifyJSON
 	if err := c.client.JSON(ctx, "You are a concise workstream classifier. Respond only with the requested JSON.", prompt, &raw); err != nil {
+		// Re-buffer on error so we can retry.
+		c.signals = signals
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 
-	result := &Result{}
+	result := &Result{Signals: signals}
 
 	if len(raw.Workstreams) > 0 {
-		// Verify all returned workstream IDs exist.
-		activeIDs := make(map[string]bool, len(active))
-		for _, ws := range active {
+		activeIDs := make(map[string]bool, len(workstreams))
+		for _, ws := range workstreams {
 			activeIDs[ws.ID] = true
 		}
 		for _, id := range raw.Workstreams {
@@ -87,6 +79,22 @@ func (c *BatchClassifier) Classify(ctx context.Context, key models.ConversationK
 	}
 
 	return result, nil
+}
+
+// Buffered returns the number of signals currently buffered.
+func (c *BatchClassifier) Buffered() int {
+	return len(c.signals)
+}
+
+// NewBatchFactory returns a Factory that creates BatchClassifiers sharing
+// the given client and logger.
+func NewBatchFactory(client *clients.Client, logger *slog.Logger) Factory {
+	return func() WorkstreamClassifier {
+		return &BatchClassifier{
+			client: client,
+			logger: logger,
+		}
+	}
 }
 
 func buildClassifyPrompt(key models.ConversationKey, signals []models.Signal, active []models.Workstream, currentAffinityIDs []string) string {

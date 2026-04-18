@@ -101,9 +101,9 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 
 	// Set up components.
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
-	cls := classifier.New(claude, logger)
+	classifierFactory := classifier.NewBatchFactory(claude, logger)
 	sc := manager.NewStatCollector()
-	rtr := router.New(cls, detectorFactory, cfg, logger)
+	rtr := router.New(detectorFactory, classifierFactory, cfg, logger)
 	mgr := manager.New(claude, sc, cfg, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).

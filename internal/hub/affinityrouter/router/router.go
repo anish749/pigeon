@@ -22,14 +22,14 @@ import (
 // It uses conversation affinity for the fast path and delegates to the
 // classifier for batch classification when the detector triggers.
 type Router struct {
-	classifier  *classifier.BatchClassifier
-	newDetector detector.Factory
-	logger      *slog.Logger
+	newDetector   detector.Factory
+	newClassifier classifier.Factory
+	logger        *slog.Logger
 
 	// Internal state.
-	affinities map[models.ConversationKey][]models.AffinityEntry              // conversation → workstream weights
-	buffers    map[models.ConversationKey]*buffer                             // pending signals per conversation
-	detectors  map[models.ConversationKey]detector.ConversationShiftDetector  // per-conversation shift detectors
+	affinities  map[models.ConversationKey][]models.AffinityEntry              // conversation → workstream weights
+	detectors   map[models.ConversationKey]detector.ConversationShiftDetector   // per-conversation shift detectors
+	classifiers map[models.ConversationKey]classifier.WorkstreamClassifier      // per-conversation classifiers
 
 	// Config.
 	workspace config.WorkspaceName
@@ -40,21 +40,16 @@ type Router struct {
 	mu sync.RWMutex
 }
 
-type buffer struct {
-	signals        []models.Signal
-	lastClassified time.Time
-}
-
-// New creates a Router with the given shift detector factory.
-func New(cls *classifier.BatchClassifier, factory detector.Factory, cfg models.Config, logger *slog.Logger) *Router {
+// New creates a Router with the given shift detector and classifier factories.
+func New(detectorFactory detector.Factory, classifierFactory classifier.Factory, cfg models.Config, logger *slog.Logger) *Router {
 	return &Router{
-		classifier:  cls,
-		newDetector: factory,
-		logger:      logger,
-		affinities:  make(map[models.ConversationKey][]models.AffinityEntry),
-		buffers:     make(map[models.ConversationKey]*buffer),
-		detectors:   make(map[models.ConversationKey]detector.ConversationShiftDetector),
-		workspace:   cfg.Workspace.Name,
+		newDetector:   detectorFactory,
+		newClassifier: classifierFactory,
+		logger:        logger,
+		affinities:    make(map[models.ConversationKey][]models.AffinityEntry),
+		detectors:     make(map[models.ConversationKey]detector.ConversationShiftDetector),
+		classifiers:   make(map[models.ConversationKey]classifier.WorkstreamClassifier),
+		workspace:     cfg.Workspace.Name,
 	}
 }
 
@@ -73,8 +68,8 @@ type RouteResult struct {
 // Fast path: if the conversation has affinity, return immediately with
 // Source=SourceAffinity and Confidence=1.0.
 //
-// The signal is always buffered. When the detector triggers, the
-// classifier is called and a classifier-based decision is returned.
+// The signal is always sent to the classifier's buffer. When the detector
+// triggers, the classifier is called and a classifier-based decision is returned.
 //
 // The workstreams parameter provides the current active workstreams for
 // the signal's workspace (needed by the classifier).
@@ -113,28 +108,24 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		r.stats.FastPathRouted++
 	}
 
-	// Get or create the buffer and detector for this conversation.
-	buf := r.buffers[key]
-	if buf == nil {
-		buf = &buffer{}
-		r.buffers[key] = buf
-	}
+	// Get or create the detector and classifier for this conversation.
 	det := r.detectors[key]
 	if det == nil {
 		det = r.newDetector()
 		r.detectors[key] = det
-		// Feed existing buffered signals so the detector has context.
-		for _, s := range buf.signals {
-			det.Observe(s)
-		}
+	}
+	cls := r.classifiers[key]
+	if cls == nil {
+		cls = r.newClassifier()
+		r.classifiers[key] = cls
 	}
 
 	// Ask the detector whether this signal represents a shift.
 	shifted := det.Observe(sig)
 
 	if !shifted {
-		// No shift detected — buffer the signal and return.
-		buf.signals = append(buf.signals, sig)
+		// No shift detected — buffer the signal in the classifier and return.
+		cls.Observe(sig)
 		r.stats.BufferedSignals++
 		if affinityResult != nil {
 			return affinityResult, nil
@@ -148,13 +139,8 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		}, nil
 	}
 
-	// Shift detected — classify the completed burst, then start
-	// a new buffer with the incoming signal.
-	signals := buf.signals
-	buf.signals = []models.Signal{sig} // new signal starts the next burst
-	buf.lastClassified = now
-	r.stats.BufferedSignals++
-
+	// Shift detected — classify the completed burst. The new signal starts
+	// the next burst, so we classify before observing it.
 	var currentAffinityIDs []string
 	if entries, ok := r.affinities[key]; ok {
 		for _, e := range entries {
@@ -166,19 +152,34 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 
 	// Release the lock during the classifier call (network/LLM).
 	r.mu.Unlock()
-	result, err := r.classifier.Classify(ctx, key, signals, workstreams, currentAffinityIDs)
+	result, err := cls.Classify(ctx, key, workstreams, currentAffinityIDs)
 	r.mu.Lock()
 
+	// Buffer the new signal in the classifier — it starts the next burst.
+	cls.Observe(sig)
+	r.stats.BufferedSignals++
+
 	if err != nil {
-		// On classifier error, re-buffer the signals and fall back.
-		buf.signals = append(signals, buf.signals...)
-		buf.lastClassified = time.Time{} // reset so we retry
-		r.stats.ClassifierCalls--        // don't count failed calls
+		r.stats.ClassifierCalls-- // don't count failed calls
 
 		if affinityResult != nil {
 			return affinityResult, nil
 		}
 		return nil, err
+	}
+
+	// If classifier had nothing buffered, route to default.
+	if result == nil {
+		if affinityResult != nil {
+			return affinityResult, nil
+		}
+		return &RouteResult{
+			Decision: models.RoutingDecision{
+				SignalID:      sig.ID,
+				WorkstreamIDs: []string{models.DefaultWorkstreamID(r.workspace)},
+				Ts:            now,
+			},
+		}, nil
 	}
 
 	// If classifier returned nothing valid, route to default.
@@ -200,7 +201,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 	r.logger.Info("classified batch",
 		"account", key.Account.Display(),
 		"conversation", key.Conversation,
-		"signals", len(signals),
+		"signals", len(result.Signals),
 		"workstreams", result.WorkstreamIDs,
 		"new_workstream", result.NewWorkstreamName,
 	)
@@ -235,9 +236,9 @@ func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string,
 // gets classified.
 func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstream) ([]*RouteResult, error) {
 	r.mu.Lock()
-	keys := make([]models.ConversationKey, 0, len(r.buffers))
-	for key, buf := range r.buffers {
-		if len(buf.signals) > 0 {
+	keys := make([]models.ConversationKey, 0, len(r.classifiers))
+	for key, cls := range r.classifiers {
+		if cls.Buffered() > 0 {
 			keys = append(keys, key)
 		}
 	}
@@ -247,13 +248,11 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 	var errs []error
 	for _, key := range keys {
 		r.mu.Lock()
-		buf := r.buffers[key]
-		if buf == nil || len(buf.signals) == 0 {
+		cls := r.classifiers[key]
+		if cls == nil || cls.Buffered() == 0 {
 			r.mu.Unlock()
 			continue
 		}
-		signals := buf.signals
-		buf.signals = nil
 
 		var currentAffinityIDs []string
 		if entries, ok := r.affinities[key]; ok {
@@ -264,9 +263,13 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 		r.stats.ClassifierCalls++
 		r.mu.Unlock()
 
-		result, err := r.classifier.Classify(ctx, key, signals, workstreams, currentAffinityIDs)
+		result, err := cls.Classify(ctx, key, workstreams, currentAffinityIDs)
 		if err != nil {
 			errs = append(errs, err)
+			continue
+		}
+
+		if result == nil {
 			continue
 		}
 
@@ -279,9 +282,9 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 
 		rr := &RouteResult{
 			Decision: models.RoutingDecision{
-				SignalID:      signals[0].ID,
+				SignalID:      result.Signals[0].ID,
 				WorkstreamIDs: wsIDs,
-				Ts:            signals[len(signals)-1].Ts,
+				Ts:            result.Signals[len(result.Signals)-1].Ts,
 			},
 			NewWorkstreamName:  result.NewWorkstreamName,
 			NewWorkstreamFocus: result.NewWorkstreamFocus,
@@ -289,7 +292,7 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 
 		r.logger.Info("flush classified",
 			"conversation", key.Conversation,
-			"signals", len(signals),
+			"signals", len(result.Signals),
 			"workstreams", wsIDs,
 			"new_workstream", result.NewWorkstreamName,
 		)
