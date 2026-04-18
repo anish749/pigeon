@@ -105,6 +105,21 @@ which attachments to fetch (all? only under a size cap? only certain
 MIME types?), where to store them (mirror Drive's `attachments/` layout?
 a dedicated path?), and how to surface them to the read/hub layers.
 
+## Conversation review TUI
+
+A terminal UI for browsing stored conversations — useful for auditing bot
+DM conversations (what pigeon said to someone, what they replied) without
+leaving the terminal or relying on the Slack UI.
+
+The data already exists: `pigeon read` can pull up any conversation from
+the local JSONL store for both bot-sent and inbound messages. A TUI would
+sit on top of this — list conversations per account, open one, scroll
+through the thread, jump between dates.
+
+Quality-of-life rather than critical — the query layer via `pigeon read`
+is sufficient for now. Becomes more valuable as the volume of
+bot-initiated DM outreach grows.
+
 ## Unified read abstraction across messaging and GWS
 
 The read layer (`store.Store`, `modelv1.Line`, `internal/read`,
