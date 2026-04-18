@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/compact"
 )
@@ -55,78 +57,58 @@ func TestCompact_DedupReactions_KeepsFirst(t *testing.T) {
 }
 
 func TestCompact_DedupMessages_PreservesRaw(t *testing.T) {
-	raw := map[string]any{
-		"files": []any{
-			map[string]any{"name": "doc.pdf", "size": float64(999)},
-		},
+	msg := modelv1.MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "",
+		RawType: modelv1.RawTypeSlack,
+		Raw:     map[string]any{"files": []any{map[string]any{"name": "doc.pdf", "size": float64(999)}}},
 	}
 	f := &modelv1.DateFile{
-		Messages: []modelv1.MsgLine{
-			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
-			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "", Raw: raw},
-		},
+		Messages: []modelv1.MsgLine{msg, msg},
 	}
 	got := compact.Compact(f)
 	if len(got.Messages) != 1 {
 		t.Fatalf("messages count = %d, want 1", len(got.Messages))
 	}
-	if got.Messages[0].Raw == nil {
-		t.Fatal("raw is nil after dedup, want preserved")
-	}
-	files, ok := got.Messages[0].Raw["files"].([]any)
-	if !ok || len(files) != 1 {
-		t.Fatalf("raw[files] = %v, want slice of 1", got.Messages[0].Raw["files"])
-	}
-	if files[0].(map[string]any)["name"] != "doc.pdf" {
-		t.Errorf("file name = %v, want doc.pdf", files[0].(map[string]any)["name"])
+	if diff := cmp.Diff(msg, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestCompact_EditUpdatesRaw(t *testing.T) {
-	origRaw := map[string]any{
-		"blocks": []any{map[string]any{"type": "rich_text", "text": "original"}},
-	}
 	editRaw := map[string]any{
 		"blocks": []any{map[string]any{"type": "rich_text", "text": "edited"}},
 	}
 	f := &modelv1.DateFile{
 		Messages: []modelv1.MsgLine{
-			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "original", Raw: origRaw},
+			{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "original",
+				Raw: map[string]any{"blocks": []any{map[string]any{"type": "rich_text", "text": "original"}}}},
 		},
 		Edits: []modelv1.EditLine{
-			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1", Text: "edited", Raw: editRaw},
+			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1", Text: "edited", RawType: modelv1.RawTypeSlack, Raw: editRaw},
 		},
 	}
 	got := compact.Compact(f)
 	if len(got.Messages) != 1 {
 		t.Fatalf("messages count = %d, want 1", len(got.Messages))
 	}
-	if got.Messages[0].Text != "edited" {
-		t.Errorf("text = %q, want %q", got.Messages[0].Text, "edited")
-	}
-	if got.Messages[0].Raw == nil {
-		t.Fatal("raw is nil after edit, want updated")
-	}
-	blocks := got.Messages[0].Raw["blocks"].([]any)
-	if blocks[0].(map[string]any)["text"] != "edited" {
-		t.Errorf("raw block text = %v, want edited", blocks[0].(map[string]any)["text"])
+	want := modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "edited", RawType: modelv1.RawTypeSlack, Raw: editRaw}
+	if diff := cmp.Diff(want, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestCompactThread_EditUpdatesRaw(t *testing.T) {
-	origRaw := map[string]any{
-		"files": []any{map[string]any{"name": "v1.pdf"}},
-	}
 	editRaw := map[string]any{
 		"files": []any{map[string]any{"name": "v2.pdf"}},
 	}
 	f := &modelv1.ThreadFile{
-		Parent:  modelv1.MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "parent"},
+		Parent: modelv1.MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "parent"},
 		Replies: []modelv1.MsgLine{
-			{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "original", Reply: true, Raw: origRaw},
+			{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "original", Reply: true,
+				Raw: map[string]any{"files": []any{map[string]any{"name": "v1.pdf"}}}},
 		},
 		Edits: []modelv1.EditLine{
-			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "R1", Sender: "Bob", SenderID: "U2", Text: "edited", Raw: editRaw},
+			{Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "R1", Sender: "Bob", SenderID: "U2", Text: "edited", RawType: modelv1.RawTypeSlack, Raw: editRaw},
 		},
 	}
 	got := compact.CompactThread(f)
@@ -136,16 +118,9 @@ func TestCompactThread_EditUpdatesRaw(t *testing.T) {
 	if len(got.Replies) != 1 {
 		t.Fatalf("replies count = %d, want 1", len(got.Replies))
 	}
-	reply := got.Replies[0]
-	if reply.Text != "edited" {
-		t.Errorf("text = %q, want %q", reply.Text, "edited")
-	}
-	if reply.Raw == nil {
-		t.Fatal("raw is nil after thread edit, want updated")
-	}
-	files := reply.Raw["files"].([]any)
-	if files[0].(map[string]any)["name"] != "v2.pdf" {
-		t.Errorf("raw file name = %v, want v2.pdf", files[0].(map[string]any)["name"])
+	want := modelv1.MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "edited", Reply: true, RawType: modelv1.RawTypeSlack, Raw: editRaw}
+	if diff := cmp.Diff(want, got.Replies[0]); diff != "" {
+		t.Errorf("reply mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -279,8 +254,9 @@ func TestCompact_SingleEdit_ReplacesText(t *testing.T) {
 	if len(got.Messages) != 1 {
 		t.Fatalf("messages count = %d, want 1", len(got.Messages))
 	}
-	if got.Messages[0].Text != "edited" {
-		t.Errorf("text = %q, want %q", got.Messages[0].Text, "edited")
+	want := modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "edited"}
+	if diff := cmp.Diff(want, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 	if len(got.Edits) != 0 {
 		t.Errorf("edits should be empty after compaction, got %d", len(got.Edits))
@@ -299,8 +275,9 @@ func TestCompact_MultipleEdits_MostRecentWins(t *testing.T) {
 		},
 	}
 	got := compact.Compact(f)
-	if got.Messages[0].Text != "second edit" {
-		t.Errorf("text = %q, want %q", got.Messages[0].Text, "second edit")
+	want := modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "second edit"}
+	if diff := cmp.Diff(want, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -322,17 +299,13 @@ func TestCompact_EditWithAttachments_ReplacesAttachments(t *testing.T) {
 		},
 	}
 	got := compact.Compact(f)
-	if got.Messages[0].Text != "edited" {
-		t.Errorf("text = %q, want %q", got.Messages[0].Text, "edited")
+	want := modelv1.MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1",
+		Text:        "edited",
+		Attachments: []modelv1.Attachment{{ID: "F2", Type: "image/png"}, {ID: "F3", Type: "application/pdf"}},
 	}
-	if len(got.Messages[0].Attachments) != 2 {
-		t.Fatalf("attachments count = %d, want 2", len(got.Messages[0].Attachments))
-	}
-	if got.Messages[0].Attachments[0].ID != "F2" {
-		t.Errorf("attachment[0].ID = %q, want %q", got.Messages[0].Attachments[0].ID, "F2")
-	}
-	if got.Messages[0].Attachments[1].ID != "F3" {
-		t.Errorf("attachment[1].ID = %q, want %q", got.Messages[0].Attachments[1].ID, "F3")
+	if diff := cmp.Diff(want, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -349,13 +322,13 @@ func TestCompact_EditRemovesAttachments(t *testing.T) {
 			{
 				Ts: ts(2026, 3, 16, 9, 5, 0), MsgID: "M1", Sender: "Alice", SenderID: "U1",
 				Text: "no attachment",
-				// nil Attachments = attachment removed
 			},
 		},
 	}
 	got := compact.Compact(f)
-	if got.Messages[0].Attachments != nil {
-		t.Errorf("attachments should be nil after edit removes them, got %v", got.Messages[0].Attachments)
+	want := modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "no attachment"}
+	if diff := cmp.Diff(want, got.Messages[0]); diff != "" {
+		t.Errorf("message mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -675,11 +648,16 @@ func TestCompactThread_EditParent(t *testing.T) {
 		},
 	}
 	got := compact.CompactThread(f)
-	if got.Parent.Text != "edited parent" {
-		t.Errorf("parent text = %q, want %q", got.Parent.Text, "edited parent")
+	wantParent := modelv1.MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", SenderID: "U1", Text: "edited parent"}
+	if diff := cmp.Diff(wantParent, got.Parent); diff != "" {
+		t.Errorf("parent mismatch (-want +got):\n%s", diff)
 	}
+	wantReply := modelv1.MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true}
 	if len(got.Replies) != 1 {
 		t.Fatalf("replies count = %d, want 1", len(got.Replies))
+	}
+	if diff := cmp.Diff(wantReply, got.Replies[0]); diff != "" {
+		t.Errorf("reply mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -694,8 +672,9 @@ func TestCompactThread_EditReply(t *testing.T) {
 		},
 	}
 	got := compact.CompactThread(f)
-	if got.Replies[0].Text != "edited reply" {
-		t.Errorf("reply text = %q, want %q", got.Replies[0].Text, "edited reply")
+	want := modelv1.MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2", Text: "edited reply", Reply: true}
+	if diff := cmp.Diff(want, got.Replies[0]); diff != "" {
+		t.Errorf("reply mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -710,8 +689,9 @@ func TestCompactThread_EditContext(t *testing.T) {
 		},
 	}
 	got := compact.CompactThread(f)
-	if got.Context[0].Text != "edited context" {
-		t.Errorf("context text = %q, want %q", got.Context[0].Text, "edited context")
+	want := modelv1.MsgLine{ID: "C1", Ts: ts(2026, 3, 16, 8, 55, 0), Sender: "Charlie", SenderID: "U3", Text: "edited context"}
+	if diff := cmp.Diff(want, got.Context[0]); diff != "" {
+		t.Errorf("context mismatch (-want +got):\n%s", diff)
 	}
 }
 
