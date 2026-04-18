@@ -119,20 +119,26 @@ func windowText(signals []models.Signal) string {
 	return text
 }
 
+const (
+	defaultWindowSize        = 5
+	defaultFallbackThreshold = 0.6
+	defaultStdMultiplier     = 1.0
+	defaultMinCalibration    = 5
+)
+
 // NewCosineFactory returns a detector.Factory that creates CosineDetectors.
-// The embedder and fallbackThreshold are shared across all detectors; each
-// detector maintains its own sliding window, previous embedding, and
-// self-calibrating threshold that adapts to the conversation's similarity
-// distribution after 5 observations.
-func NewCosineFactory(embedder Embedder, windowSize int, fallbackThreshold float64, logger *slog.Logger) detector.Factory {
+// The embedder is shared across all detectors; each detector maintains its
+// own sliding window, previous embedding, and self-calibrating threshold
+// that adapts to the conversation's similarity distribution.
+func NewCosineFactory(embedder Embedder, logger *slog.Logger) detector.Factory {
 	return func() detector.ConversationShiftDetector {
 		return &CosineDetector{
 			embedder:          embedder,
 			logger:            logger,
-			fallbackThreshold: fallbackThreshold,
-			stdMultiplier:     1.0,
-			minCalibration:    5,
-			windowSize:        windowSize,
+			fallbackThreshold: defaultFallbackThreshold,
+			stdMultiplier:     defaultStdMultiplier,
+			minCalibration:    defaultMinCalibration,
+			windowSize:        defaultWindowSize,
 		}
 	}
 }

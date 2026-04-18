@@ -35,8 +35,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	var sinceStr, untilStr, workspaceFlag string
 	var interactive bool
 	var burstGap time.Duration
-	var detectorType, embedModel string
-	var embedWindowSize int
+	var detectorType string
 
 	cmd := &cobra.Command{
 		Use:   "replay",
@@ -82,12 +81,12 @@ func newWorkstreamReplayCmd() *cobra.Command {
 				factory = detector.NewBurstGapFactory(burstGap)
 			case "cosine":
 				socketPath := filepath.Join(paths.StateDir(), "embed.sock")
-				client, err := embedding.NewClient(socketPath, embedModel, 2*time.Minute)
+				client, err := embedding.NewClient(socketPath)
 				if err != nil {
 					return fmt.Errorf("start embedding sidecar: %w", err)
 				}
 				defer client.Close()
-				factory = embedding.NewCosineFactory(client, embedWindowSize, 0.6, logger)
+				factory = embedding.NewCosineFactory(client, logger)
 			default:
 				return fmt.Errorf("unknown detector type: %s (use burstgap or cosine)", detectorType)
 			}
@@ -111,7 +110,5 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	// Detector selection.
 	cmd.Flags().StringVar(&detectorType, "detector", "burstgap", "Shift detector: burstgap or cosine")
 	cmd.Flags().DurationVar(&burstGap, "burst-gap", 90*time.Minute, "Gap duration for burst-gap detector")
-	cmd.Flags().StringVar(&embedModel, "embed-model", "all-MiniLM-L6-v2", "Sentence-transformers model for cosine detector")
-	cmd.Flags().IntVar(&embedWindowSize, "embed-window", 5, "Sliding window size (messages) for cosine detector")
 	return cmd
 }
