@@ -19,7 +19,7 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 			SenderID: rs.SenderID,
 			Via:      via,
 			Text:     text,
-			RawType: modelv1.RawTypeSlack,
+			RawType:  modelv1.RawTypeSlack,
 			Raw:      raw.AsSerializable(),
 		},
 	}
@@ -38,7 +38,7 @@ func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text str
 			Via:      via,
 			Text:     text,
 			Reply:    isReply,
-			RawType: modelv1.RawTypeSlack,
+			RawType:  modelv1.RawTypeSlack,
 			Raw:      raw.AsSerializable(),
 		},
 	}
@@ -55,7 +55,7 @@ func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text str
 			Sender:   rs.SenderName,
 			SenderID: rs.SenderID,
 			Text:     text,
-			RawType: modelv1.RawTypeSlack,
+			RawType:  modelv1.RawTypeSlack,
 			Raw:      raw.AsSerializable(),
 		},
 	}

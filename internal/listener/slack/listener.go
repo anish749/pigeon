@@ -22,17 +22,17 @@ import (
 // On every Socket Mode connect (including reconnects), it runs a sync to backfill
 // any messages missed while disconnected.
 type Listener struct {
-	client      *socketmode.Client
-	resolver    *Resolver
-	messages    *MessageStore
-	userToken   string
-	botToken    string
-	acct        account.Account
-	teamID      string
+	client       *socketmode.Client
+	resolver     *Resolver
+	messages     *MessageStore
+	userToken    string
+	botToken     string
+	acct         account.Account
+	teamID       string
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
-	onMessage   hub.MessageNotifyFunc
-	onReaction  hub.ReactionNotifyFunc
-	syncTracker *syncstatus.Tracker
+	onMessage    hub.MessageNotifyFunc
+	onReaction   hub.ReactionNotifyFunc
+	syncTracker  *syncstatus.Tracker
 }
 
 // NewListener creates a Slack listener for a single workspace.
@@ -43,17 +43,17 @@ type Listener struct {
 // Both callbacks must be non-nil.
 func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
-		client:      client,
-		resolver:    resolver,
-		messages:    messages,
-		userToken:   userToken,
-		botToken:    botToken,
-		acct:        acct,
-		teamID:      teamID,
-		pigeonBotUID:   pigeonBotUID,
-		onMessage:   onMessage,
-		onReaction:  onReaction,
-		syncTracker: syncTracker,
+		client:       client,
+		resolver:     resolver,
+		messages:     messages,
+		userToken:    userToken,
+		botToken:     botToken,
+		acct:         acct,
+		teamID:       teamID,
+		pigeonBotUID: pigeonBotUID,
+		onMessage:    onMessage,
+		onReaction:   onReaction,
+		syncTracker:  syncTracker,
 	}
 }
 
