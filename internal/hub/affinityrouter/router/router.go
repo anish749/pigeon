@@ -181,13 +181,18 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 		wsIDs = []string{models.DefaultWorkstreamID(r.workspace)}
 	}
 
-	// Build routing decisions for ALL signals in the classified burst.
-	burstDecisions := make([]models.RoutingDecision, len(signals))
-	for i, s := range signals {
-		burstDecisions[i] = models.RoutingDecision{
-			SignalID:      s.ID,
-			WorkstreamIDs: wsIDs,
-			Ts:            s.Ts,
+	// Only build burst reclassification decisions when the classifier's
+	// result differs from the fast-path affinity. If the classifier confirms
+	// what the fast path already tagged, there's nothing to reclassify.
+	var burstDecisions []models.RoutingDecision
+	if !sameIDs(wsIDs, currentAffinityIDs) {
+		burstDecisions = make([]models.RoutingDecision, len(signals))
+		for i, s := range signals {
+			burstDecisions[i] = models.RoutingDecision{
+				SignalID:      s.ID,
+				WorkstreamIDs: wsIDs,
+				Ts:            s.Ts,
+			}
 		}
 	}
 
@@ -225,6 +230,24 @@ func (r *Router) bufferReady(buf *buffer, now time.Time) bool {
 	// The burst ended: gap from the last buffered signal to now exceeds the threshold.
 	lastSignal := buf.signals[len(buf.signals)-1].Ts
 	return now.Sub(lastSignal) >= r.burstGap
+}
+
+// sameIDs reports whether two workstream ID slices contain the same IDs
+// (order-independent).
+func sameIDs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, id := range a {
+		set[id] = struct{}{}
+	}
+	for _, id := range b {
+		if _, ok := set[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateAffinity updates the conversation->workstream affinity weights.
@@ -296,12 +319,15 @@ func (r *Router) FlushBuffers(ctx context.Context, workstreams []models.Workstre
 			r.mu.Unlock()
 		}
 
-		burstDecisions := make([]models.RoutingDecision, len(signals))
-		for i, s := range signals {
-			burstDecisions[i] = models.RoutingDecision{
-				SignalID:      s.ID,
-				WorkstreamIDs: wsIDs,
-				Ts:            s.Ts,
+		var burstDecisions []models.RoutingDecision
+		if !sameIDs(wsIDs, currentAffinityIDs) {
+			burstDecisions = make([]models.RoutingDecision, len(signals))
+			for i, s := range signals {
+				burstDecisions[i] = models.RoutingDecision{
+					SignalID:      s.ID,
+					WorkstreamIDs: wsIDs,
+					Ts:            s.Ts,
+				}
 			}
 		}
 
