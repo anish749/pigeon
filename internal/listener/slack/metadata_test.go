@@ -82,4 +82,3 @@ func TestDetermineVia(t *testing.T) {
 		})
 	}
 }
-

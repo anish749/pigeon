@@ -31,4 +31,3 @@ func DetermineVia(msg goslack.Msg, isBotDM bool) modelv1.Via {
 	}
 	return modelv1.ViaOrganic
 }
-

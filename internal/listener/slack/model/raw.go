@@ -6,7 +6,7 @@ import (
 	goslack "github.com/slack-go/slack"
 )
 
-type SerailiableSlackRaw map[string]any
+type SerializableSlackRaw map[string]any
 
 // Marshal the slack-go structs to JSON, then unmarshal back to map[string]any.
 // This decouples the storage format from the slack-go types.
@@ -36,7 +36,7 @@ func NewSlackRawContent(msg goslack.Msg) SlackRawContent {
 	return content
 }
 
-func (c SlackRawContent) AsSerializable() SerailiableSlackRaw {
+func (c SlackRawContent) AsSerializable() SerializableSlackRaw {
 	if c.Blocks == nil && len(c.Attachments) == 0 && len(c.Files) == 0 {
 		return nil
 	}
@@ -44,7 +44,7 @@ func (c SlackRawContent) AsSerializable() SerailiableSlackRaw {
 	if err != nil {
 		return nil
 	}
-	var raw SerailiableSlackRaw
+	var raw SerializableSlackRaw
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil
 	}

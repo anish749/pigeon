@@ -142,7 +142,6 @@ func FormatConvMeta(meta *ConvMeta) string {
 	return strings.Join(parts, " ")
 }
 
-
 // formatReactions renders a list of reactions as a single display line.
 // e.g. "👍 Bob, Charlie · 🎉 Dave"
 func formatReactions(reactions []ReactLine) string {
