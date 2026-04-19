@@ -186,6 +186,31 @@ func (t SlackTarget) Display() string {
 	return t.Channel
 }
 
+// ResolvedSlackTarget holds the daemon-resolved Slack destination.
+// Exactly one pair is populated: UserID/UserName for DMs,
+// ChannelID/ChannelName for channels and group DMs.
+type ResolvedSlackTarget struct {
+	UserID      string `json:"user_id,omitempty"`
+	UserName    string `json:"user_name,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+}
+
+// Display returns a human-readable label, preferring the resolved name
+// and falling back to the raw ID.
+func (t ResolvedSlackTarget) Display() string {
+	if t.UserName != "" {
+		return "@" + t.UserName
+	}
+	if t.ChannelName != "" {
+		return t.ChannelName
+	}
+	if t.UserID != "" {
+		return t.UserID
+	}
+	return t.ChannelID
+}
+
 // SendRequest is the daemon API payload for /api/send.
 type SendRequest struct {
 	Platform string `json:"platform"`
@@ -211,12 +236,29 @@ type SendRequest struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// Target returns the display name for the send target (for logging and UI).
+// Target returns a human-readable label for the send target.
 func (r SendRequest) Target() string {
 	if r.Slack != nil {
 		return r.Slack.Display()
 	}
 	return r.Contact
+}
+
+// ResolvedSendRequest is the daemon-enriched form of a SendRequest.
+// Produced after validation and target resolution, this is what gets stored
+// in the outbox and deserialized by the review TUI.
+type ResolvedSendRequest struct {
+	SendRequest
+	ResolvedSlack *ResolvedSlackTarget `json:"resolved_slack,omitempty"`
+}
+
+// ResolvedTarget returns the human-readable label for the resolved send
+// target, falling back to SendRequest.Target() when no resolution exists.
+func (r ResolvedSendRequest) ResolvedTarget() string {
+	if r.ResolvedSlack != nil {
+		return r.ResolvedSlack.Display()
+	}
+	return r.SendRequest.Target()
 }
 
 // SendResponse is the daemon API response for /api/send.
@@ -262,11 +304,31 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve target display names so the outbox/TUI has human-readable info.
+	var resolvedSlack *ResolvedSlackTarget
+	if req.Platform == "slack" && req.Slack != nil {
+		acct := account.New(req.Platform, req.Account)
+		s.mu.RLock()
+		sender, ok := s.slack[acct.NameSlug()]
+		s.mu.RUnlock()
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, SendResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())})
+			return
+		}
+		var err error
+		resolvedSlack, err = resolveSlackDisplay(r.Context(), sender, req.Slack)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
+			return
+		}
+	}
+	resolved := ResolvedSendRequest{SendRequest: req, ResolvedSlack: resolvedSlack}
+
 	// All real sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
 	if !req.DryRun {
-		payload, err := json.Marshal(req)
+		payload, err := json.Marshal(resolved)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, SendResponse{Error: "marshal send request: " + err.Error()})
 			return
@@ -277,7 +339,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := s.dispatchSend(r.Context(), req)
+	resp := s.dispatchSend(r.Context(), resolved)
 	status := http.StatusOK
 	if !resp.OK {
 		status = http.StatusInternalServerError
@@ -348,7 +410,7 @@ func (s *Server) sendWhatsApp(ctx context.Context, acct account.Account, req Sen
 	return SendResponse{OK: true, Timestamp: resp.Timestamp.Format(time.RFC3339)}
 }
 
-func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRequest) SendResponse {
+func (s *Server) sendSlack(ctx context.Context, acct account.Account, req ResolvedSendRequest) SendResponse {
 	s.mu.RLock()
 	sender, ok := s.slack[acct.NameSlug()]
 	s.mu.RUnlock()
@@ -364,16 +426,25 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 		senderName = sender.UserName
 	}
 
-	channelID, channelName, err := resolveSlackTarget(ctx, sender, api, req.Slack)
-	if err != nil {
-		return SendResponse{Error: err.Error()}
+	// For DMs, OpenConversation is deferred to send time (side effect).
+	if req.ResolvedSlack.UserID != "" && req.ResolvedSlack.ChannelID == "" {
+		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{req.ResolvedSlack.UserID},
+		})
+		if err != nil {
+			return SendResponse{Error: fmt.Sprintf("open DM with %s (%s): %v", req.ResolvedSlack.Display(), req.ResolvedSlack.UserID, err)}
+		}
+		req.ResolvedSlack.ChannelID = ch.ID
 	}
+
+	channelID := req.ResolvedSlack.ChannelID
+	displayName := req.ResolvedSlack.Display()
 
 	if req.DryRun {
 		return SendResponse{
 			OK:          true,
 			ChannelID:   channelID,
-			ChannelName: channelName,
+			ChannelName: displayName,
 			SendAs:      senderName,
 		}
 	}
@@ -414,7 +485,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	if req.PostAt != "" {
 		_, scheduledID, err := api.ScheduleMessageContext(ctx, channelID, req.PostAt, opts...)
 		if err != nil {
-			return SendResponse{Error: fmt.Sprintf("schedule to %s failed: %v", channelName, err)}
+			return SendResponse{Error: fmt.Sprintf("schedule to %s failed: %v", displayName, err)}
 		}
 		return SendResponse{OK: true, ScheduledMessageID: scheduledID, SendAs: senderName}
 	}
@@ -423,13 +494,13 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req SendRe
 	_, ts, err := api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
 		slog.ErrorContext(ctx, "slack send failed",
-			"channel_id", channelID, "channel_name", channelName,
+			"channel_id", channelID, "channel_name", displayName,
 			"via", req.Via, "error", err)
 		hint := ""
 		if req.Via == modelv1.ViaPigeonAsBot {
 			hint = slackChannelNotFoundHint(err)
 		}
-		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v%s", channelName, err, hint)}
+		return SendResponse{Error: fmt.Sprintf("send to %s failed: %v%s", displayName, err, hint)}
 	}
 
 	// The listener will pick up this message via Socket Mode and write it to
@@ -638,50 +709,74 @@ func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error 
 	return nil
 }
 
-// resolveSlackTarget resolves a SlackTarget to a channel ID and display name.
-func resolveSlackTarget(ctx context.Context, sender *SlackSender, api *goslack.Client, t *SlackTarget) (channelID, channelName string, err error) {
+// resolveSlackDisplay resolves a SlackTarget to a ResolvedSlackTarget with
+// display names populated but without side effects (no OpenConversation).
+// Used at submit time so the outbox has human-readable names for the TUI.
+func resolveSlackDisplay(ctx context.Context, sender *SlackSender, t *SlackTarget) (*ResolvedSlackTarget, error) {
 	switch {
 	case t.UserID != "":
 		userName, err := sender.Resolver.UserName(ctx, t.UserID)
 		if err != nil {
-			return "", "", fmt.Errorf("unknown user %s: %v", t.UserID, err)
+			return nil, fmt.Errorf("unknown user %s: %v", t.UserID, err)
 		}
-		channelName = "@" + userName
-
-		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{t.UserID},
-		})
-		if err != nil {
-			return "", "", fmt.Errorf("open DM with %s (%s): %v", channelName, t.UserID, err)
-		}
-		return ch.ID, channelName, nil
+		return &ResolvedSlackTarget{
+			UserID:   t.UserID,
+			UserName: userName,
+		}, nil
 
 	case t.Channel != "":
-		return sender.Resolver.FindChannelID(ctx, t.Channel)
+		channelID, channelName, err := sender.Resolver.FindChannelID(ctx, t.Channel)
+		if err != nil {
+			return nil, err
+		}
+		return &ResolvedSlackTarget{
+			ChannelID:   channelID,
+			ChannelName: channelName,
+		}, nil
 	}
-	return "", "", fmt.Errorf("empty slack target")
+	return nil, fmt.Errorf("empty slack target")
 }
 
-func (s *Server) dispatchSend(ctx context.Context, req SendRequest) SendResponse {
-	acct := account.New(req.Platform, req.Account)
+// resolveSlackTarget fully resolves a SlackTarget, including opening DM
+// channels. Used by the send/react/delete paths that need routing info.
+func resolveSlackTarget(ctx context.Context, sender *SlackSender, api *goslack.Client, t *SlackTarget) (*ResolvedSlackTarget, error) {
+	resolved, err := resolveSlackDisplay(ctx, sender, t)
+	if err != nil {
+		return nil, err
+	}
+	// For DMs, open the conversation to get the channel ID.
+	if resolved.UserID != "" && resolved.ChannelID == "" {
+		ch, _, _, err := api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+			Users: []string{resolved.UserID},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("open DM with %s (%s): %v", resolved.Display(), resolved.UserID, err)
+		}
+		resolved.ChannelID = ch.ID
+	}
+	return resolved, nil
+}
+
+func (s *Server) dispatchSend(ctx context.Context, resolved ResolvedSendRequest) SendResponse {
+	acct := account.New(resolved.Platform, resolved.Account)
 	switch acct.Platform {
 	case "whatsapp":
-		return s.sendWhatsApp(ctx, acct, req)
+		return s.sendWhatsApp(ctx, acct, resolved.SendRequest)
 	case "slack":
-		return s.sendSlack(ctx, acct, req)
+		return s.sendSlack(ctx, acct, resolved)
 	default:
-		return SendResponse{Error: fmt.Sprintf("unsupported platform: %s", req.Platform)}
+		return SendResponse{Error: fmt.Sprintf("unsupported platform: %s", resolved.Platform)}
 	}
 }
 
 // executeSend is the outbox.SendFunc callback. It unmarshals the stored payload
 // and dispatches through the normal send path.
 func (s *Server) executeSend(ctx context.Context, payload json.RawMessage) (bool, string) {
-	var req SendRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
+	var resolved ResolvedSendRequest
+	if err := json.Unmarshal(payload, &resolved); err != nil {
 		return false, "invalid payload: " + err.Error()
 	}
-	resp := s.dispatchSend(ctx, req)
+	resp := s.dispatchSend(ctx, resolved)
 	if !resp.OK {
 		return false, resp.Error
 	}
@@ -753,10 +848,13 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		return ReactResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
 	}
 
-	channelID, channelName, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
+	resolved, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
 	if err != nil {
 		return ReactResponse{Error: err.Error()}
 	}
+
+	channelID := resolved.ChannelID
+	displayName := resolved.Display()
 
 	// Reactions are always sent via the bot token.
 	ref := goslack.NewRefToMessage(channelID, req.MessageID)
@@ -767,7 +865,7 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 		reactErr = sender.BotAPI.AddReactionContext(ctx, req.Emoji, ref)
 	}
 	if reactErr != nil {
-		return ReactResponse{Error: fmt.Sprintf("react on %s: %v%s", channelName, reactErr, slackChannelNotFoundHint(reactErr))}
+		return ReactResponse{Error: fmt.Sprintf("react on %s: %v%s", displayName, reactErr, slackChannelNotFoundHint(reactErr))}
 	}
 
 	// Store locally. Derive date file from the message timestamp.
@@ -795,13 +893,13 @@ func (s *Server) reactSlack(ctx context.Context, acct account.Account, req React
 			Remove:   req.Remove,
 		},
 	}
-	if err := s.store.Append(sender.Acct, channelName, line); err != nil {
+	if err := s.store.Append(sender.Acct, displayName, line); err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err)
 	}
 
 	// Also append to thread file if one exists for this message.
-	if s.store.ThreadExists(sender.Acct, channelName, req.MessageID) {
-		if err := s.store.AppendThread(sender.Acct, channelName, req.MessageID, line); err != nil {
+	if s.store.ThreadExists(sender.Acct, displayName, req.MessageID) {
+		if err := s.store.AppendThread(sender.Acct, displayName, req.MessageID, line); err != nil {
 			slog.ErrorContext(ctx, "failed to store reaction in thread", "error", err)
 		}
 	}
@@ -934,21 +1032,24 @@ func (s *Server) deleteSlack(ctx context.Context, acct account.Account, req Dele
 		return DeleteResponse{Error: fmt.Sprintf("no Slack workspace %q registered", acct.Display())}
 	}
 
-	channelID, channelName, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
+	resolved, err := resolveSlackTarget(ctx, sender, sender.BotAPI, req.Slack)
 	if err != nil {
 		return DeleteResponse{Error: err.Error()}
 	}
+
+	channelID := resolved.ChannelID
+	displayName := resolved.Display()
 
 	// Bots can only delete their own messages via chat.delete.
 	// The delete event will come back through the websocket and the listener
 	// stores it locally — no need to duplicate that here.
 	_, _, err = sender.BotAPI.DeleteMessageContext(ctx, channelID, req.MessageID)
 	if err != nil {
-		return DeleteResponse{Error: fmt.Sprintf("delete in %s: %v%s", channelName, err, slackChannelNotFoundHint(err))}
+		return DeleteResponse{Error: fmt.Sprintf("delete in %s: %v%s", displayName, err, slackChannelNotFoundHint(err))}
 	}
 
 	slog.InfoContext(ctx, "slack message deleted",
-		"msg_id", req.MessageID, "channel", channelName, "account", acct)
+		"msg_id", req.MessageID, "channel", displayName, "account", acct)
 
 	return DeleteResponse{OK: true}
 }
