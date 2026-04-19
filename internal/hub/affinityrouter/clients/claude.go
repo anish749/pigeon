@@ -58,8 +58,13 @@ func (c *Client) JSON(ctx context.Context, systemPrompt, prompt string, out any)
 
 // run executes the claude CLI and returns the result text from the response envelope.
 func (c *Client) run(ctx context.Context, systemPrompt, prompt string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+	// Use the client's default timeout, but if the caller already set a
+	// shorter deadline, respect that instead.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 
 	args := []string{
 		"-p",
