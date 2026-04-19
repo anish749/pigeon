@@ -59,12 +59,10 @@ func TestFormatMsg_Via(t *testing.T) {
 }
 
 func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-			Via: ViaToPigeon,
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
+		Via: ViaToPigeon,
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
@@ -217,11 +215,9 @@ func TestFormatMsg_Timezone(t *testing.T) {
 }
 
 func TestNotificationFormat_Basic(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
-			Sender: "Alice", SenderID: "U1", Text: "hello world",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
+		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if len(lines) != 2 {
@@ -236,12 +232,10 @@ func TestNotificationFormat_Basic(t *testing.T) {
 }
 
 func TestNotificationFormat_Via(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-			Via: ViaToPigeon,
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
+		Via: ViaToPigeon,
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
@@ -253,12 +247,10 @@ func TestNotificationFormat_Via(t *testing.T) {
 }
 
 func TestNotificationFormat_ReplyTo(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Bob", SenderID: "U2", Text: "yes",
-			ReplyTo: "M1",
-		},
+	m := MsgLine{
+		ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Bob", SenderID: "U2", Text: "yes",
+		ReplyTo: "M1",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
@@ -267,12 +259,10 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 }
 
 func TestNotificationFormat_AllOptional(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Bob", SenderID: "U2", Text: "yes",
-			Via: ViaPigeonAsUser, ReplyTo: "M1",
-		},
+	m := MsgLine{
+		ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Bob", SenderID: "U2", Text: "yes",
+		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
@@ -284,11 +274,9 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 }
 
 func TestNotificationFormat_WithConvMeta(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Magnus", SenderID: "U08H", Text: "hey",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
 	lines := formatMsgNotification(m, time.UTC, meta)
@@ -302,11 +290,9 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 }
 
 func TestNotificationFormat_WithChannelMeta(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
 	lines := formatMsgNotification(m, time.UTC, meta)
