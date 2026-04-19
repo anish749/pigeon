@@ -521,24 +521,26 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		verb = "removed reaction"
 	}
 
-	// Look up the original message so the session has context about what
-	// was reacted to. The MsgID is a Slack timestamp (e.g. "1712345678.123456")
-	// that encodes the date the message was posted.
-	originalText, originalSender := h.lookupMessage(ch.acct, conversation, r.MsgID)
-
-	var head string
-	if originalText != "" {
-		head = fmt.Sprintf("%s %s :%s: on %s's message: %s", r.Sender, verb, r.Emoji, originalSender, originalText)
-	} else {
-		head = fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
-	}
+	head := fmt.Sprintf("%s %s :%s:", r.Sender, verb, r.Emoji)
 	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
+
+	lines := []string{head, meta}
+
+	// Look up the original message so the session has context about what
+	// was reacted to. The formatted message is appended after the reaction
+	// metadata so the reaction event leads and the context follows.
+	if msgLines := h.lookupMessage(ch.acct, conversation, r.MsgID); len(msgLines) > 0 {
+		lines = append(lines, "  reacted-to message:")
+		for _, l := range msgLines {
+			lines = append(lines, "    "+l)
+		}
+	}
 
 	msg := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: conversation,
-		MsgLines:     []string{head, meta},
+		MsgLines:     lines,
 	}
 	if err := session.Send(h.ctx, msg); err != nil {
 		slog.Error("failed to deliver reaction",
@@ -546,14 +548,14 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	}
 }
 
-// lookupMessage finds the original message text and sender for a given message
-// ID. It tries the date file first (derived from the Slack timestamp), then
-// falls back to checking the thread file. Returns empty strings if the message
-// is not found (e.g. not yet synced).
-func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (text, sender string) {
+// lookupMessage finds the original message for a given message ID and returns
+// it formatted via FormatMsg. It tries the date file first (derived from the
+// Slack timestamp), then falls back to checking thread files. Returns nil if
+// the message is not found (e.g. not yet synced).
+func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) []string {
 	msgTime := parseSlackTimestamp(msgID)
 	if msgTime.IsZero() {
-		return "", ""
+		return nil
 	}
 
 	date := msgTime.UTC().Format("2006-01-02")
@@ -565,12 +567,12 @@ func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (t
 	if df != nil {
 		for _, m := range df.Messages {
 			if m.ID == msgID {
-				return truncateText(m.Text, 200), m.Sender
+				return modelv1.FormatMsg(m, time.Local)
 			}
 		}
 	}
 
-	// The message might be a thread parent — try reading the thread file.
+	// The message might be in a thread file — try reading it.
 	tf, err := h.store.ReadThread(acct, conversation, msgID)
 	if err != nil {
 		slog.Debug("lookup reacted message: read thread failed",
@@ -578,16 +580,16 @@ func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (t
 	}
 	if tf != nil {
 		if tf.Parent.ID == msgID {
-			return truncateText(tf.Parent.Text, 200), tf.Parent.Sender
+			return modelv1.FormatMsg(tf.Parent, time.Local)
 		}
 		for _, r := range tf.Replies {
 			if r.ID == msgID {
-				return truncateText(r.Text, 200), r.Sender
+				return modelv1.FormatMsg(r, time.Local)
 			}
 		}
 	}
 
-	return "", ""
+	return nil
 }
 
 // parseSlackTimestamp converts a Slack timestamp ("1234567890.123456") to
@@ -599,15 +601,6 @@ func parseSlackTimestamp(ts string) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(sec, 0)
-}
-
-// truncateText shortens s to at most maxLen runes, appending "..." if truncated.
-func truncateText(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
 }
 
 // RegistrationError is returned when session registration fails.
