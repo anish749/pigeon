@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 type statsEntry struct {

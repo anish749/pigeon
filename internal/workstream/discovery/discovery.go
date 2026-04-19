@@ -13,7 +13,7 @@ package discovery
 import (
 	"context"
 
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // DiscoveredWorkstream is a workstream found by batch analysis.

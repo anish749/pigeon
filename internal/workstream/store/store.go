@@ -3,7 +3,7 @@
 // affinities, and proposals — flows through this interface.
 package store
 
-import "github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+import "github.com/anish749/pigeon/internal/workstream/models"
 
 // Store persists durable affinity-router state.
 type Store interface {

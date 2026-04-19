@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // llmDiscoverJSON is the JSON shape returned by the discovery prompt.

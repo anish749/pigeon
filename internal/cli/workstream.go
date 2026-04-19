@@ -11,9 +11,9 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
+	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/replay"
+	"github.com/anish749/pigeon/internal/workstream/reporter"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/workspace"
 )
@@ -67,7 +67,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 			if clearState {
-				storeDir := paths.DefaultDataRoot().Workspace(string(cfg.Workspace.Name)).AffinityRouter()
+				storeDir := paths.DefaultDataRoot().Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 				if err := os.RemoveAll(storeDir); err != nil {
 					return fmt.Errorf("clear state: %w", err)
 				}

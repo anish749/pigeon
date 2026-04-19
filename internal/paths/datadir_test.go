@@ -187,12 +187,12 @@ func TestWorkspaceDir_Path(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDir_AffinityRouter(t *testing.T) {
+func TestWorkspaceDir_WorkstreamStore(t *testing.T) {
 	root := NewDataRoot("/tmp/test")
-	got := root.Workspace("acme").AffinityRouter()
-	want := "/tmp/test/.workspaces/acme/affinityrouter"
+	got := root.Workspace("acme").WorkstreamStore()
+	want := "/tmp/test/.workspaces/acme/workstream"
 	if got != want {
-		t.Errorf("AffinityRouter() = %q, want %q", got, want)
+		t.Errorf("WorkstreamStore() = %q, want %q", got, want)
 	}
 }
 
