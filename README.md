@@ -23,6 +23,7 @@ This becomes powerful when combined with other agent-facing CLIs like [linear-cl
 ## Prerequisites
 
 - **[ripgrep](https://github.com/BurntSushi/ripgrep#installation)** (`rg`) — required for search, read, and file discovery. Install via `brew install ripgrep`, `apt install ripgrep`, or see the [ripgrep installation guide](https://github.com/BurntSushi/ripgrep#installation).
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — required for the embedding sidecar used by workstream routing. Install via `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 
 ## Installation
 
