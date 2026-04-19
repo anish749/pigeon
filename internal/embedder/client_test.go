@@ -3,44 +3,58 @@ package embedder
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
 
-// testClient is a shared sidecar client created once in TestMain and
-// used by all tests in this file. This avoids restarting the sidecar
-// (which takes ~8s) for each test.
-var testClient *Client
+var (
+	sharedClient     *Client
+	sharedClientOnce sync.Once
+	sharedClientErr  error
+)
 
 func TestMain(m *testing.M) {
-	var err error
-	testClient, err = NewClient()
-	if err != nil {
-		panic("failed to start embedding sidecar: " + err.Error())
-	}
 	code := m.Run()
-	testClient.Close()
+	if sharedClient != nil {
+		sharedClient.Close()
+	}
 	os.Exit(code)
 }
 
+// testEmbedder returns a shared sidecar client, starting it on first call.
+// The sidecar is started once and reused across all tests in this package.
+// Cleanup is handled by TestMain.
+func testEmbedder(t *testing.T) *Client {
+	t.Helper()
+	sharedClientOnce.Do(func() {
+		sharedClient, sharedClientErr = NewClient()
+	})
+	if sharedClientErr != nil {
+		t.Fatalf("start embedding sidecar: %v", sharedClientErr)
+	}
+	return sharedClient
+}
+
 func TestClient_Embed(t *testing.T) {
+	client := testEmbedder(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	emb, err := testClient.Embed(ctx, "hello world")
+	emb, err := client.Embed(ctx, "hello world")
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
 	if len(emb) == 0 {
 		t.Fatal("expected non-empty embedding")
 	}
-	// all-MiniLM-L6-v2 produces 384-dimensional embeddings.
 	if len(emb) != 384 {
 		t.Errorf("expected 384 dimensions, got %d", len(emb))
 	}
 }
 
 func TestClient_Similarity(t *testing.T) {
+	client := testEmbedder(t)
 	tests := []struct {
 		name   string
 		a, b   string
@@ -75,11 +89,11 @@ func TestClient_Similarity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			embA, err := testClient.Embed(ctx, tt.a)
+			embA, err := client.Embed(ctx, tt.a)
 			if err != nil {
 				t.Fatalf("Embed(%q): %v", tt.a, err)
 			}
-			embB, err := testClient.Embed(ctx, tt.b)
+			embB, err := client.Embed(ctx, tt.b)
 			if err != nil {
 				t.Fatalf("Embed(%q): %v", tt.b, err)
 			}
