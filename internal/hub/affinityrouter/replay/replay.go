@@ -63,7 +63,12 @@ type WorkstreamReport struct {
 
 // Run executes the replay: reads all historical signals, feeds them through
 // the routing model, and returns a benchmark report.
-func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logger *slog.Logger) (*Report, error) {
+//
+// When skipDiscovery is true, the replay loads workstreams from persisted state
+// instead of running cold-start discovery. Use this for phase 2 of a two-phase
+// benchmark: first run discovery on earlier data, then run incremental routing
+// on later data with persisted workstreams.
+func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
 	startTime := time.Now()
 
 	// Read signals.
@@ -114,50 +119,54 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	mgr := manager.New(claude, sc, cfg, st, logger)
 	wsName := cfg.Workspace.Name
 
-	// Cold-start discovery: analyze all signals in batch to find workstreams
-	// before starting incremental routing. This gives the classifier actual
-	// workstreams to compare against from the very first signal.
 	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
 		return nil, fmt.Errorf("ensure default workstream: %w", err)
 	}
-	disc := discovery.NewLLMDiscovery(claude, logger)
-	discovered, err := disc.Discover(ctx, signals)
-	if err != nil {
-		return nil, fmt.Errorf("cold-start discovery: %w", err)
-	}
-	for _, dws := range discovered {
-		newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
+
+	if skipDiscovery {
+		active, err := st.ActiveWorkstreams()
 		if err != nil {
-			logger.Error("failed to create discovered workstream", "name", dws.Name, "error", err)
-			return nil, fmt.Errorf("create discovered workstream %q: %w", dws.Name, err)
+			return nil, fmt.Errorf("load persisted workstreams: %w", err)
 		}
-		if newID == "" {
-			logger.Error("discovered workstream was not auto-approved", "name", dws.Name)
-			return nil, fmt.Errorf("discovered workstream %q was not auto-approved", dws.Name)
+		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
+		for _, ws := range active {
+			logger.Info("loaded workstream", "name", ws.Name, "id", ws.ID, "focus", ws.Focus)
 		}
-		// Seed router affinities from discovered conversations.
-		// Find the account for each conversation by scanning signals.
+	} else {
+		disc := discovery.NewLLMDiscovery(claude, logger)
+		discovered, err := disc.Discover(ctx, signals)
+		if err != nil {
+			return nil, fmt.Errorf("cold-start discovery: %w", err)
+		}
 		convAccounts := make(map[string]account.Account)
 		for _, sig := range signals {
 			if _, ok := convAccounts[sig.Conversation]; !ok {
 				convAccounts[sig.Conversation] = sig.Account
 			}
 		}
-		for _, conv := range dws.Conversations {
-			acct, ok := convAccounts[conv]
-			if !ok {
-				continue
+		for _, dws := range discovered {
+			newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
+			if err != nil {
+				return nil, fmt.Errorf("create discovered workstream %q: %w", dws.Name, err)
 			}
-			key := models.ConversationKey{
-				Account:      acct,
-				Conversation: conv,
+			if newID == "" {
+				return nil, fmt.Errorf("discovered workstream %q was not auto-approved", dws.Name)
 			}
-			if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
-				logger.Error("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
-				return nil, fmt.Errorf("seed affinity for %q in workstream %q: %w", conv, newID, err)
+			for _, conv := range dws.Conversations {
+				acct, ok := convAccounts[conv]
+				if !ok {
+					continue
+				}
+				key := models.ConversationKey{
+					Account:      acct,
+					Conversation: conv,
+				}
+				if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
+					return nil, fmt.Errorf("seed affinity for %q in workstream %q: %w", conv, newID, err)
+				}
 			}
+			logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
 		}
-		logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
 	}
 
 	// Replay: for each signal, route → observe (manager records + manages).
