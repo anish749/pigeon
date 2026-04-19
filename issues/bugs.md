@@ -10,8 +10,6 @@ This means like only one of the things, either the daemon or the one of the clie
 
 When someone mentions inside a thread uh or I don't know if it in case of other other states what happens, but plot didn't work.
 
-## Dedup messages by last message id
-
 ## Validate date where calendar events are attributed
 
 Right now we used a start date. This can be particularly problematic for multi day events.

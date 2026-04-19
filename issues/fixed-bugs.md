@@ -1,5 +1,9 @@
 # Fixed Bugs
 
+## ~~Dedup messages by last message id~~ — won't fix
+
+Duplicates on disk are expected and by design. Both the real-time listener and sync can write the same message, but maintenance deduplicates by message ID when it runs. The window between duplicate write and maintenance is intentional — date files are append-only logs, not point-in-time-accurate views. Readers already go through compaction/resolution which deduplicates in memory.
+
 ## ~~Maintain() detects thread files by path substring~~ — fixed in #153
 
 Thread file detection now uses `paths.IsThreadFile` which checks filename format (date vs timestamp), not parent directory name. A conversation literally named `threads` is no longer misidentified.
