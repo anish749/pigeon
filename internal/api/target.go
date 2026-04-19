@@ -75,7 +75,17 @@ func (r SendRequest) Target() string {
 // in the outbox and deserialized by the review TUI.
 type ResolvedSendRequest struct {
 	SendRequest
-	ResolvedSlack *ResolvedSlackTarget `json:"resolved_slack,omitempty"`
+	ResolvedSlack   *ResolvedSlackTarget `json:"resolved_slack,omitempty"`
+	ResolvedMessage string               `json:"resolved_message,omitempty"`
+}
+
+// FinalMessage returns the resolved message if available, falling back to
+// the raw SendRequest.Message for old outbox items without a resolved message.
+func (r ResolvedSendRequest) FinalMessage() string {
+	if r.ResolvedMessage != "" {
+		return r.ResolvedMessage
+	}
+	return r.Message
 }
 
 // ResolvedTarget returns the human-readable label for the resolved send
