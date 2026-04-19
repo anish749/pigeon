@@ -11,6 +11,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 func setup(t *testing.T) (*FSStore, account.Account) {
@@ -1503,5 +1504,196 @@ func TestListGWSServices_Empty(t *testing.T) {
 	}
 	if len(infos) != 0 {
 		t.Errorf("got %d services, want 0", len(infos))
+	}
+}
+
+// --- Calendar cross-file dedup tests ---
+
+// calendarEventLine builds a calendar event modelv1.Line with the given ID,
+// start date, end date, and updated timestamp. Uses all-day event format.
+func calendarEventLine(id, summary, startDate, endDate, updated string) modelv1.Line {
+	raw := map[string]any{
+		"id":      id,
+		"summary": summary,
+		"status":  "confirmed",
+		"start":   map[string]any{"date": startDate},
+		"updated": updated,
+	}
+	ev := modelv1.CalendarEvent{
+		Serialized: raw,
+	}
+	ev.Runtime.Id = id
+	ev.Runtime.Summary = summary
+	ev.Runtime.Status = "confirmed"
+	ev.Runtime.Updated = updated
+	ev.Runtime.Start = &calendar.EventDateTime{Date: startDate}
+	if endDate != "" {
+		raw["end"] = map[string]any{"date": endDate}
+		ev.Runtime.End = &calendar.EventDateTime{Date: endDate}
+	}
+	return modelv1.Line{Type: modelv1.LineEvent, Event: &ev}
+}
+
+func TestDeduplicateCalendarEvents_StaleRemoved(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// Event was on April 7, then moved to April 10.
+	// Old copy in 2026-04-07.jsonl, new copy in 2026-04-10.jsonl.
+	oldEvent := calendarEventLine("evt-1", "Standup", "2026-04-07", "2026-04-08", "2026-04-06T10:00:00Z")
+	newEvent := calendarEventLine("evt-1", "Standup", "2026-04-10", "2026-04-11", "2026-04-09T10:00:00Z")
+
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), oldEvent); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(calDir.DateFile("2026-04-10"), newEvent); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// 2026-04-07.jsonl should be removed (only had the stale event).
+	if _, err := os.Stat(calDir.DateFile("2026-04-07").Path()); !os.IsNotExist(err) {
+		t.Error("2026-04-07.jsonl should be removed after dedup")
+	}
+
+	// 2026-04-10.jsonl should still have the event.
+	lines, err := s.ReadLines(calDir.DateFile("2026-04-10"))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("2026-04-10: got %d lines, want 1", len(lines))
+	}
+	if id, _ := lines[0].ID(); id != "evt-1" {
+		t.Errorf("remaining event ID = %q, want evt-1", id)
+	}
+}
+
+func TestDeduplicateCalendarEvents_CorrectFilesUnchanged(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// A multi-day event spanning April 7-9, correctly in all three files.
+	ev := calendarEventLine("evt-2", "Offsite", "2026-04-07", "2026-04-10", "2026-04-05T10:00:00Z") // end exclusive -> 7,8,9
+	for _, date := range []string{"2026-04-07", "2026-04-08", "2026-04-09"} {
+		if err := s.AppendLine(calDir.DateFile(date), ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// All three files should still exist.
+	for _, date := range []string{"2026-04-07", "2026-04-08", "2026-04-09"} {
+		if _, err := os.Stat(calDir.DateFile(date).Path()); err != nil {
+			t.Errorf("%s.jsonl should still exist", date)
+		}
+	}
+}
+
+func TestDeduplicateCalendarEvents_MultiDayShrunk(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// Event was 3-day (April 7-9), now shortened to 1-day (April 7 only).
+	oldVersion := calendarEventLine("evt-3", "Workshop", "2026-04-07", "2026-04-10", "2026-04-05T10:00:00Z")
+	newVersion := calendarEventLine("evt-3", "Workshop", "2026-04-07", "2026-04-08", "2026-04-08T10:00:00Z")
+
+	// Old copies in all three files.
+	for _, date := range []string{"2026-04-07", "2026-04-08", "2026-04-09"} {
+		if err := s.AppendLine(calDir.DateFile(date), oldVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Updated copy in April 7 (poller wrote the new version).
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), newVersion); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// April 7 should still have the event.
+	lines, err := s.ReadLines(calDir.DateFile("2026-04-07"))
+	if err != nil {
+		t.Fatalf("ReadLines 04-07: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("2026-04-07: expected at least 1 line")
+	}
+
+	// April 8 and 9 should be removed (stale).
+	for _, date := range []string{"2026-04-08", "2026-04-09"} {
+		if _, err := os.Stat(calDir.DateFile(date).Path()); !os.IsNotExist(err) {
+			t.Errorf("%s.jsonl should be removed after dedup", date)
+		}
+	}
+}
+
+func TestDeduplicateCalendarEvents_PreservesNonEventLines(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// Put an event and a non-event line in the same file.
+	oldEvent := calendarEventLine("evt-4", "Meeting", "2026-04-07", "2026-04-08", "2026-04-06T10:00:00Z")
+	otherEvent := calendarEventLine("evt-other", "Lunch", "2026-04-07", "2026-04-08", "2026-04-06T10:00:00Z")
+
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), oldEvent); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), otherEvent); err != nil {
+		t.Fatal(err)
+	}
+	// Updated version moved to April 10.
+	newEvent := calendarEventLine("evt-4", "Meeting", "2026-04-10", "2026-04-11", "2026-04-09T10:00:00Z")
+	if err := s.AppendLine(calDir.DateFile("2026-04-10"), newEvent); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// April 7 should still exist with just the other event.
+	lines, err := s.ReadLines(calDir.DateFile("2026-04-07"))
+	if err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("2026-04-07: got %d lines, want 1", len(lines))
+	}
+	if id, _ := lines[0].ID(); id != "evt-other" {
+		t.Errorf("remaining event ID = %q, want evt-other", id)
+	}
+}
+
+func TestDeduplicateCalendarEvents_NoCalendarDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "user-at-gmail-com")
+
+	// Create account dir but no gcalendar subdir.
+	ad := root.AccountFor(acct)
+	if err := os.MkdirAll(ad.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should not error.
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
 	}
 }

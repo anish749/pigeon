@@ -319,6 +319,9 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	if err := s.applyPendingEmailDeletes(ad.Gmail()); err != nil {
 		errs = append(errs, fmt.Errorf("apply pending email deletes: %w", err))
 	}
+	if err := s.deduplicateCalendarEvents(ad); err != nil {
+		errs = append(errs, fmt.Errorf("deduplicate calendar events: %w", err))
+	}
 
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
@@ -781,6 +784,166 @@ func (s *FSStore) removeEmailLines(path string, deleteIDs map[string]struct{}) e
 
 	newData := strings.Join(kept, "\n") + "\n"
 	return os.WriteFile(path, []byte(newData), 0644)
+}
+
+// deduplicateCalendarEvents removes stale event copies that linger in old
+// date files after an event's date range changes. For each calendar, it scans
+// all date files, groups event lines by ID, and removes copies from files
+// outside the event's current date range (determined by DatesForStorage on
+// the latest version).
+func (s *FSStore) deduplicateCalendarEvents(ad paths.AccountDir) error {
+	gcalDir := filepath.Join(ad.Path(), paths.GcalendarSubdir)
+	calIDs, err := listSubdirs(gcalDir)
+	if err != nil {
+		return nil // no calendar dir is fine
+	}
+
+	var errs []error
+	for _, calID := range calIDs {
+		calDir := ad.Calendar(calID)
+		if err := s.deduplicateCalendarDir(calDir); err != nil {
+			errs = append(errs, fmt.Errorf("calendar %s: %w", calID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// eventVersion records a parsed event and where it lives on disk.
+type eventVersion struct {
+	event *modelv1.CalendarEvent
+	file  string // absolute path to the date file
+	raw   string // the raw JSONL line
+}
+
+func (s *FSStore) deduplicateCalendarDir(calDir paths.CalendarDir) error {
+	files, err := listDateFiles(calDir.Path())
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Parse all lines across all files, grouping event lines by event ID.
+	allVersions := make(map[string][]eventVersion)
+
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", filepath.Base(file), err)
+		}
+		rawLines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+		for _, raw := range rawLines {
+			if raw == "" {
+				continue
+			}
+			line, err := modelv1.Parse(raw)
+			if err != nil {
+				continue // unparseable lines are preserved by removeEventLines
+			}
+			if line.Type == modelv1.LineEvent && line.Event != nil {
+				id := line.Event.Runtime.Id
+				allVersions[id] = append(allVersions[id], eventVersion{
+					event: line.Event,
+					file:  file,
+					raw:   raw,
+				})
+			}
+		}
+	}
+
+	// For each event that appears in multiple files, determine which files
+	// it legitimately belongs in and mark stale copies for removal.
+	removeFrom := make(map[string]map[string]bool) // file -> set of raw lines to remove
+
+	for _, versions := range allVersions {
+		if len(versions) <= 1 {
+			continue
+		}
+		// Pick the most recently updated version of the event.
+		latest := versions[0]
+		for _, v := range versions[1:] {
+			if v.event.Runtime.Updated > latest.event.Runtime.Updated {
+				latest = v
+			}
+		}
+		validDates := latest.event.DatesForStorage()
+		validDateSet := make(map[string]bool, len(validDates))
+		for _, d := range validDates {
+			validDateSet[d] = true
+		}
+
+		for _, v := range versions {
+			fileDate := dateFromFilename(v.file)
+			if fileDate == "" {
+				continue
+			}
+			if !validDateSet[fileDate] {
+				if removeFrom[v.file] == nil {
+					removeFrom[v.file] = make(map[string]bool)
+				}
+				removeFrom[v.file][v.raw] = true
+			}
+		}
+	}
+
+	if len(removeFrom) == 0 {
+		return nil
+	}
+
+	var errs []error
+	for file, staleLines := range removeFrom {
+		if err := s.removeEventLines(file, staleLines); err != nil {
+			errs = append(errs, fmt.Errorf("remove stale events from %s: %w", filepath.Base(file), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// removeEventLines rewrites a JSONL file, dropping lines in the stale set.
+// Non-event lines are preserved. If no lines remain, the file is removed.
+func (s *FSStore) removeEventLines(path string, staleLines map[string]bool) error {
+	mu := s.fileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	rawLines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	var kept []string
+	removed := 0
+	for _, raw := range rawLines {
+		if raw == "" {
+			continue
+		}
+		if staleLines[raw] {
+			removed++
+			continue
+		}
+		kept = append(kept, raw)
+	}
+
+	if removed == 0 {
+		return nil
+	}
+
+	if len(kept) == 0 {
+		return os.Remove(path)
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0644)
+}
+
+// dateFromFilename extracts YYYY-MM-DD from a path like .../2026-04-07.jsonl.
+func dateFromFilename(path string) string {
+	base := filepath.Base(path)
+	if !paths.IsDateFile(base) {
+		return ""
+	}
+	return strings.TrimSuffix(base, paths.FileExt)
 }
 
 func cleanupStaleDriveMeta(dir, keepName string) error {
