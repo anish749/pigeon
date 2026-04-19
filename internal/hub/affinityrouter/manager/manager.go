@@ -17,26 +17,23 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 )
 
 // Manager owns the lifecycle of all workstreams. It is the only component
 // that creates or modifies workstreams. Its single entry point is
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
-	mu     sync.RWMutex
 	client *clients.Client
 	sc     *StatCollector
+	store  store.Store
 	cfg    models.Config
 	logger *slog.Logger
 
-	// Workstream storage — manager owns this.
-	workstreams map[string]models.Workstream
+	// mu guards ephemeral in-process state below.
+	mu sync.Mutex
 
-	// Proposal queue.
-	proposals   []*models.Proposal
-	proposalSeq int
-
-	// Internal tracking.
+	// Ephemeral tracking — not persisted.
 	signalsSinceUpdate map[string]int  // workstreamID → signals since last focus update
 	recentSignals      []models.Signal // rolling buffer for focus context
 
@@ -45,63 +42,31 @@ type Manager struct {
 	dormancyChanges int
 }
 
-// New creates a workstream manager. The StatCollector is injected so the
-// caller can also query it directly (e.g. for report building).
-func New(client *clients.Client, sc *StatCollector, cfg models.Config, logger *slog.Logger) *Manager {
+// New creates a workstream manager.
+func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
 		sc:                 sc,
+		store:              st,
 		cfg:                cfg,
 		logger:             logger,
-		workstreams:        make(map[string]models.Workstream),
 		signalsSinceUpdate: make(map[string]int),
 	}
-}
-
-// --- Workstream queries (read-only) ---
-
-// GetWorkstream returns a workstream by ID, or zero value + false if not found.
-func (m *Manager) GetWorkstream(id string) (models.Workstream, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	ws, ok := m.workstreams[id]
-	return ws, ok
-}
-
-// ActiveWorkstreams returns non-default, active workstreams for a workspace.
-func (m *Manager) ActiveWorkstreams(ws config.WorkspaceName) []models.Workstream {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var result []models.Workstream
-	for _, w := range m.workstreams {
-		if w.Workspace == ws && w.State == models.StateActive && !w.IsDefault() {
-			result = append(result, w)
-		}
-	}
-	return result
-}
-
-// AllWorkstreams returns all workstreams (for reporting).
-func (m *Manager) AllWorkstreams() []models.Workstream {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	result := make([]models.Workstream, 0, len(m.workstreams))
-	for _, ws := range m.workstreams {
-		result = append(result, ws)
-	}
-	return result
 }
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
 // if it doesn't exist. The ts should be the timestamp of the first signal
 // in this workspace.
-func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time) {
+func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time) error {
 	id := models.DefaultWorkstreamID(ws)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.workstreams[id]; !ok {
-		m.workstreams[id] = models.NewDefaultWorkstream(ws, ts)
+	_, ok, err := m.store.GetWorkstream(id)
+	if err != nil {
+		return err
 	}
+	if ok {
+		return nil
+	}
+	return m.store.PutWorkstream(models.NewDefaultWorkstream(ws, ts))
 }
 
 // --- Lifecycle operations ---
@@ -127,15 +92,21 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 			Created:   triggerSignals[0].Ts,
 		}
 
-		m.mu.Lock()
-		if _, exists := m.workstreams[w.ID]; exists {
-			m.mu.Unlock()
-			return w.ID, nil // already exists, reuse
+		_, exists, err := m.store.GetWorkstream(w.ID)
+		if err != nil {
+			return "", err
 		}
-		m.workstreams[w.ID] = w
+		if exists {
+			return w.ID, nil
+		}
+		if err := m.store.PutWorkstream(w); err != nil {
+			return "", err
+		}
+
 		proposal.State = models.ProposalApproved
-		m.proposals = append(m.proposals, proposal)
-		m.mu.Unlock()
+		if err := m.store.PutProposal(proposal); err != nil {
+			return "", err
+		}
 
 		m.logger.Info("workstream created (auto-approved)",
 			"workspace", string(ws),
@@ -146,12 +117,15 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	}
 
 	// Queue for user confirmation.
-	m.mu.Lock()
-	m.proposalSeq++
-	proposal.ID = fmt.Sprintf("p-%d", m.proposalSeq)
+	seq, err := m.store.NextProposalSeq()
+	if err != nil {
+		return "", err
+	}
+	proposal.ID = fmt.Sprintf("p-%d", seq)
 	proposal.State = models.ProposalPending
-	m.proposals = append(m.proposals, proposal)
-	m.mu.Unlock()
+	if err := m.store.PutProposal(proposal); err != nil {
+		return "", err
+	}
 
 	m.logger.Info("workstream proposed (pending confirmation)",
 		"workspace", string(ws),
@@ -164,8 +138,10 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 // lifecycle operations (focus updates, dormancy). This is the single entry
 // point — the manager owns the stat collector, so recording happens here.
 func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decision models.RoutingDecision) error {
-	// Record in the stat collector — single source of truth.
+	// Record in the stat collector (has its own lock).
 	m.sc.Record(decision, sig)
+
+	m.mu.Lock()
 
 	// Buffer the signal for focus update context.
 	m.recentSignals = append(m.recentSignals, sig)
@@ -178,55 +154,50 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 		m.signalsSinceUpdate[wsID]++
 	}
 
-	// Check if any workstream needs a focus update.
-	var errs []error
+	// Collect workstreams that need a focus update.
+	var needsUpdate []string
 	for wsID, count := range m.signalsSinceUpdate {
-		if count < m.cfg.FocusUpdateInterval {
+		if count >= m.cfg.FocusUpdateInterval {
+			needsUpdate = append(needsUpdate, wsID)
+		}
+	}
+	recentSignals := make([]models.Signal, len(m.recentSignals))
+	copy(recentSignals, m.recentSignals)
+
+	m.mu.Unlock()
+
+	// Focus updates (store + LLM calls) happen outside the lock.
+	var errs []error
+	for _, wsID := range needsUpdate {
+		ws, ok, err := m.store.GetWorkstream(wsID)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		ws, ok := m.GetWorkstream(wsID)
 		if !ok || ws.IsDefault() {
+			m.mu.Lock()
 			m.signalsSinceUpdate[wsID] = 0
+			m.mu.Unlock()
 			continue
 		}
 
-		if err := m.updateFocus(ctx, ws, m.recentSignals); err != nil {
+		if err := m.updateFocus(ctx, ws, recentSignals); err != nil {
 			errs = append(errs, err)
 		}
+		m.mu.Lock()
 		m.signalsSinceUpdate[wsID] = 0
+		m.mu.Unlock()
 	}
 
 	// Dormancy check.
-	m.detectDormancy(sig.Ts)
+	if err := m.detectDormancy(sig.Ts); err != nil {
+		errs = append(errs, err)
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("manager: %w", errs[0])
 	}
 	return nil
-}
-
-// --- Proposals ---
-
-// PendingProposals returns unresolved proposals.
-func (m *Manager) PendingProposals() []*models.Proposal {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var pending []*models.Proposal
-	for _, p := range m.proposals {
-		if p.State == models.ProposalPending {
-			pending = append(pending, p)
-		}
-	}
-	return pending
-}
-
-// AllProposals returns all proposals (for reporting).
-func (m *Manager) AllProposals() []*models.Proposal {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	result := make([]*models.Proposal, len(m.proposals))
-	copy(result, m.proposals)
-	return result
 }
 
 // --- Internal lifecycle operations ---
@@ -243,10 +214,12 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	}
 
 	updated := ws.WithFocus(strings.TrimSpace(newFocus))
+	if err := m.store.PutWorkstream(updated); err != nil {
+		return err
+	}
 	m.mu.Lock()
-	m.workstreams[ws.ID] = updated
-	m.mu.Unlock()
 	m.focusUpdates++
+	m.mu.Unlock()
 
 	m.logger.Info("focus updated",
 		"workstream", ws.Name,
@@ -256,23 +229,30 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	return nil
 }
 
-func (m *Manager) detectDormancy(now time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, ws := range m.workstreams {
+func (m *Manager) detectDormancy(now time.Time) error {
+	all, err := m.store.ListWorkstreams()
+	if err != nil {
+		return err
+	}
+	for _, ws := range all {
 		if ws.IsDefault() || ws.State != models.StateActive {
 			continue
 		}
-		lastSig := m.sc.LastSignal(id)
+		lastSig := m.sc.LastSignal(ws.ID)
 		if !lastSig.IsZero() && now.Sub(lastSig) > m.cfg.DormancyThreshold {
-			m.workstreams[id] = ws.WithState(models.StateDormant)
+			if err := m.store.PutWorkstream(ws.WithState(models.StateDormant)); err != nil {
+				return err
+			}
+			m.mu.Lock()
 			m.dormancyChanges++
+			m.mu.Unlock()
 			m.logger.Info("workstream marked dormant",
 				"workstream", ws.Name,
 				"last_signal", lastSig.Format("2006-01-02"),
 			)
 		}
 	}
+	return nil
 }
 
 func buildFocusPrompt(ws models.Workstream, signals []models.Signal) string {
@@ -317,17 +297,13 @@ func generateWorkstreamID(name string) string {
 type Stats struct {
 	FocusUpdates    int
 	DormancyChanges int
-	WorkstreamCount int
-	ProposalCount   int
 }
 
 func (m *Manager) Stats() Stats {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return Stats{
 		FocusUpdates:    m.focusUpdates,
 		DormancyChanges: m.dormancyChanges,
-		WorkstreamCount: len(m.workstreams),
-		ProposalCount:   len(m.proposals),
 	}
 }

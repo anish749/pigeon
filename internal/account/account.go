@@ -12,8 +12,8 @@ import (
 // Account identifies a messaging account with a platform and display name.
 // Construct via New to ensure the Platform field is always lowercase.
 type Account struct {
-	Platform string // always lowercase: "slack", "whatsapp"
-	Name     string // original display name: "Coding With Anish", "+1234567890"
+	Platform string `json:"platform"` // always lowercase: "slack", "whatsapp"
+	Name     string `json:"name"`     // original display name: "Coding With Anish", "+1234567890"
 }
 
 // New creates an Account, normalizing the platform to lowercase.
