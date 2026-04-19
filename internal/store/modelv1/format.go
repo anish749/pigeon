@@ -46,7 +46,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
-// FormatMsgNotification renders a message for Claude Code channel notifications.
+// formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
 // This function does not format reactions — it operates on MsgLine only.
@@ -96,6 +96,21 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 	lines = append(lines, meta)
 
 	return lines
+}
+
+// FormatReactionFallbackNotification formats a reaction notification for
+// Claude Code when the original message could not be found. This happens
+// when the reacted-to message is not on disk (e.g. older than synced history).
+func FormatReactionFallbackNotification(r ReactLine, loc *time.Location) []string {
+	verb := "reacted with"
+	if r.Remove {
+		verb = "removed reaction"
+	}
+	return []string{
+		fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji),
+		fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+			r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji),
+	}
 }
 
 // FormatDateFileNotification renders a resolved conversation day for Claude Code

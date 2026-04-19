@@ -532,14 +532,7 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
 		lines = modelv1.FormatReactionNotification(*msg, react, time.Local)
 	} else {
-		verb := "reacted with"
-		if r.Remove {
-			verb = "removed reaction"
-		}
-		lines = []string{
-			fmt.Sprintf("%s %s :%s:", r.Sender, verb, r.Emoji),
-			fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji),
-		}
+		lines = modelv1.FormatReactionFallbackNotification(react, time.Local)
 	}
 
 	notification := &IncomingMsg{
