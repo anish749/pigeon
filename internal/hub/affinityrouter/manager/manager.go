@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosimple/slug"
@@ -28,6 +29,9 @@ type Manager struct {
 	store  store.Store
 	cfg    models.Config
 	logger *slog.Logger
+
+	// mu guards ephemeral in-process state below.
+	mu sync.Mutex
 
 	// Ephemeral tracking — not persisted.
 	signalsSinceUpdate map[string]int  // workstreamID → signals since last focus update
@@ -134,8 +138,10 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 // lifecycle operations (focus updates, dormancy). This is the single entry
 // point — the manager owns the stat collector, so recording happens here.
 func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decision models.RoutingDecision) error {
-	// Record in the stat collector — single source of truth.
+	// Record in the stat collector (has its own lock).
 	m.sc.Record(decision, sig)
+
+	m.mu.Lock()
 
 	// Buffer the signal for focus update context.
 	m.recentSignals = append(m.recentSignals, sig)
@@ -148,26 +154,39 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 		m.signalsSinceUpdate[wsID]++
 	}
 
-	// Check if any workstream needs a focus update.
-	var errs []error
+	// Collect workstreams that need a focus update.
+	var needsUpdate []string
 	for wsID, count := range m.signalsSinceUpdate {
-		if count < m.cfg.FocusUpdateInterval {
-			continue
+		if count >= m.cfg.FocusUpdateInterval {
+			needsUpdate = append(needsUpdate, wsID)
 		}
+	}
+	recentSignals := make([]models.Signal, len(m.recentSignals))
+	copy(recentSignals, m.recentSignals)
+
+	m.mu.Unlock()
+
+	// Focus updates (store + LLM calls) happen outside the lock.
+	var errs []error
+	for _, wsID := range needsUpdate {
 		ws, ok, err := m.store.GetWorkstream(wsID)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		if !ok || ws.IsDefault() {
+			m.mu.Lock()
 			m.signalsSinceUpdate[wsID] = 0
+			m.mu.Unlock()
 			continue
 		}
 
-		if err := m.updateFocus(ctx, ws, m.recentSignals); err != nil {
+		if err := m.updateFocus(ctx, ws, recentSignals); err != nil {
 			errs = append(errs, err)
 		}
+		m.mu.Lock()
 		m.signalsSinceUpdate[wsID] = 0
+		m.mu.Unlock()
 	}
 
 	// Dormancy check.
@@ -198,7 +217,9 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 	if err := m.store.PutWorkstream(updated); err != nil {
 		return err
 	}
+	m.mu.Lock()
 	m.focusUpdates++
+	m.mu.Unlock()
 
 	m.logger.Info("focus updated",
 		"workstream", ws.Name,
@@ -222,7 +243,9 @@ func (m *Manager) detectDormancy(now time.Time) error {
 			if err := m.store.PutWorkstream(ws.WithState(models.StateDormant)); err != nil {
 				return err
 			}
+			m.mu.Lock()
 			m.dormancyChanges++
+			m.mu.Unlock()
 			m.logger.Info("workstream marked dormant",
 				"workstream", ws.Name,
 				"last_signal", lastSig.Format("2006-01-02"),
@@ -277,6 +300,8 @@ type Stats struct {
 }
 
 func (m *Manager) Stats() Stats {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return Stats{
 		FocusUpdates:    m.focusUpdates,
 		DormancyChanges: m.dormancyChanges,

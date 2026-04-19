@@ -20,7 +20,7 @@ const (
 // under a single directory.
 type FS struct {
 	dir string
-	mu  sync.Mutex
+	mu  sync.RWMutex
 }
 
 // NewFS creates a file-backed store rooted at dir.
@@ -32,6 +32,8 @@ func NewFS(dir string) *FS {
 // --- Workstreams ---
 
 func (s *FS) GetWorkstream(id string) (models.Workstream, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	all, err := s.loadWorkstreams()
 	if err != nil {
 		return models.Workstream{}, false, err
@@ -45,10 +47,14 @@ func (s *FS) GetWorkstream(id string) (models.Workstream, bool, error) {
 }
 
 func (s *FS) ListWorkstreams() ([]models.Workstream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.loadWorkstreams()
 }
 
 func (s *FS) ActiveWorkstreams() ([]models.Workstream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	all, err := s.loadWorkstreams()
 	if err != nil {
 		return nil, err
@@ -102,6 +108,8 @@ type affinityRecord struct {
 }
 
 func (s *FS) GetAffinities(key models.ConversationKey) ([]models.AffinityEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	records, err := s.loadAffinities()
 	if err != nil {
 		return nil, err
@@ -152,6 +160,8 @@ type proposalFile struct {
 }
 
 func (s *FS) ListProposals() ([]*models.Proposal, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	pf, err := s.loadProposalFile()
 	if err != nil {
 		return nil, err
