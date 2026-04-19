@@ -36,18 +36,18 @@ func (s *Server) CCNotifier() outbox.SubmitFunc {
 }
 
 func (s *Server) postCCMessage(item *outbox.Item) {
-	var req SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
+	var resolved ResolvedSendRequest
+	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
 		slog.Error("cc: cannot parse outbox payload", "id", item.ID, "error", err)
 		return
 	}
 
-	if req.Platform != "slack" {
-		slog.Debug("cc: skipping non-Slack outbox item", "platform", req.Platform, "id", item.ID)
+	if resolved.Platform != "slack" {
+		slog.Debug("cc: skipping non-Slack outbox item", "platform", resolved.Platform, "id", item.ID)
 		return
 	}
 
-	acct := account.New(req.Platform, req.Account)
+	acct := account.New(resolved.Platform, resolved.Account)
 	s.mu.RLock()
 	sender, ok := s.slack[acct.NameSlug()]
 	s.mu.RUnlock()
@@ -66,12 +66,13 @@ func (s *Server) postCCMessage(item *outbox.Item) {
 		return
 	}
 
-	target := req.Target()
+	message := resolved.FinalMessage()
+	target := resolved.ResolvedTarget()
 	_, _, err = sender.BotAPI.PostMessageContext(ctx, dm.ID,
-		goslack.MsgOptionText("Pending review: "+req.Message, false),
+		goslack.MsgOptionText("Pending review: "+message, false),
 		goslack.MsgOptionBlocks(
 			goslack.NewSectionBlock(
-				goslack.NewTextBlockObject("mrkdwn", req.Message, false, false),
+				goslack.NewTextBlockObject("mrkdwn", message, false, false),
 				nil, nil,
 			),
 			goslack.NewContextBlock("",

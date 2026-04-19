@@ -34,8 +34,8 @@ type Outbox struct {
 	onSubmit SubmitFunc
 }
 
-// New creates an empty Outbox. onSubmit is called (if non-nil) each time
-// a new item is added; it must not block.
+// New creates an empty Outbox. onSubmit is called each time a new item is
+// added; it must not block.
 func New(onSubmit SubmitFunc) *Outbox {
 	return &Outbox{
 		items:    make(map[string]*Item),
