@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/claude"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -94,6 +97,7 @@ type Hub struct {
 	sessions map[string]*Session // SessionID → connected session
 	channels map[string]*channel // account slug → delivery channel
 	store    store.Store
+	dataRoot paths.DataRoot
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
@@ -101,7 +105,7 @@ type Hub struct {
 // New creates a Hub, loads session files, starts delivery goroutines, and
 // watches for new session files. Returns an error if session files cannot
 // be read (no sessions configured yet is not an error). Call Stop() to shut down.
-func New(ctx context.Context, s store.Store) (*Hub, error) {
+func New(ctx context.Context, s store.Store, dataRoot paths.DataRoot) (*Hub, error) {
 	sessions, err := claude.ListAllSessions()
 	if err != nil {
 		return nil, fmt.Errorf("load session files: %w", err)
@@ -112,6 +116,7 @@ func New(ctx context.Context, s store.Store) (*Hub, error) {
 		sessions: make(map[string]*Session),
 		channels: make(map[string]*channel),
 		store:    s,
+		dataRoot: dataRoot,
 		ctx:      ctx,
 		cancel:   cancel,
 	}
@@ -518,19 +523,57 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	if r.Remove {
 		verb = "removed reaction"
 	}
-	head := fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
+
+	var target string
+	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
+		text := msg.Text
+		if len(text) > 100 {
+			text = text[:100] + "…"
+		}
+		target = fmt.Sprintf(" to %q (from %s)", text, msg.Sender)
+	}
+
+	head := fmt.Sprintf("%s %s :%s:%s", r.Sender, verb, r.Emoji, target)
 	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
 
-	msg := &IncomingMsg{
+	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: conversation,
 		MsgLines:     []string{head, meta},
 	}
-	if err := session.Send(h.ctx, msg); err != nil {
+	if err := session.Send(h.ctx, notification); err != nil {
 		slog.Error("failed to deliver reaction",
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
+}
+
+// lookupMessage searches for a message by ID in a conversation using grep.
+// Returns nil if not found or on error.
+func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) *modelv1.MsgLine {
+	dir := h.dataRoot.AccountFor(acct).Conversation(conversation).Path()
+	out, err := read.Grep(dir, read.GrepOpts{
+		Query:        msgID,
+		FixedStrings: true,
+		NoFilename:   true,
+	})
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parsed, err := modelv1.Parse(line)
+		if err != nil {
+			continue
+		}
+		if parsed.Type == modelv1.LineMessage && parsed.Msg != nil && parsed.Msg.ID == msgID {
+			return parsed.Msg
+		}
+	}
+	return nil
 }
 
 // RegistrationError is returned when session registration fails.
