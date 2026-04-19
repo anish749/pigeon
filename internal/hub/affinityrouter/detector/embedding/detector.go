@@ -6,17 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
 
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
-
-// Embedder produces embedding vectors from text.
-type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float64, error)
-}
 
 // CosineDetector implements ConversationShiftDetector using embedding
 // cosine similarity. It buffers signals into a sliding window, embeds
@@ -27,7 +22,7 @@ type Embedder interface {
 // observations, it switches from fallbackThreshold to mean - stdMultiplier*std
 // computed over all observed similarities for this conversation.
 type CosineDetector struct {
-	embedder Embedder
+	embedder embedder.Embedder
 	logger   *slog.Logger
 
 	// Self-calibrating threshold parameters.
@@ -72,7 +67,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		return false
 	}
 
-	sim := cosineSimilarity(emb, d.prevEmbed)
+	sim := embedder.CosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
 	d.sims = append(d.sims, sim)
 
@@ -98,16 +93,6 @@ func (d *CosineDetector) currentThreshold() float64 {
 	return mean - d.stdMultiplier*std
 }
 
-// cosineSimilarity returns the cosine similarity between two vectors
-// using gonum's BLAS-optimized Dot and Norm.
-func cosineSimilarity(a, b []float64) float64 {
-	denom := floats.Norm(a, 2) * floats.Norm(b, 2)
-	if denom == 0 {
-		return 0
-	}
-	return floats.Dot(a, b) / denom
-}
-
 func windowText(signals []models.Signal) string {
 	var text string
 	for i, s := range signals {
@@ -130,10 +115,10 @@ const (
 // The embedder is shared across all detectors; each detector maintains its
 // own sliding window, previous embedding, and self-calibrating threshold
 // that adapts to the conversation's similarity distribution.
-func NewCosineFactory(embedder Embedder, logger *slog.Logger) detector.Factory {
+func NewCosineFactory(emb embedder.Embedder, logger *slog.Logger) detector.Factory {
 	return func() detector.ConversationShiftDetector {
 		return &CosineDetector{
-			embedder:          embedder,
+			embedder:          emb,
 			logger:            logger,
 			fallbackThreshold: defaultFallbackThreshold,
 			stdMultiplier:     defaultStdMultiplier,
