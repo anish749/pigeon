@@ -178,25 +178,21 @@ func (t SlackTarget) Validate() error {
 	return nil
 }
 
-// Display returns the raw target identifier (user ID or channel name).
-func (t SlackTarget) Display() string {
+// Display returns a human-readable label for the target. If resolvedName
+// is provided, user targets return "name (ID)" and channel targets return
+// the resolved name. Without a resolved name, returns the raw ID or
+// channel string.
+func (t SlackTarget) Display(resolvedName string) string {
+	if resolvedName != "" {
+		if t.UserID != "" {
+			return fmt.Sprintf("%s (%s)", resolvedName, t.UserID)
+		}
+		return resolvedName
+	}
 	if t.UserID != "" {
 		return t.UserID
 	}
 	return t.Channel
-}
-
-// DisplayWithName returns a human-readable label. If resolvedName is
-// non-empty, it returns "name (ID)" for user targets or just the name
-// for channels. Falls back to Display() when no name is available.
-func (t SlackTarget) DisplayWithName(resolvedName string) string {
-	if resolvedName == "" {
-		return t.Display()
-	}
-	if t.UserID != "" {
-		return fmt.Sprintf("%s (%s)", resolvedName, t.UserID)
-	}
-	return resolvedName
 }
 
 // SendRequest is the daemon API payload for /api/send.
@@ -227,7 +223,7 @@ type SendRequest struct {
 // Target returns the display name for the send target (for logging and UI).
 func (r SendRequest) Target() string {
 	if r.Slack != nil {
-		return r.Slack.Display()
+		return r.Slack.Display("")
 	}
 	return r.Contact
 }

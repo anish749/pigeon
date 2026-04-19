@@ -40,40 +40,22 @@ func TestSlackTargetValidate(t *testing.T) {
 
 func TestSlackTargetDisplay(t *testing.T) {
 	tests := []struct {
-		name   string
-		target SlackTarget
-		want   string
-	}{
-		{name: "user_id", target: SlackTarget{UserID: "U123"}, want: "U123"},
-		{name: "channel", target: SlackTarget{Channel: "#eng"}, want: "#eng"},
-		{name: "both prefers user_id", target: SlackTarget{UserID: "U123", Channel: "#eng"}, want: "U123"},
-		{name: "empty", target: SlackTarget{}, want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.target.Display(); got != tt.want {
-				t.Fatalf("Display() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSlackTargetDisplayWithName(t *testing.T) {
-	tests := []struct {
 		name         string
 		target       SlackTarget
 		resolvedName string
 		want         string
 	}{
-		{name: "user with name", target: SlackTarget{UserID: "U123"}, resolvedName: "Alice", want: "Alice (U123)"},
-		{name: "channel with name", target: SlackTarget{Channel: "#eng"}, resolvedName: "engineering", want: "engineering"},
-		{name: "user no name falls back", target: SlackTarget{UserID: "U123"}, resolvedName: "", want: "U123"},
-		{name: "channel no name falls back", target: SlackTarget{Channel: "#eng"}, resolvedName: "", want: "#eng"},
+		{name: "user_id raw", target: SlackTarget{UserID: "U123"}, want: "U123"},
+		{name: "channel raw", target: SlackTarget{Channel: "#eng"}, want: "#eng"},
+		{name: "both prefers user_id", target: SlackTarget{UserID: "U123", Channel: "#eng"}, want: "U123"},
+		{name: "empty", target: SlackTarget{}, want: ""},
+		{name: "user with resolved name", target: SlackTarget{UserID: "U123"}, resolvedName: "Alice", want: "Alice (U123)"},
+		{name: "channel with resolved name", target: SlackTarget{Channel: "#eng"}, resolvedName: "engineering", want: "engineering"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.target.DisplayWithName(tt.resolvedName); got != tt.want {
-				t.Fatalf("DisplayWithName(%q) = %q, want %q", tt.resolvedName, got, tt.want)
+			if got := tt.target.Display(tt.resolvedName); got != tt.want {
+				t.Fatalf("Display(%q) = %q, want %q", tt.resolvedName, got, tt.want)
 			}
 		})
 	}
