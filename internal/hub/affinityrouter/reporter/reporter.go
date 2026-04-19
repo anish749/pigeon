@@ -27,10 +27,8 @@ func Print(w io.Writer, r *replay.Report) {
 		fmt.Fprintf(w, "  %-20s %d\n", typ, count)
 	}
 
-	// Routing stats.
-	fmt.Fprintf(w, "\nRouting stats:\n")
-	fmt.Fprintf(w, "  Fast-path routed:  %d\n", r.RouterStats.FastPathRouted)
-	fmt.Fprintf(w, "  Classifier calls:  %d\n", r.RouterStats.ClassifierCalls)
+	// Manager stats.
+	fmt.Fprintf(w, "\nStats:\n")
 	fmt.Fprintf(w, "  Focus updates:     %d\n", r.ManagerStats.FocusUpdates)
 
 	// Proposal stats.

@@ -62,6 +62,8 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 		return nil, fmt.Errorf("classify batch: %w", err)
 	}
 
+	c.logger.Info("classifier response", "account", acct.Display(), "conversation", conversation, "returned_workstreams", raw.Workstreams, "new_name", raw.NewWorkstreamName, "new_focus", raw.NewWorkstreamFocus)
+
 	// Validate returned workstream IDs.
 	var newIDs []string
 	if len(raw.Workstreams) > 0 {
@@ -73,7 +75,7 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 			if activeIDs[id] {
 				newIDs = append(newIDs, id)
 			} else {
-				c.logger.Warn("classifier returned unknown workstream ID", "id", id)
+				c.logger.Warn("classifier returned unknown workstream ID", "id", id, "account", acct.Display(), "conversation", conversation)
 			}
 		}
 	}
@@ -87,8 +89,8 @@ func (c *BatchClassifier) ObserveAndClassify(ctx context.Context, sig models.Sig
 				Signal:        s,
 				WorkstreamIDs: newIDs,
 			})
+			c.logger.Info("reclassified signal", "signal_id", s.ID, "sender", s.Sender, "text", s.Text, "from", prev, "to", newIDs)
 		}
-		// Update tracking to reflect the classification.
 		c.decisions[s.ID] = newIDs
 	}
 
@@ -148,7 +150,7 @@ func buildClassifyPrompt(acct account.Account, conversation string, signals []mo
 Your job: given a batch of recent messages from a single conversation, determine which workstream(s) they relate to.
 
 KEY CONCEPTS:
-- A WORKSTREAM is a sustained, coherent effort that spans days or weeks. Examples: "ES 7.17 Upgrade", "Image Upload Feature", "Meta Partnership". It is NOT a single message topic or a casual exchange.
+- A WORKSTREAM is a sustained, coherent effort that spans days or weeks. Examples: "Database Migration", "Mobile App Redesign", "Partner API Integration". It is NOT a single message topic or a casual exchange.
 - A CONVERSATION is a Slack channel, DM, group DM, email thread, etc. One conversation often maps to one workstream (e.g. a DM with a colleague about a specific project), but channels can contain multiple workstreams.
 - MULTI-ROUTING: One batch of messages can belong to multiple workstreams simultaneously. A deprecation notice, incident, or API change may affect several ongoing efforts. List ALL relevant workstream IDs when this happens.
 - Messages like "ok", "sounds good", "call?", lunch plans, or general coordination that don't relate to any specific effort should NOT be assigned to a workstream — return an empty "workstreams" array so they stay in the general stream.

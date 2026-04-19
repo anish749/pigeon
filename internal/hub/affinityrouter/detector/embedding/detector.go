@@ -31,9 +31,10 @@ type CosineDetector struct {
 	minCalibration    int
 	sims              []float64
 
-	windowSize int
-	window     []models.Signal
-	prevEmbed  []float64
+	windowSize     int
+	window         []models.Signal
+	prevEmbed      []float64
+	prevWindowText string
 }
 
 func (d *CosineDetector) Observe(sig models.Signal) bool {
@@ -64,22 +65,34 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 	// First full window — cache embedding, no comparison yet.
 	if d.prevEmbed == nil {
 		d.prevEmbed = emb
+		d.prevWindowText = text
+		d.logger.Info("cosine: first window cached",
+			"conversation", sig.Conversation,
+			"account", sig.Account.Display(),
+			"window_text", text,
+		)
 		return false
 	}
 
 	sim := embedder.CosineSimilarity(emb, d.prevEmbed)
+	prevText := d.prevWindowText
 	d.prevEmbed = emb
+	d.prevWindowText = text
 	d.sims = append(d.sims, sim)
 
 	threshold := d.currentThreshold()
 	shifted := sim < threshold
-	if shifted {
-		d.logger.Info("topic shift detected",
-			"sim", fmt.Sprintf("%.3f", sim),
-			"threshold", fmt.Sprintf("%.3f", threshold),
-			"calibrated", len(d.sims) >= d.minCalibration,
-		)
-	}
+	d.logger.Info("cosine: similarity check",
+		"conversation", sig.Conversation,
+		"account", sig.Account.Display(),
+		"sim", fmt.Sprintf("%.3f", sim),
+		"threshold", fmt.Sprintf("%.3f", threshold),
+		"shifted", shifted,
+		"calibrated", len(d.sims) >= d.minCalibration,
+		"observations", len(d.sims),
+		"prev_window", prevText,
+		"curr_window", text,
+	)
 	return shifted
 }
 
