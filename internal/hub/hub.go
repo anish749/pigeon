@@ -48,21 +48,6 @@ type ReactionInfo struct {
 // ReactionNotifyFunc is called by listeners when a reaction event arrives.
 type ReactionNotifyFunc func(acct account.Account, conversation string, r ReactionInfo) RouteResult
 
-// ThreadReplyInfo describes a thread reply that should be delivered to a
-// connected session. Used for thread replies that don't get written to the
-// channel date file (only to the thread file), so the standard drain
-// mechanism can't pick them up.
-type ThreadReplyInfo struct {
-	ThreadTS string // Slack timestamp of the thread parent
-	Sender   string
-	SenderID string
-	Text     string
-}
-
-// ThreadReplyNotifyFunc is called by listeners when a routable thread reply
-// arrives (e.g. a bot mention in a public channel thread).
-type ThreadReplyNotifyFunc func(acct account.Account, conversation string, r ThreadReplyInfo) RouteResult
-
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
 // next drain since it reads all messages since last_delivered.
@@ -91,18 +76,16 @@ type channel struct {
 
 type deliverySignal struct {
 	kind         signalKind
-	conversation string          // only set for signalNewMessage, signalReaction, signalThreadReply
-	reaction     *ReactionInfo   // only set for signalReaction
-	threadReply  *ThreadReplyInfo // only set for signalThreadReply
+	conversation string        // only set for signalNewMessage and signalReaction
+	reaction     *ReactionInfo // only set for signalReaction
 }
 
 type signalKind int
 
 const (
-	signalNewMessage  signalKind = iota // a specific conversation has a new message
-	signalConnected                     // session just connected — send hello and drain all
-	signalReaction                      // a reaction event on a specific conversation
-	signalThreadReply                   // a thread reply that needs direct delivery
+	signalNewMessage signalKind = iota // a specific conversation has a new message
+	signalConnected                    // session just connected — send hello and drain all
+	signalReaction                     // a reaction event on a specific conversation
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -328,34 +311,6 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, r Reactio
 	return RouteResult{State: RouteOK}
 }
 
-// RouteThreadReply signals that a routable thread reply has arrived for the
-// given account and conversation. Thread replies are stored in thread files,
-// not channel date files, so they bypass the standard drain mechanism and
-// are delivered directly to the connected session. Non-blocking.
-func (h *Hub) RouteThreadReply(acct account.Account, conversation string, r ThreadReplyInfo) RouteResult {
-	key := acct.String()
-
-	h.mu.RLock()
-	ch, exists := h.channels[key]
-	h.mu.RUnlock()
-
-	if !exists {
-		slog.Warn("no session configured, thread reply not routed",
-			"account", acct, "conversation", conversation)
-		return RouteResult{State: RouteNoSession}
-	}
-
-	rc := r
-	select {
-	case ch.signal <- deliverySignal{kind: signalThreadReply, conversation: conversation, threadReply: &rc}:
-	default:
-		slog.Error("delivery signal buffer full, thread reply delivery may be delayed",
-			"account", acct, "conversation", conversation,
-			"buffer_size", signalBufferSize)
-	}
-	return RouteResult{State: RouteOK}
-}
-
 // Sessions returns the number of active (connected) sessions.
 func (h *Hub) Sessions() int {
 	h.mu.RLock()
@@ -449,10 +404,6 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalReaction:
 				if sig.reaction != nil {
 					h.deliverReaction(ch, sig.conversation, *sig.reaction)
-				}
-			case signalThreadReply:
-				if sig.threadReply != nil {
-					h.deliverThreadReply(ch, sig.conversation, *sig.threadReply)
 				}
 			}
 		}
@@ -578,35 +529,6 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	}
 	if err := session.Send(h.ctx, msg); err != nil {
 		slog.Error("failed to deliver reaction",
-			"session_id", ch.sessionID, "account", ch.acct, "error", err)
-	}
-}
-
-// deliverThreadReply sends a thread reply notification to the connected session.
-// Thread replies are only written to thread files, not channel date files, so
-// the standard drain mechanism cannot deliver them.
-func (h *Hub) deliverThreadReply(ch *channel, conversation string, r ThreadReplyInfo) {
-	h.mu.RLock()
-	session := h.sessions[ch.sessionID]
-	h.mu.RUnlock()
-
-	if session == nil {
-		slog.Warn("session not connected, thread reply dropped",
-			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
-		return
-	}
-
-	head := fmt.Sprintf("%s (in thread): %s", r.Sender, r.Text)
-	meta := fmt.Sprintf("  [thread_ts:%s] [sender_id:%s]", r.ThreadTS, r.SenderID)
-
-	msg := &IncomingMsg{
-		Platform:     ch.acct.Platform,
-		Account:      ch.acct.Name,
-		Conversation: conversation,
-		MsgLines:     []string{head, meta},
-	}
-	if err := session.Send(h.ctx, msg); err != nil {
-		slog.Error("failed to deliver thread reply",
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
 }

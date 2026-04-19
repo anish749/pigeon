@@ -22,18 +22,17 @@ import (
 // On every Socket Mode connect (including reconnects), it runs a sync to backfill
 // any messages missed while disconnected.
 type Listener struct {
-	client        *socketmode.Client
-	resolver      *Resolver
-	messages      *MessageStore
-	userToken     string
-	botToken      string
-	acct          account.Account
-	teamID        string
-	pigeonBotUID  string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
-	onMessage     hub.MessageNotifyFunc
-	onReaction    hub.ReactionNotifyFunc
-	onThreadReply hub.ThreadReplyNotifyFunc
-	syncTracker   *syncstatus.Tracker
+	client       *socketmode.Client
+	resolver     *Resolver
+	messages     *MessageStore
+	userToken    string
+	botToken     string
+	acct         account.Account
+	teamID       string
+	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
+	onMessage    hub.MessageNotifyFunc
+	onReaction   hub.ReactionNotifyFunc
+	syncTracker  *syncstatus.Tracker
 }
 
 // NewListener creates a Slack listener for a single workspace.
@@ -41,23 +40,20 @@ type Listener struct {
 // onMessage is called when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called when a reaction or unreaction event arrives.
-// onThreadReply is called when a routable thread reply arrives (thread replies
-// are stored in thread files, not channel date files, so they need direct delivery).
-// All callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onThreadReply hub.ThreadReplyNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+// Both callbacks must be non-nil.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
-		client:        client,
-		resolver:      resolver,
-		messages:      messages,
-		userToken:     userToken,
-		botToken:      botToken,
-		acct:          acct,
-		teamID:        teamID,
-		pigeonBotUID:  pigeonBotUID,
-		onMessage:     onMessage,
-		onReaction:    onReaction,
-		onThreadReply: onThreadReply,
-		syncTracker:   syncTracker,
+		client:       client,
+		resolver:     resolver,
+		messages:     messages,
+		userToken:    userToken,
+		botToken:     botToken,
+		acct:         acct,
+		teamID:       teamID,
+		pigeonBotUID: pigeonBotUID,
+		onMessage:    onMessage,
+		onReaction:   onReaction,
+		syncTracker:  syncTracker,
 	}
 }
 
@@ -192,40 +188,19 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
-	//
-	// Thread replies are only written to thread files (not the channel date
-	// file), so the standard drain mechanism won't find them. Route them via
-	// onThreadReply which delivers the message content directly.
 	var result hub.RouteResult
-	shouldRoute := false
 	switch msg.ChannelType {
 	case "im", "mpim":
-		shouldRoute = true
+		result = l.onMessage(l.acct, rs.ChannelName)
 	case "group":
-		shouldRoute = true
+		result = l.onMessage(l.acct, rs.ChannelName)
 	case "channel":
 		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
-			shouldRoute = true
+			result = l.onMessage(l.acct, rs.ChannelName)
 		}
 	default:
 		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
 			"channel_type", msg.ChannelType, "channel", rs.ChannelName, "account", l.acct)
-	}
-	if shouldRoute {
-		// Thread-only replies (not broadcasts) are only in the thread file, so
-		// the standard date-file drain can't find them. Deliver directly.
-		// Broadcasts are written to both the date file and thread file, so the
-		// normal onMessage → drain path works.
-		if isThreadReply && msg.SubType != "thread_broadcast" {
-			result = l.onThreadReply(l.acct, rs.ChannelName, hub.ThreadReplyInfo{
-				ThreadTS: msg.ThreadTimeStamp,
-				Sender:   rs.SenderName,
-				SenderID: rs.SenderID,
-				Text:     text,
-			})
-		} else {
-			result = l.onMessage(l.acct, rs.ChannelName)
-		}
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
