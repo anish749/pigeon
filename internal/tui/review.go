@@ -127,6 +127,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
+	case "v":
+		if len(m.items) > 0 {
+			item := m.items[m.cursor]
+			nextVia := cycleVia(item)
+			m.status = dimStyle.Render("Updating send mode...")
+			return m, m.setVia(item.ID, nextVia)
+		}
 	}
 	return m, nil
 }
@@ -209,9 +216,9 @@ func (m model) View() string {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
 	} else {
-		help := "  a approve  f feedback  j/k navigate  q quit"
+		help := "  a approve  v send mode  f feedback  j/k navigate  q quit"
 		if m.cursor < count && m.items[m.cursor].SessionID == "" {
-			help = "  a approve  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
+			help = "  a approve  v send mode  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
 		}
 		b.WriteString(helpStyle.Render(help))
 	}
@@ -287,6 +294,43 @@ func (m model) sendFeedback(id, note string) tea.Cmd {
 		}
 		if ok, _ := result["ok"].(bool); ok {
 			return actionDoneMsg{"Feedback sent to session"}
+		}
+		detail, _ := result["error"].(string)
+		return actionFailMsg{detail}
+	}
+}
+
+// cycleVia parses the item payload and returns the next Via value in the
+// rotation: "" (bot) -> "pigeon-as-user" -> "pigeon-as-bot" -> "" -> ...
+// For whatsapp items, Via is always empty (user sends as themselves).
+func cycleVia(item *outbox.Item) modelv1.Via {
+	var req api.SendRequest
+	if err := json.Unmarshal(item.Payload, &req); err != nil {
+		return modelv1.ViaPigeonAsBot
+	}
+	if req.Platform == "whatsapp" {
+		return ""
+	}
+	switch req.Via {
+	case "", modelv1.ViaPigeonAsBot:
+		return modelv1.ViaPigeonAsUser
+	default:
+		return modelv1.ViaPigeonAsBot
+	}
+}
+
+func (m model) setVia(id string, via modelv1.Via) tea.Cmd {
+	return func() tea.Msg {
+		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)})
+		if err != nil {
+			return actionFailMsg{"marshal request: " + err.Error()}
+		}
+		result, err := doPost("http://pigeon/api/outbox/action", body)
+		if err != nil {
+			return actionFailMsg{err.Error()}
+		}
+		if ok, _ := result["ok"].(bool); ok {
+			return actionDoneMsg{"Send mode updated"}
 		}
 		detail, _ := result["error"].(string)
 		return actionFailMsg{detail}
