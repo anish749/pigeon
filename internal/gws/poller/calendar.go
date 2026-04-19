@@ -176,10 +176,12 @@ func (p *Poller) writeEvents(calID string, events []*modelv1.CalendarEvent) []er
 	var errs []error
 	var signals []identity.Signal
 	for _, ev := range events {
-		datePath := p.accountDir.Calendar(calID).DateFile(ev.DateForStorage())
 		line := modelv1.Line{Type: modelv1.LineEvent, Event: ev}
-		if err := p.store.AppendLine(datePath, line); err != nil {
-			errs = append(errs, fmt.Errorf("append event %s: %w", ev.Runtime.Id, err))
+		for _, date := range ev.DatesForStorage() {
+			datePath := p.accountDir.Calendar(calID).DateFile(date)
+			if err := p.store.AppendLine(datePath, line); err != nil {
+				errs = append(errs, fmt.Errorf("append event %s to %s: %w", ev.Runtime.Id, date, err))
+			}
 		}
 
 		// Collect attendee identity signals.
