@@ -1505,3 +1505,83 @@ func TestListGWSServices_Empty(t *testing.T) {
 		t.Errorf("got %d services, want 0", len(infos))
 	}
 }
+
+func TestLookupMessage_DateFile(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	m := msgLine("1700000001.000001", ts(2026, 4, 19, 10, 0, 0), "Alice", "U001", "hello world")
+	if err := s.Append(acct, conv, m); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := s.LookupMessage(acct, conv, "1700000001.000001")
+	if err != nil {
+		t.Fatalf("LookupMessage: %v", err)
+	}
+	if got == nil {
+		t.Fatal("LookupMessage returned nil, want match")
+	}
+	if got.Sender != "Alice" {
+		t.Errorf("Sender = %q, want %q", got.Sender, "Alice")
+	}
+	if got.Text != "hello world" {
+		t.Errorf("Text = %q, want %q", got.Text, "hello world")
+	}
+}
+
+func TestLookupMessage_ThreadFile(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	// Write a thread reply.
+	reply := msgLine("1700000002.000002", ts(2026, 4, 19, 10, 5, 0), "Bob", "U002", "thread reply")
+	reply.Msg.Reply = true
+	if err := s.AppendThread(acct, conv, "1700000001.000001", reply); err != nil {
+		t.Fatalf("AppendThread: %v", err)
+	}
+
+	got, err := s.LookupMessage(acct, conv, "1700000002.000002")
+	if err != nil {
+		t.Fatalf("LookupMessage: %v", err)
+	}
+	if got == nil {
+		t.Fatal("LookupMessage returned nil, want match")
+	}
+	if got.Sender != "Bob" {
+		t.Errorf("Sender = %q, want %q", got.Sender, "Bob")
+	}
+	if got.Text != "thread reply" {
+		t.Errorf("Text = %q, want %q", got.Text, "thread reply")
+	}
+}
+
+func TestLookupMessage_NotFound(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	m := msgLine("1700000001.000001", ts(2026, 4, 19, 10, 0, 0), "Alice", "U001", "hello")
+	if err := s.Append(acct, conv, m); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := s.LookupMessage(acct, conv, "9999999999.999999")
+	if err != nil {
+		t.Fatalf("LookupMessage: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+func TestLookupMessage_NoConversation(t *testing.T) {
+	s, acct := setup(t)
+
+	got, err := s.LookupMessage(acct, "#nonexistent", "1700000001.000001")
+	if err != nil {
+		t.Fatalf("LookupMessage: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}

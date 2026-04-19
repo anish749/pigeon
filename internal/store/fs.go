@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -399,6 +400,53 @@ func (s *FSStore) ReadMeta(acct account.Account, conversation string) (*modelv1.
 		return nil, fmt.Errorf("parse meta: %w", err)
 	}
 	return &meta, nil
+}
+
+// LookupMessage searches for a message by ID across date files and thread
+// files in a conversation. Returns nil, nil if not found.
+func (s *FSStore) LookupMessage(acct account.Account, conversation, msgID string) (*MsgSummary, error) {
+	dir := s.convDir(acct, conversation).Path()
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat conversation dir: %w", err)
+	}
+
+	out, err := exec.Command("rg", "--color=never", "-F", "-C0",
+		"--glob", "*"+paths.FileExt, msgID, dir).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil // no matches
+		}
+		return nil, fmt.Errorf("rg lookup: %w", err)
+	}
+
+	// rg output is "filepath:json_line\n" — parse each matching line looking
+	// for a msg event whose ID matches exactly.
+	for _, rawLine := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if rawLine == "" {
+			continue
+		}
+		// Strip the filepath prefix (everything up to and including the first ':').
+		_, jsonLine, ok := strings.Cut(rawLine, ":")
+		if !ok {
+			continue
+		}
+
+		parsed, err := modelv1.Parse(jsonLine)
+		if err != nil {
+			continue
+		}
+		if parsed.Type != modelv1.LineMessage || parsed.Msg == nil {
+			continue
+		}
+		if parsed.Msg.ID != msgID {
+			continue
+		}
+		return &MsgSummary{Sender: parsed.Msg.Sender, Text: parsed.Msg.Text}, nil
+	}
+	return nil, nil
 }
 
 // --- internal helpers ---

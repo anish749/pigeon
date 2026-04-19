@@ -55,7 +55,18 @@ type Store interface {
 	// Returns nil, nil if the file does not exist.
 	ReadMeta(acct account.Account, conversation string) (*modelv1.ConvMeta, error)
 
+	// LookupMessage searches for a message by ID across date files and thread
+	// files in a conversation. Returns nil, nil if not found.
+	LookupMessage(acct account.Account, conversation, msgID string) (*MsgSummary, error)
+
 	// Maintain runs the maintenance pass for an account: dedup, sort,
 	// reconcile edits/deletes/reactions, and rewrite modified files.
 	Maintain(acct account.Account) error
+}
+
+// MsgSummary is a lightweight view of a message, used when only the sender
+// and text are needed (e.g. providing context for reaction notifications).
+type MsgSummary struct {
+	Sender string
+	Text   string
 }

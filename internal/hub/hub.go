@@ -518,7 +518,24 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 	if r.Remove {
 		verb = "removed reaction"
 	}
-	head := fmt.Sprintf("%s %s :%s: on a previous message", r.Sender, verb, r.Emoji)
+
+	// Look up the original message to include context.
+	var target string
+	if summary, err := h.store.LookupMessage(ch.acct, conversation, r.MsgID); err != nil {
+		slog.Warn("reaction context lookup failed", "error", err,
+			"account", ch.acct, "conversation", conversation, "msg_id", r.MsgID)
+	} else if summary != nil {
+		text := summary.Text
+		if len(text) > 100 {
+			text = text[:100] + "…"
+		}
+		target = fmt.Sprintf(" to %q (from %s)", text, summary.Sender)
+	}
+	if target == "" {
+		target = " on a previous message"
+	}
+
+	head := fmt.Sprintf("%s %s :%s:%s", r.Sender, verb, r.Emoji, target)
 	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
 
 	msg := &IncomingMsg{
