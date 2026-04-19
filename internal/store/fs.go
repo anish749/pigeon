@@ -319,6 +319,9 @@ func (s *FSStore) Maintain(acct account.Account) error {
 	if err := s.applyPendingEmailDeletes(ad.Gmail()); err != nil {
 		errs = append(errs, fmt.Errorf("apply pending email deletes: %w", err))
 	}
+	if err := s.reshuffleCalendarEvents(ad); err != nil {
+		errs = append(errs, fmt.Errorf("reshuffle calendar events: %w", err))
+	}
 
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, paths.FileExt) {
@@ -781,6 +784,142 @@ func (s *FSStore) removeEmailLines(path string, deleteIDs map[string]struct{}) e
 
 	newData := strings.Join(kept, "\n") + "\n"
 	return os.WriteFile(path, []byte(newData), 0644)
+}
+
+// reshuffleCalendarEvents deduplicates calendar events across date files.
+// For each calendar, it loads all date files, keeps the latest version of
+// each event (by Updated timestamp), computes DatesForStorage on it, and
+// rewrites the files so each event appears only in the correct date files.
+func (s *FSStore) reshuffleCalendarEvents(ad paths.AccountDir) error {
+	calIDs, err := ad.CalendarIDs()
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+	for _, calID := range calIDs {
+		if err := s.reshuffleCalendar(ad.Calendar(calID)); err != nil {
+			errs = append(errs, fmt.Errorf("calendar %s: %w", calID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// reshuffleCalendar loads all date files for a single calendar, deduplicates
+// events across files (keeping the latest version by Updated timestamp),
+// and rewrites each file with events attributed to the correct dates.
+func (s *FSStore) reshuffleCalendar(calDir paths.CalendarDir) error {
+	files, err := listDateFiles(calDir.Path())
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Load all lines from all files. Non-event lines are tracked per date
+	// so they can be written back to their original file.
+	type fileLines struct {
+		nonEvents []modelv1.Line
+	}
+	perFile := make(map[string]*fileLines) // date -> non-event lines
+	allEvents := make(map[string]*modelv1.CalendarEvent) // event ID -> latest version
+
+	for _, file := range files {
+		date := strings.TrimSuffix(filepath.Base(file), paths.FileExt)
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", filepath.Base(file), err)
+		}
+		lines, parseErr := parseLines(data)
+		if parseErr != nil {
+			slog.Warn("reshuffle: skipping unparseable calendar file",
+				"file", filepath.Base(file), "error", parseErr)
+			continue
+		}
+
+		fl := &fileLines{}
+		for _, l := range lines {
+			if l.Type != modelv1.LineEvent || l.Event == nil {
+				fl.nonEvents = append(fl.nonEvents, l)
+				continue
+			}
+			id := l.Event.Runtime.Id
+			existing, ok := allEvents[id]
+			if !ok || l.Event.Runtime.Updated > existing.Runtime.Updated {
+				allEvents[id] = l.Event
+			}
+		}
+		perFile[date] = fl
+	}
+
+	// Build the desired state: which events belong in which date file.
+	desired := make(map[string][]*modelv1.CalendarEvent) // date -> events
+	for _, ev := range allEvents {
+		for _, date := range ev.DatesForStorage() {
+			desired[date] = append(desired[date], ev)
+		}
+	}
+
+	// Rewrite each file. A file needs rewriting if the set of events in it
+	// changed. Files for dates no longer needed are removed. Files for new
+	// dates are created.
+	allDates := make(map[string]bool)
+	for date := range perFile {
+		allDates[date] = true
+	}
+	for date := range desired {
+		allDates[date] = true
+	}
+
+	var errs []error
+	for date := range allDates {
+		file := string(calDir.DateFile(date))
+		mu := s.fileMu(file)
+		mu.Lock()
+
+		var lines []modelv1.Line
+		// Preserve non-event lines from the original file.
+		if fl, ok := perFile[date]; ok {
+			lines = append(lines, fl.nonEvents...)
+		}
+		// Add events that belong to this date.
+		for _, ev := range desired[date] {
+			lines = append(lines, modelv1.Line{Type: modelv1.LineEvent, Event: ev})
+		}
+
+		if len(lines) == 0 {
+			// No content for this date — remove the file if it exists.
+			if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("remove %s: %w", date, err))
+			}
+			mu.Unlock()
+			continue
+		}
+
+		var buf []byte
+		for _, l := range lines {
+			b, err := modelv1.Marshal(l)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("marshal event in %s: %w", date, err))
+				continue
+			}
+			buf = append(buf, b...)
+			buf = append(buf, '\n')
+		}
+
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			errs = append(errs, fmt.Errorf("create dir for %s: %w", date, err))
+			mu.Unlock()
+			continue
+		}
+		if err := os.WriteFile(file, buf, 0644); err != nil {
+			errs = append(errs, fmt.Errorf("write %s: %w", date, err))
+		}
+		mu.Unlock()
+	}
+
+	return errors.Join(errs...)
 }
 
 func cleanupStaleDriveMeta(dir, keepName string) error {
