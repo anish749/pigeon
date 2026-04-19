@@ -87,9 +87,9 @@ func (w WorkspaceDir) Path() string {
 	return filepath.Join(w.root.base, ".workspaces", w.name)
 }
 
-// AffinityRouter returns the path to the affinity router store directory.
-func (w WorkspaceDir) AffinityRouter() string {
-	return filepath.Join(w.Path(), "affinityrouter")
+// WorkstreamStore returns the path to the workstream store directory.
+func (w WorkspaceDir) WorkstreamStore() string {
+	return filepath.Join(w.Path(), "workstream")
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/

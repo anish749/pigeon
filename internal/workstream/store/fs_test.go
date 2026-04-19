@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 func TestFSRoundTrip(t *testing.T) {

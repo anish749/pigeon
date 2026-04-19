@@ -1,11 +1,11 @@
-// Package semanticrouter routes signals to workstreams using embedding
+// Package router routes signals to workstreams using embedding
 // cosine similarity. Each signal is independently compared against every
 // workstream's focus embedding, and routed to all workstreams above the
 // similarity threshold. No caching, no batching, no affinity state.
 //
 // Workstream discovery and creation is handled separately (user-triggered).
 // This package only handles the routing decision.
-package semanticrouter
+package router
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"log/slog"
 
 	"github.com/anish749/pigeon/internal/embedder"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // WorkstreamEmbedding pairs a workstream with its pre-computed focus embedding.

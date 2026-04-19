@@ -10,13 +10,13 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/discovery"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/semanticrouter"
-	arstore "github.com/anish749/pigeon/internal/hub/affinityrouter/store"
+	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/discovery"
+	"github.com/anish749/pigeon/internal/workstream/manager"
+	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/reader"
+	"github.com/anish749/pigeon/internal/workstream/router"
+	arstore "github.com/anish749/pigeon/internal/workstream/store"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -93,7 +93,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 
 	// Set up persistence and manager.
-	storeDir := root.Workspace(string(cfg.Workspace.Name)).AffinityRouter()
+	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir)
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	sc := manager.NewStatCollector()
@@ -130,7 +130,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	if err != nil {
 		return nil, fmt.Errorf("list active workstreams: %w", err)
 	}
-	sr := semanticrouter.New(emb, threshold, models.DefaultWorkstreamID(wsName), logger)
+	sr := router.New(emb, threshold, models.DefaultWorkstreamID(wsName), logger)
 	if err := sr.LoadWorkstreams(ctx, active); err != nil {
 		return nil, fmt.Errorf("load workstream embeddings: %w", err)
 	}

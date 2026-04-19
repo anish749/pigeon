@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"

@@ -15,9 +15,9 @@ import (
 	"github.com/gosimple/slug"
 
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/store"
+	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/store"
 )
 
 // Manager owns the lifecycle of all workstreams. It is the only component

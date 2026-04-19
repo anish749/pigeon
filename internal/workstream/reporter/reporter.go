@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
+	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/replay"
 )
 
 // Print writes a human-readable benchmark report to w.

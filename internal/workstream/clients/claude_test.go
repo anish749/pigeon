@@ -52,7 +52,7 @@ func TestStripCodeFences(t *testing.T) {
 
 // TestClient_JSON calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
 //
-// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_JSON -v
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/workstream/clients/ -run TestClient_JSON -v
 func TestClient_JSON(t *testing.T) {
 	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
@@ -110,7 +110,7 @@ Respond with ONLY the JSON object, no other text.`
 
 // TestClient_Text calls the real claude CLI. Skip unless CLAUDE_LIVE_TEST=1.
 //
-// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/hub/affinityrouter/clients/ -run TestClient_Text -v
+// Run with: CLAUDE_LIVE_TEST=1 go test ./internal/workstream/clients/ -run TestClient_Text -v
 func TestClient_Text(t *testing.T) {
 	if os.Getenv("CLAUDE_LIVE_TEST") == "" {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")

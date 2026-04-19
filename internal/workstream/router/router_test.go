@@ -1,4 +1,4 @@
-package semanticrouter
+package router
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // mockEmbedder returns pre-configured embeddings for known texts.
