@@ -182,11 +182,9 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 
 		// Progress logging.
 		if (i+1)%1000 == 0 || i == len(signals)-1 {
-			wsCount, _ := st.ListWorkstreams()
 			logger.Info("replay progress",
 				"signals", i+1,
 				"total", len(signals),
-				"workstreams", len(wsCount),
 			)
 		}
 	}
