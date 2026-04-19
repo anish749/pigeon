@@ -89,33 +89,22 @@ func RunSemantic(ctx context.Context, cfg Config, embedder semanticrouter.Embedd
 	}
 
 	// Build semantic router with workstream focus embeddings.
-	sr := semanticrouter.New(embedder, threshold, logger)
 	active, err := st.ActiveWorkstreams()
 	if err != nil {
 		return nil, fmt.Errorf("list active workstreams: %w", err)
 	}
+	sr := semanticrouter.New(embedder, threshold, models.DefaultWorkstreamID(wsName), logger)
 	if err := sr.LoadWorkstreams(ctx, active); err != nil {
 		return nil, fmt.Errorf("load workstream embeddings: %w", err)
 	}
-	logger.Info("semantic router ready", "workstreams", sr.WorkstreamCount(), "threshold", threshold)
+	logger.Info("semantic router ready", "workstreams", len(active), "threshold", threshold)
 
 	// Route each signal independently — no LLM calls, just embedding comparisons.
 	for i, sig := range signals {
-		result, err := sr.Route(ctx, sig)
+		decision, err := sr.Route(ctx, sig)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
 			continue
-		}
-
-		wsIDs := result.WorkstreamIDs
-		if len(wsIDs) == 0 {
-			wsIDs = []string{models.DefaultWorkstreamID(wsName)}
-		}
-
-		decision := models.RoutingDecision{
-			SignalID:      sig.ID,
-			WorkstreamIDs: wsIDs,
-			Ts:            sig.Ts,
 		}
 
 		if err := mgr.ObserveRouting(ctx, sig, decision); err != nil {
