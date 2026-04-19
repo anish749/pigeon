@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/discovery"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
@@ -62,7 +63,7 @@ type WorkstreamReport struct {
 //
 // When skipDiscovery is true, workstreams are loaded from persisted state
 // instead of running cold-start discovery.
-func Run(ctx context.Context, cfg Config, embedder semanticrouter.Embedder, threshold float64, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
+func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float64, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
 	startTime := time.Now()
 
 	// Read signals.
@@ -129,7 +130,7 @@ func Run(ctx context.Context, cfg Config, embedder semanticrouter.Embedder, thre
 	if err != nil {
 		return nil, fmt.Errorf("list active workstreams: %w", err)
 	}
-	sr := semanticrouter.New(embedder, threshold, models.DefaultWorkstreamID(wsName), logger)
+	sr := semanticrouter.New(emb, threshold, models.DefaultWorkstreamID(wsName), logger)
 	if err := sr.LoadWorkstreams(ctx, active); err != nil {
 		return nil, fmt.Errorf("load workstream embeddings: %w", err)
 	}

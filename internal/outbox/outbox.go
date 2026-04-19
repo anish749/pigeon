@@ -74,6 +74,19 @@ func (o *Outbox) Get(id string) *Item {
 	return o.items[id]
 }
 
+// UpdatePayload replaces the payload of an existing item. Returns false if
+// the item does not exist.
+func (o *Outbox) UpdatePayload(id string, payload json.RawMessage) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	item, ok := o.items[id]
+	if !ok {
+		return false
+	}
+	item.Payload = payload
+	return true
+}
+
 // Remove deletes an item from the outbox.
 func (o *Outbox) Remove(id string) {
 	o.mu.Lock()

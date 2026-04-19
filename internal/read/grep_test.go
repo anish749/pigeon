@@ -92,6 +92,34 @@ func TestGrep_CaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestGrep_NoFilename(t *testing.T) {
+	dir := setupFixture(t)
+
+	// Default output includes file paths as prefixes.
+	out, err := Grep(dir, GrepOpts{Query: "hello"})
+	if err != nil {
+		t.Fatalf("Grep: %v", err)
+	}
+	if !strings.Contains(string(out), ".jsonl:") {
+		t.Error("default Grep output should contain filename prefix")
+	}
+
+	// With NoFilename, file paths should be stripped.
+	out, err = Grep(dir, GrepOpts{Query: "hello", NoFilename: true})
+	if err != nil {
+		t.Fatalf("Grep --no-filename: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("Grep --no-filename returned no output")
+	}
+	if strings.Contains(string(out), ".jsonl:") {
+		t.Error("Grep --no-filename output should not contain filename prefix")
+	}
+	if !strings.Contains(string(out), "Alice") {
+		t.Error("Grep --no-filename output should still contain match content")
+	}
+}
+
 func TestGrep_Since(t *testing.T) {
 	dir := setupFixture(t)
 

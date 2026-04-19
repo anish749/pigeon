@@ -59,12 +59,10 @@ func TestFormatMsg_Via(t *testing.T) {
 }
 
 func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-			Via: ViaToPigeon,
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
+		Via: ViaToPigeon,
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
@@ -217,11 +215,9 @@ func TestFormatMsg_Timezone(t *testing.T) {
 }
 
 func TestNotificationFormat_Basic(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
-			Sender: "Alice", SenderID: "U1", Text: "hello world",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
+		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if len(lines) != 2 {
@@ -236,12 +232,10 @@ func TestNotificationFormat_Basic(t *testing.T) {
 }
 
 func TestNotificationFormat_Via(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-			Via: ViaToPigeon,
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
+		Via: ViaToPigeon,
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
@@ -253,12 +247,10 @@ func TestNotificationFormat_Via(t *testing.T) {
 }
 
 func TestNotificationFormat_ReplyTo(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Bob", SenderID: "U2", Text: "yes",
-			ReplyTo: "M1",
-		},
+	m := MsgLine{
+		ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Bob", SenderID: "U2", Text: "yes",
+		ReplyTo: "M1",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
@@ -267,12 +259,10 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 }
 
 func TestNotificationFormat_AllOptional(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Bob", SenderID: "U2", Text: "yes",
-			Via: ViaPigeonAsUser, ReplyTo: "M1",
-		},
+	m := MsgLine{
+		ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Bob", SenderID: "U2", Text: "yes",
+		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
 	lines := formatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
@@ -284,11 +274,9 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 }
 
 func TestNotificationFormat_WithConvMeta(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Magnus", SenderID: "U08H", Text: "hey",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
 	lines := formatMsgNotification(m, time.UTC, meta)
@@ -302,11 +290,9 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 }
 
 func TestNotificationFormat_WithChannelMeta(t *testing.T) {
-	m := ResolvedMsg{
-		MsgLine: MsgLine{
-			ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-			Sender: "Alice", SenderID: "U1", Text: "hello",
-		},
+	m := MsgLine{
+		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
 	lines := formatMsgNotification(m, time.UTC, meta)
@@ -421,5 +407,100 @@ func TestFormatDateFile_NilErrorNoWarning(t *testing.T) {
 	lines := FormatDateFile(f, time.UTC, nil)
 	if len(lines) != 1 {
 		t.Errorf("lines = %d, want 1 (nil error should not add warning)", len(lines))
+	}
+}
+
+func TestFormatReactionNotification(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "sounds good",
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if len(lines) < 2 {
+		t.Fatalf("got %d lines, want at least 2", len(lines))
+	}
+	if !strings.Contains(lines[0], "Alice") || !strings.Contains(lines[0], ":thumbsup:") || !strings.Contains(lines[0], "Bob") {
+		t.Errorf("header = %q, want Alice reacted to Bob's message", lines[0])
+	}
+	if !strings.Contains(lines[0], "sounds good") {
+		t.Errorf("header = %q, want message text included", lines[0])
+	}
+	meta := lines[len(lines)-1]
+	if !strings.Contains(meta, "[reaction]") || !strings.Contains(meta, "[message_id:M1]") {
+		t.Errorf("meta = %q, want [reaction] and [message_id:M1]", meta)
+	}
+}
+
+func TestFormatReactionNotification_Remove(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "hello",
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if !strings.Contains(lines[0], "removed reaction") {
+		t.Errorf("header = %q, want 'removed reaction'", lines[0])
+	}
+}
+
+func TestFormatReactionNotification_WithRaw(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "hello",
+		Raw: map[string]any{"blocks": []any{"test"}},
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "eyes",
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if len(lines) < 3 {
+		t.Fatalf("got %d lines, want at least 3 (header + raw + meta)", len(lines))
+	}
+	if !strings.Contains(lines[1], "blocks") {
+		t.Errorf("raw line = %q, want blocks JSON", lines[1])
+	}
+}
+
+func TestFormatReactionFallbackNotification(t *testing.T) {
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
+	}
+
+	lines := FormatReactionFallbackNotification(react, time.UTC)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if !strings.Contains(lines[0], "Alice") || !strings.Contains(lines[0], ":thumbsup:") {
+		t.Errorf("header = %q, want Alice and emoji", lines[0])
+	}
+	if !strings.Contains(lines[0], "reacted with") {
+		t.Errorf("header = %q, want 'reacted with'", lines[0])
+	}
+	if !strings.Contains(lines[1], "[reaction]") || !strings.Contains(lines[1], "[message_id:M1]") {
+		t.Errorf("meta = %q, want [reaction] and [message_id:M1]", lines[1])
+	}
+}
+
+func TestFormatReactionFallbackNotification_Remove(t *testing.T) {
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
+	}
+
+	lines := FormatReactionFallbackNotification(react, time.UTC)
+	if !strings.Contains(lines[0], "removed reaction") {
+		t.Errorf("header = %q, want 'removed reaction'", lines[0])
 	}
 }

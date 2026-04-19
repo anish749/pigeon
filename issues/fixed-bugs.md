@@ -47,3 +47,19 @@ GWS CLI handler now captures stdout and stderr separately. Error parsing tries s
 ## ~~Slack: send fails to MPDM channels with channel_not_found~~ — fixed in #230
 
 Bot sends to MPDMs are now rejected early with actionable guidance to use `--via pigeon-as-user` instead of failing after outbox review.
+
+## ~~`pigeon read` does not work for GWS accounts~~ — fixed in #198
+
+`pigeon read` now rejects GWS and Linear platforms with a clear error instead of silently returning wrong output. GWS read semantics tracked as a feature.
+
+## ~~Slack: @Slackbot DM fetch fails on every sync~~ — fixed in 06d6b7f
+
+USLACKBOT is now filtered out before fetch, preventing the `channel_not_found` warning on every sync cycle.
+
+## ~~Slack: "all messages filtered" after sync fetch~~ — fixed in #228, #229
+
+Unified filter now checks blocks, attachments, and files (not just text) so bot/integration messages with non-text content are no longer incorrectly filtered. Store layer also persists blocks and attachments.
+
+## ~~Hub: reaction notifications lack context about the reacted message~~ — fixed in #265
+
+Reaction notifications now include the original message content. The hub looks up the reacted-to message via `read.Grep` (searching both date files and thread files) and formats it using `FormatReactionNotification`. Falls back to `FormatReactionFallbackNotification` when the message is not on disk.

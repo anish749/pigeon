@@ -32,8 +32,7 @@ Flags -l, -c, -i, -F, and -C are passed through to rg. See
 rg --help for full documentation of pattern syntax and behavior.
 
 Output is raw rg format: filepath:matching_line. To pipe to jq,
-use -C 0 (disable context lines) and cut -d: -f2- (strip the
-filepath prefix) so jq receives valid JSON.
+use --no-filename -C 0 so each output line is valid JSON.
 
 JSON fields in each line:
   type      event type: "msg", "react", "unreact", "edit", "delete", "separator"
@@ -55,8 +54,8 @@ JSON fields in each line:
   pigeon grep -q "deploy" -i                        # case insensitive
   pigeon grep -q "Alice" -F                         # literal match, no regex
   pigeon grep -q "bug" -p slack -a acme-corp -C 3
-  pigeon grep -q "deploy" -C 0 | cut -d: -f2- | jq 'select(.type == "msg")'
-  pigeon grep -q "Alice" -C 0 | cut -d: -f2- | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'`,
+  pigeon grep -q "deploy" --no-filename -C 0 | jq 'select(.type == "msg")'
+  pigeon grep -q "Alice" --no-filename -C 0 | jq -r '"[" + .ts[11:19] + "] " + .sender + ": " + .text'`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query, err := cmd.Flags().GetString("query")
@@ -94,6 +93,10 @@ JSON fields in each line:
 			fixedStrings, err := cmd.Flags().GetBool("fixed-strings")
 			if err != nil {
 				return fmt.Errorf("get fixed-strings flag: %w", err)
+			}
+			noFilename, err := cmd.Flags().GetBool("no-filename")
+			if err != nil {
+				return fmt.Errorf("get no-filename flag: %w", err)
 			}
 
 			dir := paths.SearchDir(platform, account)
@@ -149,6 +152,7 @@ JSON fields in each line:
 				Count:           count,
 				CaseInsensitive: caseInsensitive,
 				FixedStrings:    fixedStrings,
+				NoFilename:      noFilename,
 			})
 			if err != nil {
 				return err
@@ -170,6 +174,7 @@ JSON fields in each line:
 	cmd.Flags().BoolP("count", "c", false, "print match count per file")
 	cmd.Flags().BoolP("ignore-case", "i", false, "case insensitive search")
 	cmd.Flags().BoolP("fixed-strings", "F", false, "treat query as literal string, not regex")
+	cmd.Flags().Bool("no-filename", false, "omit file paths from output")
 	cmd.MarkFlagRequired("query")
 	return cmd
 }

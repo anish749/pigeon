@@ -12,14 +12,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector/embedding"
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
-
-// Embedder produces embedding vectors from text.
-type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float64, error)
-}
 
 // WorkstreamEmbedding pairs a workstream with its pre-computed focus embedding.
 type WorkstreamEmbedding struct {
@@ -30,7 +25,7 @@ type WorkstreamEmbedding struct {
 // Router routes signals to workstreams by comparing signal embeddings
 // against workstream focus embeddings.
 type Router struct {
-	embedder    Embedder
+	embedder    embedder.Embedder
 	threshold   float64
 	logger      *slog.Logger
 	workstreams []WorkstreamEmbedding
@@ -45,7 +40,7 @@ type Router struct {
 //
 // defaultWSID is the workstream ID used when no workstream matches above
 // the threshold.
-func New(embedder Embedder, threshold float64, defaultWSID string, logger *slog.Logger) *Router {
+func New(embedder embedder.Embedder, threshold float64, defaultWSID string, logger *slog.Logger) *Router {
 	return &Router{
 		embedder:    embedder,
 		threshold:   threshold,
@@ -91,7 +86,7 @@ func (r *Router) Route(ctx context.Context, sig models.Signal) (models.RoutingDe
 	scores := make(map[string]float64, len(r.workstreams))
 
 	for _, ws := range r.workstreams {
-		sim := embedding.CosineSimilarity(emb, ws.Embedding)
+		sim := embedder.CosineSimilarity(emb, ws.Embedding)
 		scores[ws.Workstream.ID] = sim
 		if sim >= r.threshold {
 			matched = append(matched, ws.Workstream.ID)

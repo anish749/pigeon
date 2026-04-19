@@ -115,6 +115,30 @@ func TestSendRequestTarget(t *testing.T) {
 	}
 }
 
+func TestResolvedSendRequestFinalMessage(t *testing.T) {
+	tests := []struct {
+		name            string
+		message         string
+		resolvedMessage string
+		want            string
+	}{
+		{name: "resolved present", message: "**bold**", resolvedMessage: "*bold*", want: "*bold*"},
+		{name: "resolved empty falls back to raw", message: "hello", resolvedMessage: "", want: "hello"},
+		{name: "both empty", message: "", resolvedMessage: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := ResolvedSendRequest{
+				SendRequest:     SendRequest{Message: tt.message},
+				ResolvedMessage: tt.resolvedMessage,
+			}
+			if got := r.FinalMessage(); got != tt.want {
+				t.Fatalf("FinalMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }

@@ -127,6 +127,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
+	case "v":
+		if len(m.items) > 0 {
+			item := m.items[m.cursor]
+			nextVia := cycleVia(item)
+			m.status = dimStyle.Render("Updating send mode...")
+			return m, m.setVia(item.ID, nextVia)
+		}
 	}
 	return m, nil
 }
@@ -209,9 +216,9 @@ func (m model) View() string {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
 	} else {
-		help := "  a approve  f feedback  j/k navigate  q quit"
+		help := "  a approve  v send mode  f feedback  j/k navigate  q quit"
 		if m.cursor < count && m.items[m.cursor].SessionID == "" {
-			help = "  a approve  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
+			help = "  a approve  v send mode  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
 		}
 		b.WriteString(helpStyle.Render(help))
 	}
@@ -219,13 +226,14 @@ func (m model) View() string {
 }
 
 func (m model) renderDetail(item *outbox.Item) string {
-	var req api.SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
+	var resolved api.ResolvedSendRequest
+	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
 		return "  " + dimStyle.Render("(cannot parse payload)")
 	}
+	req := resolved.SendRequest
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
+	b.WriteString(fmt.Sprintf("  To: %s\n", resolved.ResolvedTarget()))
 	b.WriteString(fmt.Sprintf("  On: %s / %s\n", req.Platform, req.Account))
 	b.WriteString(fmt.Sprintf("  From: %s\n", sendIdentity(req)))
 	if req.Thread != "" {
@@ -237,7 +245,7 @@ func (m model) renderDetail(item *outbox.Item) string {
 	if maxWidth < 40 {
 		maxWidth = 40
 	}
-	box := msgStyle.Width(maxWidth).Render(req.Message)
+	box := msgStyle.Width(maxWidth).Render(resolved.FinalMessage())
 	for _, line := range strings.Split(box, "\n") {
 		b.WriteString("  " + line + "\n")
 	}
@@ -292,6 +300,43 @@ func (m model) sendFeedback(id, note string) tea.Cmd {
 	}
 }
 
+// cycleVia parses the item payload and returns the next Via value in the
+// rotation: "" (bot) -> "pigeon-as-user" -> "pigeon-as-bot" -> "" -> ...
+// For whatsapp items, Via is always empty (user sends as themselves).
+func cycleVia(item *outbox.Item) modelv1.Via {
+	var req api.SendRequest
+	if err := json.Unmarshal(item.Payload, &req); err != nil {
+		return modelv1.ViaPigeonAsBot
+	}
+	if req.Platform == "whatsapp" {
+		return ""
+	}
+	switch req.Via {
+	case "", modelv1.ViaPigeonAsBot:
+		return modelv1.ViaPigeonAsUser
+	default:
+		return modelv1.ViaPigeonAsBot
+	}
+}
+
+func (m model) setVia(id string, via modelv1.Via) tea.Cmd {
+	return func() tea.Msg {
+		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)})
+		if err != nil {
+			return actionFailMsg{"marshal request: " + err.Error()}
+		}
+		result, err := doPost("http://pigeon/api/outbox/action", body)
+		if err != nil {
+			return actionFailMsg{err.Error()}
+		}
+		if ok, _ := result["ok"].(bool); ok {
+			return actionDoneMsg{"Send mode updated"}
+		}
+		detail, _ := result["error"].(string)
+		return actionFailMsg{detail}
+	}
+}
+
 func tickEvery(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{} })
 }
@@ -332,20 +377,22 @@ func doPost(url string, body []byte) (map[string]any, error) {
 
 // itemSummary derives a one-line display string from the outbox item's payload.
 func itemSummary(item *outbox.Item) string {
-	var req api.SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
+	var resolved api.ResolvedSendRequest
+	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
 		return "(unknown)"
 	}
-	msg := req.Message
+	req := resolved.SendRequest
+	msg := resolved.FinalMessage()
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}
+	target := resolved.ResolvedTarget()
 	// Slack can send as either bot or user, so call out the identity.
 	// WhatsApp always sends as the user — no need to clutter the line.
 	if req.Platform == "slack" {
-		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, req.Target(), sendIdentity(req), msg)
+		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, target, sendIdentity(req), msg)
 	}
-	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
+	return fmt.Sprintf("%s → %s: %s", req.Platform, target, msg)
 }
 
 // sendIdentity returns "user" or "pigeon" — the sender identity for an

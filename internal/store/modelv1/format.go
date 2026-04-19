@@ -49,8 +49,8 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 // formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
-// TODO: include reactions
-func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta) []string {
+// This function does not format reactions — it operates on MsgLine only.
+func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -74,6 +74,45 @@ func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta
 	return lines
 }
 
+// FormatReactionNotification formats a message with a single reaction for
+// Claude Code channel notifications. This does not include all reactions
+// associated with the message — only the specific reaction event being delivered.
+func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []string {
+	verb := "reacted with"
+	if r.Remove {
+		verb = "removed reaction"
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s %s :%s: to %s's %s",
+		displaySender(r.Sender, r.Via), verb, r.Emoji, displaySender(m.Sender, m.Via), m.Text))
+	lines = append(lines, formatRaw(m.Raw, "  ")...)
+
+	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+		m.Ts.In(loc).Format("15:04:05"), m.ID, r.SenderID, r.Emoji)
+	if r.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", r.Via)
+	}
+	lines = append(lines, meta)
+
+	return lines
+}
+
+// FormatReactionFallbackNotification formats a reaction notification for
+// Claude Code when the original message could not be found. This happens
+// when the reacted-to message is not on disk (e.g. older than synced history).
+func FormatReactionFallbackNotification(r ReactLine, loc *time.Location) []string {
+	verb := "reacted with"
+	if r.Remove {
+		verb = "removed reaction"
+	}
+	return []string{
+		fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji),
+		fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+			r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji),
+	}
+}
+
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
 // channel notifications. See formatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.
@@ -83,7 +122,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMet
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, formatMsgNotification(m, loc, convMeta)...)
+		lines = append(lines, formatMsgNotification(m.MsgLine, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)

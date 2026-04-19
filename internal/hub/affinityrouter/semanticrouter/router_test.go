@@ -20,9 +20,10 @@ func (m *mockEmbedder) Embed(_ context.Context, text string) ([]float64, error) 
 	if emb, ok := m.embeddings[text]; ok {
 		return emb, nil
 	}
-	// Return a zero vector for unknown text.
 	return make([]float64, 3), nil
 }
+
+func (m *mockEmbedder) Close() error { return nil }
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

@@ -1,6 +1,7 @@
 package modelv1
 
 import (
+	"slices"
 	"testing"
 
 	gcal "google.golang.org/api/calendar/v3"
@@ -89,6 +90,86 @@ func TestEventDateForStorage(t *testing.T) {
 			got := ce.DateForStorage()
 			if got != tt.want {
 				t.Errorf("DateForStorage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDatesForStorage(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   *gcal.Event
+		want []string
+	}{
+		{
+			name: "single-day all-day event",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{Date: "2026-04-07"},
+				End:   &gcal.EventDateTime{Date: "2026-04-08"},
+			},
+			want: []string{"2026-04-07"},
+		},
+		{
+			name: "multi-day all-day event (3 days)",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{Date: "2026-04-07"},
+				End:   &gcal.EventDateTime{Date: "2026-04-10"},
+			},
+			want: []string{"2026-04-07", "2026-04-08", "2026-04-09"},
+		},
+		{
+			name: "single-day timed event",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{DateTime: "2026-04-07T10:00:00Z"},
+				End:   &gcal.EventDateTime{DateTime: "2026-04-07T11:00:00Z"},
+			},
+			want: []string{"2026-04-07"},
+		},
+		{
+			name: "timed event spanning midnight",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{DateTime: "2026-04-07T23:00:00Z"},
+				End:   &gcal.EventDateTime{DateTime: "2026-04-08T01:00:00Z"},
+			},
+			want: []string{"2026-04-07", "2026-04-08"},
+		},
+		{
+			name: "missing end date falls back to single date",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{Date: "2026-04-07"},
+			},
+			want: []string{"2026-04-07"},
+		},
+		{
+			name: "missing end dateTime falls back to single date",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{DateTime: "2026-04-07T10:00:00Z"},
+			},
+			want: []string{"2026-04-07"},
+		},
+		{
+			name: "no start falls back to DateForStorage",
+			ev: &gcal.Event{
+				Updated: "2026-04-06T15:00:00Z",
+			},
+			want: []string{"2026-04-06"},
+		},
+		{
+			name: "timed event spanning 3 days",
+			ev: &gcal.Event{
+				Start: &gcal.EventDateTime{DateTime: "2026-04-07T20:00:00Z"},
+				End:   &gcal.EventDateTime{DateTime: "2026-04-09T06:00:00Z"},
+			},
+			want: []string{"2026-04-07", "2026-04-08", "2026-04-09"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ce := &CalendarEvent{Runtime: *tt.ev}
+			got := ce.DatesForStorage()
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("DatesForStorage() = %v, want %v", got, tt.want)
 			}
 		})
 	}

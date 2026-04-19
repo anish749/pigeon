@@ -61,17 +61,9 @@ whose machine is in a non-UTC zone has no way to know that "yesterday's"
 messages may land in today's file, or vice versa, depending on how the
 write path handled the clock.
 
-## `pigeon read` does not work for GWS accounts
-
-`pigeon read` now rejects GWS and Linear platforms with a clear error (#198) instead of silently returning wrong output. The underlying limitation remains — there is no supported way to read GWS data via `pigeon read`. The design for GWS read semantics is tracked as a feature.
-
 ## Slack: missing_scope errors on every sync cycle
 
 Every sync cycle logs `failed to fetch muted channels, skipping mute filter` and `search failed: missing_scope`. The bot tokens lack the OAuth scope needed for muted-channel filtering and search. The daemon degrades gracefully — it syncs all channels instead of prioritizing unmuted ones — but the warnings are emitted on every cycle for every workspace, making the logs very noisy.
-
-## Slack: "all messages filtered" after sync fetch
-
-During sync, some channels fetch messages successfully but then filter out every single one, logging `slack sync: all messages filtered`. This likely happens in bot-only or integration-heavy channels where every message is from a bot or app that gets filtered. The channel appears empty on disk despite having real activity.
 
 ## WhatsApp: recurring websocket EOF disconnects
 
@@ -81,14 +73,6 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
-
-## Slack: @Slackbot DM fetch fails on every sync
-
-Every sync cycle attempts to fetch the @Slackbot bot DM and fails with `channel_not_found`. The Slackbot DM channel cannot be fetched via the Slack API. This is expected behavior but it generates a warning on every sync cycle for every workspace, adding noise to the logs.
-
-## Hub: reaction notifications lack context about the reacted message
-
-When a reaction event is delivered to a connected Claude Code session via the hub, only the reaction itself is sent (emoji, channel, timestamp). The message that was reacted to is not included. The receiving session has no way to understand what the reaction means without separately looking up the original message. This makes reactions largely useless as a signal to the agent — it sees "someone reacted 👍" but not what they reacted to.
 
 ## Terminal UI review does not show the recipient/target name
 

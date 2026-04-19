@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector/embedding"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
@@ -31,7 +32,7 @@ func TestBenchmarkDetectors(t *testing.T) {
 		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires local data and uv)")
 	}
 
-	client, err := embedding.NewClient()
+	client, err := embedder.NewClient()
 	if err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestSidecarSmoke(t *testing.T) {
 		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires uv)")
 	}
 
-	client, err := embedding.NewClient()
+	client, err := embedder.NewClient()
 	if err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}

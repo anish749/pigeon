@@ -12,7 +12,6 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/utils/mrkdwn"
 )
 
 // slackTarget returns a *SlackTarget if either field is set, or nil.
@@ -55,17 +54,12 @@ func RunSend(p SendParams) error {
 		}
 	}
 
-	msg := p.Message
-	if p.Platform == "slack" {
-		msg = mrkdwn.ToSlackMarkdown(msg)
-	}
-
 	req := api.SendRequest{
 		Platform:  p.Platform,
 		Account:   p.Account,
 		Slack:     slackTarget(p.UserID, p.Channel),
 		Contact:   p.Contact,
-		Message:   msg,
+		Message:   p.Message,
 		Thread:    p.Thread,
 		Broadcast: p.Broadcast,
 		PostAt:    p.PostAt,
