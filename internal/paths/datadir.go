@@ -103,7 +103,6 @@ func (p PlatformDir) Path() string {
 	return filepath.Join(p.root.base, p.platform)
 }
 
-
 // AccountDir represents an account directory: <base>/<platform>/<account-slug>/
 type AccountDir struct {
 	platform PlatformDir
