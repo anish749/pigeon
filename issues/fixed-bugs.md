@@ -63,3 +63,7 @@ Unified filter now checks blocks, attachments, and files (not just text) so bot/
 ## ~~Hub: reaction notifications lack context about the reacted message~~ — fixed in #265
 
 Reaction notifications now include the original message content. The hub looks up the reacted-to message via `read.Grep` (searching both date files and thread files) and formats it using `FormatReactionNotification`. Falls back to `FormatReactionFallbackNotification` when the message is not on disk.
+
+## ~~Terminal UI review does not allow changing the send mode~~ — fixed in #252
+
+The outbox review screen now supports toggling send mode with the `v` key before approving the message.
