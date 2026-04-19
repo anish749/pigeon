@@ -524,23 +524,23 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		verb = "removed reaction"
 	}
 
-	var target string
-	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
-		text := msg.Text
-		if len(text) > 100 {
-			text = text[:100] + "…"
-		}
-		target = fmt.Sprintf(" to %q (from %s)", text, msg.Sender)
-	}
-
-	head := fmt.Sprintf("%s %s :%s:%s", r.Sender, verb, r.Emoji, target)
+	head := fmt.Sprintf("%s %s :%s:", r.Sender, verb, r.Emoji)
 	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
+
+	lines := []string{head, meta}
+	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
+		contextLines := modelv1.FormatMsgNotification(*msg, time.Local, nil)
+		lines = append(lines, "  reacted to:")
+		for _, cl := range contextLines {
+			lines = append(lines, "  "+cl)
+		}
+	}
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
 		Account:      ch.acct.Name,
 		Conversation: conversation,
-		MsgLines:     []string{head, meta},
+		MsgLines:     lines,
 	}
 	if err := session.Send(h.ctx, notification); err != nil {
 		slog.Error("failed to deliver reaction",
