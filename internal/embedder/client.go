@@ -34,7 +34,11 @@ const (
 // NewClient starts the Python embedding sidecar and returns a Client
 // connected to it. The caller must call Close to shut down the sidecar.
 func NewClient() (*Client, error) {
-	socketPath := filepath.Join(paths.StateDir(), fmt.Sprintf("embed-%d.sock", os.Getpid()))
+	socketDir := paths.StateDir()
+	if err := os.MkdirAll(socketDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create state dir for embed socket: %w", err)
+	}
+	socketPath := filepath.Join(socketDir, fmt.Sprintf("embed-%d.sock", os.Getpid()))
 	sidecarScript := filepath.Join(findRepoRoot(), "embed", "sidecar.py")
 
 	proc, err := startSidecar(sidecarScript, socketPath, defaultModelName, defaultStartupTimeout)
