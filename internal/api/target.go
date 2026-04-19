@@ -79,6 +79,15 @@ type ResolvedSendRequest struct {
 	ResolvedMessage string               `json:"resolved_message,omitempty"`
 }
 
+// FinalMessage returns the resolved message if available, falling back to
+// the raw SendRequest.Message for old outbox items without a resolved message.
+func (r ResolvedSendRequest) FinalMessage() string {
+	if r.ResolvedMessage != "" {
+		return r.ResolvedMessage
+	}
+	return r.Message
+}
+
 // ResolvedTarget returns the human-readable label for the resolved send
 // target, falling back to SendRequest.Target() when no resolution exists.
 func (r ResolvedSendRequest) ResolvedTarget() string {
