@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
@@ -31,6 +32,8 @@ func (f *fakeEmbedder) Embed(_ context.Context, _ string) ([]float64, error) {
 	return r.vec, r.err
 }
 
+func (f *fakeEmbedder) Close() error { return nil }
+
 // --- CosineDetector.Observe tests ---
 
 func sig(sender, text string) models.Signal {
@@ -42,9 +45,9 @@ func sig(sender, text string) models.Signal {
 	}
 }
 
-func newTestDetector(embedder Embedder, windowSize int, fallbackThreshold float64) *CosineDetector {
+func newTestDetector(emb embedder.Embedder, windowSize int, fallbackThreshold float64) *CosineDetector {
 	return &CosineDetector{
-		embedder:          embedder,
+		embedder:          emb,
 		logger:            slog.Default(),
 		fallbackThreshold: fallbackThreshold,
 		stdMultiplier:     1.0,

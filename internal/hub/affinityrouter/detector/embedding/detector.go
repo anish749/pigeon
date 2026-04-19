@@ -13,11 +13,6 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
-// Embedder produces embedding vectors from text.
-type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float64, error)
-}
-
 // CosineDetector implements ConversationShiftDetector using embedding
 // cosine similarity. It buffers signals into a sliding window, embeds
 // window text via the sidecar, and compares against the previous
@@ -27,7 +22,7 @@ type Embedder interface {
 // observations, it switches from fallbackThreshold to mean - stdMultiplier*std
 // computed over all observed similarities for this conversation.
 type CosineDetector struct {
-	embedder Embedder
+	embedder embedder.Embedder
 	logger   *slog.Logger
 
 	// Self-calibrating threshold parameters.
@@ -120,10 +115,10 @@ const (
 // The embedder is shared across all detectors; each detector maintains its
 // own sliding window, previous embedding, and self-calibrating threshold
 // that adapts to the conversation's similarity distribution.
-func NewCosineFactory(embedder Embedder, logger *slog.Logger) detector.Factory {
+func NewCosineFactory(emb embedder.Embedder, logger *slog.Logger) detector.Factory {
 	return func() detector.ConversationShiftDetector {
 		return &CosineDetector{
-			embedder:          embedder,
+			embedder:          emb,
 			logger:            logger,
 			fallbackThreshold: defaultFallbackThreshold,
 			stdMultiplier:     defaultStdMultiplier,
