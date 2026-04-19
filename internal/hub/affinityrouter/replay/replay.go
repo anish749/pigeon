@@ -8,22 +8,19 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/discovery"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
-	"github.com/anish749/pigeon/internal/hub/affinityrouter/router"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/semanticrouter"
 	arstore "github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
 
-// Config is an alias for the shared config — replay uses it directly.
+// Config is an alias for the shared config.
 type Config = models.Config
 
 // Report holds the results of a replay run.
@@ -36,7 +33,6 @@ type Report struct {
 
 	Workstreams []WorkstreamReport
 
-	RouterStats  router.Stats
 	ManagerStats manager.Stats
 
 	ProposalsTotal    int
@@ -61,61 +57,45 @@ type WorkstreamReport struct {
 	IsDefault    bool
 }
 
-// Run executes the replay: reads all historical signals, feeds them through
-// the routing model, and returns a benchmark report.
+// Run reads historical signals, routes them through the semantic router,
+// and returns a benchmark report.
 //
-// When skipDiscovery is true, the replay loads workstreams from persisted state
-// instead of running cold-start discovery. Use this for phase 2 of a two-phase
-// benchmark: first run discovery on earlier data, then run incremental routing
-// on later data with persisted workstreams.
-func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
+// When skipDiscovery is true, workstreams are loaded from persisted state
+// instead of running cold-start discovery.
+func Run(ctx context.Context, cfg Config, embedder semanticrouter.Embedder, threshold float64, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
 	startTime := time.Now()
 
 	// Read signals.
 	root := paths.DefaultDataRoot()
 	fsStore := store.NewFSStore(root)
-	rdr := reader.New(fsStore, root)
-
-	logger.Info("reading signals",
-		"since", cfg.Since.Format("2006-01-02"),
-		"until", cfg.Until.Format("2006-01-02"),
-	)
-
-	signals, err := rdr.ReadAll(cfg.Since, cfg.Until)
+	signals, err := reader.New(fsStore, root).ReadAll(cfg.Since, cfg.Until)
 	if err != nil {
 		return nil, fmt.Errorf("read signals: %w", err)
 	}
-
 	logger.Info("signals loaded", "count", len(signals))
-
 	if len(signals) == 0 {
 		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
 	}
 
-	{
-		allowed := make(map[string]bool, len(cfg.Workspace.Accounts))
-		for _, a := range cfg.Workspace.Accounts {
-			allowed[a.String()] = true
-		}
-		var filtered []models.Signal
-		for _, sig := range signals {
-			if allowed[sig.Account.String()] {
-				filtered = append(filtered, sig)
-			}
-		}
-		signals = filtered
-		logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "accounts", len(allowed), "count", len(signals))
+	// Filter to workspace accounts.
+	allowed := make(map[string]bool, len(cfg.Workspace.Accounts))
+	for _, a := range cfg.Workspace.Accounts {
+		allowed[a.String()] = true
 	}
+	filtered := signals[:0]
+	for _, sig := range signals {
+		if allowed[sig.Account.String()] {
+			filtered = append(filtered, sig)
+		}
+	}
+	signals = filtered
+	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 
-	// Set up components.
-	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
-	classifierFactory := classifier.NewBatchFactory(claude, logger)
-	sc := manager.NewStatCollector()
-
+	// Set up persistence and manager.
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).AffinityRouter()
 	st := arstore.NewFS(storeDir)
-
-	rtr := router.New(detectorFactory, classifierFactory, cfg, st, logger)
+	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
+	sc := manager.NewStatCollector()
 	mgr := manager.New(claude, sc, cfg, st, logger)
 	wsName := cfg.Workspace.Name
 
@@ -123,145 +103,71 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, skip
 		return nil, fmt.Errorf("ensure default workstream: %w", err)
 	}
 
+	// Discovery or load persisted workstreams.
 	if skipDiscovery {
 		active, err := st.ActiveWorkstreams()
 		if err != nil {
 			return nil, fmt.Errorf("load persisted workstreams: %w", err)
 		}
 		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
-		for _, ws := range active {
-			logger.Info("loaded workstream", "name", ws.Name, "id", ws.ID, "focus", ws.Focus)
-		}
 	} else {
 		disc := discovery.NewLLMDiscovery(claude, logger)
 		discovered, err := disc.Discover(ctx, signals)
 		if err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
 		}
-		convAccounts := make(map[string]account.Account)
-		for _, sig := range signals {
-			if _, ok := convAccounts[sig.Conversation]; !ok {
-				convAccounts[sig.Conversation] = sig.Account
-			}
-		}
 		for _, dws := range discovered {
-			newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
+			_, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
 			if err != nil {
 				return nil, fmt.Errorf("create discovered workstream %q: %w", dws.Name, err)
 			}
-			if newID == "" {
-				return nil, fmt.Errorf("discovered workstream %q was not auto-approved", dws.Name)
-			}
-			for _, conv := range dws.Conversations {
-				acct, ok := convAccounts[conv]
-				if !ok {
-					continue
-				}
-				key := models.ConversationKey{
-					Account:      acct,
-					Conversation: conv,
-				}
-				if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
-					return nil, fmt.Errorf("seed affinity for %q in workstream %q: %w", conv, newID, err)
-				}
-			}
-			logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
 		}
 	}
 
-	// Replay: for each signal, route → observe (manager records + manages).
-	for i, sig := range signals {
-		if err := mgr.EnsureDefaultWorkstream(wsName, sig.Ts); err != nil {
-			return nil, fmt.Errorf("ensure default workstream: %w", err)
-		}
+	// Build semantic router from active workstreams.
+	active, err := st.ActiveWorkstreams()
+	if err != nil {
+		return nil, fmt.Errorf("list active workstreams: %w", err)
+	}
+	sr := semanticrouter.New(embedder, threshold, models.DefaultWorkstreamID(wsName), logger)
+	if err := sr.LoadWorkstreams(ctx, active); err != nil {
+		return nil, fmt.Errorf("load workstream embeddings: %w", err)
+	}
+	logger.Info("semantic router ready", "workstreams", len(active), "threshold", threshold)
 
-		// Route the signal.
-		active, err := st.ActiveWorkstreams()
-		if err != nil {
-			return nil, fmt.Errorf("list active workstreams: %w", err)
-		}
-		result, err := rtr.Route(ctx, sig, active)
+	// Route each signal independently.
+	for i, sig := range signals {
+		decision, err := sr.Route(ctx, sig)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
 			continue
 		}
-
-		// If the classifier proposed a new workstream, ask the manager.
-		if result.NewWorkstreamName != "" {
-			newID, err := mgr.ProposeNew(ctx,
-				result.NewWorkstreamName,
-				result.NewWorkstreamFocus,
-				wsName,
-				sig.Ts,
-			)
-			if err != nil {
-				logger.Warn("propose new workstream failed", "error", err)
-			} else if newID != "" {
-				result.Decision.WorkstreamIDs = append(result.Decision.WorkstreamIDs, newID)
-			}
-		}
-
-		// Ensure decision has at least the default workstream.
-		if len(result.Decision.WorkstreamIDs) == 0 {
-			result.Decision.WorkstreamIDs = []string{models.DefaultWorkstreamID(wsName)}
-		}
-
-		// Manager records to ledger and runs lifecycle checks.
-		if err := mgr.ObserveRouting(ctx, sig, result.Decision); err != nil {
+		if err := mgr.ObserveRouting(ctx, sig, decision); err != nil {
 			logger.Warn("manager observe failed", "error", err, "index", i)
 		}
-
-		// Re-deliver reclassified signals to the manager.
-		for _, routing := range result.Reclassified {
-			if routing.Signal.ID == sig.ID {
-				continue // already handled above
-			}
-			reclassDecision := models.RoutingDecision{
-				SignalID:      routing.Signal.ID,
-				WorkstreamIDs: routing.WorkstreamIDs,
-				Ts:            routing.Signal.Ts,
-			}
-			if err := mgr.ObserveRouting(ctx, routing.Signal, reclassDecision); err != nil {
-				logger.Warn("reclassify observe failed", "error", err, "signal", routing.Signal.ID)
-			}
-		}
-
-		// Update router affinities from the decision.
-		key := models.ConversationKey{
-			Account:      sig.Account,
-			Conversation: sig.Conversation,
-		}
-		for _, wsID := range result.Decision.WorkstreamIDs {
-			if err := rtr.UpdateAffinity(key, wsID, sig.Ts); err != nil {
-				logger.Warn("update affinity failed", "error", err)
-			}
-		}
-
-		// Progress logging.
-		if (i+1)%1000 == 0 || i == len(signals)-1 {
-			logger.Info("replay progress",
-				"signals", i+1,
-				"total", len(signals),
-			)
+		if (i+1)%500 == 0 || i == len(signals)-1 {
+			logger.Info("replay progress", "signals", i+1, "total", len(signals))
 		}
 	}
 
-	// Build report.
+	return buildReport(cfg, signals, startTime, mgr, sc, st)
+}
+
+func buildReport(cfg Config, signals []models.Signal, startTime time.Time, mgr *manager.Manager, sc *manager.StatCollector, st arstore.Store) (*Report, error) {
 	report := &Report{
 		Since:        cfg.Since,
 		Until:        cfg.Until,
 		TotalSignals: len(signals),
 		ByType:       countByType(signals),
-		RouterStats:  rtr.Stats(),
 		ManagerStats: mgr.Stats(),
 		Duration:     time.Since(startTime),
 	}
 
-	allProposals, err := st.ListProposals()
+	proposals, err := st.ListProposals()
 	if err != nil {
 		return nil, fmt.Errorf("list proposals: %w", err)
 	}
-	for _, p := range allProposals {
+	for _, p := range proposals {
 		report.ProposalsTotal++
 		switch p.State {
 		case models.ProposalApproved:
@@ -273,11 +179,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, skip
 		}
 	}
 
-	allWorkstreams, err := st.ListWorkstreams()
+	workstreams, err := st.ListWorkstreams()
 	if err != nil {
 		return nil, fmt.Errorf("list workstreams: %w", err)
 	}
-	for _, ws := range allWorkstreams {
+	for _, ws := range workstreams {
 		report.Workstreams = append(report.Workstreams, WorkstreamReport{
 			ID:           ws.ID,
 			Name:         ws.Name,

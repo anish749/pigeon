@@ -11,7 +11,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
 
-// --- cosineSimilarity tests ---
+// --- CosineSimilarity tests ---
 
 func TestCosineSimilarity(t *testing.T) {
 	tests := []struct {
@@ -59,9 +59,9 @@ func TestCosineSimilarity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cosineSimilarity(tt.a, tt.b)
+			got := CosineSimilarity(tt.a, tt.b)
 			if math.Abs(got-tt.want) > 1e-6 {
-				t.Errorf("cosineSimilarity(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+				t.Errorf("CosineSimilarity(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}
