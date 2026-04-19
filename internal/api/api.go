@@ -159,7 +159,6 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 type SlackTarget struct {
 	UserID  string `json:"user_id,omitempty"` // Slack user ID (U-prefixed) for DMs
 	Channel string `json:"channel,omitempty"` // #channel or @mpdm-... for channels/group DMs
-	Name    string `json:"name,omitempty"`    // resolved display name (set by daemon before outbox)
 }
 
 // Validate checks that exactly one field is set and that values are well-formed.
@@ -181,9 +180,6 @@ func (t SlackTarget) Validate() error {
 
 // Display returns a human-readable label for the target.
 func (t SlackTarget) Display() string {
-	if t.Name != "" {
-		return t.Name
-	}
 	if t.UserID != "" {
 		return t.UserID
 	}
@@ -265,10 +261,6 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
 		return
 	}
-
-	// Resolve a human-readable target name for the outbox review UI.
-	// Best-effort: if resolution fails the TUI falls back to the raw ID.
-	s.resolveTargetName(r.Context(), &req)
 
 	// All real sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
@@ -644,34 +636,6 @@ func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error 
 		return fmt.Errorf("bot is not a member of this group DM — use --via pigeon-as-user to send as yourself")
 	}
 	return nil
-}
-
-// resolveTargetName populates the display name on the send target so the
-// outbox review UI can show a human-readable recipient. Best-effort — a
-// failed resolution leaves the Name field empty and the TUI falls back to
-// the raw ID or channel.
-func (s *Server) resolveTargetName(ctx context.Context, req *SendRequest) {
-	if req.Slack == nil || req.Slack.Name != "" {
-		return
-	}
-	s.mu.RLock()
-	sender := s.slack[req.Account]
-	s.mu.RUnlock()
-	if sender == nil {
-		return
-	}
-	switch {
-	case req.Slack.UserID != "":
-		name, err := sender.Resolver.UserName(ctx, req.Slack.UserID)
-		if err == nil {
-			req.Slack.Name = name
-		}
-	case req.Slack.Channel != "":
-		_, name, err := sender.Resolver.FindChannelID(ctx, req.Slack.Channel)
-		if err == nil && name != req.Slack.Channel {
-			req.Slack.Name = name
-		}
-	}
 }
 
 // resolveSlackTarget resolves a SlackTarget to a channel ID and display name.

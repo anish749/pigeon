@@ -49,11 +49,6 @@ func TestItemSummary(t *testing.T) {
 			want: "slack → U123 (from user): hello",
 		},
 		{
-			name: "slack user with resolved name",
-			req:  api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{UserID: "U123", Name: "Alice"}, Message: "hello", Via: modelv1.ViaPigeonAsBot},
-			want: "slack → Alice (from pigeon): hello",
-		},
-		{
 			name: "slack empty via defaults to bot",
 			req:  api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{Channel: "#eng"}, Message: "hello"},
 			want: "slack → #eng (from pigeon): hello",
