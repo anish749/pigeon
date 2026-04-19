@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gosimple/slug"
@@ -24,7 +23,6 @@ import (
 // that creates or modifies workstreams. Its single entry point is
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
-	mu     sync.Mutex
 	client *clients.Client
 	sc     *StatCollector
 	store  store.Store
@@ -50,33 +48,6 @@ func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.
 		logger:             logger,
 		signalsSinceUpdate: make(map[string]int),
 	}
-}
-
-// --- Workstream queries (read-only) ---
-
-// GetWorkstream returns a workstream by ID, or zero value + false if not found.
-func (m *Manager) GetWorkstream(id string) (models.Workstream, bool, error) {
-	return m.store.GetWorkstream(id)
-}
-
-// ActiveWorkstreams returns non-default, active workstreams for a workspace.
-func (m *Manager) ActiveWorkstreams(ws config.WorkspaceName) ([]models.Workstream, error) {
-	all, err := m.store.ListWorkstreams()
-	if err != nil {
-		return nil, err
-	}
-	var result []models.Workstream
-	for _, w := range all {
-		if w.Workspace == ws && w.State == models.StateActive && !w.IsDefault() {
-			result = append(result, w)
-		}
-	}
-	return result, nil
-}
-
-// AllWorkstreams returns all workstreams (for reporting).
-func (m *Manager) AllWorkstreams() ([]models.Workstream, error) {
-	return m.store.ListWorkstreams()
 }
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
@@ -166,8 +137,6 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 	// Record in the stat collector — single source of truth.
 	m.sc.Record(decision, sig)
 
-	m.mu.Lock()
-
 	// Buffer the signal for focus update context.
 	m.recentSignals = append(m.recentSignals, sig)
 	if len(m.recentSignals) > m.cfg.FocusUpdateInterval*2 {
@@ -179,18 +148,9 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 		m.signalsSinceUpdate[wsID]++
 	}
 
-	// Snapshot ephemeral state under lock, then release for I/O.
-	recentSignals := make([]models.Signal, len(m.recentSignals))
-	copy(recentSignals, m.recentSignals)
-	signalCounts := make(map[string]int, len(m.signalsSinceUpdate))
-	for k, v := range m.signalsSinceUpdate {
-		signalCounts[k] = v
-	}
-	m.mu.Unlock()
-
 	// Check if any workstream needs a focus update.
 	var errs []error
-	for wsID, count := range signalCounts {
+	for wsID, count := range m.signalsSinceUpdate {
 		if count < m.cfg.FocusUpdateInterval {
 			continue
 		}
@@ -200,18 +160,14 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 			continue
 		}
 		if !ok || ws.IsDefault() {
-			m.mu.Lock()
 			m.signalsSinceUpdate[wsID] = 0
-			m.mu.Unlock()
 			continue
 		}
 
-		if err := m.updateFocus(ctx, ws, recentSignals); err != nil {
+		if err := m.updateFocus(ctx, ws, m.recentSignals); err != nil {
 			errs = append(errs, err)
 		}
-		m.mu.Lock()
 		m.signalsSinceUpdate[wsID] = 0
-		m.mu.Unlock()
 	}
 
 	// Dormancy check.
@@ -223,28 +179,6 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 		return fmt.Errorf("manager: %w", errs[0])
 	}
 	return nil
-}
-
-// --- Proposals ---
-
-// PendingProposals returns unresolved proposals.
-func (m *Manager) PendingProposals() ([]*models.Proposal, error) {
-	all, err := m.store.ListProposals()
-	if err != nil {
-		return nil, err
-	}
-	var pending []*models.Proposal
-	for _, p := range all {
-		if p.State == models.ProposalPending {
-			pending = append(pending, p)
-		}
-	}
-	return pending, nil
-}
-
-// AllProposals returns all proposals (for reporting).
-func (m *Manager) AllProposals() ([]*models.Proposal, error) {
-	return m.store.ListProposals()
 }
 
 // --- Internal lifecycle operations ---
@@ -340,17 +274,11 @@ func generateWorkstreamID(name string) string {
 type Stats struct {
 	FocusUpdates    int
 	DormancyChanges int
-	WorkstreamCount int
-	ProposalCount   int
 }
 
 func (m *Manager) Stats() Stats {
-	all, _ := m.store.ListWorkstreams()
-	proposals, _ := m.store.ListProposals()
 	return Stats{
 		FocusUpdates:    m.focusUpdates,
 		DormancyChanges: m.dormancyChanges,
-		WorkstreamCount: len(all),
-		ProposalCount:   len(proposals),
 	}
 }

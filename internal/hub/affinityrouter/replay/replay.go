@@ -119,9 +119,15 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 
 		// Route the signal.
-		active, err := mgr.ActiveWorkstreams(wsName)
+		allWS, err := st.ListWorkstreams()
 		if err != nil {
-			return nil, fmt.Errorf("list active workstreams: %w", err)
+			return nil, fmt.Errorf("list workstreams: %w", err)
+		}
+		var active []models.Workstream
+		for _, w := range allWS {
+			if w.Workspace == wsName && w.State == models.StateActive && !w.IsDefault() {
+				active = append(active, w)
+			}
 		}
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
@@ -182,11 +188,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 
 		// Progress logging.
 		if (i+1)%1000 == 0 || i == len(signals)-1 {
-			mgrStats := mgr.Stats()
+			wsCount, _ := st.ListWorkstreams()
 			logger.Info("replay progress",
 				"signals", i+1,
 				"total", len(signals),
-				"workstreams", mgrStats.WorkstreamCount,
+				"workstreams", len(wsCount),
 			)
 		}
 	}
@@ -202,7 +208,7 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		Duration:     time.Since(startTime),
 	}
 
-	allProposals, err := mgr.AllProposals()
+	allProposals, err := st.ListProposals()
 	if err != nil {
 		return nil, fmt.Errorf("list proposals: %w", err)
 	}
@@ -218,7 +224,7 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 	}
 
-	allWorkstreams, err := mgr.AllWorkstreams()
+	allWorkstreams, err := st.ListWorkstreams()
 	if err != nil {
 		return nil, fmt.Errorf("list workstreams: %w", err)
 	}
