@@ -219,13 +219,14 @@ func (m model) View() string {
 }
 
 func (m model) renderDetail(item *outbox.Item) string {
-	var req api.SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
+	var resolved api.ResolvedSendRequest
+	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
 		return "  " + dimStyle.Render("(cannot parse payload)")
 	}
+	req := resolved.SendRequest
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
+	b.WriteString(fmt.Sprintf("  To: %s\n", resolved.ResolvedTarget()))
 	b.WriteString(fmt.Sprintf("  On: %s / %s\n", req.Platform, req.Account))
 	b.WriteString(fmt.Sprintf("  From: %s\n", sendIdentity(req)))
 	if req.Thread != "" {
@@ -332,20 +333,22 @@ func doPost(url string, body []byte) (map[string]any, error) {
 
 // itemSummary derives a one-line display string from the outbox item's payload.
 func itemSummary(item *outbox.Item) string {
-	var req api.SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
+	var resolved api.ResolvedSendRequest
+	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
 		return "(unknown)"
 	}
+	req := resolved.SendRequest
 	msg := req.Message
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}
+	target := resolved.ResolvedTarget()
 	// Slack can send as either bot or user, so call out the identity.
 	// WhatsApp always sends as the user — no need to clutter the line.
 	if req.Platform == "slack" {
-		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, req.Target(), sendIdentity(req), msg)
+		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, target, sendIdentity(req), msg)
 	}
-	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
+	return fmt.Sprintf("%s → %s: %s", req.Platform, target, msg)
 }
 
 // sendIdentity returns "user" or "pigeon" — the sender identity for an
