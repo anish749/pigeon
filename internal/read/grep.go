@@ -17,6 +17,7 @@ type GrepOpts struct {
 	Count           bool // -c: return match counts per file
 	CaseInsensitive bool // -i
 	FixedStrings    bool // -F: literal match, no regex
+	NoFilename      bool // --no-filename: omit file paths from output
 	JSON            bool // --json: structured JSON output (for machine parsing)
 }
 
@@ -85,6 +86,9 @@ func buildGrepFlags(opts GrepOpts) []string {
 	}
 	if opts.FixedStrings {
 		args = append(args, "-F")
+	}
+	if opts.NoFilename {
+		args = append(args, "--no-filename")
 	}
 	if opts.Context > 0 {
 		args = append(args, fmt.Sprintf("-C%d", opts.Context))
