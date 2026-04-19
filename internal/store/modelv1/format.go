@@ -84,8 +84,8 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji))
-	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
+	lines = append(lines, fmt.Sprintf("%s %s :%s: to %s's %s",
+		displaySender(r.Sender, r.Via), verb, r.Emoji, displaySender(m.Sender, m.Via), m.Text))
 	lines = append(lines, formatRaw(m.Raw, "  ")...)
 
 	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
