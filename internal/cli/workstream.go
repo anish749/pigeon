@@ -11,6 +11,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector/embedding"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
@@ -78,7 +79,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 			case "burstgap":
 				factory = detector.NewBurstGapFactory(burstGap)
 			case "cosine":
-				client, err := embedding.NewClient()
+				client, err := embedder.NewClient()
 				if err != nil {
 					return fmt.Errorf("start embedding sidecar: %w", err)
 				}

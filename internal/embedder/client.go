@@ -1,7 +1,5 @@
-// Package embedding provides a client for the Python embedding sidecar
-// and a ConversationShiftDetector that uses cosine similarity drops
-// to detect topic shifts.
-package embedding
+// Package embedder provides a client for the Python embedding sidecar.
+package embedder
 
 import (
 	"bufio"

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
 
+	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
@@ -72,7 +72,7 @@ func (d *CosineDetector) Observe(sig models.Signal) bool {
 		return false
 	}
 
-	sim := cosineSimilarity(emb, d.prevEmbed)
+	sim := embedder.CosineSimilarity(emb, d.prevEmbed)
 	d.prevEmbed = emb
 	d.sims = append(d.sims, sim)
 
@@ -96,16 +96,6 @@ func (d *CosineDetector) currentThreshold() float64 {
 	}
 	mean, std := stat.PopMeanStdDev(d.sims, nil)
 	return mean - d.stdMultiplier*std
-}
-
-// cosineSimilarity returns the cosine similarity between two vectors
-// using gonum's BLAS-optimized Dot and Norm.
-func cosineSimilarity(a, b []float64) float64 {
-	denom := floats.Norm(a, 2) * floats.Norm(b, 2)
-	if denom == 0 {
-		return 0
-	}
-	return floats.Dot(a, b) / denom
 }
 
 func windowText(signals []models.Signal) string {
