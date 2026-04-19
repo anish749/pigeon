@@ -52,7 +52,7 @@ func New(embedder embedder.Embedder, threshold float64, defaultWSID string, logg
 // LoadWorkstreams computes and caches focus embeddings for each workstream.
 // Call this after discovery or when workstreams change.
 func (r *Router) LoadWorkstreams(ctx context.Context, workstreams []models.Workstream) error {
-	r.workstreams = nil
+	var loaded []WorkstreamEmbedding
 	for _, ws := range workstreams {
 		if ws.IsDefault() || ws.Focus == "" {
 			r.logger.Warn("skipping workstream", "name", ws.Name, "id", ws.ID, "reason_default", ws.IsDefault(), "reason_empty_focus", ws.Focus == "")
@@ -62,12 +62,13 @@ func (r *Router) LoadWorkstreams(ctx context.Context, workstreams []models.Works
 		if err != nil {
 			return fmt.Errorf("embed focus for %q: %w", ws.Name, err)
 		}
-		r.workstreams = append(r.workstreams, WorkstreamEmbedding{
+		loaded = append(loaded, WorkstreamEmbedding{
 			Workstream: ws,
 			Embedding:  emb,
 		})
 		r.logger.Info("embedded workstream focus", "name", ws.Name, "id", ws.ID, "dims", len(emb))
 	}
+	r.workstreams = loaded
 	return nil
 }
 
