@@ -58,7 +58,7 @@ type conversationDigest struct {
 // Discover analyzes all signals and discovers workstreams.
 func (d *LLMDiscovery) Discover(ctx context.Context, signals []models.Signal) ([]DiscoveredWorkstream, error) {
 	if len(signals) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no signals to discover workstreams from")
 	}
 
 	// Step 1: Build per-conversation digests.

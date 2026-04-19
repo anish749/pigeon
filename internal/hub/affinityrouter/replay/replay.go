@@ -128,12 +128,12 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	for _, dws := range discovered {
 		newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
 		if err != nil {
-			logger.Warn("failed to create discovered workstream", "name", dws.Name, "error", err)
-			continue
+			logger.Error("failed to create discovered workstream", "name", dws.Name, "error", err)
+			return nil, fmt.Errorf("create discovered workstream %q: %w", dws.Name, err)
 		}
 		if newID == "" {
-			logger.Info("discovery workstream queued as proposal", "name", dws.Name)
-			continue
+			logger.Error("discovered workstream was not auto-approved", "name", dws.Name)
+			return nil, fmt.Errorf("discovered workstream %q was not auto-approved", dws.Name)
 		}
 		// Seed router affinities from discovered conversations.
 		// Find the account for each conversation by scanning signals.
@@ -153,7 +153,8 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 				Conversation: conv,
 			}
 			if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
-				logger.Warn("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
+				logger.Error("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
+				return nil, fmt.Errorf("seed affinity for %q in workstream %q: %w", conv, newID, err)
 			}
 		}
 		logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
