@@ -55,12 +55,14 @@ func NewClient(socketPath string) (*Client, error) {
 	}, nil
 }
 
-// Close sends SIGTERM to the sidecar process.
+// Close sends SIGTERM to the sidecar process and removes the socket file.
 func (c *Client) Close() error {
+	var err error
 	if c.proc != nil {
-		return c.proc.Signal(os.Interrupt)
+		err = c.proc.Signal(os.Interrupt)
 	}
-	return nil
+	os.Remove(c.socketPath)
+	return err
 }
 
 // Embed returns the embedding vector for text.

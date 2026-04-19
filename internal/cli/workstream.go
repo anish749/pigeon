@@ -80,7 +80,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 			case "burstgap":
 				factory = detector.NewBurstGapFactory(burstGap)
 			case "cosine":
-				socketPath := filepath.Join(paths.StateDir(), "embed.sock")
+				socketPath := filepath.Join(paths.StateDir(), fmt.Sprintf("embed-%d.sock", os.Getpid()))
 				client, err := embedding.NewClient(socketPath)
 				if err != nil {
 					return fmt.Errorf("start embedding sidecar: %w", err)
