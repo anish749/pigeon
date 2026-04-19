@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 )
@@ -19,6 +20,7 @@ const (
 // under a single directory.
 type FS struct {
 	dir string
+	mu  sync.Mutex
 }
 
 // NewFS creates a file-backed store rooted at dir.
@@ -29,24 +31,51 @@ func NewFS(dir string) *FS {
 
 // --- Workstreams ---
 
-func (s *FS) LoadWorkstreams() (map[string]models.Workstream, error) {
+func (s *FS) GetWorkstream(id string) (models.Workstream, bool, error) {
+	all, err := s.loadWorkstreams()
+	if err != nil {
+		return models.Workstream{}, false, err
+	}
+	for _, ws := range all {
+		if ws.ID == id {
+			return ws, true, nil
+		}
+	}
+	return models.Workstream{}, false, nil
+}
+
+func (s *FS) ListWorkstreams() ([]models.Workstream, error) {
+	return s.loadWorkstreams()
+}
+
+func (s *FS) PutWorkstream(ws models.Workstream) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	all, err := s.loadWorkstreams()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i, existing := range all {
+		if existing.ID == ws.ID {
+			all[i] = ws
+			found = true
+			break
+		}
+	}
+	if !found {
+		all = append(all, ws)
+	}
+	return s.save(workstreamsFile, all)
+}
+
+func (s *FS) loadWorkstreams() ([]models.Workstream, error) {
 	var list []models.Workstream
 	if err := s.load(workstreamsFile, &list); err != nil {
 		return nil, err
 	}
-	m := make(map[string]models.Workstream, len(list))
-	for _, ws := range list {
-		m[ws.ID] = ws
-	}
-	return m, nil
-}
-
-func (s *FS) SaveWorkstreams(m map[string]models.Workstream) error {
-	list := make([]models.Workstream, 0, len(m))
-	for _, ws := range m {
-		list = append(list, ws)
-	}
-	return s.save(workstreamsFile, list)
+	return list, nil
 }
 
 // --- Affinities ---
@@ -54,47 +83,111 @@ func (s *FS) SaveWorkstreams(m map[string]models.Workstream) error {
 // affinityRecord is the on-disk representation of a single conversation's
 // affinity entries. ConversationKey can't be a JSON map key directly.
 type affinityRecord struct {
-	Key     models.ConversationKey  `json:"key"`
-	Entries []models.AffinityEntry  `json:"entries"`
+	Key     models.ConversationKey `json:"key"`
+	Entries []models.AffinityEntry `json:"entries"`
 }
 
-func (s *FS) LoadAffinities() (map[models.ConversationKey][]models.AffinityEntry, error) {
-	var records []affinityRecord
-	if err := s.load(affinitiesFile, &records); err != nil {
+func (s *FS) GetAffinities(key models.ConversationKey) ([]models.AffinityEntry, error) {
+	records, err := s.loadAffinities()
+	if err != nil {
 		return nil, err
 	}
-	m := make(map[models.ConversationKey][]models.AffinityEntry, len(records))
 	for _, r := range records {
-		m[r.Key] = r.Entries
+		if r.Key == key {
+			return r.Entries, nil
+		}
 	}
-	return m, nil
+	return nil, nil
 }
 
-func (s *FS) SaveAffinities(m map[models.ConversationKey][]models.AffinityEntry) error {
-	records := make([]affinityRecord, 0, len(m))
-	for key, entries := range m {
+func (s *FS) PutAffinities(key models.ConversationKey, entries []models.AffinityEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records, err := s.loadAffinities()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i, r := range records {
+		if r.Key == key {
+			records[i].Entries = entries
+			found = true
+			break
+		}
+	}
+	if !found {
 		records = append(records, affinityRecord{Key: key, Entries: entries})
 	}
 	return s.save(affinitiesFile, records)
 }
 
+func (s *FS) loadAffinities() ([]affinityRecord, error) {
+	var records []affinityRecord
+	if err := s.load(affinitiesFile, &records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 // --- Proposals ---
 
 type proposalFile struct {
-	Seq       int               `json:"seq"`
+	Seq       int                `json:"seq"`
 	Proposals []*models.Proposal `json:"proposals"`
 }
 
-func (s *FS) LoadProposals() ([]*models.Proposal, int, error) {
-	var pf proposalFile
-	if err := s.load(proposalsFile, &pf); err != nil {
-		return nil, 0, err
+func (s *FS) ListProposals() ([]*models.Proposal, error) {
+	pf, err := s.loadProposalFile()
+	if err != nil {
+		return nil, err
 	}
-	return pf.Proposals, pf.Seq, nil
+	return pf.Proposals, nil
 }
 
-func (s *FS) SaveProposals(proposals []*models.Proposal, seq int) error {
-	return s.save(proposalsFile, proposalFile{Seq: seq, Proposals: proposals})
+func (s *FS) PutProposal(p *models.Proposal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pf, err := s.loadProposalFile()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i, existing := range pf.Proposals {
+		if existing.ID == p.ID {
+			pf.Proposals[i] = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		pf.Proposals = append(pf.Proposals, p)
+	}
+	return s.save(proposalsFile, pf)
+}
+
+func (s *FS) NextProposalSeq() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pf, err := s.loadProposalFile()
+	if err != nil {
+		return 0, err
+	}
+	pf.Seq++
+	if err := s.save(proposalsFile, pf); err != nil {
+		return 0, err
+	}
+	return pf.Seq, nil
+}
+
+func (s *FS) loadProposalFile() (proposalFile, error) {
+	var pf proposalFile
+	if err := s.load(proposalsFile, &pf); err != nil {
+		return proposalFile{}, err
+	}
+	return pf, nil
 }
 
 // --- helpers ---

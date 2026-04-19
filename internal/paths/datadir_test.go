@@ -178,6 +178,24 @@ func TestIdentityDir_UsesConstants(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDir_Path(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	got := root.Workspace("acme").Path()
+	want := "/tmp/test/.workspaces/acme"
+	if got != want {
+		t.Errorf("Workspace().Path() = %q, want %q", got, want)
+	}
+}
+
+func TestWorkspaceDir_AffinityRouter(t *testing.T) {
+	root := NewDataRoot("/tmp/test")
+	got := root.Workspace("acme").AffinityRouter()
+	want := "/tmp/test/.workspaces/acme/affinityrouter"
+	if got != want {
+		t.Errorf("AffinityRouter() = %q, want %q", got, want)
+	}
+}
+
 func TestIsDateFile(t *testing.T) {
 	tests := []struct {
 		name string

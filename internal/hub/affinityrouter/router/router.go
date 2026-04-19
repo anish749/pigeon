@@ -8,7 +8,6 @@ package router
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -29,10 +28,9 @@ type Router struct {
 	store         store.Store
 	logger        *slog.Logger
 
-	// Internal state.
-	affinities  map[models.ConversationKey][]models.AffinityEntry              // conversation → workstream weights
-	detectors   map[models.ConversationKey]detector.ConversationShiftDetector   // per-conversation shift detectors
-	classifiers map[models.ConversationKey]classifier.WorkstreamClassifier      // per-conversation classifiers
+	// Ephemeral per-conversation state — not persisted.
+	detectors   map[models.ConversationKey]detector.ConversationShiftDetector
+	classifiers map[models.ConversationKey]classifier.WorkstreamClassifier
 
 	// Config.
 	workspace config.WorkspaceName
@@ -44,29 +42,16 @@ type Router struct {
 }
 
 // New creates a Router with the given shift detector and classifier factories.
-// If st is non-nil, affinities are loaded from it on creation and persisted
-// after each UpdateAffinity call.
-func New(detectorFactory detector.Factory, classifierFactory classifier.Factory, cfg models.Config, st store.Store, logger *slog.Logger) (*Router, error) {
-	affinities := make(map[models.ConversationKey][]models.AffinityEntry)
-	if st != nil {
-		loaded, err := st.LoadAffinities()
-		if err != nil {
-			return nil, fmt.Errorf("load affinities: %w", err)
-		}
-		if loaded != nil {
-			affinities = loaded
-		}
-	}
+func New(detectorFactory detector.Factory, classifierFactory classifier.Factory, cfg models.Config, st store.Store, logger *slog.Logger) *Router {
 	return &Router{
 		newDetector:   detectorFactory,
 		newClassifier: classifierFactory,
 		store:         st,
 		logger:        logger,
-		affinities:    affinities,
 		detectors:     make(map[models.ConversationKey]detector.ConversationShiftDetector),
 		classifiers:   make(map[models.ConversationKey]classifier.WorkstreamClassifier),
 		workspace:     cfg.Workspace.Name,
-	}, nil
+	}
 }
 
 // RouteResult bundles the routing decision with classification results.
@@ -115,7 +100,11 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 
 	// Fast path: conversation has affinity.
 	var affinityIDs []string
-	if entries, ok := r.affinities[key]; ok && len(entries) > 0 {
+	entries, err := r.store.GetAffinities(key)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) > 0 {
 		affinityIDs = make([]string, len(entries))
 		for i, e := range entries {
 			affinityIDs[i] = e.WorkstreamID
@@ -204,32 +193,24 @@ func (r *Router) Route(ctx context.Context, sig models.Signal, workstreams []mod
 // UpdateAffinity updates the conversation->workstream affinity weights.
 // Called by the orchestrator after recording a routing decision in the ledger.
 func (r *Router) UpdateAffinity(key models.ConversationKey, workstreamID string, ts time.Time) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	entries, err := r.store.GetAffinities(key)
+	if err != nil {
+		return err
+	}
 
-	entries := r.affinities[key]
 	for i, e := range entries {
 		if e.WorkstreamID == workstreamID {
 			entries[i].Strength++
 			entries[i].LastSignal = ts
-			r.affinities[key] = entries
-			return r.persistAffinities()
+			return r.store.PutAffinities(key, entries)
 		}
 	}
-	r.affinities[key] = append(entries, models.AffinityEntry{
+	entries = append(entries, models.AffinityEntry{
 		WorkstreamID: workstreamID,
 		Strength:     1,
 		LastSignal:   ts,
 	})
-	return r.persistAffinities()
-}
-
-// persistAffinities saves affinities to the store. Must be called with mu held.
-func (r *Router) persistAffinities() error {
-	if r.store == nil {
-		return nil
-	}
-	return r.store.SaveAffinities(r.affinities)
+	return r.store.PutAffinities(key, entries)
 }
 
 // Stats holds routing statistics.

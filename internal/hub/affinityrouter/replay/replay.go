@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/anish749/pigeon/internal/config"
@@ -106,17 +105,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	classifierFactory := classifier.NewBatchFactory(claude, logger)
 	sc := manager.NewStatCollector()
 
-	storeDir := filepath.Join(root.Path(), ".affinityrouter")
+	storeDir := root.Workspace(string(cfg.Workspace.Name)).AffinityRouter()
 	st := arstore.NewFS(storeDir)
 
-	rtr, err := router.New(detectorFactory, classifierFactory, cfg, st, logger)
-	if err != nil {
-		return nil, fmt.Errorf("create router: %w", err)
-	}
-	mgr, err := manager.New(claude, sc, cfg, st, logger)
-	if err != nil {
-		return nil, fmt.Errorf("create manager: %w", err)
-	}
+	rtr := router.New(detectorFactory, classifierFactory, cfg, st, logger)
+	mgr := manager.New(claude, sc, cfg, st, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).
 	wsName := cfg.Workspace.Name
@@ -126,7 +119,10 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 
 		// Route the signal.
-		active := mgr.ActiveWorkstreams(wsName)
+		active, err := mgr.ActiveWorkstreams(wsName)
+		if err != nil {
+			return nil, fmt.Errorf("list active workstreams: %w", err)
+		}
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
@@ -206,7 +202,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		Duration:     time.Since(startTime),
 	}
 
-	for _, p := range mgr.AllProposals() {
+	allProposals, err := mgr.AllProposals()
+	if err != nil {
+		return nil, fmt.Errorf("list proposals: %w", err)
+	}
+	for _, p := range allProposals {
 		report.ProposalsTotal++
 		switch p.State {
 		case models.ProposalApproved:
@@ -218,7 +218,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 	}
 
-	for _, ws := range mgr.AllWorkstreams() {
+	allWorkstreams, err := mgr.AllWorkstreams()
+	if err != nil {
+		return nil, fmt.Errorf("list workstreams: %w", err)
+	}
+	for _, ws := range allWorkstreams {
 		report.Workstreams = append(report.Workstreams, WorkstreamReport{
 			ID:           ws.ID,
 			Name:         ws.Name,

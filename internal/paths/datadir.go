@@ -71,6 +71,27 @@ func (r DataRoot) AccountFor(acct account.Account) AccountDir {
 	return AccountDir{platform: r.Platform(acct.Platform), slug: acct.NameSlug()}
 }
 
+// Workspace returns a WorkspaceDir for the given workspace name.
+func (r DataRoot) Workspace(name string) WorkspaceDir {
+	return WorkspaceDir{root: r, name: name}
+}
+
+// WorkspaceDir represents a workspace-scoped directory: <base>/.workspaces/<name>/
+type WorkspaceDir struct {
+	root DataRoot
+	name string
+}
+
+// Path returns the workspace directory path.
+func (w WorkspaceDir) Path() string {
+	return filepath.Join(w.root.base, ".workspaces", w.name)
+}
+
+// AffinityRouter returns the path to the affinity router store directory.
+func (w WorkspaceDir) AffinityRouter() string {
+	return filepath.Join(w.Path(), "affinityrouter")
+}
+
 // PlatformDir represents a platform directory: <base>/<platform>/
 type PlatformDir struct {
 	root     DataRoot
