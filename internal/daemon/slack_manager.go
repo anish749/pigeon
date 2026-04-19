@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
@@ -27,6 +28,7 @@ type SlackManager struct {
 	apiServer   *api.Server
 	onMessage   hub.MessageNotifyFunc
 	onReaction  hub.ReactionNotifyFunc
+	obHandler   *outbox.Handler
 	store       *store.FSStore
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -45,11 +47,12 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, obHandler *outbox.Handler, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
 	return &SlackManager{
 		apiServer:   apiServer,
 		onMessage:   onMessage,
 		onReaction:  onReaction,
+		obHandler:   obHandler,
 		store:       s,
 		idStore:     idStore,
 		dataRoot:    dataRoot,
@@ -161,7 +164,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 	if err != nil {
 		return fmt.Errorf("create message store for %s: %w", acct, err)
 	}
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.syncTracker)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.obHandler, m.syncTracker)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:    botAPI,
