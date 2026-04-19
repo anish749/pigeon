@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
 	"testing"
 	"time"
@@ -32,8 +31,7 @@ func TestBenchmarkDetectors(t *testing.T) {
 		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires local data and uv)")
 	}
 
-	socketPath := filepath.Join(paths.StateDir(), "embed-benchmark.sock")
-	client, err := embedding.NewClient(socketPath)
+	client, err := embedding.NewClient()
 	if err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}
@@ -174,8 +172,7 @@ func TestSidecarSmoke(t *testing.T) {
 		t.Skip("skipping: set PIGEON_BENCHMARK=1 to run (requires uv)")
 	}
 
-	socketPath := filepath.Join(paths.StateDir(), "embed-smoke.sock")
-	client, err := embedding.NewClient(socketPath)
+	client, err := embedding.NewClient()
 	if err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}

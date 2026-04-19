@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,7 +15,6 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/replay"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reporter"
-	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
@@ -80,8 +78,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 			case "burstgap":
 				factory = detector.NewBurstGapFactory(burstGap)
 			case "cosine":
-				socketPath := filepath.Join(paths.StateDir(), "embed.sock")
-				client, err := embedding.NewClient(socketPath)
+				client, err := embedding.NewClient()
 				if err != nil {
 					return fmt.Errorf("start embedding sidecar: %w", err)
 				}
