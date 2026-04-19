@@ -48,6 +48,20 @@ func (s *FS) ListWorkstreams() ([]models.Workstream, error) {
 	return s.loadWorkstreams()
 }
 
+func (s *FS) ActiveWorkstreams() ([]models.Workstream, error) {
+	all, err := s.loadWorkstreams()
+	if err != nil {
+		return nil, err
+	}
+	var active []models.Workstream
+	for _, ws := range all {
+		if ws.State == models.StateActive && !ws.IsDefault() {
+			active = append(active, ws)
+		}
+	}
+	return active, nil
+}
+
 func (s *FS) PutWorkstream(ws models.Workstream) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

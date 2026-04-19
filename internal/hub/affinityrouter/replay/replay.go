@@ -119,15 +119,9 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 
 		// Route the signal.
-		allWS, err := st.ListWorkstreams()
+		active, err := st.ActiveWorkstreams()
 		if err != nil {
-			return nil, fmt.Errorf("list workstreams: %w", err)
-		}
-		var active []models.Workstream
-		for _, w := range allWS {
-			if w.Workspace == wsName && w.State == models.StateActive && !w.IsDefault() {
-				active = append(active, w)
-			}
+			return nil, fmt.Errorf("list active workstreams: %w", err)
 		}
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
