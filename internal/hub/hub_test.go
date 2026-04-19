@@ -3,8 +3,12 @@ package hub
 import (
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 func TestConnectedClaudeSessions_Empty(t *testing.T) {
@@ -95,5 +99,95 @@ func TestConnectedClaudeSessions_SessionWithNoChannel(t *testing.T) {
 	}
 	if got[0].Account != "" {
 		t.Errorf("Account = %q, want empty for orphan session", got[0].Account)
+	}
+}
+
+func setupLookup(t *testing.T) (*Hub, *store.FSStore, account.Account) {
+	t.Helper()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+	h := &Hub{dataRoot: root}
+	return h, s, acct
+}
+
+func TestLookupMessage_DateFile(t *testing.T) {
+	h, s, acct := setupLookup(t)
+
+	msg := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
+			Sender: "Alice", SenderID: "U001", Text: "hello world",
+		},
+	}
+	if err := s.Append(acct, "#general", msg); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got := h.lookupMessage(acct, "#general", "1700000001.000001")
+	if got == nil {
+		t.Fatal("lookupMessage returned nil, want match")
+	}
+	if got.Sender != "Alice" {
+		t.Errorf("Sender = %q, want %q", got.Sender, "Alice")
+	}
+	if got.Text != "hello world" {
+		t.Errorf("Text = %q, want %q", got.Text, "hello world")
+	}
+}
+
+func TestLookupMessage_ThreadFile(t *testing.T) {
+	h, s, acct := setupLookup(t)
+
+	reply := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "1700000002.000002", Ts: time.Date(2026, 4, 19, 10, 5, 0, 0, time.UTC),
+			Sender: "Bob", SenderID: "U002", Text: "thread reply", Reply: true,
+		},
+	}
+	if err := s.AppendThread(acct, "#general", "1700000001.000001", reply); err != nil {
+		t.Fatalf("AppendThread: %v", err)
+	}
+
+	got := h.lookupMessage(acct, "#general", "1700000002.000002")
+	if got == nil {
+		t.Fatal("lookupMessage returned nil, want match")
+	}
+	if got.Sender != "Bob" {
+		t.Errorf("Sender = %q, want %q", got.Sender, "Bob")
+	}
+	if got.Text != "thread reply" {
+		t.Errorf("Text = %q, want %q", got.Text, "thread reply")
+	}
+}
+
+func TestLookupMessage_NotFound(t *testing.T) {
+	h, s, acct := setupLookup(t)
+
+	msg := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
+			Sender: "Alice", SenderID: "U001", Text: "hello",
+		},
+	}
+	if err := s.Append(acct, "#general", msg); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got := h.lookupMessage(acct, "#general", "9999999999.999999")
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+func TestLookupMessage_NoConversation(t *testing.T) {
+	h, _, acct := setupLookup(t)
+
+	got := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
 	}
 }

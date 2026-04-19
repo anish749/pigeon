@@ -409,3 +409,98 @@ func TestFormatDateFile_NilErrorNoWarning(t *testing.T) {
 		t.Errorf("lines = %d, want 1 (nil error should not add warning)", len(lines))
 	}
 }
+
+func TestFormatReactionNotification(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "sounds good",
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if len(lines) < 2 {
+		t.Fatalf("got %d lines, want at least 2", len(lines))
+	}
+	if !strings.Contains(lines[0], "Alice") || !strings.Contains(lines[0], ":thumbsup:") || !strings.Contains(lines[0], "Bob") {
+		t.Errorf("header = %q, want Alice reacted to Bob's message", lines[0])
+	}
+	if !strings.Contains(lines[0], "sounds good") {
+		t.Errorf("header = %q, want message text included", lines[0])
+	}
+	meta := lines[len(lines)-1]
+	if !strings.Contains(meta, "[reaction]") || !strings.Contains(meta, "[message_id:M1]") {
+		t.Errorf("meta = %q, want [reaction] and [message_id:M1]", meta)
+	}
+}
+
+func TestFormatReactionNotification_Remove(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "hello",
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if !strings.Contains(lines[0], "removed reaction") {
+		t.Errorf("header = %q, want 'removed reaction'", lines[0])
+	}
+}
+
+func TestFormatReactionNotification_WithRaw(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "hello",
+		Raw: map[string]any{"blocks": []any{"test"}},
+	}
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "eyes",
+	}
+
+	lines := FormatReactionNotification(msg, react, time.UTC)
+	if len(lines) < 3 {
+		t.Fatalf("got %d lines, want at least 3 (header + raw + meta)", len(lines))
+	}
+	if !strings.Contains(lines[1], "blocks") {
+		t.Errorf("raw line = %q, want blocks JSON", lines[1])
+	}
+}
+
+func TestFormatReactionFallbackNotification(t *testing.T) {
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
+	}
+
+	lines := FormatReactionFallbackNotification(react, time.UTC)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if !strings.Contains(lines[0], "Alice") || !strings.Contains(lines[0], ":thumbsup:") {
+		t.Errorf("header = %q, want Alice and emoji", lines[0])
+	}
+	if !strings.Contains(lines[0], "reacted with") {
+		t.Errorf("header = %q, want 'reacted with'", lines[0])
+	}
+	if !strings.Contains(lines[1], "[reaction]") || !strings.Contains(lines[1], "[message_id:M1]") {
+		t.Errorf("meta = %q, want [reaction] and [message_id:M1]", lines[1])
+	}
+}
+
+func TestFormatReactionFallbackNotification_Remove(t *testing.T) {
+	react := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
+	}
+
+	lines := FormatReactionFallbackNotification(react, time.UTC)
+	if !strings.Contains(lines[0], "removed reaction") {
+		t.Errorf("header = %q, want 'removed reaction'", lines[0])
+	}
+}

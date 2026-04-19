@@ -156,7 +156,7 @@ func DaemonRun(version string) error {
 	// Identity: per-service writers (owned by each manager, one per account)
 	// flush signals to <platform>/<account>/identity/people.jsonl. The shared
 	// reader merges all those files at read time for cross-source lookups.
-	msgHub, err := hub.New(ctx, store)
+	msgHub, err := hub.New(ctx, store, dataRoot)
 	if err != nil {
 		return fmt.Errorf("start hub: %w", err)
 	}

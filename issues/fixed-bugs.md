@@ -59,3 +59,7 @@ USLACKBOT is now filtered out before fetch, preventing the `channel_not_found` w
 ## ~~Slack: "all messages filtered" after sync fetch~~ — fixed in #228, #229
 
 Unified filter now checks blocks, attachments, and files (not just text) so bot/integration messages with non-text content are no longer incorrectly filtered. Store layer also persists blocks and attachments.
+
+## ~~Hub: reaction notifications lack context about the reacted message~~ — fixed in #265
+
+Reaction notifications now include the original message content. The hub looks up the reacted-to message via `read.Grep` (searching both date files and thread files) and formats it using `FormatReactionNotification`. Falls back to `FormatReactionFallbackNotification` when the message is not on disk.
