@@ -20,12 +20,12 @@ const (
 // RoutingLedger. State changes (focus update, dormancy) produce a new
 // Workstream value via the With* methods.
 type Workstream struct {
-	ID        string               // unique identifier
-	Name      string               // human-readable name
-	Workspace config.WorkspaceName // which workspace this belongs to
-	State     WorkstreamState      // active, dormant, resolved
-	Focus     string               // LLM-generated description, used for routing
-	Created   time.Time            // when this workstream was first created
+	ID        string               `json:"id"`
+	Name      string               `json:"name"`
+	Workspace config.WorkspaceName `json:"workspace"`
+	State     WorkstreamState      `json:"state"`
+	Focus     string               `json:"focus"`
+	Created   time.Time            `json:"created"`
 }
 
 // DefaultWorkstreamID returns the ID for a workspace's default workstream.

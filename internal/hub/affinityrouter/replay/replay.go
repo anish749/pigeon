@@ -16,6 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/router"
+	arstore "github.com/anish749/pigeon/internal/hub/affinityrouter/store"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 )
@@ -103,16 +104,25 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	claude := clients.New(cfg.Model, cfg.LLMCallTimeout, logger)
 	classifierFactory := classifier.NewBatchFactory(claude, logger)
 	sc := manager.NewStatCollector()
-	rtr := router.New(detectorFactory, classifierFactory, cfg, logger)
-	mgr := manager.New(claude, sc, cfg, logger)
+
+	storeDir := root.Workspace(string(cfg.Workspace.Name)).AffinityRouter()
+	st := arstore.NewFS(storeDir)
+
+	rtr := router.New(detectorFactory, classifierFactory, cfg, st, logger)
+	mgr := manager.New(claude, sc, cfg, st, logger)
 
 	// Replay: for each signal, route → observe (manager records + manages).
 	wsName := cfg.Workspace.Name
 	for i, sig := range signals {
-		mgr.EnsureDefaultWorkstream(wsName, sig.Ts)
+		if err := mgr.EnsureDefaultWorkstream(wsName, sig.Ts); err != nil {
+			return nil, fmt.Errorf("ensure default workstream: %w", err)
+		}
 
 		// Route the signal.
-		active := mgr.ActiveWorkstreams(wsName)
+		active, err := st.ActiveWorkstreams()
+		if err != nil {
+			return nil, fmt.Errorf("list active workstreams: %w", err)
+		}
 		result, err := rtr.Route(ctx, sig, active)
 		if err != nil {
 			logger.Warn("route failed", "error", err, "index", i)
@@ -165,16 +175,16 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 			Conversation: sig.Conversation,
 		}
 		for _, wsID := range result.Decision.WorkstreamIDs {
-			rtr.UpdateAffinity(key, wsID, sig.Ts)
+			if err := rtr.UpdateAffinity(key, wsID, sig.Ts); err != nil {
+				logger.Warn("update affinity failed", "error", err)
+			}
 		}
 
 		// Progress logging.
 		if (i+1)%1000 == 0 || i == len(signals)-1 {
-			mgrStats := mgr.Stats()
 			logger.Info("replay progress",
 				"signals", i+1,
 				"total", len(signals),
-				"workstreams", mgrStats.WorkstreamCount,
 			)
 		}
 	}
@@ -190,7 +200,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		Duration:     time.Since(startTime),
 	}
 
-	for _, p := range mgr.AllProposals() {
+	allProposals, err := st.ListProposals()
+	if err != nil {
+		return nil, fmt.Errorf("list proposals: %w", err)
+	}
+	for _, p := range allProposals {
 		report.ProposalsTotal++
 		switch p.State {
 		case models.ProposalApproved:
@@ -202,7 +216,11 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 		}
 	}
 
-	for _, ws := range mgr.AllWorkstreams() {
+	allWorkstreams, err := st.ListWorkstreams()
+	if err != nil {
+		return nil, fmt.Errorf("list workstreams: %w", err)
+	}
+	for _, ws := range allWorkstreams {
 		report.Workstreams = append(report.Workstreams, WorkstreamReport{
 			ID:           ws.ID,
 			Name:         ws.Name,
