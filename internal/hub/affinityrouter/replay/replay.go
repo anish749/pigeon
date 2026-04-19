@@ -123,41 +123,40 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 	disc := discovery.NewLLMDiscovery(claude, logger)
 	discovered, err := disc.Discover(ctx, signals)
 	if err != nil {
-		logger.Warn("discovery failed, continuing without initial workstreams", "error", err)
-	} else {
-		for _, dws := range discovered {
-			newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, nil)
-			if err != nil {
-				logger.Warn("failed to create discovered workstream", "name", dws.Name, "error", err)
-				continue
-			}
-			if newID == "" {
-				logger.Info("discovery workstream queued as proposal", "name", dws.Name)
-				continue
-			}
-			// Seed router affinities from discovered conversations.
-			// Find the account for each conversation by scanning signals.
-			convAccounts := make(map[string]account.Account)
-			for _, sig := range signals {
-				if _, ok := convAccounts[sig.Conversation]; !ok {
-					convAccounts[sig.Conversation] = sig.Account
-				}
-			}
-			for _, conv := range dws.Conversations {
-				acct, ok := convAccounts[conv]
-				if !ok {
-					continue
-				}
-				key := models.ConversationKey{
-					Account:      acct,
-					Conversation: conv,
-				}
-				if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
-					logger.Warn("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
-				}
-			}
-			logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
+		return nil, fmt.Errorf("cold-start discovery: %w", err)
+	}
+	for _, dws := range discovered {
+		newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
+		if err != nil {
+			logger.Warn("failed to create discovered workstream", "name", dws.Name, "error", err)
+			continue
 		}
+		if newID == "" {
+			logger.Info("discovery workstream queued as proposal", "name", dws.Name)
+			continue
+		}
+		// Seed router affinities from discovered conversations.
+		// Find the account for each conversation by scanning signals.
+		convAccounts := make(map[string]account.Account)
+		for _, sig := range signals {
+			if _, ok := convAccounts[sig.Conversation]; !ok {
+				convAccounts[sig.Conversation] = sig.Account
+			}
+		}
+		for _, conv := range dws.Conversations {
+			acct, ok := convAccounts[conv]
+			if !ok {
+				continue
+			}
+			key := models.ConversationKey{
+				Account:      acct,
+				Conversation: conv,
+			}
+			if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
+				logger.Warn("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
+			}
+		}
+		logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
 	}
 
 	// Replay: for each signal, route → observe (manager records + manages).
@@ -183,7 +182,7 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 				result.NewWorkstreamName,
 				result.NewWorkstreamFocus,
 				wsName,
-				[]models.Signal{sig},
+				sig.Ts,
 			)
 			if err != nil {
 				logger.Warn("propose new workstream failed", "error", err)

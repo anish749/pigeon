@@ -73,14 +73,7 @@ func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time)
 
 // ProposeNew queues a proposal to create a new workstream. In AutoApprove
 // mode, creates immediately. Returns the new workstream ID if created.
-func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.WorkspaceName, triggerSignals []models.Signal) (string, error) {
-	var proposedAt time.Time
-	if len(triggerSignals) > 0 {
-		proposedAt = triggerSignals[0].Ts
-	} else {
-		proposedAt = time.Now()
-	}
-
+func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.WorkspaceName, proposedAt time.Time) (string, error) {
 	proposal := &models.Proposal{
 		Type:           models.ProposalCreate,
 		SuggestedName:  name,
