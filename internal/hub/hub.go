@@ -519,20 +519,26 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		return
 	}
 
-	verb := "reacted with"
-	if r.Remove {
-		verb = "removed reaction"
+	react := modelv1.ReactLine{
+		Ts:       time.Now(),
+		MsgID:    r.MsgID,
+		Sender:   r.Sender,
+		SenderID: r.SenderID,
+		Emoji:    r.Emoji,
+		Remove:   r.Remove,
 	}
 
-	head := fmt.Sprintf("%s %s :%s:", r.Sender, verb, r.Emoji)
-	meta := fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji)
-
-	lines := []string{head, meta}
+	var lines []string
 	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
-		contextLines := modelv1.FormatMsgNotification(*msg, time.Local, nil)
-		lines = append(lines, "  reacted to:")
-		for _, cl := range contextLines {
-			lines = append(lines, "  "+cl)
+		lines = modelv1.FormatReactionNotification(*msg, react, time.Local)
+	} else {
+		verb := "reacted with"
+		if r.Remove {
+			verb = "removed reaction"
+		}
+		lines = []string{
+			fmt.Sprintf("%s %s :%s:", r.Sender, verb, r.Emoji),
+			fmt.Sprintf("  [reaction] [message_id:%s] [sender_id:%s] [emoji:%s]", r.MsgID, r.SenderID, r.Emoji),
 		}
 	}
 

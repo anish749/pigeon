@@ -50,7 +50,7 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
 // This function does not format reactions — it operates on MsgLine only.
-func FormatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
+func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -74,6 +74,30 @@ func FormatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 	return lines
 }
 
+// FormatReactionNotification formats a message with a single reaction for
+// Claude Code channel notifications. This does not include all reactions
+// associated with the message — only the specific reaction event being delivered.
+func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []string {
+	verb := "reacted with"
+	if r.Remove {
+		verb = "removed reaction"
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji))
+	lines = append(lines, fmt.Sprintf("%s: %s", displaySender(m.Sender, m.Via), m.Text))
+	lines = append(lines, formatRaw(m.Raw, "  ")...)
+
+	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+		m.Ts.In(loc).Format("15:04:05"), m.ID, r.SenderID, r.Emoji)
+	if r.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", r.Via)
+	}
+	lines = append(lines, meta)
+
+	return lines
+}
+
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
 // channel notifications. See formatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.
@@ -83,7 +107,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMet
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, FormatMsgNotification(m.MsgLine, loc, convMeta)...)
+		lines = append(lines, formatMsgNotification(m.MsgLine, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)
