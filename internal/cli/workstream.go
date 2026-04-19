@@ -98,7 +98,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&sinceStr, "since", "2026-01-18", "Start date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&sinceStr, "since", "", "Start date (YYYY-MM-DD, default: 30 days ago)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
 	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")

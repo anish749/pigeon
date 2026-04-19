@@ -150,7 +150,7 @@ func buildClassifyPrompt(acct account.Account, conversation string, signals []mo
 Your job: given a batch of recent messages from a single conversation, determine which workstream(s) they relate to.
 
 KEY CONCEPTS:
-- A WORKSTREAM is a sustained, coherent effort that spans days or weeks. Examples: "ES 7.17 Upgrade", "Image Upload Feature", "Meta Partnership". It is NOT a single message topic or a casual exchange.
+- A WORKSTREAM is a sustained, coherent effort that spans days or weeks. Examples: "Database Migration", "Mobile App Redesign", "Partner API Integration". It is NOT a single message topic or a casual exchange.
 - A CONVERSATION is a Slack channel, DM, group DM, email thread, etc. One conversation often maps to one workstream (e.g. a DM with a colleague about a specific project), but channels can contain multiple workstreams.
 - MULTI-ROUTING: One batch of messages can belong to multiple workstreams simultaneously. A deprecation notice, incident, or API change may affect several ongoing efforts. List ALL relevant workstream IDs when this happens.
 - Messages like "ok", "sounds good", "call?", lunch plans, or general coordination that don't relate to any specific effort should NOT be assigned to a workstream — return an empty "workstreams" array so they stay in the general stream.

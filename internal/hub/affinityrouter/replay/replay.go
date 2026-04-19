@@ -8,10 +8,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/classifier"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/clients"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/detector"
+	"github.com/anish749/pigeon/internal/hub/affinityrouter/discovery"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/manager"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/models"
 	"github.com/anish749/pigeon/internal/hub/affinityrouter/reader"
@@ -110,9 +112,55 @@ func Run(ctx context.Context, cfg Config, detectorFactory detector.Factory, logg
 
 	rtr := router.New(detectorFactory, classifierFactory, cfg, st, logger)
 	mgr := manager.New(claude, sc, cfg, st, logger)
+	wsName := cfg.Workspace.Name
+
+	// Cold-start discovery: analyze all signals in batch to find workstreams
+	// before starting incremental routing. This gives the classifier actual
+	// workstreams to compare against from the very first signal.
+	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
+		return nil, fmt.Errorf("ensure default workstream: %w", err)
+	}
+	disc := discovery.NewLLMDiscovery(claude, logger)
+	discovered, err := disc.Discover(ctx, signals)
+	if err != nil {
+		logger.Warn("discovery failed, continuing without initial workstreams", "error", err)
+	} else {
+		for _, dws := range discovered {
+			newID, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, nil)
+			if err != nil {
+				logger.Warn("failed to create discovered workstream", "name", dws.Name, "error", err)
+				continue
+			}
+			if newID == "" {
+				logger.Info("discovery workstream queued as proposal", "name", dws.Name)
+				continue
+			}
+			// Seed router affinities from discovered conversations.
+			// Find the account for each conversation by scanning signals.
+			convAccounts := make(map[string]account.Account)
+			for _, sig := range signals {
+				if _, ok := convAccounts[sig.Conversation]; !ok {
+					convAccounts[sig.Conversation] = sig.Account
+				}
+			}
+			for _, conv := range dws.Conversations {
+				acct, ok := convAccounts[conv]
+				if !ok {
+					continue
+				}
+				key := models.ConversationKey{
+					Account:      acct,
+					Conversation: conv,
+				}
+				if err := rtr.UpdateAffinity(key, newID, signals[0].Ts); err != nil {
+					logger.Warn("failed to seed affinity", "conversation", conv, "workstream", newID, "error", err)
+				}
+			}
+			logger.Info("seeded workstream from discovery", "name", dws.Name, "id", newID, "conversations", dws.Conversations)
+		}
+	}
 
 	// Replay: for each signal, route → observe (manager records + manages).
-	wsName := cfg.Workspace.Name
 	for i, sig := range signals {
 		if err := mgr.EnsureDefaultWorkstream(wsName, sig.Ts); err != nil {
 			return nil, fmt.Errorf("ensure default workstream: %w", err)
