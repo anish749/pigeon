@@ -75,7 +75,8 @@ func (r SendRequest) Target() string {
 // in the outbox and deserialized by the review TUI.
 type ResolvedSendRequest struct {
 	SendRequest
-	ResolvedSlack *ResolvedSlackTarget `json:"resolved_slack,omitempty"`
+	ResolvedSlack   *ResolvedSlackTarget `json:"resolved_slack,omitempty"`
+	ResolvedMessage string               `json:"resolved_message,omitempty"`
 }
 
 // ResolvedTarget returns the human-readable label for the resolved send

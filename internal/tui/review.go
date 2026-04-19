@@ -238,7 +238,11 @@ func (m model) renderDetail(item *outbox.Item) string {
 	if maxWidth < 40 {
 		maxWidth = 40
 	}
-	box := msgStyle.Width(maxWidth).Render(req.Message)
+	msg := resolved.ResolvedMessage
+	if msg == "" {
+		msg = req.Message
+	}
+	box := msgStyle.Width(maxWidth).Render(msg)
 	for _, line := range strings.Split(box, "\n") {
 		b.WriteString("  " + line + "\n")
 	}
@@ -338,7 +342,10 @@ func itemSummary(item *outbox.Item) string {
 		return "(unknown)"
 	}
 	req := resolved.SendRequest
-	msg := req.Message
+	msg := resolved.ResolvedMessage
+	if msg == "" {
+		msg = req.Message
+	}
 	if len(msg) > 60 {
 		msg = msg[:57] + "..."
 	}

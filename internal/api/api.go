@@ -212,17 +212,20 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		req.Via = modelv1.ViaPigeonAsBot
 	}
 
-	// Undo shell escaping: zsh (and bash with histexpand) escape "!" to "\!"
-	// in interactive sessions, so messages composed via CLI often contain
-	// literal backslash-bang that wasn't intended.
-	req.Message = strings.ReplaceAll(req.Message, `\!`, "!")
-
 	if err := s.checkMPDMBotAccess(r.Context(), req); err != nil {
 		writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
 		return
 	}
 
-	// Resolve target display names so the outbox/TUI has human-readable info.
+	// Resolve message and target so the outbox/TUI has the final text and
+	// human-readable destination names.
+	var resolvedMessage string
+	if req.Platform == "slack" {
+		resolvedMessage = ResolveSlackMessage(req.Message)
+	} else {
+		resolvedMessage = req.Message
+	}
+
 	var resolvedSlack *ResolvedSlackTarget
 	if req.Platform == "slack" && req.Slack != nil {
 		acct := account.New(req.Platform, req.Account)
@@ -240,7 +243,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resolved := ResolvedSendRequest{SendRequest: req, ResolvedSlack: resolvedSlack}
+	resolved := ResolvedSendRequest{SendRequest: req, ResolvedSlack: resolvedSlack, ResolvedMessage: resolvedMessage}
 
 	// All real sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
@@ -367,20 +370,20 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req Resolv
 		}
 	}
 
-	// Resolve @mentions in the message text to Slack's <@USER_ID> format.
-	req.Message = sender.Resolver.ResolveMentions(req.Message)
+	// Resolve @mentions in the resolved message text to Slack's <@USER_ID> format.
+	message := sender.Resolver.ResolveMentions(req.ResolvedMessage)
 
 	// Build message options.
 	// Text is always set as the notification/fallback, even when blocks are
 	// present. The message is mrkdwn-formatted; escape=false preserves it.
-	opts := []goslack.MsgOption{goslack.MsgOptionText(req.Message, false)}
+	opts := []goslack.MsgOption{goslack.MsgOptionText(message, false)}
 
 	if req.Via == modelv1.ViaPigeonAsUser {
 		// Wrap user-token messages in Block Kit so recipients can
 		// distinguish automated sends from the human typing directly.
 		opts = append(opts, goslack.MsgOptionBlocks(
 			goslack.NewSectionBlock(
-				goslack.NewTextBlockObject("mrkdwn", req.Message, false, false),
+				goslack.NewTextBlockObject("mrkdwn", message, false, false),
 				nil, nil,
 			),
 			goslack.NewContextBlock("",
