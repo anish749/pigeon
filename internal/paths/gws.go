@@ -148,6 +148,26 @@ func (g GmailDir) PendingDeletesPath() string {
 	return filepath.Join(g.Path(), pendingDeletesFile)
 }
 
+// CalendarIDs returns the calendar ID subdirectories under gcalendar/.
+// Returns nil without error if the gcalendar directory does not exist.
+func (a AccountDir) CalendarIDs() ([]string, error) {
+	dir := filepath.Join(a.Path(), GcalendarSubdir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list calendar IDs: %w", err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
 // CalendarDir represents a calendar directory: <account>/gcalendar/<calID>/
 type CalendarDir struct {
 	account AccountDir

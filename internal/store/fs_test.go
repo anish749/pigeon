@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 func setup(t *testing.T) (*FSStore, account.Account) {
@@ -1503,5 +1505,132 @@ func TestListGWSServices_Empty(t *testing.T) {
 	}
 	if len(infos) != 0 {
 		t.Errorf("got %d services, want 0", len(infos))
+	}
+}
+
+// makeCalEvent creates a CalendarEvent with both Runtime and Serialized
+// populated so it round-trips through Marshal/Parse.
+func makeCalEvent(id, startDate, endDate, updated string) modelv1.Line {
+	ev := &calendar.Event{
+		Id:      id,
+		Summary: "event " + id,
+		Start:   &calendar.EventDateTime{Date: startDate},
+		Updated: updated,
+	}
+	if endDate != "" {
+		ev.End = &calendar.EventDateTime{Date: endDate}
+	}
+	// Build Serialized from the Runtime so Marshal works.
+	raw, _ := json.Marshal(ev)
+	var serialized map[string]any
+	json.Unmarshal(raw, &serialized)
+	return modelv1.Line{
+		Type: modelv1.LineEvent,
+		Event: &modelv1.CalendarEvent{
+			Runtime:    *ev,
+			Serialized: serialized,
+		},
+	}
+}
+
+func TestReshuffleCalendar_StaleAfterDateMove(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "test@example.com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// Event was on April 7, then moved to April 10.
+	old := makeCalEvent("evt-1", "2026-04-07", "2026-04-08", "2026-04-05T10:00:00Z")
+	updated := makeCalEvent("evt-1", "2026-04-10", "2026-04-11", "2026-04-06T10:00:00Z")
+
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), old); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(calDir.DateFile("2026-04-10"), updated); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// April 7 file should be gone (stale copy removed, no other content).
+	if _, err := os.Stat(string(calDir.DateFile("2026-04-07"))); !os.IsNotExist(err) {
+		t.Error("2026-04-07 file should be removed after reshuffle")
+	}
+
+	// April 10 file should still have the event.
+	data, err := os.ReadFile(string(calDir.DateFile("2026-04-10")))
+	if err != nil {
+		t.Fatalf("read 2026-04-10: %v", err)
+	}
+	if !strings.Contains(string(data), "evt-1") {
+		t.Error("2026-04-10 should contain evt-1")
+	}
+}
+
+func TestReshuffleCalendar_MultiDayShrunk(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "test@example.com")
+	calDir := root.AccountFor(acct).Calendar("primary")
+
+	// Event was 3 days (April 7-9), then shortened to 1 day (April 7 only).
+	oldVersion := makeCalEvent("evt-2", "2026-04-07", "2026-04-10", "2026-04-05T10:00:00Z")
+	newVersion := makeCalEvent("evt-2", "2026-04-07", "2026-04-08", "2026-04-06T10:00:00Z")
+
+	// Old version was expanded to 3 files.
+	for _, date := range []string{"2026-04-07", "2026-04-08", "2026-04-09"} {
+		if err := s.AppendLine(calDir.DateFile(date), oldVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// New version written to April 7 only (overwritten by poller).
+	if err := s.AppendLine(calDir.DateFile("2026-04-07"), newVersion); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	// April 8 and 9 should be gone.
+	for _, date := range []string{"2026-04-08", "2026-04-09"} {
+		if _, err := os.Stat(string(calDir.DateFile(date))); !os.IsNotExist(err) {
+			t.Errorf("%s file should be removed after reshuffle", date)
+		}
+	}
+
+	// April 7 should have exactly one copy of evt-2.
+	data, err := os.ReadFile(string(calDir.DateFile("2026-04-07")))
+	if err != nil {
+		t.Fatalf("read 2026-04-07: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	count := 0
+	for _, l := range lines {
+		if strings.Contains(l, "evt-2") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("2026-04-07 should have 1 copy of evt-2, got %d", count)
+	}
+}
+
+func TestReshuffleCalendar_NoCalendarDir(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("gws", "test@example.com")
+
+	// Create the account dir so Maintain can read the maintenance state,
+	// but don't create a gcalendar subdirectory.
+	if err := os.MkdirAll(root.AccountFor(acct).Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// No calendar dir exists — should be a no-op.
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
 	}
 }
