@@ -18,6 +18,7 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/logging"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store"
@@ -161,8 +162,9 @@ func DaemonRun(version string) error {
 	}
 	defer msgHub.Stop()
 
+	ob := outbox.New()
 	tracker := syncstatus.NewTracker()
-	apiServer := api.NewServer(msgHub, store, version, tracker)
+	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.Route, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
