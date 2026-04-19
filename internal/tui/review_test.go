@@ -34,9 +34,10 @@ func TestSendIdentity(t *testing.T) {
 
 func TestItemSummary(t *testing.T) {
 	tests := []struct {
-		name string
-		req  api.SendRequest
-		want string
+		name          string
+		req           api.SendRequest
+		displayTarget string // simulates daemon-resolved name
+		want          string
 	}{
 		{
 			name: "slack as bot shows from",
@@ -47,6 +48,12 @@ func TestItemSummary(t *testing.T) {
 			name: "slack as user shows from",
 			req:  api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{UserID: "U123"}, Message: "hello", Via: modelv1.ViaPigeonAsUser},
 			want: "slack → U123 (from user): hello",
+		},
+		{
+			name:          "slack user with resolved name",
+			req:           api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{UserID: "U123"}, Message: "hello", Via: modelv1.ViaPigeonAsBot},
+			displayTarget: "Alice",
+			want:          "slack → Alice (from pigeon): hello",
 		},
 		{
 			name: "slack empty via defaults to bot",
@@ -61,7 +68,7 @@ func TestItemSummary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			item := itemFromReq(t, tt.req)
+			item := listItemFromReq(t, tt.req, tt.displayTarget)
 			if got := itemSummary(item); got != tt.want {
 				t.Fatalf("itemSummary() = %q, want %q", got, tt.want)
 			}
@@ -72,7 +79,7 @@ func TestItemSummary(t *testing.T) {
 func TestItemSummaryTruncatesLongMessage(t *testing.T) {
 	longMsg := strings.Repeat("a", 100)
 	req := api.SendRequest{Platform: "slack", Slack: &api.SlackTarget{Channel: "#eng"}, Message: longMsg, Via: modelv1.ViaPigeonAsBot}
-	got := itemSummary(itemFromReq(t, req))
+	got := itemSummary(listItemFromReq(t, req, ""))
 	want := "slack → #eng (from pigeon): " + strings.Repeat("a", 57) + "..."
 	if got != want {
 		t.Fatalf("itemSummary() = %q, want %q", got, want)
@@ -80,17 +87,20 @@ func TestItemSummaryTruncatesLongMessage(t *testing.T) {
 }
 
 func TestItemSummaryUnparseablePayload(t *testing.T) {
-	item := &outbox.Item{Payload: []byte("not json")}
+	item := api.OutboxListItem{Item: &outbox.Item{Payload: []byte("not json")}}
 	if got := itemSummary(item); got != "(unknown)" {
 		t.Fatalf("itemSummary() = %q, want %q", got, "(unknown)")
 	}
 }
 
-func itemFromReq(t *testing.T, req api.SendRequest) *outbox.Item {
+func listItemFromReq(t *testing.T, req api.SendRequest, displayTarget string) api.OutboxListItem {
 	t.Helper()
 	payload, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	return &outbox.Item{Payload: payload}
+	return api.OutboxListItem{
+		Item:          &outbox.Item{Payload: payload},
+		DisplayTarget: displayTarget,
+	}
 }

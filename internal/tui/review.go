@@ -44,7 +44,7 @@ const (
 )
 
 type model struct {
-	items    []*outbox.Item
+	items    []api.OutboxListItem
 	cursor   int
 	mode     mode
 	feedback string
@@ -56,7 +56,7 @@ type model struct {
 
 // Bubble Tea messages
 type (
-	itemsMsg       []*outbox.Item
+	itemsMsg       []api.OutboxListItem
 	actionDoneMsg  struct{ detail string }
 	actionFailMsg  struct{ detail string }
 	clearStatusMsg struct{}
@@ -77,7 +77,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case itemsMsg:
-		m.items = []*outbox.Item(msg)
+		m.items = []api.OutboxListItem(msg)
 		m.err = nil
 		if m.cursor >= len(m.items) {
 			m.cursor = max(0, len(m.items)-1)
@@ -218,14 +218,18 @@ func (m model) View() string {
 	return b.String()
 }
 
-func (m model) renderDetail(item *outbox.Item) string {
+func (m model) renderDetail(item api.OutboxListItem) string {
 	var req api.SendRequest
 	if err := json.Unmarshal(item.Payload, &req); err != nil {
 		return "  " + dimStyle.Render("(cannot parse payload)")
 	}
 
+	target := item.DisplayTarget
+	if target == "" {
+		target = req.Target()
+	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  To: %s\n", req.Target()))
+	b.WriteString(fmt.Sprintf("  To: %s\n", target))
 	b.WriteString(fmt.Sprintf("  On: %s / %s\n", req.Platform, req.Account))
 	b.WriteString(fmt.Sprintf("  From: %s\n", sendIdentity(req)))
 	if req.Thread != "" {
@@ -302,13 +306,13 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 
 // --- HTTP helpers ---
 
-func doGet() ([]*outbox.Item, error) {
+func doGet() ([]api.OutboxListItem, error) {
 	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/outbox")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	var items []*outbox.Item
+	var items []api.OutboxListItem
 	json.NewDecoder(resp.Body).Decode(&items)
 	return items, nil
 }
@@ -330,11 +334,15 @@ func doPost(url string, body []byte) (map[string]any, error) {
 	return result, nil
 }
 
-// itemSummary derives a one-line display string from the outbox item's payload.
-func itemSummary(item *outbox.Item) string {
+// itemSummary derives a one-line display string from the outbox item.
+func itemSummary(item api.OutboxListItem) string {
 	var req api.SendRequest
 	if err := json.Unmarshal(item.Payload, &req); err != nil {
 		return "(unknown)"
+	}
+	target := item.DisplayTarget
+	if target == "" {
+		target = req.Target()
 	}
 	msg := req.Message
 	if len(msg) > 60 {
@@ -343,9 +351,9 @@ func itemSummary(item *outbox.Item) string {
 	// Slack can send as either bot or user, so call out the identity.
 	// WhatsApp always sends as the user — no need to clutter the line.
 	if req.Platform == "slack" {
-		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, req.Target(), sendIdentity(req), msg)
+		return fmt.Sprintf("%s → %s (from %s): %s", req.Platform, target, sendIdentity(req), msg)
 	}
-	return fmt.Sprintf("%s → %s: %s", req.Platform, req.Target(), msg)
+	return fmt.Sprintf("%s → %s: %s", req.Platform, target, msg)
 }
 
 // sendIdentity returns "user" or "pigeon" — the sender identity for an

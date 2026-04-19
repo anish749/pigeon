@@ -58,6 +58,27 @@ func TestSlackTargetDisplay(t *testing.T) {
 	}
 }
 
+func TestSlackTargetDisplayWithName(t *testing.T) {
+	tests := []struct {
+		name         string
+		target       SlackTarget
+		resolvedName string
+		want         string
+	}{
+		{name: "user with name", target: SlackTarget{UserID: "U123"}, resolvedName: "Alice", want: "Alice (U123)"},
+		{name: "channel with name", target: SlackTarget{Channel: "#eng"}, resolvedName: "engineering", want: "engineering"},
+		{name: "user no name falls back", target: SlackTarget{UserID: "U123"}, resolvedName: "", want: "U123"},
+		{name: "channel no name falls back", target: SlackTarget{Channel: "#eng"}, resolvedName: "", want: "#eng"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.target.DisplayWithName(tt.resolvedName); got != tt.want {
+				t.Fatalf("DisplayWithName(%q) = %q, want %q", tt.resolvedName, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateTarget(t *testing.T) {
 	tests := []struct {
 		name     string

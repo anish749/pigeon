@@ -128,7 +128,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("POST /api/react", s.handleReact)
 	mux.HandleFunc("POST /api/delete", s.handleDeleteMsg)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
-	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
+	mux.HandleFunc("GET /api/outbox", s.handleOutboxList(obHandler))
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
@@ -178,12 +178,25 @@ func (t SlackTarget) Validate() error {
 	return nil
 }
 
-// Display returns a human-readable label for the target.
+// Display returns the raw target identifier (user ID or channel name).
 func (t SlackTarget) Display() string {
 	if t.UserID != "" {
 		return t.UserID
 	}
 	return t.Channel
+}
+
+// DisplayWithName returns a human-readable label. If resolvedName is
+// non-empty, it returns "name (ID)" for user targets or just the name
+// for channels. Falls back to Display() when no name is available.
+func (t SlackTarget) DisplayWithName(resolvedName string) string {
+	if resolvedName == "" {
+		return t.Display()
+	}
+	if t.UserID != "" {
+		return fmt.Sprintf("%s (%s)", resolvedName, t.UserID)
+	}
+	return resolvedName
 }
 
 // SendRequest is the daemon API payload for /api/send.
@@ -636,6 +649,65 @@ func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error 
 		return fmt.Errorf("bot is not a member of this group DM — use --via pigeon-as-user to send as yourself")
 	}
 	return nil
+}
+
+// OutboxListItem wraps an outbox item with display metadata resolved by the
+// daemon. The Payload is the original SendRequest JSON; DisplayTarget is the
+// human-readable recipient name resolved from the Slack resolver.
+type OutboxListItem struct {
+	*outbox.Item
+	DisplayTarget string `json:"display_target,omitempty"`
+}
+
+// handleOutboxList wraps the outbox handler's list endpoint to enrich each
+// item with a resolved display name. The outbox package stores raw JSON
+// payloads and has no access to platform resolvers — the API server does.
+func (s *Server) handleOutboxList(ob *outbox.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		items := s.outbox.List()
+		if items == nil {
+			items = []*outbox.Item{}
+		}
+		enriched := make([]OutboxListItem, len(items))
+		for i, item := range items {
+			enriched[i] = OutboxListItem{Item: item, DisplayTarget: s.resolveOutboxTarget(r.Context(), item)}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(enriched)
+	}
+}
+
+// resolveOutboxTarget extracts the send target from an outbox item's payload
+// and resolves it to a human-readable name. Best-effort — returns empty
+// string if parsing or resolution fails.
+func (s *Server) resolveOutboxTarget(ctx context.Context, item *outbox.Item) string {
+	var req SendRequest
+	if err := json.Unmarshal(item.Payload, &req); err != nil {
+		return ""
+	}
+	if req.Slack == nil {
+		return "" // WhatsApp uses Contact which is already a name
+	}
+	s.mu.RLock()
+	sender := s.slack[req.Account]
+	s.mu.RUnlock()
+	if sender == nil {
+		return ""
+	}
+	switch {
+	case req.Slack.UserID != "":
+		name, err := sender.Resolver.UserName(ctx, req.Slack.UserID)
+		if err == nil {
+			return name
+		}
+	case req.Slack.Channel != "":
+		_, name, err := sender.Resolver.FindChannelID(ctx, req.Slack.Channel)
+		if err == nil && name != req.Slack.Channel {
+			return name
+		}
+	}
+	return ""
 }
 
 // resolveSlackTarget resolves a SlackTarget to a channel ID and display name.
