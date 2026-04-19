@@ -413,7 +413,7 @@ func (s *FSStore) LookupMessage(acct account.Account, conversation, msgID string
 		return nil, fmt.Errorf("stat conversation dir: %w", err)
 	}
 
-	out, err := exec.Command("rg", "--color=never", "-F", "-C0",
+	out, err := exec.Command("rg", "--color=never", "--no-filename", "-F", "-C0",
 		"--glob", "*"+paths.FileExt, msgID, dir).Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -422,19 +422,14 @@ func (s *FSStore) LookupMessage(acct account.Account, conversation, msgID string
 		return nil, fmt.Errorf("rg lookup: %w", err)
 	}
 
-	// rg output is "filepath:json_line\n" — parse each matching line looking
-	// for a msg event whose ID matches exactly.
-	for _, rawLine := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if rawLine == "" {
-			continue
-		}
-		// Strip the filepath prefix (everything up to and including the first ':').
-		_, jsonLine, ok := strings.Cut(rawLine, ":")
-		if !ok {
+	// Each output line is a raw JSONL object — parse looking for a msg
+	// event whose ID matches exactly.
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
 			continue
 		}
 
-		parsed, err := modelv1.Parse(jsonLine)
+		parsed, err := modelv1.Parse(line)
 		if err != nil {
 			continue
 		}
