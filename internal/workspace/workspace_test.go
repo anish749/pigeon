@@ -179,3 +179,69 @@ func TestGetCurrentWorkspace_NoAccountsConfigured(t *testing.T) {
 		t.Errorf("got %d accounts, want 0", len(ws.Accounts))
 	}
 }
+
+func TestContains(t *testing.T) {
+	ws := &Workspace{
+		Name: "work",
+		Accounts: []account.Account{
+			account.New("slack", "acme-corp"),
+			account.New("gws", "work@co.com"),
+		},
+	}
+
+	tests := []struct {
+		acct account.Account
+		want bool
+	}{
+		{account.New("slack", "acme-corp"), true},
+		{account.New("gws", "work@co.com"), true},
+		{account.New("slack", "other-corp"), false},
+		{account.New("whatsapp", "acme-corp"), false},
+	}
+	for _, tt := range tests {
+		got := ws.Contains(tt.acct)
+		if got != tt.want {
+			t.Errorf("Contains(%v) = %v, want %v", tt.acct, got, tt.want)
+		}
+	}
+}
+
+func TestAccountsForPlatform(t *testing.T) {
+	ws := &Workspace{
+		Name: "work",
+		Accounts: []account.Account{
+			account.New("slack", "acme-corp"),
+			account.New("slack", "side-project"),
+			account.New("gws", "work@co.com"),
+			account.New("whatsapp", "+15551234567"),
+		},
+	}
+
+	t.Run("filter slack", func(t *testing.T) {
+		got := ws.AccountsForPlatform("slack")
+		if len(got) != 2 {
+			t.Fatalf("got %d, want 2", len(got))
+		}
+	})
+
+	t.Run("filter gws", func(t *testing.T) {
+		got := ws.AccountsForPlatform("gws")
+		if len(got) != 1 {
+			t.Fatalf("got %d, want 1", len(got))
+		}
+	})
+
+	t.Run("filter missing platform", func(t *testing.T) {
+		got := ws.AccountsForPlatform("linear-issues")
+		if len(got) != 0 {
+			t.Fatalf("got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("empty string returns all", func(t *testing.T) {
+		got := ws.AccountsForPlatform("")
+		if len(got) != 4 {
+			t.Fatalf("got %d, want 4", len(got))
+		}
+	})
+}

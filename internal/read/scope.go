@@ -15,11 +15,14 @@ import (
 // within the workspace but cannot escape it. An explicit account that is not
 // in the workspace is rejected.
 //
-// With no active workspace (ws == nil), falls back to paths.SearchDir.
+// With no active workspace (ws == nil), returns a single directory based on
+// the platform/account filters: account dir, platform dir, or data root.
 func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string, error) {
+	root := paths.DefaultDataRoot()
+
 	// No workspace — fall back to single-directory behavior.
 	if ws == nil {
-		return []string{paths.SearchDir(platform, accountName)}, nil
+		return []string{searchDir(root, platform, accountName)}, nil
 	}
 
 	// Explicit account — validate it's in the workspace.
@@ -28,7 +31,7 @@ func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string
 		if !ws.Contains(acct) {
 			return nil, fmt.Errorf("account %s is not in workspace %q", acct.Display(), ws.Name)
 		}
-		return []string{paths.SearchDir(platform, accountName)}, nil
+		return []string{root.AccountFor(acct).Path()}, nil
 	}
 
 	accounts := ws.AccountsForPlatform(platform)
@@ -39,10 +42,22 @@ func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string
 		return nil, fmt.Errorf("workspace %q has no accounts", ws.Name)
 	}
 
-	root := paths.DefaultDataRoot()
 	dirs := make([]string, len(accounts))
 	for i, acct := range accounts {
 		dirs[i] = root.AccountFor(acct).Path()
 	}
 	return dirs, nil
+}
+
+// searchDir returns a single data directory scoped by optional platform and
+// account filters.
+func searchDir(root paths.DataRoot, platform, accountName string) string {
+	switch {
+	case platform != "" && accountName != "":
+		return root.AccountFor(account.New(platform, accountName)).Path()
+	case platform != "":
+		return root.Platform(platform).Path()
+	default:
+		return root.Path()
+	}
 }
