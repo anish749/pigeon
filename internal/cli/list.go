@@ -76,7 +76,11 @@ func runListSince(cmd *cobra.Command, platform, account, since string) error {
 		return fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
 
-	dirs, err := resolveSearchDirs(cmd, platform, account)
+	ws, err := currentWorkspace(cmd)
+	if err != nil {
+		return err
+	}
+	dirs, err := read.SearchDirs(ws, platform, account)
 	if err != nil {
 		return err
 	}

@@ -48,7 +48,11 @@ Output is one file path per line, suitable for piping to other tools.`,
 				return fmt.Errorf("get since flag: %w", err)
 			}
 
-			dirs, err := resolveSearchDirs(cmd, platform, account)
+			ws, err := currentWorkspace(cmd)
+			if err != nil {
+				return err
+			}
+			dirs, err := read.SearchDirs(ws, platform, account)
 			if err != nil {
 				return err
 			}

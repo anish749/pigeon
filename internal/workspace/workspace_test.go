@@ -136,7 +136,7 @@ func TestGetCurrentWorkspace_IncludesLinear(t *testing.T) {
 	}
 	want := []account.Account{
 		account.New("slack", "acme-corp"),
-		account.New("linear", "eng"),
+		account.New("linear-issues", "eng"),
 	}
 	if len(ws.Accounts) != len(want) {
 		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
