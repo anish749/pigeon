@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -97,9 +98,13 @@ func runListSince(platform, account, since string) error {
 	now := time.Now()
 	for _, c := range convs {
 		switch {
-		case c.LatestDate != "":
-			t, _ := time.Parse("2006-01-02", c.LatestDate)
-			fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(t)))
+		case c.LatestDateFile != "":
+			info, err := os.Stat(c.LatestDateFile)
+			if err == nil {
+				fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(info.ModTime())))
+			} else {
+				fmt.Printf("%s  active\n", c.Display)
+			}
 		default:
 			fmt.Printf("%s  active\n", c.Display)
 		}
@@ -110,9 +115,10 @@ func runListSince(platform, account, since string) error {
 
 // activeConv represents a conversation discovered from file paths.
 type activeConv struct {
-	Display    string // platform/account/conversation
-	Dir        string // absolute conversation directory
-	LatestDate string // most recent YYYY-MM-DD from date filenames, empty for thread-only
+	Display        string // platform/account/conversation
+	Dir            string // absolute conversation directory
+	LatestDate     string // most recent YYYY-MM-DD from date filenames, empty for thread-only
+	LatestDateFile string // absolute path to the most recent date file (for mtime)
 }
 
 // extractConversations deduplicates file paths into unique conversations,
@@ -159,6 +165,7 @@ func extractConversations(files []string, root string) []activeConv {
 			dateStr := strings.TrimSuffix(parts[3], paths.FileExt)
 			if dateStr > c.LatestDate {
 				c.LatestDate = dateStr
+				c.LatestDateFile = f
 			}
 		}
 	}
