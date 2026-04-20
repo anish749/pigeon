@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/selfupdate"
+	"github.com/anish749/pigeon/internal/workspace"
 )
 
 // Command group IDs for categorized help output.
@@ -23,6 +24,10 @@ const (
 	groupSlack       = "slack"
 	groupMaintenance = "maintenance"
 )
+
+// activeWorkspace holds the resolved workspace for this CLI invocation.
+// Set in root's PersistentPreRunE; nil when no workspace is active.
+var activeWorkspace *workspace.Workspace
 
 // ensureDaemon is a PreRunE hook for commands that benefit from the daemon running.
 func ensureDaemon(cmd *cobra.Command, args []string) error {
@@ -268,6 +273,15 @@ MAINTENANCE
 			if _, err := exec.LookPath("rg"); err != nil {
 				return fmt.Errorf("ripgrep (rg) is required but not found on PATH — install it: https://github.com/BurntSushi/ripgrep#installation")
 			}
+			wsFlag, err := cmd.Flags().GetString("workspace")
+			if err != nil {
+				return fmt.Errorf("get workspace flag: %w", err)
+			}
+			ws, err := currentWorkspace(wsFlag)
+			if err != nil {
+				return err
+			}
+			activeWorkspace = ws
 			return nil
 		},
 	}

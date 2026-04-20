@@ -97,12 +97,7 @@ JSON fields in each line:
 			if err != nil {
 				return fmt.Errorf("get no-filename flag: %w", err)
 			}
-
-			ws, err := currentWorkspace(cmd)
-			if err != nil {
-				return err
-			}
-			dirs, err := read.SearchDirs(ws, platform, account)
+			dirs, err := read.SearchDirs(activeWorkspace, platform, account)
 			if err != nil {
 				return err
 			}

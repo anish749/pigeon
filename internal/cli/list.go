@@ -40,24 +40,18 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get since flag: %w", err)
 			}
-
 			if since != "" {
-				return runListSince(cmd, platform, account, since)
+				return runListSince(platform, account, since)
 			}
 
-			ws, err := currentWorkspace(cmd)
-			if err != nil {
-				return err
-			}
-			if ws != nil {
-				// Explicit account must be validated against the workspace.
+			if activeWorkspace != nil {
 				if account != "" {
-					if err := validateAccountInWorkspace(cmd, a.New(platform, account)); err != nil {
+					if err := validateAccountInWorkspace(a.New(platform, account)); err != nil {
 						return err
 					}
 					return commands.RunList(platform, account)
 				}
-				return commands.RunListScoped(ws.Accounts, platform)
+				return commands.RunListScoped(activeWorkspace.Accounts, platform)
 			}
 			return commands.RunList(platform, account)
 		},
@@ -70,17 +64,13 @@ func newListCmd() *cobra.Command {
 
 // runListSince uses read.Glob to find active files, then extracts unique
 // conversations and prints them with directory paths.
-func runListSince(cmd *cobra.Command, platform, account, since string) error {
+func runListSince(platform, account, since string) error {
 	sinceDur, err := timeutil.ParseDuration(since)
 	if err != nil {
 		return fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
 
-	ws, err := currentWorkspace(cmd)
-	if err != nil {
-		return err
-	}
-	dirs, err := read.SearchDirs(ws, platform, account)
+	dirs, err := read.SearchDirs(activeWorkspace, platform, account)
 	if err != nil {
 		return err
 	}

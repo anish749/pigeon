@@ -41,7 +41,7 @@ func newReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := validateAccountInWorkspace(cmd, a.New(platform, account)); err != nil {
+			if err := validateAccountInWorkspace(a.New(platform, account)); err != nil {
 				return err
 			}
 			return commands.RunRead(commands.ReadParams{

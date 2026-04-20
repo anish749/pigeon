@@ -3,17 +3,14 @@ package cli
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
-
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
-// currentWorkspace resolves the active workspace from the --workspace flag,
+// currentWorkspace resolves the active workspace from the given flag value,
 // environment, or config default. Returns nil when no workspace is active.
-func currentWorkspace(cmd *cobra.Command) (*workspace.Workspace, error) {
-	wsFlag, _ := cmd.Flags().GetString("workspace")
+func currentWorkspace(wsFlag string) (*workspace.Workspace, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -33,16 +30,12 @@ func currentWorkspace(cmd *cobra.Command) (*workspace.Workspace, error) {
 // validateAccountInWorkspace checks that the given account is within the
 // active workspace. Returns nil if no workspace is active or the account
 // is in scope.
-func validateAccountInWorkspace(cmd *cobra.Command, acct account.Account) error {
-	ws, err := currentWorkspace(cmd)
-	if err != nil {
-		return err
-	}
-	if ws == nil {
+func validateAccountInWorkspace(acct account.Account) error {
+	if activeWorkspace == nil {
 		return nil
 	}
-	if !ws.Contains(acct) {
-		return fmt.Errorf("account %s is not in workspace %q", acct.Display(), ws.Name)
+	if !activeWorkspace.Contains(acct) {
+		return fmt.Errorf("account %s is not in workspace %q", acct.Display(), activeWorkspace.Name)
 	}
 	return nil
 }
