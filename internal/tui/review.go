@@ -130,8 +130,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "x":
 		if len(m.items) > 0 {
-			m.status = dimStyle.Render("Dismissing...")
-			return m, m.dismissItem(m.items[m.cursor].ID)
+			item := m.items[m.cursor]
+			m.setStatus(item.ID, dimStyle.Render("Dismissing..."))
+			return m, m.dismissItem(item.ID)
 		}
 	case "v":
 		if len(m.items) > 0 {
@@ -291,17 +292,17 @@ func (m model) dismissItem(id string) tea.Cmd {
 	return func() tea.Msg {
 		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "dismiss"})
 		if err != nil {
-			return actionFailMsg{"marshal request: " + err.Error()}
+			return actionFailMsg{id, "marshal request: " + err.Error()}
 		}
 		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
-			return actionFailMsg{err.Error()}
+			return actionFailMsg{id, err.Error()}
 		}
 		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{"Dismissed"}
+			return actionDoneMsg{id, "Dismissed"}
 		}
 		detail, _ := result["error"].(string)
-		return actionFailMsg{detail}
+		return actionFailMsg{id, detail}
 	}
 }
 
