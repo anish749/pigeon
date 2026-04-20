@@ -128,6 +128,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFeedback
 			m.feedback = ""
 		}
+	case "x":
+		if len(m.items) > 0 {
+			m.status = dimStyle.Render("Dismissing...")
+			return m, m.dismissItem(m.items[m.cursor].ID)
+		}
 	case "v":
 		if len(m.items) > 0 {
 			item := m.items[m.cursor]
@@ -216,9 +221,9 @@ func (m model) View() string {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
 	} else {
-		help := "  a approve  v send mode  f feedback  j/k navigate  q quit"
+		help := "  a approve  x dismiss  v send mode  f feedback  j/k navigate  q quit"
 		if m.cursor < count && m.items[m.cursor].SessionID == "" {
-			help = "  a approve  v send mode  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
+			help = "  a approve  x dismiss  v send mode  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
 		}
 		b.WriteString(helpStyle.Render(help))
 	}
@@ -279,6 +284,24 @@ func (m model) approveItem(id string) tea.Cmd {
 		}
 		detail, _ := result["error"].(string)
 		return actionFailMsg{id, detail}
+	}
+}
+
+func (m model) dismissItem(id string) tea.Cmd {
+	return func() tea.Msg {
+		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "dismiss"})
+		if err != nil {
+			return actionFailMsg{"marshal request: " + err.Error()}
+		}
+		result, err := doPost("http://pigeon/api/outbox/action", body)
+		if err != nil {
+			return actionFailMsg{err.Error()}
+		}
+		if ok, _ := result["ok"].(bool); ok {
+			return actionDoneMsg{"Dismissed"}
+		}
+		detail, _ := result["error"].(string)
+		return actionFailMsg{detail}
 	}
 }
 

@@ -30,7 +30,7 @@ func NewHandler(ob *Outbox, send SendFunc, notify NotifyFunc) *Handler {
 // ActionRequest is the payload for POST /api/outbox/action.
 type ActionRequest struct {
 	ID     string `json:"id"`
-	Action string `json:"action"` // "approve", "feedback", or "set_via"
+	Action string `json:"action"` // "approve", "feedback", "dismiss", or "set_via"
 	Note   string `json:"note,omitempty"`
 	Via    string `json:"via,omitempty"`
 }
@@ -63,10 +63,12 @@ func (h *Handler) HandleAction(w http.ResponseWriter, r *http.Request) {
 		h.approve(w, r, item)
 	case "feedback":
 		h.feedback(w, item, req.Note)
+	case "dismiss":
+		h.dismiss(w, item)
 	case "set_via":
 		h.setVia(w, item, req.Via)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'approve', 'feedback', or 'set_via'"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'approve', 'feedback', 'dismiss', or 'set_via'"})
 	}
 }
 
@@ -119,6 +121,20 @@ func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
 
 	h.outbox.Remove(item.ID)
 	slog.Info("outbox feedback delivered", "id", item.ID, "session_id", item.SessionID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) dismiss(w http.ResponseWriter, item *Item) {
+	h.outbox.Remove(item.ID)
+
+	msg := fmt.Sprintf("[outbox] Dismissed (ID: %s)", item.ID)
+	if item.SessionID != "" {
+		if err := h.notify(item.SessionID, msg); err != nil {
+			slog.Error("outbox: failed to notify session of dismissal", "id", item.ID, "session_id", item.SessionID, "error", err)
+		}
+	}
+
+	slog.Info("outbox item dismissed", "id", item.ID, "session_id", item.SessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
