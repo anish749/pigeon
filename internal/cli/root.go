@@ -272,6 +272,8 @@ MAINTENANCE
 		},
 	}
 
+	root.PersistentFlags().StringP("workspace", "w", "", "scope to a workspace")
+
 	root.AddGroup(
 		&cobra.Group{ID: groupSetup, Title: "Setup:"},
 		&cobra.Group{ID: groupDaemon, Title: "Daemon:"},

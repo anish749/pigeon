@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 )
 
@@ -20,7 +21,7 @@ func newReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			account, err := cmd.Flags().GetString("account")
+			accountName, err := cmd.Flags().GetString("account")
 			if err != nil {
 				return err
 			}
@@ -40,9 +41,12 @@ func newReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateAccountInWorkspace(cmd, account.New(platform, accountName)); err != nil {
+				return err
+			}
 			return commands.RunRead(commands.ReadParams{
 				Platform: platform,
-				Account:  account,
+				Account:  accountName,
 				Contact:  contact,
 				Date:     date,
 				Last:     last,

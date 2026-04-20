@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,7 +31,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get platform flag: %w", err)
 			}
-			account, err := cmd.Flags().GetString("account")
+			accountName, err := cmd.Flags().GetString("account")
 			if err != nil {
 				return fmt.Errorf("get account flag: %w", err)
 			}
@@ -40,9 +41,21 @@ func newListCmd() *cobra.Command {
 			}
 
 			if since != "" {
-				return runListSince(platform, account, since)
+				return runListSince(cmd, platform, accountName, since)
 			}
-			return commands.RunList(platform, account)
+
+			// When a workspace is active and no explicit account is given,
+			// list only the workspace's accounts.
+			if accountName == "" {
+				ws, err := currentWorkspace(cmd)
+				if err != nil {
+					return err
+				}
+				if ws != nil {
+					return commands.RunListScoped(ws.Accounts, platform)
+				}
+			}
+			return commands.RunList(platform, accountName)
 		},
 	}
 	cmd.Flags().StringP("platform", "p", "", "filter by platform (e.g. whatsapp, slack)")
@@ -53,24 +66,35 @@ func newListCmd() *cobra.Command {
 
 // runListSince uses read.Glob to find active files, then extracts unique
 // conversations and prints them with directory paths.
-func runListSince(platform, account, since string) error {
+func runListSince(cmd *cobra.Command, platform, accountName, since string) error {
 	sinceDur, err := timeutil.ParseDuration(since)
 	if err != nil {
 		return fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
 
-	dir := paths.SearchDir(platform, account)
-	files, err := read.Glob(dir, sinceDur)
+	dirs, err := resolveSearchDirs(cmd, platform, accountName)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+
+	var allFiles []string
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue
+		}
+		files, err := read.Glob(dir, sinceDur)
+		if err != nil {
+			return err
+		}
+		allFiles = append(allFiles, files...)
+	}
+	if len(allFiles) == 0 {
 		fmt.Println("No conversations found.")
 		return nil
 	}
 
 	root := paths.DefaultDataRoot().Path()
-	convs := extractConversations(files, root)
+	convs := extractConversations(allFiles, root)
 	if len(convs) == 0 {
 		fmt.Println("No conversations found.")
 		return nil

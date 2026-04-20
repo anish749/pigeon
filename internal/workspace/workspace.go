@@ -77,6 +77,31 @@ func GetAllWorkspaces(cfg *config.Config) ([]*Workspace, error) {
 	return workspaces, nil
 }
 
+// Contains reports whether the workspace includes the given account.
+func (w *Workspace) Contains(acct account.Account) bool {
+	for _, a := range w.Accounts {
+		if a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug() {
+			return true
+		}
+	}
+	return false
+}
+
+// AccountsForPlatform returns the subset of workspace accounts matching the
+// given platform. Returns all accounts if platform is empty.
+func (w *Workspace) AccountsForPlatform(platform string) []account.Account {
+	if platform == "" {
+		return w.Accounts
+	}
+	var out []account.Account
+	for _, a := range w.Accounts {
+		if a.Platform == platform {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // allAccounts returns every configured account across all platforms.
 func allAccounts(cfg *config.Config) []account.Account {
 	var accounts []account.Account
