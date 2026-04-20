@@ -7,98 +7,44 @@ import (
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
-func TestSearchDirs_NoWorkspace(t *testing.T) {
-	dirs, err := SearchDirs(nil, "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(dirs) != 1 {
-		t.Fatalf("got %d dirs, want 1", len(dirs))
-	}
-}
-
-func TestSearchDirs_NoWorkspaceWithPlatformAndAccount(t *testing.T) {
-	dirs, err := SearchDirs(nil, "slack", "acme-corp")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(dirs) != 1 {
-		t.Fatalf("got %d dirs, want 1", len(dirs))
-	}
-}
-
-func TestSearchDirs_WorkspaceReturnsAccountDirs(t *testing.T) {
-	ws := makeWorkspace(t, "work", config.WorkspaceConfig{
+func TestSearchDirs(t *testing.T) {
+	workWS := makeWorkspace(t, "work", config.WorkspaceConfig{
 		Slack:    []string{"acme-corp"},
 		WhatsApp: []string{"+15551234567"},
 	})
-
-	dirs, err := SearchDirs(ws, "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(dirs) != 2 {
-		t.Fatalf("got %d dirs, want 2: %v", len(dirs), dirs)
-	}
-}
-
-func TestSearchDirs_WorkspaceFiltersByPlatform(t *testing.T) {
-	ws := makeWorkspace(t, "work", config.WorkspaceConfig{
-		Slack:    []string{"acme-corp"},
-		WhatsApp: []string{"+15551234567"},
-	})
-
-	dirs, err := SearchDirs(ws, "slack", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(dirs) != 1 {
-		t.Fatalf("got %d dirs, want 1: %v", len(dirs), dirs)
-	}
-}
-
-func TestSearchDirs_WorkspacePlatformNotPresent(t *testing.T) {
-	ws := makeWorkspace(t, "work", config.WorkspaceConfig{
+	slackOnlyWS := makeWorkspace(t, "slack-only", config.WorkspaceConfig{
 		Slack: []string{"acme-corp"},
 	})
+	emptyWS := &workspace.Workspace{Name: "empty"}
 
-	_, err := SearchDirs(ws, "whatsapp", "")
-	if err == nil {
-		t.Fatal("expected error for platform not in workspace")
+	tests := []struct {
+		name     string
+		ws       *workspace.Workspace
+		platform string
+		account  string
+		wantDirs int
+		wantErr  bool
+	}{
+		{"no workspace, no filters", nil, "", "", 1, false},
+		{"no workspace, explicit account", nil, "slack", "acme-corp", 1, false},
+		{"workspace returns all account dirs", workWS, "", "", 2, false},
+		{"workspace filters by platform", workWS, "slack", "", 1, false},
+		{"workspace platform not present", slackOnlyWS, "whatsapp", "", 0, true},
+		{"explicit account in workspace", slackOnlyWS, "slack", "acme-corp", 1, false},
+		{"explicit account not in workspace", slackOnlyWS, "slack", "other-org", 0, true},
+		{"empty workspace", emptyWS, "", "", 0, true},
 	}
-}
 
-func TestSearchDirs_ExplicitAccountInWorkspace(t *testing.T) {
-	ws := makeWorkspace(t, "work", config.WorkspaceConfig{
-		Slack: []string{"acme-corp"},
-	})
-
-	dirs, err := SearchDirs(ws, "slack", "acme-corp")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(dirs) != 1 {
-		t.Fatalf("got %d dirs, want 1: %v", len(dirs), dirs)
-	}
-}
-
-func TestSearchDirs_ExplicitAccountNotInWorkspace(t *testing.T) {
-	ws := makeWorkspace(t, "work", config.WorkspaceConfig{
-		Slack: []string{"acme-corp"},
-	})
-
-	_, err := SearchDirs(ws, "slack", "other-org")
-	if err == nil {
-		t.Fatal("expected error for account not in workspace")
-	}
-}
-
-func TestSearchDirs_EmptyWorkspace(t *testing.T) {
-	ws := &workspace.Workspace{Name: "empty"}
-
-	_, err := SearchDirs(ws, "", "")
-	if err == nil {
-		t.Fatal("expected error for empty workspace")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs, err := SearchDirs(tt.ws, tt.platform, tt.account)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(dirs) != tt.wantDirs {
+				t.Fatalf("got %d dirs, want %d: %v", len(dirs), tt.wantDirs, dirs)
+			}
+		})
 	}
 }
 
