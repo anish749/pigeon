@@ -17,7 +17,9 @@ func RunList(platform, accountName string) error {
 
 	// Level 3: list conversations for a specific account
 	if platform != "" && accountName != "" {
-		return listAccount(s, account.New(platform, accountName))
+		acct := account.New(platform, accountName)
+		fmt.Printf("%s:\n", acct.Display())
+		return listAccount(s, acct)
 	}
 
 	// Level 2: list accounts for a specific platform
@@ -121,7 +123,8 @@ func RunListScoped(accounts []account.Account, platform string) error {
 	return nil
 }
 
-// listAccount prints conversations (or GWS services) for a single account.
+// listAccount prints a header and conversations (or GWS services) for a
+// single account.
 func listAccount(s *store.FSStore, acct account.Account) error {
 	if acct.Platform == "gws" {
 		return listGWSAccount(s, acct)
@@ -135,7 +138,6 @@ func listAccount(s *store.FSStore, acct account.Account) error {
 		fmt.Println("No conversations found.")
 		return nil
 	}
-	fmt.Printf("Conversations in %s:\n\n", acct.Display())
 	for _, c := range convs {
 		meta, err := s.ReadMeta(acct, c)
 		if err != nil {
@@ -162,7 +164,6 @@ func listGWSAccount(s *store.FSStore, acct account.Account) error {
 		fmt.Println("No services found.")
 		return nil
 	}
-	fmt.Printf("Services in %s:\n\n", acct.Display())
 	for _, info := range infos {
 		fmt.Printf("  %s  %s\n", info.Service, gwsItemLabel(info.Service, info.Items))
 	}
