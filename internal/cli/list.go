@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
 
@@ -89,7 +91,10 @@ func runListSince(platform, account, since string) error {
 	}
 
 	root := paths.DefaultDataRoot().Path()
-	convs := extractConversations(allFiles, root)
+	convs, err := extractConversations(allFiles, root)
+	if err != nil {
+		return err
+	}
 	if len(convs) == 0 {
 		fmt.Println("No conversations found.")
 		return nil
@@ -97,14 +102,9 @@ func runListSince(platform, account, since string) error {
 
 	now := time.Now()
 	for _, c := range convs {
-		switch {
-		case c.LatestDateFile != "":
-			info, err := os.Stat(c.LatestDateFile)
-			if err != nil {
-				return fmt.Errorf("stat %s: %w", c.LatestDateFile, err)
-			}
-			fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(info.ModTime())))
-		default:
+		if !c.LatestTime.IsZero() {
+			fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(c.LatestTime)))
+		} else {
 			fmt.Printf("%s  active\n", c.Display)
 		}
 		fmt.Printf("  %s\n", c.Dir)
@@ -114,15 +114,14 @@ func runListSince(platform, account, since string) error {
 
 // activeConv represents a conversation discovered from file paths.
 type activeConv struct {
-	Display        string // platform/account/conversation
-	Dir            string // absolute conversation directory
-	LatestDate     string // most recent YYYY-MM-DD from date filenames, empty for thread-only
-	LatestDateFile string // absolute path to the most recent date file (for mtime)
+	Display    string    // platform/account/conversation
+	Dir        string    // absolute conversation directory
+	LatestTime time.Time // most recent message timestamp from file content
 }
 
 // extractConversations deduplicates file paths into unique conversations,
-// tracking the most recent date file per conversation for age display.
-func extractConversations(files []string, root string) []activeConv {
+// tracking the most recent message timestamp per conversation for age display.
+func extractConversations(files []string, root string) ([]activeConv, error) {
 	seen := make(map[string]*activeConv)
 	var order []string
 	for _, f := range files {
@@ -160,12 +159,10 @@ func extractConversations(files []string, root string) []activeConv {
 			seen[convDir] = c
 			order = append(order, convDir)
 		}
-		if !isThread {
-			dateStr := strings.TrimSuffix(parts[3], paths.FileExt)
-			if dateStr > c.LatestDate {
-				c.LatestDate = dateStr
-				c.LatestDateFile = f
-			}
+		if ts, err := lastLineTs(f); err != nil {
+			return nil, fmt.Errorf("read last line of %s: %w", f, err)
+		} else if ts.After(c.LatestTime) {
+			c.LatestTime = ts
 		}
 	}
 
@@ -173,5 +170,27 @@ func extractConversations(files []string, root string) []activeConv {
 	for i, key := range order {
 		result[i] = *seen[key]
 	}
-	return result
+	return result, nil
+}
+
+// lastLineTs reads the last non-empty line of a JSONL file and returns
+// its message timestamp.
+func lastLineTs(path string) (time.Time, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	data = bytes.TrimRight(data, "\n")
+	if len(data) == 0 {
+		return time.Time{}, nil
+	}
+	last := data
+	if i := bytes.LastIndexByte(data, '\n'); i >= 0 {
+		last = data[i+1:]
+	}
+	line, err := modelv1.Parse(string(last))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return line.Ts(), nil
 }
