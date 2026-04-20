@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/account"
+	a "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
@@ -32,7 +32,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get platform flag: %w", err)
 			}
-			accountName, err := cmd.Flags().GetString("account")
+			account, err := cmd.Flags().GetString("account")
 			if err != nil {
 				return fmt.Errorf("get account flag: %w", err)
 			}
@@ -42,7 +42,7 @@ func newListCmd() *cobra.Command {
 			}
 
 			if since != "" {
-				return runListSince(cmd, platform, accountName, since)
+				return runListSince(cmd, platform, account, since)
 			}
 
 			ws, err := currentWorkspace(cmd)
@@ -51,15 +51,15 @@ func newListCmd() *cobra.Command {
 			}
 			if ws != nil {
 				// Explicit account must be validated against the workspace.
-				if accountName != "" {
-					if err := validateAccountInWorkspace(cmd, account.New(platform, accountName)); err != nil {
+				if account != "" {
+					if err := validateAccountInWorkspace(cmd, a.New(platform, account)); err != nil {
 						return err
 					}
-					return commands.RunList(platform, accountName)
+					return commands.RunList(platform, account)
 				}
 				return commands.RunListScoped(ws.Accounts, platform)
 			}
-			return commands.RunList(platform, accountName)
+			return commands.RunList(platform, account)
 		},
 	}
 	cmd.Flags().StringP("platform", "p", "", "filter by platform (e.g. whatsapp, slack)")
@@ -70,13 +70,13 @@ func newListCmd() *cobra.Command {
 
 // runListSince uses read.Glob to find active files, then extracts unique
 // conversations and prints them with directory paths.
-func runListSince(cmd *cobra.Command, platform, accountName, since string) error {
+func runListSince(cmd *cobra.Command, platform, account, since string) error {
 	sinceDur, err := timeutil.ParseDuration(since)
 	if err != nil {
 		return fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
 
-	dirs, err := resolveSearchDirs(cmd, platform, accountName)
+	dirs, err := resolveSearchDirs(cmd, platform, account)
 	if err != nil {
 		return err
 	}
