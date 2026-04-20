@@ -1,34 +1,94 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
-func TestExtractConversations(t *testing.T) {
-	root := "/data"
-	files := []string{
-		"/data/slack/acme/#general/2026-04-07.jsonl",
-		"/data/slack/acme/#general/2026-04-06.jsonl",
-		"/data/slack/acme/#general/threads/1742100000.jsonl",
-		"/data/slack/acme/#random/2026-04-07.jsonl",
-		"/data/whatsapp/phone/Alice/2026-04-05.jsonl",
+// writeDateFile creates a date JSONL file with the given messages using the model layer.
+func writeDateFile(t *testing.T, path string, msgs []modelv1.MsgLine) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	data, err := modelv1.MarshalDateFile(&modelv1.DateFile{Messages: msgs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	convs := extractConversations(files, root)
+// writeThreadFile creates a thread JSONL file with a parent and replies using the model layer.
+func writeThreadFile(t *testing.T, path string, parent modelv1.MsgLine, replies []modelv1.MsgLine) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range replies {
+		replies[i].Reply = true
+	}
+	data, err := modelv1.MarshalThreadFile(&modelv1.ThreadFile{Parent: parent, Replies: replies})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func msg(id string, ts time.Time) modelv1.MsgLine {
+	return modelv1.MsgLine{ID: id, Ts: ts, Sender: "Test", SenderID: "U123", Text: "hello"}
+}
+
+func TestExtractConversations(t *testing.T) {
+	sharedRoot := t.TempDir()
+	root := paths.NewDataRoot(sharedRoot)
+	general := root.AccountFor(account.New("slack", "acme")).Conversation("#general")
+	random := root.AccountFor(account.New("slack", "acme")).Conversation("#random")
+	alice := root.AccountFor(account.New("whatsapp", "phone")).Conversation("Alice")
+
+	now := time.Now()
+
+	generalDate1 := string(general.DateFile("2026-04-07"))
+	generalDate2 := string(general.DateFile("2026-04-06"))
+	generalThread := string(general.ThreadFile("1742100000"))
+	randomDate := string(random.DateFile("2026-04-07"))
+	aliceDate := string(alice.DateFile("2026-04-05"))
+
+	writeDateFile(t, generalDate1, []modelv1.MsgLine{msg("1", now.Add(-1*time.Hour))})
+	writeDateFile(t, generalDate2, []modelv1.MsgLine{msg("2", now.Add(-24*time.Hour))})
+	writeThreadFile(t, generalThread, msg("3", now.Add(-2*time.Hour)), []modelv1.MsgLine{msg("4", now.Add(-30*time.Minute))})
+	writeDateFile(t, randomDate, []modelv1.MsgLine{msg("5", now.Add(-2*time.Hour))})
+	writeDateFile(t, aliceDate, []modelv1.MsgLine{msg("6", now.Add(-3*time.Hour))})
+
+	files := []string{generalDate1, generalDate2, generalThread, randomDate, aliceDate}
+	convs, err := extractConversations(files, sharedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(convs) != 3 {
 		t.Fatalf("got %d conversations, want 3", len(convs))
 	}
 
-	// #general: has both date files and threads — should pick latest date.
+	// #general: thread reply is newest (30m ago), should win over date file (1h ago).
 	if convs[0].Display != "slack/acme/#general" {
 		t.Errorf("convs[0].Display = %q, want slack/acme/#general", convs[0].Display)
 	}
-	if convs[0].LatestDate != "2026-04-07" {
-		t.Errorf("convs[0].LatestDate = %q, want 2026-04-07", convs[0].LatestDate)
+	age := now.Sub(convs[0].LatestTime)
+	if age < 25*time.Minute || age > 35*time.Minute {
+		t.Errorf("convs[0] age = %v, want ~30m", age)
 	}
-	if convs[0].Dir != "/data/slack/acme/#general" {
-		t.Errorf("convs[0].Dir = %q, want /data/slack/acme/#general", convs[0].Dir)
+	if convs[0].Dir != general.Path() {
+		t.Errorf("convs[0].Dir = %q, want %s", convs[0].Dir, general.Path())
 	}
 
 	// #random: single date file.
@@ -43,24 +103,38 @@ func TestExtractConversations(t *testing.T) {
 }
 
 func TestExtractConversations_ThreadOnly(t *testing.T) {
-	root := "/data"
-	files := []string{
-		"/data/slack/acme/#general/threads/1742100000.jsonl",
-		"/data/slack/acme/#general/threads/1742200000.jsonl",
-	}
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("slack", "acme"))
+	general := acct.Conversation("#general")
+	now := time.Now()
 
-	convs := extractConversations(files, root)
+	thread1 := string(general.ThreadFile("1742100000"))
+	thread2 := string(general.ThreadFile("1742200000"))
+
+	writeThreadFile(t, thread1, msg("1", now.Add(-3*time.Hour)), []modelv1.MsgLine{msg("2", now.Add(-2*time.Hour))})
+	writeThreadFile(t, thread2, msg("3", now.Add(-2*time.Hour)), []modelv1.MsgLine{msg("4", now.Add(-1*time.Hour))})
+
+	files := []string{thread1, thread2}
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
-	if convs[0].LatestDate != "" {
-		t.Errorf("thread-only conversation should have empty LatestDate, got %q", convs[0].LatestDate)
+	// Thread-only conversation should have timestamp from newest reply.
+	age := now.Sub(convs[0].LatestTime)
+	if age < 55*time.Minute || age > 65*time.Minute {
+		t.Errorf("thread-only age = %v, want ~1h", age)
 	}
 }
 
 func TestExtractConversations_Empty(t *testing.T) {
-	convs := extractConversations(nil, "/data")
+	convs, err := extractConversations(nil, "/data")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(convs) != 0 {
 		t.Errorf("got %d conversations, want 0", len(convs))
 	}
@@ -68,17 +142,24 @@ func TestExtractConversations_Empty(t *testing.T) {
 
 // TestExtractConversations_ConversationNamedThreads verifies that a
 // conversation literally named "threads" is not dropped by the
-// path-component strip logic. Its date files live at
-// <acct>/threads/YYYY-MM-DD.jsonl and the "threads" component must be
-// preserved as the conversation name.
+// path-component strip logic.
 func TestExtractConversations_ConversationNamedThreads(t *testing.T) {
-	root := "/data"
-	files := []string{
-		"/data/slack/acme/threads/2026-04-07.jsonl",
-		"/data/slack/acme/threads/threads/1742100000.jsonl",
-	}
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("slack", "acme"))
+	threads := acct.Conversation("threads")
+	now := time.Now()
 
-	convs := extractConversations(files, root)
+	dateFile := string(threads.DateFile("2026-04-07"))
+	threadFile := string(threads.ThreadFile("1742100000"))
+
+	writeDateFile(t, dateFile, []modelv1.MsgLine{msg("1", now.Add(-1*time.Hour))})
+	writeThreadFile(t, threadFile, msg("2", now.Add(-3*time.Hour)), []modelv1.MsgLine{msg("3", now.Add(-2*time.Hour))})
+
+	files := []string{dateFile, threadFile}
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1: %+v", len(convs), convs)
@@ -86,27 +167,36 @@ func TestExtractConversations_ConversationNamedThreads(t *testing.T) {
 	if convs[0].Display != "slack/acme/threads" {
 		t.Errorf("Display = %q, want slack/acme/threads", convs[0].Display)
 	}
-	if convs[0].Dir != "/data/slack/acme/threads" {
-		t.Errorf("Dir = %q, want /data/slack/acme/threads", convs[0].Dir)
+	if convs[0].Dir != threads.Path() {
+		t.Errorf("Dir = %q, want %s", convs[0].Dir, threads.Path())
 	}
-	if convs[0].LatestDate != "2026-04-07" {
-		t.Errorf("LatestDate = %q, want 2026-04-07", convs[0].LatestDate)
+	// Date file message (1h ago) is newer than thread reply (2h ago).
+	age := now.Sub(convs[0].LatestTime)
+	if age < 55*time.Minute || age > 65*time.Minute {
+		t.Errorf("age = %v, want ~1h", age)
 	}
 }
 
 func TestExtractConversations_PreservesOrder(t *testing.T) {
-	root := "/data"
-	files := []string{
-		"/data/slack/acme/#beta/2026-04-07.jsonl",
-		"/data/slack/acme/#alpha/2026-04-07.jsonl",
-	}
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("slack", "acme"))
+	now := time.Now()
 
-	convs := extractConversations(files, root)
+	beta := string(acct.Conversation("#beta").DateFile("2026-04-07"))
+	alpha := string(acct.Conversation("#alpha").DateFile("2026-04-07"))
+
+	writeDateFile(t, beta, []modelv1.MsgLine{msg("1", now.Add(-1*time.Hour))})
+	writeDateFile(t, alpha, []modelv1.MsgLine{msg("2", now.Add(-2*time.Hour))})
+
+	files := []string{beta, alpha}
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(convs) != 2 {
 		t.Fatalf("got %d conversations, want 2", len(convs))
 	}
-	// Order should match first-seen in the input.
 	if convs[0].Display != "slack/acme/#beta" {
 		t.Errorf("first conversation = %q, want slack/acme/#beta", convs[0].Display)
 	}
