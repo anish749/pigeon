@@ -13,10 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anish749/pigeon/internal/api"
-	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 var (
