@@ -113,32 +113,8 @@ func RunListScoped(accounts []account.Account, platform string) error {
 
 	for _, acct := range filtered {
 		fmt.Printf("%s:\n", acct.Display())
-		if acct.Platform == "gws" {
-			infos, err := s.ListGWSServices(acct)
-			if err != nil {
-				return err
-			}
-			for _, info := range infos {
-				fmt.Printf("  %s  %s\n", info.Service, gwsItemLabel(info.Service, info.Items))
-			}
-		} else {
-			convs, err := s.ListConversations(acct)
-			if err != nil {
-				return err
-			}
-			for _, c := range convs {
-				meta, err := s.ReadMeta(acct, c)
-				if err != nil {
-					return fmt.Errorf("read metadata for %s: %w", c, err)
-				}
-				if meta != nil {
-					if ids := modelv1.FormatConvMeta(meta); ids != "" {
-						fmt.Printf("  %s  %s\n", c, ids)
-						continue
-					}
-				}
-				fmt.Printf("  %s\n", c)
-			}
+		if err := listAccount(s, acct); err != nil {
+			return err
 		}
 		fmt.Println()
 	}

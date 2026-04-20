@@ -185,7 +185,7 @@ func TestContains(t *testing.T) {
 		Name: "work",
 		Accounts: []account.Account{
 			account.New("slack", "acme-corp"),
-			account.New("gws", "work@co.com"),
+			account.New("whatsapp", "+15551234567"),
 		},
 	}
 
@@ -194,14 +194,13 @@ func TestContains(t *testing.T) {
 		want bool
 	}{
 		{account.New("slack", "acme-corp"), true},
-		{account.New("gws", "work@co.com"), true},
-		{account.New("slack", "other-corp"), false},
-		{account.New("whatsapp", "acme-corp"), false},
+		{account.New("whatsapp", "+15551234567"), true},
+		{account.New("slack", "other-org"), false},
+		{account.New("gws", "acme-corp"), false},
 	}
 	for _, tt := range tests {
-		got := ws.Contains(tt.acct)
-		if got != tt.want {
-			t.Errorf("Contains(%v) = %v, want %v", tt.acct, got, tt.want)
+		if got := ws.Contains(tt.acct); got != tt.want {
+			t.Errorf("Contains(%s) = %v, want %v", tt.acct.Display(), got, tt.want)
 		}
 	}
 }
@@ -212,36 +211,31 @@ func TestAccountsForPlatform(t *testing.T) {
 		Accounts: []account.Account{
 			account.New("slack", "acme-corp"),
 			account.New("slack", "side-project"),
-			account.New("gws", "work@co.com"),
 			account.New("whatsapp", "+15551234567"),
 		},
 	}
 
-	t.Run("filter slack", func(t *testing.T) {
-		got := ws.AccountsForPlatform("slack")
-		if len(got) != 2 {
-			t.Fatalf("got %d, want 2", len(got))
-		}
-	})
+	// Filter to slack — should get 2.
+	slack := ws.AccountsForPlatform("slack")
+	if len(slack) != 2 {
+		t.Errorf("AccountsForPlatform(slack) = %d accounts, want 2", len(slack))
+	}
 
-	t.Run("filter gws", func(t *testing.T) {
-		got := ws.AccountsForPlatform("gws")
-		if len(got) != 1 {
-			t.Fatalf("got %d, want 1", len(got))
-		}
-	})
+	// Filter to whatsapp — should get 1.
+	wa := ws.AccountsForPlatform("whatsapp")
+	if len(wa) != 1 {
+		t.Errorf("AccountsForPlatform(whatsapp) = %d accounts, want 1", len(wa))
+	}
 
-	t.Run("filter missing platform", func(t *testing.T) {
-		got := ws.AccountsForPlatform("linear-issues")
-		if len(got) != 0 {
-			t.Fatalf("got %d, want 0", len(got))
-		}
-	})
+	// Filter to gws — should get 0.
+	gws := ws.AccountsForPlatform("gws")
+	if len(gws) != 0 {
+		t.Errorf("AccountsForPlatform(gws) = %d accounts, want 0", len(gws))
+	}
 
-	t.Run("empty string returns all", func(t *testing.T) {
-		got := ws.AccountsForPlatform("")
-		if len(got) != 4 {
-			t.Fatalf("got %d, want 4", len(got))
-		}
-	})
+	// Empty platform — should get all.
+	all := ws.AccountsForPlatform("")
+	if len(all) != 3 {
+		t.Errorf("AccountsForPlatform(\"\") = %d accounts, want 3", len(all))
+	}
 }
