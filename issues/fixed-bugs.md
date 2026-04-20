@@ -75,3 +75,7 @@ The outbox review screen now supports toggling send mode with the `v` key before
 ## ~~Terminal UI review does not show the recipient/target name~~ — fixed in #257
 
 `itemSummary` now displays `platform → resolved target (from sender): message` using `ResolvedTarget()` which resolves Slack channel IDs and user IDs to display names at submit time.
+
+## ~~Validate date where calendar events are attributed~~ — fixed in #261
+
+Multi-day events are now expanded to all spanned date files instead of only the start date.
