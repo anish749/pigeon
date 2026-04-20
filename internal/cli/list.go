@@ -100,11 +100,10 @@ func runListSince(platform, account, since string) error {
 		switch {
 		case c.LatestDateFile != "":
 			info, err := os.Stat(c.LatestDateFile)
-			if err == nil {
-				fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(info.ModTime())))
-			} else {
-				fmt.Printf("%s  active\n", c.Display)
+			if err != nil {
+				return fmt.Errorf("stat %s: %w", c.LatestDateFile, err)
 			}
+			fmt.Printf("%s  last: %s ago\n", c.Display, timeutil.FormatAge(now.Sub(info.ModTime())))
 		default:
 			fmt.Printf("%s  active\n", c.Display)
 		}
