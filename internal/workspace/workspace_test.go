@@ -123,6 +123,31 @@ func TestGetCurrentWorkspace_ConfigDefaultUnknown(t *testing.T) {
 	}
 }
 
+func TestGetCurrentWorkspace_IncludesLinear(t *testing.T) {
+	cfg := &config.Config{
+		Workspaces: map[config.WorkspaceName]config.WorkspaceConfig{
+			"work": {Slack: []string{"acme-corp"}, Linear: []string{"eng"}},
+		},
+	}
+
+	ws, err := GetCurrentWorkspace(cfg, "work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []account.Account{
+		account.New("slack", "acme-corp"),
+		account.New("linear", "eng"),
+	}
+	if len(ws.Accounts) != len(want) {
+		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
+	}
+	for i, got := range ws.Accounts {
+		if got != want[i] {
+			t.Errorf("Accounts[%d] = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
 func TestGetCurrentWorkspace_NoWorkspaceReturnsAll(t *testing.T) {
 	cfg := &config.Config{
 		Slack:    []config.SlackConfig{{Workspace: "acme-corp"}},

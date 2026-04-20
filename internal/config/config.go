@@ -33,6 +33,7 @@ type WorkspaceConfig struct {
 	Slack    []string `yaml:"slack,omitempty"`
 	GWS      []string `yaml:"gws,omitempty"`
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
+	Linear   []string `yaml:"linear,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.

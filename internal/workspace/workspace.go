@@ -57,6 +57,9 @@ func resolve(cfg *config.Config, ws config.WorkspaceName, source string) (*Works
 	for _, slug := range wsCfg.WhatsApp {
 		accounts = append(accounts, account.New("whatsapp", slug))
 	}
+	for _, slug := range wsCfg.Linear {
+		accounts = append(accounts, account.New("linear", slug))
+	}
 	return &Workspace{Name: ws, Accounts: accounts}, nil
 }
 
