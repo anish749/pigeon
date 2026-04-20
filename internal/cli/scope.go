@@ -14,18 +14,12 @@ import (
 // resolveSearchDirs returns the data directories to search, scoped by the
 // active workspace and any explicit platform/account flags.
 //
-// When platform+account are both set, the workspace is not consulted — the
-// caller explicitly chose a target. When only platform is set, results are
-// filtered to that platform within the workspace. When neither is set, all
-// workspace accounts are returned.
+// The workspace is a hard boundary — explicit platform/account flags narrow
+// within the workspace but cannot escape it. An explicit account that is not
+// in the workspace is rejected.
 //
 // With no active workspace, falls back to paths.SearchDir (single directory).
 func resolveSearchDirs(cmd *cobra.Command, platform, accountName string) ([]string, error) {
-	// Explicit account — single directory, no workspace filtering.
-	if platform != "" && accountName != "" {
-		return []string{paths.SearchDir(platform, accountName)}, nil
-	}
-
 	ws, err := currentWorkspace(cmd)
 	if err != nil {
 		return nil, err
@@ -33,6 +27,15 @@ func resolveSearchDirs(cmd *cobra.Command, platform, accountName string) ([]stri
 
 	// No workspace — fall back to single-directory behavior.
 	if ws == nil {
+		return []string{paths.SearchDir(platform, accountName)}, nil
+	}
+
+	// Explicit account — validate it's in the workspace.
+	if platform != "" && accountName != "" {
+		acct := account.New(platform, accountName)
+		if !ws.Contains(acct) {
+			return nil, fmt.Errorf("account %s is not in workspace %q", acct.Display(), ws.Name)
+		}
 		return []string{paths.SearchDir(platform, accountName)}, nil
 	}
 

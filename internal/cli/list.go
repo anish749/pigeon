@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
@@ -44,16 +45,19 @@ func newListCmd() *cobra.Command {
 				return runListSince(cmd, platform, accountName, since)
 			}
 
-			// When a workspace is active and no explicit account is given,
-			// list only the workspace's accounts.
-			if accountName == "" {
-				ws, err := currentWorkspace(cmd)
-				if err != nil {
-					return err
+			ws, err := currentWorkspace(cmd)
+			if err != nil {
+				return err
+			}
+			if ws != nil {
+				// Explicit account must be validated against the workspace.
+				if accountName != "" {
+					if err := validateAccountInWorkspace(cmd, account.New(platform, accountName)); err != nil {
+						return err
+					}
+					return commands.RunList(platform, accountName)
 				}
-				if ws != nil {
-					return commands.RunListScoped(ws.Accounts, platform)
-				}
+				return commands.RunListScoped(ws.Accounts, platform)
 			}
 			return commands.RunList(platform, accountName)
 		},
