@@ -10,13 +10,6 @@ This means like only one of the things, either the daemon or the one of the clie
 
 When someone mentions inside a thread uh or I don't know if it in case of other other states what happens, but plot didn't work.
 
-## Dedup messages by last message id
-
-## Validate date where calendar events are attributed
-
-Right now we used a start date. This can be particularly problematic for multi day events.
-We need to validate how exactly this works in practice.
-
 ## Thread files cannot be date-filtered without scanning content
 
 Thread files are stored at `<conversation>/threads/<ts>.jsonl` where `<ts>` is
@@ -74,10 +67,3 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
 
-## Terminal UI review does not show the recipient/target name
-
-When reviewing outgoing messages in the terminal UI, there is no indication of who the message is being sent to. The sender is shown but not the target — the person being messaged or the conversation the message is going to. This makes it hard to confirm messages are addressed correctly during review.
-
-## Terminal UI review does not allow changing the send mode
-
-When reviewing an outgoing message in the terminal UI, the send mode (send as bot, impersonate user, or send from the user's own account) is fixed. There is no way to change it during review. The user should be able to toggle the send mode from the review screen before approving.

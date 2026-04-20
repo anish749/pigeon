@@ -1,5 +1,9 @@
 # Fixed Bugs
 
+## ~~Dedup messages by last message id~~ — won't fix
+
+Duplicates on disk are expected and by design. Both the real-time listener and sync can write the same message, but maintenance deduplicates by message ID when it runs. The window between duplicate write and maintenance is intentional — date files are append-only logs, not point-in-time-accurate views. Readers already go through compaction/resolution which deduplicates in memory.
+
 ## ~~Maintain() detects thread files by path substring~~ — fixed in #153
 
 Thread file detection now uses `paths.IsThreadFile` which checks filename format (date vs timestamp), not parent directory name. A conversation literally named `threads` is no longer misidentified.
@@ -63,3 +67,15 @@ Unified filter now checks blocks, attachments, and files (not just text) so bot/
 ## ~~Hub: reaction notifications lack context about the reacted message~~ — fixed in #265
 
 Reaction notifications now include the original message content. The hub looks up the reacted-to message via `read.Grep` (searching both date files and thread files) and formats it using `FormatReactionNotification`. Falls back to `FormatReactionFallbackNotification` when the message is not on disk.
+
+## ~~Terminal UI review does not allow changing the send mode~~ — fixed in #252
+
+The outbox review screen now supports toggling send mode with the `v` key before approving the message.
+
+## ~~Terminal UI review does not show the recipient/target name~~ — fixed in #257
+
+`itemSummary` now displays `platform → resolved target (from sender): message` using `ResolvedTarget()` which resolves Slack channel IDs and user IDs to display names at submit time.
+
+## ~~Validate date where calendar events are attributed~~ — fixed in #261
+
+Multi-day events are now expanded to all spanned date files instead of only the start date.
