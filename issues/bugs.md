@@ -72,6 +72,3 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
 
-## Terminal UI review does not show the recipient/target name
-
-When reviewing outgoing messages in the terminal UI, there is no indication of who the message is being sent to. The sender is shown but not the target — the person being messaged or the conversation the message is going to. This makes it hard to confirm messages are addressed correctly during review.

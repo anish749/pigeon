@@ -71,3 +71,7 @@ Reaction notifications now include the original message content. The hub looks u
 ## ~~Terminal UI review does not allow changing the send mode~~ — fixed in #252
 
 The outbox review screen now supports toggling send mode with the `v` key before approving the message.
+
+## ~~Terminal UI review does not show the recipient/target name~~ — fixed in #257
+
+`itemSummary` now displays `platform → resolved target (from sender): message` using `ResolvedTarget()` which resolves Slack channel IDs and user IDs to display names at submit time.
