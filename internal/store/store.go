@@ -47,6 +47,11 @@ type Store interface {
 	// ListConversations returns all conversation directories for an account.
 	ListConversations(acct account.Account) ([]string, error)
 
+	// LatestConversationActivity returns the most recent message timestamp in a
+	// conversation within the optional since window. Returns the zero time when
+	// no message falls within the window.
+	LatestConversationActivity(acct account.Account, conversation string, since time.Duration) (time.Time, error)
+
 	// WriteMetaIfNotExists writes .meta.json only if it doesn't already exist.
 	// Returns true if written, false if already present.
 	WriteMetaIfNotExists(acct account.Account, conversation string, meta modelv1.ConvMeta) (bool, error)

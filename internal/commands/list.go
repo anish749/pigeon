@@ -4,12 +4,18 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/search"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/workspace"
 )
 
 func RunList(platform, accountName string) error {
@@ -123,6 +129,50 @@ func RunListScoped(accounts []account.Account, platform string) error {
 	return nil
 }
 
+// RunListSince lists conversations with activity within the given window.
+func RunListSince(ws *workspace.Workspace, platform, accountName string, since time.Duration) error {
+	s := store.NewFSStore(paths.DefaultDataRoot())
+
+	dirs, err := read.SearchDirs(ws, platform, accountName)
+	if err != nil {
+		return err
+	}
+
+	var allFiles []string
+	for _, dir := range dirs {
+		files, err := read.Glob(dir, since)
+		if err != nil {
+			return err
+		}
+		allFiles = append(allFiles, files...)
+	}
+	if len(allFiles) == 0 {
+		fmt.Println("No conversations found.")
+		return nil
+	}
+
+	convs := activeConversations(allFiles, paths.DefaultDataRoot().Path())
+	if len(convs) == 0 {
+		fmt.Println("No conversations found.")
+		return nil
+	}
+
+	now := time.Now()
+	for _, conv := range convs {
+		latest, err := s.LatestConversationActivity(conv.Account, conv.Name, since)
+		if err != nil {
+			return fmt.Errorf("read latest activity for %s: %w", conv.Display, err)
+		}
+		if latest.IsZero() {
+			fmt.Printf("%s  active\n", conv.Display)
+		} else {
+			fmt.Printf("%s  last: %s ago\n", conv.Display, timeutil.FormatAge(now.Sub(latest)))
+		}
+		fmt.Printf("  %s\n", conv.Dir)
+	}
+	return nil
+}
+
 // listAccount prints a header and conversations (or GWS services) for a
 // single account.
 func listAccount(s *store.FSStore, acct account.Account) error {
@@ -152,6 +202,38 @@ func listAccount(s *store.FSStore, acct account.Account) error {
 		fmt.Printf("  %s\n", c)
 	}
 	return nil
+}
+
+type activeConversation struct {
+	Account account.Account
+	Name    string
+	Display string
+	Dir     string
+}
+
+func activeConversations(files []string, root string) []activeConversation {
+	seen := make(map[string]struct{})
+	var convs []activeConversation
+	for _, f := range files {
+		platform, acctName, convName, _, _, err := search.ParseFilePath(f, root)
+		if err != nil {
+			continue
+		}
+		key := strings.Join([]string{platform, acctName, convName}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		acct := account.NewFromSlug(platform, acctName)
+		convs = append(convs, activeConversation{
+			Account: acct,
+			Name:    convName,
+			Display: strings.Join([]string{platform, acctName, convName}, "/"),
+			Dir:     paths.NewDataRoot(root).AccountFor(acct).Conversation(convName).Path(),
+		})
+	}
+	return convs
 }
 
 // listGWSAccount prints the services and item counts for a GWS account.

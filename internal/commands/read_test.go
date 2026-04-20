@@ -136,3 +136,48 @@ func convNames(matches []*conversation) []string {
 	}
 	return names
 }
+
+func TestActiveConversations(t *testing.T) {
+	root := "/data"
+	files := []string{
+		"/data/slack/acme/#general/2026-04-07.jsonl",
+		"/data/slack/acme/#general/threads/1742100000.jsonl",
+		"/data/slack/acme/#random/2026-04-07.jsonl",
+		"/data/whatsapp/phone/Alice/2026-04-05.jsonl",
+	}
+
+	convs := activeConversations(files, root)
+
+	if len(convs) != 3 {
+		t.Fatalf("got %d conversations, want 3", len(convs))
+	}
+	if convs[0].Display != "slack/acme/#general" {
+		t.Errorf("convs[0].Display = %q, want slack/acme/#general", convs[0].Display)
+	}
+	if convs[0].Dir != "/data/slack/acme/#general" {
+		t.Errorf("convs[0].Dir = %q, want /data/slack/acme/#general", convs[0].Dir)
+	}
+	if convs[1].Display != "slack/acme/#random" {
+		t.Errorf("convs[1].Display = %q, want slack/acme/#random", convs[1].Display)
+	}
+	if convs[2].Display != "whatsapp/phone/Alice" {
+		t.Errorf("convs[2].Display = %q, want whatsapp/phone/Alice", convs[2].Display)
+	}
+}
+
+func TestActiveConversations_ConversationNamedThreads(t *testing.T) {
+	root := "/data"
+	files := []string{
+		"/data/slack/acme/threads/2026-04-07.jsonl",
+		"/data/slack/acme/threads/threads/1742100000.jsonl",
+	}
+
+	convs := activeConversations(files, root)
+
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	if convs[0].Display != "slack/acme/threads" {
+		t.Errorf("Display = %q, want slack/acme/threads", convs[0].Display)
+	}
+}

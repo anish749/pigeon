@@ -260,6 +260,24 @@ func (s *FSStore) ListConversations(acct account.Account) ([]string, error) {
 	return convs, nil
 }
 
+// LatestConversationActivity returns the most recent message timestamp in a
+// conversation within the optional since window.
+func (s *FSStore) LatestConversationActivity(acct account.Account, conversation string, since time.Duration) (time.Time, error) {
+	opts := ReadOpts{Last: 1}
+	if since > 0 {
+		opts.Since = since
+	}
+
+	df, err := s.ReadConversation(acct, conversation, opts)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if df == nil || len(df.Messages) == 0 {
+		return time.Time{}, nil
+	}
+	return df.Messages[len(df.Messages)-1].Ts, nil
+}
+
 // GWSServiceInfo holds summary information about a GWS service directory.
 type GWSServiceInfo struct {
 	Service string // "gmail", "gcalendar", "gdrive"

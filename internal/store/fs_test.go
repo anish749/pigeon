@@ -112,6 +112,52 @@ func TestAppend_DedupOnRead(t *testing.T) {
 	}
 }
 
+func TestLatestConversationActivity_UsesLatestMessageTimestamp(t *testing.T) {
+	s, acct := setup(t)
+	now := time.Now().UTC()
+
+	older := msgLine("M1", now.Add(-2*time.Hour), "Alice", "U1", "earlier")
+	newer := msgLine("M2", now.Add(-10*time.Minute), "Bob", "U2", "later")
+
+	if err := s.Append(acct, "#general", older); err != nil {
+		t.Fatalf("Append older: %v", err)
+	}
+	if err := s.Append(acct, "#general", newer); err != nil {
+		t.Fatalf("Append newer: %v", err)
+	}
+
+	got, err := s.LatestConversationActivity(acct, "#general", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("LatestConversationActivity: %v", err)
+	}
+	if !got.Equal(newer.Msg.Ts) {
+		t.Errorf("latest activity = %v, want %v", got, newer.Msg.Ts)
+	}
+}
+
+func TestLatestConversationActivity_UsesRecentThreadReply(t *testing.T) {
+	s, acct := setup(t)
+	now := time.Now().UTC()
+
+	parent := msgLine("P1", now.Add(-48*time.Hour), "Alice", "U1", "old parent")
+	reply := msgLine("R1", now.Add(-15*time.Minute), "Bob", "U2", "recent reply")
+
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", parent.Msg.ID, reply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	got, err := s.LatestConversationActivity(acct, "#general", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("LatestConversationActivity: %v", err)
+	}
+	if !got.Equal(reply.Msg.Ts) {
+		t.Errorf("latest activity = %v, want %v", got, reply.Msg.Ts)
+	}
+}
+
 // --- Thread ---
 
 func TestAppendThreadAndRead(t *testing.T) {
