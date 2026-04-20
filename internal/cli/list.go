@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -77,9 +76,6 @@ func runListSince(platform, account, since string) error {
 
 	var allFiles []string
 	for _, dir := range dirs {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			continue
-		}
 		files, err := read.Glob(dir, sinceDur)
 		if err != nil {
 			return err

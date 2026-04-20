@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -62,9 +61,6 @@ Output is one file path per line, suitable for piping to other tools.`,
 			}
 
 			for _, dir := range dirs {
-				if _, err := os.Stat(dir); os.IsNotExist(err) {
-					continue
-				}
 				files, err := read.Glob(dir, sinceDur)
 				if err != nil {
 					return err

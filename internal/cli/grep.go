@@ -116,9 +116,6 @@ JSON fields in each line:
 			if isTerminal() && !filesOnly && !count {
 				var allMatches []search.Match
 				for _, dir := range dirs {
-					if _, err := os.Stat(dir); os.IsNotExist(err) {
-						continue
-					}
 					out, err := read.Grep(dir, read.GrepOpts{
 						Query:           query,
 						Since:           sinceDur,
@@ -151,9 +148,6 @@ JSON fields in each line:
 
 			var allOut []byte
 			for _, dir := range dirs {
-				if _, err := os.Stat(dir); os.IsNotExist(err) {
-					continue
-				}
 				out, err := read.Grep(dir, read.GrepOpts{
 					Query:           query,
 					Since:           sinceDur,

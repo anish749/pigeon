@@ -2,6 +2,8 @@ package read
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
@@ -20,7 +22,11 @@ import (
 func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string, error) {
 	// No workspace — fall back to single-directory behavior.
 	if ws == nil {
-		return []string{paths.SearchDir(platform, accountName)}, nil
+		dir := paths.SearchDir(platform, accountName)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil, fmt.Errorf("no data at %s", dir)
+		}
+		return []string{dir}, nil
 	}
 
 	root := paths.DefaultDataRoot()
@@ -31,7 +37,11 @@ func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string
 		if !ws.Contains(acct) {
 			return nil, fmt.Errorf("account %s is not in workspace %q", acct.Display(), ws.Name)
 		}
-		return []string{root.AccountFor(acct).Path()}, nil
+		dir := root.AccountFor(acct).Path()
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil, fmt.Errorf("no data for %s", acct.Display())
+		}
+		return []string{dir}, nil
 	}
 
 	accounts := ws.AccountsForPlatform(platform)
@@ -42,9 +52,14 @@ func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string
 		return nil, fmt.Errorf("workspace %q has no accounts", ws.Name)
 	}
 
-	dirs := make([]string, len(accounts))
-	for i, acct := range accounts {
-		dirs[i] = root.AccountFor(acct).Path()
+	var dirs []string
+	for _, acct := range accounts {
+		dir := root.AccountFor(acct).Path()
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			slog.Info("skipping account with no data", "account", acct.Display(), "workspace", ws.Name)
+			continue
+		}
+		dirs = append(dirs, dir)
 	}
 	return dirs, nil
 }
