@@ -1588,3 +1588,52 @@ func TestReadConversation_ThreadReply_OldParentInDateFile(t *testing.T) {
 		t.Errorf("want only the fresh reply, got %d: %v", len(df.Messages), ids)
 	}
 }
+
+// TestReadConversation_ThreadReplyToOldParent_DeliveredViaSince verifies that
+// a new thread reply to an old parent message is returned by ReadConversation
+// with a Since filter. This simulates the hub's drainConversation path where
+// lastDelivered is recent but the thread root is days old.
+func TestReadConversation_ThreadReplyToOldParent_DeliveredViaSince(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	// Parent message written 7 days ago.
+	oldParent := msgLine("1700000001.000001", time.Now().Add(-7*24*time.Hour), "Alice", "U001", "old discussion")
+	if err := s.Append(acct, conv, oldParent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+
+	// New thread reply written just now.
+	recentReply := msgLine("1700000002.000002", time.Now().Add(-10*time.Second), "Bob", "U002", "replying to old thread")
+	recentReply.Msg.Reply = true
+	if err := s.AppendThread(acct, conv, "1700000001.000001", recentReply); err != nil {
+		t.Fatalf("AppendThread: %v", err)
+	}
+
+	// Read with Since=5 minutes, simulating hub drain window.
+	df, err := s.ReadConversation(acct, conv, ReadOpts{Since: 5 * time.Minute})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	// The recent thread reply should be present.
+	var found bool
+	for _, m := range df.Messages {
+		if m.ID == "1700000002.000002" {
+			found = true
+			if m.Text != "replying to old thread" {
+				t.Errorf("Text = %q, want %q", m.Text, "replying to old thread")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("thread reply not found in ReadConversation(Since=5m), got %d messages: %v",
+			len(df.Messages), func() []string {
+				var ids []string
+				for _, m := range df.Messages {
+					ids = append(ids, m.ID)
+				}
+				return ids
+			}())
+	}
+}
