@@ -13,10 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anish749/pigeon/internal/api"
-	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/timeutil"
 )
 
 var (
@@ -44,22 +44,22 @@ const (
 )
 
 type model struct {
-	items    []*outbox.Item
-	cursor   int
-	mode     mode
-	feedback string
-	status   string
-	err      error
-	width    int
-	height   int
+	items      []*outbox.Item
+	cursor     int
+	mode       mode
+	feedback   string
+	itemStatus map[string]string // per-item status keyed by item ID
+	err        error
+	width      int
+	height     int
 }
 
 // Bubble Tea messages
 type (
 	itemsMsg       []*outbox.Item
-	actionDoneMsg  struct{ detail string }
-	actionFailMsg  struct{ detail string }
-	clearStatusMsg struct{}
+	actionDoneMsg  struct{ id, detail string }
+	actionFailMsg  struct{ id, detail string }
+	clearStatusMsg struct{ id string }
 	tickMsg        struct{}
 )
 
@@ -84,15 +84,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case actionDoneMsg:
-		m.status = successStyle.Render("✓ " + msg.detail)
-		return m, tea.Batch(m.fetchItems(), clearStatusAfter(3*time.Second))
+		m.setStatus(msg.id, successStyle.Render("✓ "+msg.detail))
+		return m, tea.Batch(m.fetchItems(), clearStatusAfter(msg.id, 3*time.Second))
 
 	case actionFailMsg:
-		m.status = errorStyle.Render("✗ " + msg.detail)
-		return m, clearStatusAfter(30 * time.Second)
+		m.setStatus(msg.id, errorStyle.Render("✗ "+msg.detail))
+		return m, clearStatusAfter(msg.id, 30*time.Second)
 
 	case clearStatusMsg:
-		m.status = ""
+		delete(m.itemStatus, msg.id)
 
 	case tickMsg:
 		return m, tea.Batch(m.fetchItems(), tickEvery(time.Second))
@@ -119,8 +119,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "a":
 		if len(m.items) > 0 {
-			m.status = dimStyle.Render("Approving...")
-			return m, m.approveItem(m.items[m.cursor].ID)
+			item := m.items[m.cursor]
+			m.setStatus(item.ID, dimStyle.Render("Approving..."))
+			return m, m.approveItem(item.ID)
 		}
 	case "f":
 		if len(m.items) > 0 && m.items[m.cursor].SessionID != "" {
@@ -131,7 +132,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.items) > 0 {
 			item := m.items[m.cursor]
 			nextVia := cycleVia(item)
-			m.status = dimStyle.Render("Updating send mode...")
+			m.setStatus(item.ID, dimStyle.Render("Updating send mode..."))
 			return m, m.setVia(item.ID, nextVia)
 		}
 	}
@@ -150,7 +151,7 @@ func (m model) handleFeedbackKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			note := m.feedback
 			m.mode = modeList
 			m.feedback = ""
-			m.status = dimStyle.Render("Sending feedback...")
+			m.setStatus(item.ID, dimStyle.Render("Sending feedback..."))
 			return m, m.sendFeedback(item.ID, note)
 		}
 	case tea.KeyBackspace:
@@ -180,9 +181,6 @@ func (m model) View() string {
 	if count == 0 {
 		b.WriteString(dimStyle.Render("  No pending items. Waiting for submissions..."))
 		b.WriteString("\n\n")
-		if m.status != "" {
-			b.WriteString("  " + m.status + "\n\n")
-		}
 		b.WriteString(helpStyle.Render("  q quit"))
 		return b.String()
 	}
@@ -207,8 +205,10 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	if m.status != "" {
-		b.WriteString("  " + m.status + "\n")
+	if m.cursor < count {
+		if s := m.itemStatus[m.items[m.cursor].ID]; s != "" {
+			b.WriteString("  " + s + "\n")
+		}
 	}
 
 	b.WriteString("\n")
@@ -268,17 +268,17 @@ func (m model) approveItem(id string) tea.Cmd {
 	return func() tea.Msg {
 		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "approve"})
 		if err != nil {
-			return actionFailMsg{"marshal request: " + err.Error()}
+			return actionFailMsg{id, "marshal request: " + err.Error()}
 		}
 		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
-			return actionFailMsg{err.Error()}
+			return actionFailMsg{id, err.Error()}
 		}
 		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{"Approved and sent"}
+			return actionDoneMsg{id, "Approved and sent"}
 		}
 		detail, _ := result["error"].(string)
-		return actionFailMsg{detail}
+		return actionFailMsg{id, detail}
 	}
 }
 
@@ -286,17 +286,17 @@ func (m model) sendFeedback(id, note string) tea.Cmd {
 	return func() tea.Msg {
 		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "feedback", Note: note})
 		if err != nil {
-			return actionFailMsg{"marshal request: " + err.Error()}
+			return actionFailMsg{id, "marshal request: " + err.Error()}
 		}
 		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
-			return actionFailMsg{err.Error()}
+			return actionFailMsg{id, err.Error()}
 		}
 		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{"Feedback sent to session"}
+			return actionDoneMsg{id, "Feedback sent to session"}
 		}
 		detail, _ := result["error"].(string)
-		return actionFailMsg{detail}
+		return actionFailMsg{id, detail}
 	}
 }
 
@@ -323,17 +323,17 @@ func (m model) setVia(id string, via modelv1.Via) tea.Cmd {
 	return func() tea.Msg {
 		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)})
 		if err != nil {
-			return actionFailMsg{"marshal request: " + err.Error()}
+			return actionFailMsg{id, "marshal request: " + err.Error()}
 		}
 		result, err := doPost("http://pigeon/api/outbox/action", body)
 		if err != nil {
-			return actionFailMsg{err.Error()}
+			return actionFailMsg{id, err.Error()}
 		}
 		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{"Send mode updated"}
+			return actionDoneMsg{id, "Send mode updated"}
 		}
 		detail, _ := result["error"].(string)
-		return actionFailMsg{detail}
+		return actionFailMsg{id, detail}
 	}
 }
 
@@ -341,8 +341,15 @@ func tickEvery(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func clearStatusAfter(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg{} })
+func clearStatusAfter(id string, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg{id} })
+}
+
+func (m *model) setStatus(id, s string) {
+	if m.itemStatus == nil {
+		m.itemStatus = make(map[string]string)
+	}
+	m.itemStatus[id] = s
 }
 
 // --- HTTP helpers ---
