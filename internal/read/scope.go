@@ -61,5 +61,8 @@ func SearchDirs(ws *workspace.Workspace, platform, accountName string) ([]string
 		}
 		dirs = append(dirs, dir)
 	}
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("no synced data for any account in workspace %q", ws.Name)
+	}
 	return dirs, nil
 }

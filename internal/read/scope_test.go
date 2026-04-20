@@ -47,7 +47,7 @@ func TestSearchDirs(t *testing.T) {
 		{"empty workspace", emptyWS, "", "", 0, true},
 		{"workspace account dir missing on disk", makeWorkspace(t, "ghost", config.WorkspaceConfig{
 			Slack: []string{"no-such-org"},
-		}), "", "", 0, false},
+		}), "", "", 0, true},
 	}
 
 	for _, tt := range tests {
