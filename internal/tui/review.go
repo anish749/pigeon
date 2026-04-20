@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -272,55 +271,19 @@ func (m model) fetchItems() tea.Cmd {
 
 func (m model) approveItem(id string) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "approve"})
-		if err != nil {
-			return actionFailMsg{id, "marshal request: " + err.Error()}
-		}
-		result, err := doPost("http://pigeon/api/outbox/action", body)
-		if err != nil {
-			return actionFailMsg{id, err.Error()}
-		}
-		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{id, "Approved and sent"}
-		}
-		detail, _ := result["error"].(string)
-		return actionFailMsg{id, detail}
+		return doAction(outbox.ActionRequest{ID: id, Action: "approve"}, id, "Approved and sent")
 	}
 }
 
 func (m model) dismissItem(id string) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "dismiss"})
-		if err != nil {
-			return actionFailMsg{id, "marshal request: " + err.Error()}
-		}
-		result, err := doPost("http://pigeon/api/outbox/action", body)
-		if err != nil {
-			return actionFailMsg{id, err.Error()}
-		}
-		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{id, "Dismissed"}
-		}
-		detail, _ := result["error"].(string)
-		return actionFailMsg{id, detail}
+		return doAction(outbox.ActionRequest{ID: id, Action: "dismiss"}, id, "Dismissed")
 	}
 }
 
 func (m model) sendFeedback(id, note string) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "feedback", Note: note})
-		if err != nil {
-			return actionFailMsg{id, "marshal request: " + err.Error()}
-		}
-		result, err := doPost("http://pigeon/api/outbox/action", body)
-		if err != nil {
-			return actionFailMsg{id, err.Error()}
-		}
-		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{id, "Feedback sent to session"}
-		}
-		detail, _ := result["error"].(string)
-		return actionFailMsg{id, detail}
+		return doAction(outbox.ActionRequest{ID: id, Action: "feedback", Note: note}, id, "Feedback sent to session")
 	}
 }
 
@@ -345,19 +308,7 @@ func cycleVia(item *outbox.Item) modelv1.Via {
 
 func (m model) setVia(id string, via modelv1.Via) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)})
-		if err != nil {
-			return actionFailMsg{id, "marshal request: " + err.Error()}
-		}
-		result, err := doPost("http://pigeon/api/outbox/action", body)
-		if err != nil {
-			return actionFailMsg{id, err.Error()}
-		}
-		if ok, _ := result["ok"].(bool); ok {
-			return actionDoneMsg{id, "Send mode updated"}
-		}
-		detail, _ := result["error"].(string)
-		return actionFailMsg{id, detail}
+		return doAction(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)}, id, "Send mode updated")
 	}
 }
 
@@ -378,6 +329,21 @@ func (m *model) setStatus(id, s string) {
 
 // --- HTTP helpers ---
 
+func doAction(req outbox.ActionRequest, id, successDetail string) tea.Msg {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return actionFailMsg{id, "marshal request: " + err.Error()}
+	}
+	resp, err := doPost("http://pigeon/api/outbox/action", body)
+	if err != nil {
+		return actionFailMsg{id, err.Error()}
+	}
+	if resp.OK {
+		return actionDoneMsg{id, successDetail}
+	}
+	return actionFailMsg{id, resp.Error}
+}
+
 func doGet() ([]*outbox.Item, error) {
 	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/outbox")
 	if err != nil {
@@ -389,21 +355,17 @@ func doGet() ([]*outbox.Item, error) {
 	return items, nil
 }
 
-func doPost(url string, body []byte) (map[string]any, error) {
+func doPost(url string, body []byte) (*outbox.ActionResponse, error) {
 	resp, err := daemonclient.DefaultPgnHTTPClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
+	var result outbox.ActionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	return result, nil
+	return &result, nil
 }
 
 // itemSummary derives a one-line display string from the outbox item's payload.
