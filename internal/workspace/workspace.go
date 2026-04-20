@@ -60,6 +60,20 @@ func resolve(cfg *config.Config, ws config.WorkspaceName, source string) (*Works
 	return &Workspace{Name: ws, Accounts: accounts}, nil
 }
 
+// GetAllWorkspaces returns every named workspace in the config, resolved with
+// their accounts. Returns an error if any workspace fails to resolve.
+func GetAllWorkspaces(cfg *config.Config) ([]*Workspace, error) {
+	var workspaces []*Workspace
+	for name := range cfg.Workspaces {
+		ws, err := resolve(cfg, name, "config")
+		if err != nil {
+			return nil, err
+		}
+		workspaces = append(workspaces, ws)
+	}
+	return workspaces, nil
+}
+
 // allAccounts returns every configured account across all platforms.
 func allAccounts(cfg *config.Config) []account.Account {
 	var accounts []account.Account

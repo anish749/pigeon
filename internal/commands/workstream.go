@@ -28,12 +28,10 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 		}
 		workspaces = append(workspaces, ws)
 	} else {
-		for name := range cfg.Workspaces {
-			ws, err := workspace.GetCurrentWorkspace(cfg, string(name))
-			if err != nil {
-				return err
-			}
-			workspaces = append(workspaces, ws)
+		var err error
+		workspaces, err = workspace.GetAllWorkspaces(cfg)
+		if err != nil {
+			return err
 		}
 		if len(workspaces) == 0 {
 			return fmt.Errorf("no workspaces configured — run 'pigeon workspace add' first")
