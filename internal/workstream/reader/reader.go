@@ -30,6 +30,27 @@ func New(s *store.FSStore, root paths.DataRoot) *Reader {
 	return &Reader{store: s, root: root}
 }
 
+// ReadAccounts reads signals for the given accounts within the time range.
+// Returns them sorted by timestamp.
+func (r *Reader) ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
+	var signals []models.Signal
+	var errs []error
+
+	for _, acct := range accounts {
+		sigs, err := r.readAccount(acct, since, until)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", acct.Display(), err))
+		}
+		signals = append(signals, sigs...)
+	}
+
+	sort.Slice(signals, func(i, j int) bool {
+		return signals[i].Ts.Before(signals[j].Ts)
+	})
+
+	return signals, errors.Join(errs...)
+}
+
 // ReadAll reads all signals within the given time range across all platforms
 // and workspaces. Returns them sorted by timestamp.
 func (r *Reader) ReadAll(since, until time.Time) ([]models.Signal, error) {

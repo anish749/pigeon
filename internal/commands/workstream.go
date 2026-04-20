@@ -38,35 +38,26 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 		}
 	}
 
+	claude := clients.New(model, timeout, logger)
+	disc := discovery.NewLLMDiscovery(claude, logger)
+
+	root := paths.DefaultDataRoot()
+	fsStore := store.NewFSStore(root)
+	r := reader.New(fsStore, root)
+
 	for _, ws := range workspaces {
-		if err := discoverWorkspace(ctx, ws, since, until, model, timeout, logger, w); err != nil {
+		if err := discoverWorkspace(ctx, r, disc, ws, since, until, w); err != nil {
 			return fmt.Errorf("discover workspace %q: %w", ws.Name, err)
 		}
 	}
 	return nil
 }
 
-func discoverWorkspace(ctx context.Context, ws *workspace.Workspace, since, until time.Time, model string, timeout time.Duration, logger *slog.Logger, w io.Writer) error {
-	root := paths.DefaultDataRoot()
-	fsStore := store.NewFSStore(root)
-
-	signals, err := reader.New(fsStore, root).ReadAll(since, until)
+func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LLMDiscovery, ws *workspace.Workspace, since, until time.Time, w io.Writer) error {
+	signals, err := r.ReadAccounts(ws.Accounts, since, until)
 	if err != nil {
 		return fmt.Errorf("read signals: %w", err)
 	}
-
-	// Filter to this workspace's accounts.
-	allowed := make(map[string]bool, len(ws.Accounts))
-	for _, a := range ws.Accounts {
-		allowed[a.String()] = true
-	}
-	filtered := signals[:0]
-	for _, sig := range signals {
-		if allowed[sig.Account.String()] {
-			filtered = append(filtered, sig)
-		}
-	}
-	signals = filtered
 
 	fmt.Fprintf(w, "Workspace %q: %d signals (%s → %s)\n",
 		ws.Name, len(signals), since.Format("2006-01-02"), until.Format("2006-01-02"))
@@ -76,8 +67,6 @@ func discoverWorkspace(ctx context.Context, ws *workspace.Workspace, since, unti
 		return nil
 	}
 
-	claude := clients.New(model, timeout, logger)
-	disc := discovery.NewLLMDiscovery(claude, logger)
 	discovered, err := disc.Discover(ctx, signals)
 	if err != nil {
 		return fmt.Errorf("discovery: %w", err)
