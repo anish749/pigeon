@@ -9,13 +9,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
-	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/workspace"
 )
 
 func newWorkstreamCmd() *cobra.Command {
@@ -24,7 +25,53 @@ func newWorkstreamCmd() *cobra.Command {
 		Short: "Workstream management",
 		Long:  "Manage workstream routing and run replay benchmarks.",
 	}
+	cmd.AddCommand(newWorkstreamDiscoverCmd())
 	cmd.AddCommand(newWorkstreamReplayCmd())
+	return cmd
+}
+
+func newWorkstreamDiscoverCmd() *cobra.Command {
+	var sinceStr, untilStr, workspaceFlag, model string
+	var timeout time.Duration
+
+	cmd := &cobra.Command{
+		Use:   "discover",
+		Short: "Discover workstreams from messaging history",
+		Long:  "Analyzes signals across conversations to identify distinct ongoing workstreams.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			appCfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			since := time.Now().AddDate(0, 0, -30)
+			until := time.Now()
+			if sinceStr != "" {
+				t, err := time.Parse("2006-01-02", sinceStr)
+				if err != nil {
+					return fmt.Errorf("parse --since: %w", err)
+				}
+				since = t
+			}
+			if untilStr != "" {
+				t, err := time.Parse("2006-01-02", untilStr)
+				if err != nil {
+					return fmt.Errorf("parse --until: %w", err)
+				}
+				until = t
+			}
+
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			return commands.RunWorkstreamDiscover(cmd.Context(), appCfg, workspaceFlag, since, until, model, timeout, logger, os.Stdout)
+		},
+	}
+
+	cmd.Flags().StringVar(&sinceStr, "since", "", "Start date (YYYY-MM-DD, default: 30 days ago)")
+	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace to discover (default: all workspaces)")
+	cmd.Flags().StringVar(&model, "model", "haiku", "Claude model for discovery")
+	cmd.Flags().DurationVar(&timeout, "timeout", 60*time.Second, "Timeout per LLM call")
+
 	return cmd
 }
 
