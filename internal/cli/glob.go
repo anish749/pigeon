@@ -2,12 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
@@ -48,10 +46,9 @@ Output is one file path per line, suitable for piping to other tools.`,
 			if err != nil {
 				return fmt.Errorf("get since flag: %w", err)
 			}
-
-			dir := paths.SearchDir(platform, account)
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				return fmt.Errorf("no data at %s", dir)
+			dirs, err := read.SearchDirs(activeWorkspace, platform, account)
+			if err != nil {
+				return err
 			}
 
 			var sinceDur time.Duration
@@ -63,12 +60,14 @@ Output is one file path per line, suitable for piping to other tools.`,
 				sinceDur = d
 			}
 
-			files, err := read.Glob(dir, sinceDur)
-			if err != nil {
-				return err
-			}
-			for _, f := range files {
-				fmt.Println(f)
+			for _, dir := range dirs {
+				files, err := read.Glob(dir, sinceDur)
+				if err != nil {
+					return err
+				}
+				for _, f := range files {
+					fmt.Println(f)
+				}
 			}
 			return nil
 		},

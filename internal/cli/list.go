@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	a "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
@@ -38,9 +39,18 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get since flag: %w", err)
 			}
-
 			if since != "" {
 				return runListSince(platform, account, since)
+			}
+
+			if activeWorkspace != nil {
+				if account != "" {
+					if err := validateAccountInWorkspace(a.New(platform, account)); err != nil {
+						return err
+					}
+					return commands.RunList(platform, account)
+				}
+				return commands.RunListScoped(activeWorkspace.Accounts, platform)
 			}
 			return commands.RunList(platform, account)
 		},
@@ -59,18 +69,26 @@ func runListSince(platform, account, since string) error {
 		return fmt.Errorf("invalid --since value %q: %w", since, err)
 	}
 
-	dir := paths.SearchDir(platform, account)
-	files, err := read.Glob(dir, sinceDur)
+	dirs, err := read.SearchDirs(activeWorkspace, platform, account)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+
+	var allFiles []string
+	for _, dir := range dirs {
+		files, err := read.Glob(dir, sinceDur)
+		if err != nil {
+			return err
+		}
+		allFiles = append(allFiles, files...)
+	}
+	if len(allFiles) == 0 {
 		fmt.Println("No conversations found.")
 		return nil
 	}
 
 	root := paths.DefaultDataRoot().Path()
-	convs := extractConversations(files, root)
+	convs := extractConversations(allFiles, root)
 	if len(convs) == 0 {
 		fmt.Println("No conversations found.")
 		return nil

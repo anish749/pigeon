@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/search"
 	"github.com/anish749/pigeon/internal/timeutil"
@@ -98,10 +97,9 @@ JSON fields in each line:
 			if err != nil {
 				return fmt.Errorf("get no-filename flag: %w", err)
 			}
-
-			dir := paths.SearchDir(platform, account)
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				return fmt.Errorf("no data at %s", dir)
+			dirs, err := read.SearchDirs(activeWorkspace, platform, account)
+			if err != nil {
+				return err
 			}
 
 			var sinceDur time.Duration
@@ -116,52 +114,60 @@ JSON fields in each line:
 			// Terminal: use rg --json for structured parsing.
 			// Pipe: use raw rg output for jq compatibility.
 			if isTerminal() && !filesOnly && !count {
+				var allMatches []search.Match
+				for _, dir := range dirs {
+					out, err := read.Grep(dir, read.GrepOpts{
+						Query:           query,
+						Since:           sinceDur,
+						Context:         context,
+						CaseInsensitive: caseInsensitive,
+						FixedStrings:    fixedStrings,
+						JSON:            true,
+					})
+					if err != nil {
+						return err
+					}
+					matches, parseErr := search.ParseGrepOutput(out, dir)
+					if parseErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
+					}
+					allMatches = append(allMatches, matches...)
+				}
+				if sinceDur > 0 {
+					allMatches = search.FilterThreadsBySince(allMatches, sinceDur)
+				}
+				if len(allMatches) == 0 {
+					fmt.Println("No matches found.")
+					return nil
+				}
+				fmt.Printf("%d match(es) found:\n\n", len(allMatches))
+				search.PrintSummary(allMatches, sinceDur)
+				search.PrintGroupedResults(allMatches)
+				return nil
+			}
+
+			var allOut []byte
+			for _, dir := range dirs {
 				out, err := read.Grep(dir, read.GrepOpts{
 					Query:           query,
 					Since:           sinceDur,
 					Context:         context,
+					FilesOnly:       filesOnly,
+					Count:           count,
 					CaseInsensitive: caseInsensitive,
 					FixedStrings:    fixedStrings,
-					JSON:            true,
+					NoFilename:      noFilename,
 				})
 				if err != nil {
 					return err
 				}
-				matches, parseErr := search.ParseGrepOutput(out, dir)
-				if parseErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: some lines failed to parse: %v\n", parseErr)
-				}
-				if sinceDur > 0 {
-					matches = search.FilterThreadsBySince(matches, sinceDur)
-				}
-				if len(matches) == 0 {
-					fmt.Println("No matches found.")
-					return nil
-				}
-				fmt.Printf("%d match(es) found:\n\n", len(matches))
-				search.PrintSummary(matches, sinceDur)
-				search.PrintGroupedResults(matches)
-				return nil
+				allOut = append(allOut, out...)
 			}
-
-			out, err := read.Grep(dir, read.GrepOpts{
-				Query:           query,
-				Since:           sinceDur,
-				Context:         context,
-				FilesOnly:       filesOnly,
-				Count:           count,
-				CaseInsensitive: caseInsensitive,
-				FixedStrings:    fixedStrings,
-				NoFilename:      noFilename,
-			})
-			if err != nil {
-				return err
-			}
-			if len(out) == 0 {
+			if len(allOut) == 0 {
 				fmt.Println("No matches found.")
 				return nil
 			}
-			os.Stdout.Write(out)
+			os.Stdout.Write(allOut)
 			return nil
 		},
 	}
