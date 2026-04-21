@@ -135,14 +135,14 @@ func TestGlob_SinceIncludesRecentLinearIssue(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 	old := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
 
-	recentIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-1.jsonl")
+	recentIssue := filepath.Join(dir, "linear-issues", "acme", "issues", "PROJ-1.jsonl")
 	writeFile(t, recentIssue, `{"type":"linear-issue","id":"i1","identifier":"PROJ-1","updatedAt":"`+today+`T12:00:00Z"}`+"\n")
 
-	oldIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-2.jsonl")
+	oldIssue := filepath.Join(dir, "linear-issues", "acme", "issues", "PROJ-2.jsonl")
 	writeFile(t, oldIssue, `{"type":"linear-issue","id":"i2","identifier":"PROJ-2","updatedAt":"`+old+`T12:00:00Z"}`+"\n")
 
 	// An issue whose record is old but a new comment landed in the window.
-	commentedIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-3.jsonl")
+	commentedIssue := filepath.Join(dir, "linear-issues", "acme", "issues", "PROJ-3.jsonl")
 	writeFile(t, commentedIssue,
 		`{"type":"linear-issue","id":"i3","identifier":"PROJ-3","updatedAt":"`+old+`T12:00:00Z"}`+"\n"+
 			`{"type":"linear-comment","id":"c1","createdAt":"`+today+`T13:00:00Z"}`+"\n")

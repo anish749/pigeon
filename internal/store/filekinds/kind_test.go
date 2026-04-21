@@ -70,7 +70,7 @@ func TestKindMatch_Routing(t *testing.T) {
 		},
 		{
 			name: "linear issue file",
-			path: string(r.AccountFor(account.New("linear", "acme")).Linear().IssueFile("PROJ-123")),
+			path: string(r.AccountFor(account.New("linear-issues", "acme")).Linear().IssueFile("PROJ-123")),
 			want: "linear-issue",
 		},
 	}
@@ -232,7 +232,7 @@ func TestLatestTs_CalendarUsesUpdatedField(t *testing.T) {
 
 func TestLatestTs_LinearIssueScansBothFields(t *testing.T) {
 	dir := t.TempDir()
-	acct := paths.NewDataRoot(dir).AccountFor(account.New("linear", "acme"))
+	acct := paths.NewDataRoot(dir).AccountFor(account.New("linear-issues", "acme"))
 	path := string(acct.Linear().IssueFile("PROJ-123"))
 
 	// Linear issue lines carry "updatedAt"; comment lines carry "createdAt".

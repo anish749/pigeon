@@ -7,8 +7,8 @@ import (
 
 const (
 	// LinearPlatform is the platform segment for Linear accounts under the
-	// data root: <root>/linear/<workspace>/...
-	LinearPlatform = "linear"
+	// data root: <root>/linear-issues/<workspace>/...
+	LinearPlatform = "linear-issues"
 
 	linearIssuesSubdir = "issues"
 

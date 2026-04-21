@@ -328,7 +328,7 @@ func TestExtractConversations_Calendar(t *testing.T) {
 // in the same file.
 func TestExtractConversations_Linear(t *testing.T) {
 	root := t.TempDir()
-	acct := paths.NewDataRoot(root).AccountFor(account.New("linear", "acme"))
+	acct := paths.NewDataRoot(root).AccountFor(account.New("linear-issues", "acme"))
 	now := time.Now()
 	issueUpdated := now.Add(-5 * time.Hour).UTC().Format(time.RFC3339)
 	commentCreated := now.Add(-20 * time.Minute).UTC().Format(time.RFC3339)
@@ -357,8 +357,8 @@ func TestExtractConversations_Linear(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
-	if convs[0].Display != "linear/acme/issues" {
-		t.Errorf("Display = %q, want linear/acme/issues", convs[0].Display)
+	if convs[0].Display != "linear-issues/acme/issues" {
+		t.Errorf("Display = %q, want linear-issues/acme/issues", convs[0].Display)
 	}
 	age := now.Sub(convs[0].LatestTime)
 	if age < 15*time.Minute || age > 25*time.Minute {
@@ -420,7 +420,7 @@ func TestExtractConversations_MixedKinds(t *testing.T) {
 	}
 
 	// Linear issue file.
-	lin := r.AccountFor(account.New("linear", "acme")).Linear()
+	lin := r.AccountFor(account.New("linear-issues", "acme")).Linear()
 	linFile := string(lin.IssueFile("PROJ-7"))
 	linUpdated := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339)
 	writeLines(t, linFile,
@@ -446,7 +446,7 @@ func TestExtractConversations_MixedKinds(t *testing.T) {
 		"gws/anish/gmail",
 		"gws/anish/gcalendar",
 		"gws/anish/gdrive",
-		"linear/acme/issues",
+		"linear-issues/acme/issues",
 	}
 	for _, d := range wantDisplays {
 		if _, ok := byDisplay[d]; !ok {
@@ -467,7 +467,7 @@ func TestExtractConversations_MixedKinds(t *testing.T) {
 	if calAge < 35*time.Minute || calAge > 45*time.Minute {
 		t.Errorf("calendar age = %v, want ~40m", calAge)
 	}
-	linAge := now.Sub(byDisplay["linear/acme/issues"].LatestTime)
+	linAge := now.Sub(byDisplay["linear-issues/acme/issues"].LatestTime)
 	if linAge < 55*time.Minute || linAge > 65*time.Minute {
 		t.Errorf("linear age = %v, want ~1h", linAge)
 	}
