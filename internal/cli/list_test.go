@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +47,29 @@ func writeThreadFile(t *testing.T, path string, parent modelv1.MsgLine, replies 
 
 func msg(id string, ts time.Time) modelv1.MsgLine {
 	return modelv1.MsgLine{ID: id, Ts: ts, Sender: "Test", SenderID: "U123", Text: "hello"}
+}
+
+// writeLines serialises lines through modelv1.Marshal and writes them to
+// path. Using the real marshaller keeps these tests honest: if the on-disk
+// format ever drifts (field names, timestamp layout), the test files drift
+// with it, matching what real pollers produce.
+func writeLines(t *testing.T, path string, lines ...modelv1.Line) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	for _, l := range lines {
+		data, err := modelv1.Marshal(l)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", l.Type, err)
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestExtractConversations(t *testing.T) {
@@ -214,6 +238,247 @@ func TestExtractConversations_DriveContent(t *testing.T) {
 	if !convs[0].LatestTime.Equal(want) {
 		t.Errorf("LatestTime = %v, want %v", convs[0].LatestTime, want)
 	}
+}
+
+// TestExtractConversations_Gmail verifies that gmail date files — which
+// contain LineEmail records carrying "ts" — are routed to the emailDateKind
+// and contribute the latest email timestamp to LatestTime. Before the
+// filekinds refactor, gmail files scanned through modelv1.ParseDateFile
+// classified LineEmail as unknown, so LatestTime was always zero (conversation
+// showed "active" instead of "last X ago").
+func TestExtractConversations_Gmail(t *testing.T) {
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("gws", "anish"))
+	now := time.Now()
+
+	path := string(acct.Gmail().DateFile("2026-04-14"))
+	writeLines(t, path,
+		modelv1.Line{Type: modelv1.LineEmail, Email: &modelv1.EmailLine{
+			ID: "e1", ThreadID: "t1", Ts: now.Add(-3 * time.Hour), From: "a@b.c", Subject: "hi",
+		}},
+		modelv1.Line{Type: modelv1.LineEmail, Email: &modelv1.EmailLine{
+			ID: "e2", ThreadID: "t2", Ts: now.Add(-30 * time.Minute), From: "x@y.z", Subject: "yo",
+		}},
+	)
+
+	convs, err := extractConversations([]string{path}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	// All gmail files for an account collapse into one "gmail" conversation —
+	// parts[:3] is platform/account/service.
+	if convs[0].Display != "gws/anish/gmail" {
+		t.Errorf("Display = %q, want gws/anish/gmail", convs[0].Display)
+	}
+	age := now.Sub(convs[0].LatestTime)
+	if age < 25*time.Minute || age > 35*time.Minute {
+		t.Errorf("age = %v, want ~30m (latest email)", age)
+	}
+}
+
+// TestExtractConversations_Calendar verifies that calendar date files — which
+// contain LineEvent records carrying "updated" (not "ts") — are routed to the
+// calendarDateKind and contribute the newest "updated" timestamp. Before
+// filekinds, calendar events were unclassified by modelv1's DateFile and
+// LatestTime was always zero.
+func TestExtractConversations_Calendar(t *testing.T) {
+	root := t.TempDir()
+	cal := paths.NewDataRoot(root).
+		AccountFor(account.New("gws", "anish")).
+		Calendar("primary")
+	now := time.Now()
+	olderUpdated := now.Add(-6 * time.Hour).UTC().Format(time.RFC3339)
+	newerUpdated := now.Add(-45 * time.Minute).UTC().Format(time.RFC3339)
+
+	path := string(cal.DateFile("2026-04-14"))
+	writeLines(t, path,
+		modelv1.Line{Type: modelv1.LineEvent, Event: &modelv1.CalendarEvent{
+			Serialized: map[string]any{"id": "e1", "updated": olderUpdated, "summary": "standup"},
+		}},
+		modelv1.Line{Type: modelv1.LineEvent, Event: &modelv1.CalendarEvent{
+			Serialized: map[string]any{"id": "e2", "updated": newerUpdated, "summary": "review"},
+		}},
+	)
+
+	convs, err := extractConversations([]string{path}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	if convs[0].Display != "gws/anish/gcalendar" {
+		t.Errorf("Display = %q, want gws/anish/gcalendar", convs[0].Display)
+	}
+	age := now.Sub(convs[0].LatestTime)
+	if age < 40*time.Minute || age > 50*time.Minute {
+		t.Errorf("age = %v, want ~45m (newest updated)", age)
+	}
+}
+
+// TestExtractConversations_Linear verifies routing + timestamp extraction for
+// a Linear issue file, and pins the display behaviour: every issue under a
+// workspace collapses into a single "linear/<ws>/issues" conversation (same
+// parts[:3] grouping as gmail/gcalendar). The test also asserts that the
+// newest timestamp wins even when it comes from a comment's "createdAt"
+// rather than the issue's "updatedAt" — Linear interleaves both line types
+// in the same file.
+func TestExtractConversations_Linear(t *testing.T) {
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("linear", "acme"))
+	now := time.Now()
+	issueUpdated := now.Add(-5 * time.Hour).UTC().Format(time.RFC3339)
+	commentCreated := now.Add(-20 * time.Minute).UTC().Format(time.RFC3339)
+
+	path := string(acct.Linear().IssueFile("PROJ-123"))
+	writeLines(t, path,
+		modelv1.Line{Type: modelv1.LineLinearIssue, Issue: &modelv1.LinearIssue{
+			Serialized: map[string]any{
+				"id":         "i1",
+				"identifier": "PROJ-123",
+				"updatedAt":  issueUpdated,
+			},
+		}},
+		modelv1.Line{Type: modelv1.LineLinearComment, LinearComment: &modelv1.LinearComment{
+			Serialized: map[string]any{
+				"id":        "c1",
+				"createdAt": commentCreated,
+			},
+		}},
+	)
+
+	convs, err := extractConversations([]string{path}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	if convs[0].Display != "linear/acme/issues" {
+		t.Errorf("Display = %q, want linear/acme/issues", convs[0].Display)
+	}
+	age := now.Sub(convs[0].LatestTime)
+	if age < 15*time.Minute || age > 25*time.Minute {
+		t.Errorf("age = %v, want ~20m (comment createdAt wins over issue updatedAt)", age)
+	}
+}
+
+// TestExtractConversations_MixedKinds exercises the full routing matrix in
+// one extractConversations call: slack date, slack thread, gmail, calendar,
+// drive markdown, and linear issue. Each is expected to resolve to its own
+// conversation entry with the right Display and LatestTime.
+func TestExtractConversations_MixedKinds(t *testing.T) {
+	root := t.TempDir()
+	r := paths.NewDataRoot(root)
+	now := time.Now()
+
+	// Slack date file.
+	slack := r.AccountFor(account.New("slack", "acme")).Conversation("#general")
+	slackFile := string(slack.DateFile("2026-04-14"))
+	writeDateFile(t, slackFile, []modelv1.MsgLine{msg("m1", now.Add(-10*time.Minute))})
+
+	// Slack thread file under the same conversation.
+	slackThread := string(slack.ThreadFile("1742100000"))
+	writeThreadFile(t, slackThread,
+		msg("p1", now.Add(-3*time.Hour)),
+		[]modelv1.MsgLine{msg("r1", now.Add(-5*time.Minute))},
+	)
+
+	// Gmail date file.
+	gws := r.AccountFor(account.New("gws", "anish"))
+	gmailFile := string(gws.Gmail().DateFile("2026-04-14"))
+	writeLines(t, gmailFile,
+		modelv1.Line{Type: modelv1.LineEmail, Email: &modelv1.EmailLine{
+			ID: "e1", ThreadID: "t1", Ts: now.Add(-2 * time.Hour), From: "a@b.c", Subject: "hi",
+		}},
+	)
+
+	// Calendar date file.
+	calFile := string(gws.Calendar("primary").DateFile("2026-04-14"))
+	calUpdated := now.Add(-40 * time.Minute).UTC().Format(time.RFC3339)
+	writeLines(t, calFile,
+		modelv1.Line{Type: modelv1.LineEvent, Event: &modelv1.CalendarEvent{
+			Serialized: map[string]any{"id": "e1", "updated": calUpdated, "summary": "standup"},
+		}},
+	)
+
+	// Drive markdown + sibling meta.
+	drive := gws.Drive().File("notes-ABC")
+	driveNotes := filepath.Join(drive.Path(), "Notes.md")
+	if err := os.MkdirAll(drive.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(driveNotes, []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driveMetaDate := now.AddDate(0, 0, -1).UTC().Format("2006-01-02")
+	if err := os.WriteFile(drive.MetaFile(driveMetaDate).Path(), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Linear issue file.
+	lin := r.AccountFor(account.New("linear", "acme")).Linear()
+	linFile := string(lin.IssueFile("PROJ-7"))
+	linUpdated := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	writeLines(t, linFile,
+		modelv1.Line{Type: modelv1.LineLinearIssue, Issue: &modelv1.LinearIssue{
+			Serialized: map[string]any{"id": "i1", "identifier": "PROJ-7", "updatedAt": linUpdated},
+		}},
+	)
+
+	files := []string{slackFile, slackThread, gmailFile, calFile, driveNotes, linFile}
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build Display → conv lookup for clarity.
+	byDisplay := make(map[string]activeConv)
+	for _, c := range convs {
+		byDisplay[c.Display] = c
+	}
+
+	wantDisplays := []string{
+		"slack/acme/#general",
+		"gws/anish/gmail",
+		"gws/anish/gcalendar",
+		"gws/anish/gdrive",
+		"linear/acme/issues",
+	}
+	for _, d := range wantDisplays {
+		if _, ok := byDisplay[d]; !ok {
+			t.Errorf("missing conversation %q; got displays: %v", d, keys(byDisplay))
+		}
+	}
+
+	// Spot-check that each kind's own timestamp flowed through.
+	slackAge := now.Sub(byDisplay["slack/acme/#general"].LatestTime)
+	if slackAge < 3*time.Minute || slackAge > 7*time.Minute {
+		t.Errorf("slack age = %v, want ~5m (newest thread reply)", slackAge)
+	}
+	gmailAge := now.Sub(byDisplay["gws/anish/gmail"].LatestTime)
+	if gmailAge < 110*time.Minute || gmailAge > 130*time.Minute {
+		t.Errorf("gmail age = %v, want ~2h", gmailAge)
+	}
+	calAge := now.Sub(byDisplay["gws/anish/gcalendar"].LatestTime)
+	if calAge < 35*time.Minute || calAge > 45*time.Minute {
+		t.Errorf("calendar age = %v, want ~40m", calAge)
+	}
+	linAge := now.Sub(byDisplay["linear/acme/issues"].LatestTime)
+	if linAge < 55*time.Minute || linAge > 65*time.Minute {
+		t.Errorf("linear age = %v, want ~1h", linAge)
+	}
+}
+
+func keys(m map[string]activeConv) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestExtractConversations_PreservesOrder(t *testing.T) {

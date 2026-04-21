@@ -98,6 +98,46 @@ func TestThreadDatePatterns_MatchesDateGlobs(t *testing.T) {
 	}
 }
 
+func TestLinearDatePatterns(t *testing.T) {
+	since := 3 * 24 * time.Hour
+	patterns := linearDatePatterns(since)
+
+	// One pattern per field per day.
+	wantCount := 2 * len(dateGlobs(since))
+	if len(patterns) != wantCount {
+		t.Fatalf("linearDatePatterns(%v) returned %d patterns, want %d (2 fields × %d days)",
+			since, len(patterns), wantCount, len(dateGlobs(since)))
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	gotUpdatedToday, gotCreatedToday := false, false
+	for _, p := range patterns {
+		switch p {
+		case `"updatedAt":"` + today:
+			gotUpdatedToday = true
+		case `"createdAt":"` + today:
+			gotCreatedToday = true
+		}
+		// Every pattern must be a "<field>":"YYYY-MM-DD prefix.
+		if p[:1] != `"` {
+			t.Errorf("pattern %q does not start with a quote", p)
+		}
+	}
+	if !gotUpdatedToday {
+		t.Errorf("linearDatePatterns missing today's updatedAt pattern, got: %v", patterns)
+	}
+	if !gotCreatedToday {
+		t.Errorf("linearDatePatterns missing today's createdAt pattern, got: %v", patterns)
+	}
+}
+
+func TestDatePatternsForFields_Empty(t *testing.T) {
+	// With no fields, no patterns are generated regardless of window size.
+	if got := datePatternsForFields(7 * 24 * time.Hour); len(got) != 0 {
+		t.Errorf("datePatternsForFields() with no fields returned %v, want empty", got)
+	}
+}
+
 func TestReverseStrings(t *testing.T) {
 	tests := []struct {
 		input []string
