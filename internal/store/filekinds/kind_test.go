@@ -266,22 +266,59 @@ func TestLatestTs_UnknownFileReturnsZero(t *testing.T) {
 	}
 }
 
-func TestLatestTs_JSONLWithMalformedLines(t *testing.T) {
+func TestLatestTs_MalformedJSONLFailsLoud(t *testing.T) {
 	dir := t.TempDir()
 	conv := paths.NewDataRoot(dir).AccountFor(account.New("slack", "acme")).Conversation("#general")
 	path := string(conv.DateFile("2026-04-14"))
 
+	// A truncated / corrupted JSONL file must surface the parse error rather
+	// than silently returning a stale or zero timestamp. Pigeon's JSONL
+	// stores are structured data, not free-form logs — degrading to "best
+	// effort" would mask real corruption.
 	writeFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
 not json at all
-{"incomplete":
-{"type":"msg","id":"2","ts":"2026-04-14T09:00:00Z","sender":"b","from":"U2","text":"ok"}
+`)
+
+	_, err := LatestTs(path)
+	if err == nil {
+		t.Fatal("expected error on malformed JSONL line, got nil")
+	}
+}
+
+func TestLatestTs_InvalidTimestampFailsLoud(t *testing.T) {
+	dir := t.TempDir()
+	conv := paths.NewDataRoot(dir).AccountFor(account.New("slack", "acme")).Conversation("#general")
+	path := string(conv.DateFile("2026-04-14"))
+
+	// A line that parses as JSON but carries a non-timestamp "ts" value
+	// indicates data-model corruption — also surface an error.
+	writeFile(t, path, `{"type":"msg","id":"1","ts":"not-a-timestamp"}
+`)
+
+	_, err := LatestTs(path)
+	if err == nil {
+		t.Fatal("expected error on invalid ts field, got nil")
+	}
+}
+
+func TestLatestTs_MissingFieldIsOK(t *testing.T) {
+	dir := t.TempDir()
+	conv := paths.NewDataRoot(dir).AccountFor(account.New("slack", "acme")).Conversation("#general")
+	path := string(conv.DateFile("2026-04-14"))
+
+	// Lines without the scanned field must be tolerated — e.g. the
+	// `{"type":"separator"}` thread-file marker carries no ts and must not
+	// cause an error. Only JSON-parse and ts-parse failures surface.
+	writeFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
+{"type":"separator"}
+{"type":"msg","id":"2","ts":"2026-04-14T10:00:00Z","sender":"b","from":"U2","text":"bye"}
 `)
 
 	ts, err := LatestTs(path)
 	if err != nil {
-		t.Fatalf("malformed lines should be skipped silently: %v", err)
+		t.Fatalf("separator line should be tolerated: %v", err)
 	}
-	want, _ := time.Parse(time.RFC3339, "2026-04-14T09:00:00Z")
+	want, _ := time.Parse(time.RFC3339, "2026-04-14T10:00:00Z")
 	if !ts.Equal(want) {
 		t.Errorf("got %v, want %v", ts, want)
 	}

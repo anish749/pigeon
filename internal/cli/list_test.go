@@ -231,8 +231,12 @@ func TestExtractConversations_DriveContent(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
-	if convs[0].Display != "gws/anish/gdrive" {
-		t.Errorf("Display = %q, want gws/anish/gdrive", convs[0].Display)
+	// Drive grouping is per-doc (by slug), not one collapsed "gdrive" entry.
+	if convs[0].Display != "gws/anish/gdrive/notes-ABC" {
+		t.Errorf("Display = %q, want gws/anish/gdrive/notes-ABC", convs[0].Display)
+	}
+	if convs[0].Dir != drive.Path() {
+		t.Errorf("Dir = %q, want %s", convs[0].Dir, drive.Path())
 	}
 	want, _ := time.Parse("2006-01-02", "2026-04-15")
 	if !convs[0].LatestTime.Equal(want) {
@@ -310,8 +314,12 @@ func TestExtractConversations_Calendar(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
-	if convs[0].Display != "gws/anish/gcalendar" {
-		t.Errorf("Display = %q, want gws/anish/gcalendar", convs[0].Display)
+	// Calendar grouping is per-calendarID, not one collapsed "gcalendar" entry.
+	if convs[0].Display != "gws/anish/gcalendar/primary" {
+		t.Errorf("Display = %q, want gws/anish/gcalendar/primary", convs[0].Display)
+	}
+	if convs[0].Dir != cal.Path() {
+		t.Errorf("Dir = %q, want %s", convs[0].Dir, cal.Path())
 	}
 	age := now.Sub(convs[0].LatestTime)
 	if age < 40*time.Minute || age > 50*time.Minute {
@@ -320,12 +328,12 @@ func TestExtractConversations_Calendar(t *testing.T) {
 }
 
 // TestExtractConversations_Linear verifies routing + timestamp extraction for
-// a Linear issue file, and pins the display behaviour: every issue under a
-// workspace collapses into a single "linear/<ws>/issues" conversation (same
-// parts[:3] grouping as gmail/gcalendar). The test also asserts that the
-// newest timestamp wins even when it comes from a comment's "createdAt"
-// rather than the issue's "updatedAt" — Linear interleaves both line types
-// in the same file.
+// a Linear issue file, and pins the display behaviour: each Linear issue is
+// its own conversation (Dir = the issue file itself). The display drops the
+// redundant "issues/" segment so the label reads as platform/workspace/id.
+// The test also asserts that the newest timestamp wins even when it comes
+// from a comment's "createdAt" rather than the issue's "updatedAt" — Linear
+// interleaves both line types in the same file.
 func TestExtractConversations_Linear(t *testing.T) {
 	root := t.TempDir()
 	acct := paths.NewDataRoot(root).AccountFor(account.New("linear-issues", "acme"))
@@ -357,12 +365,110 @@ func TestExtractConversations_Linear(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
-	if convs[0].Display != "linear-issues/acme/issues" {
-		t.Errorf("Display = %q, want linear-issues/acme/issues", convs[0].Display)
+	if convs[0].Display != "linear-issues/acme/PROJ-123" {
+		t.Errorf("Display = %q, want linear-issues/acme/PROJ-123", convs[0].Display)
+	}
+	if convs[0].Dir != path {
+		t.Errorf("Dir = %q, want the issue file %s", convs[0].Dir, path)
 	}
 	age := now.Sub(convs[0].LatestTime)
 	if age < 15*time.Minute || age > 25*time.Minute {
 		t.Errorf("age = %v, want ~20m (comment createdAt wins over issue updatedAt)", age)
+	}
+}
+
+// TestExtractConversations_PerIssueLinearGrouping verifies that two Linear
+// issue files in the same workspace produce two separate conversation
+// entries rather than collapsing into one. This is the per-source grouping
+// behaviour: each issue is its own unit of activity.
+func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("linear-issues", "acme"))
+	now := time.Now()
+
+	issue1 := string(acct.Linear().IssueFile("PROJ-1"))
+	issue2 := string(acct.Linear().IssueFile("PROJ-2"))
+	writeLines(t, issue1,
+		modelv1.Line{Type: modelv1.LineLinearIssue, Issue: &modelv1.LinearIssue{
+			Serialized: map[string]any{"id": "i1", "identifier": "PROJ-1",
+				"updatedAt": now.Add(-10 * time.Minute).UTC().Format(time.RFC3339)},
+		}},
+	)
+	writeLines(t, issue2,
+		modelv1.Line{Type: modelv1.LineLinearIssue, Issue: &modelv1.LinearIssue{
+			Serialized: map[string]any{"id": "i2", "identifier": "PROJ-2",
+				"updatedAt": now.Add(-2 * time.Hour).UTC().Format(time.RFC3339)},
+		}},
+	)
+
+	convs, err := extractConversations([]string{issue1, issue2}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (one per issue)", len(convs))
+	}
+}
+
+// TestExtractConversations_PerDocDriveGrouping verifies that two Drive docs
+// produce two conversation entries rather than collapsing under "gdrive".
+func TestExtractConversations_PerDocDriveGrouping(t *testing.T) {
+	root := t.TempDir()
+	drive := paths.NewDataRoot(root).AccountFor(account.New("gws", "anish")).Drive()
+
+	for _, slug := range []string{"doc-A", "doc-B"} {
+		d := drive.File(slug)
+		if err := os.MkdirAll(d.Path(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d.Path(), "Notes.md"), []byte("# x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(d.MetaFile("2026-04-15").Path(), []byte(`{}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files := []string{
+		filepath.Join(drive.File("doc-A").Path(), "Notes.md"),
+		filepath.Join(drive.File("doc-B").Path(), "Notes.md"),
+	}
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (one per doc)", len(convs))
+	}
+}
+
+// TestExtractConversations_PerCalendarGrouping verifies that two calendars
+// under the same gws account produce two conversation entries rather than
+// collapsing under "gcalendar".
+func TestExtractConversations_PerCalendarGrouping(t *testing.T) {
+	root := t.TempDir()
+	acct := paths.NewDataRoot(root).AccountFor(account.New("gws", "anish"))
+	now := time.Now()
+
+	files := []string{}
+	for _, cid := range []string{"primary", "team-cal"} {
+		path := string(acct.Calendar(cid).DateFile("2026-04-14"))
+		writeLines(t, path,
+			modelv1.Line{Type: modelv1.LineEvent, Event: &modelv1.CalendarEvent{
+				Serialized: map[string]any{"id": "e1",
+					"updated": now.Add(-30 * time.Minute).UTC().Format(time.RFC3339),
+					"summary": "meeting"},
+			}},
+		)
+		files = append(files, path)
+	}
+
+	convs, err := extractConversations(files, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (one per calendar)", len(convs))
 	}
 }
 
@@ -444,9 +550,9 @@ func TestExtractConversations_MixedKinds(t *testing.T) {
 	wantDisplays := []string{
 		"slack/acme/#general",
 		"gws/anish/gmail",
-		"gws/anish/gcalendar",
-		"gws/anish/gdrive",
-		"linear-issues/acme/issues",
+		"gws/anish/gcalendar/primary",
+		"gws/anish/gdrive/notes-ABC",
+		"linear-issues/acme/PROJ-7",
 	}
 	for _, d := range wantDisplays {
 		if _, ok := byDisplay[d]; !ok {
@@ -463,11 +569,11 @@ func TestExtractConversations_MixedKinds(t *testing.T) {
 	if gmailAge < 110*time.Minute || gmailAge > 130*time.Minute {
 		t.Errorf("gmail age = %v, want ~2h", gmailAge)
 	}
-	calAge := now.Sub(byDisplay["gws/anish/gcalendar"].LatestTime)
+	calAge := now.Sub(byDisplay["gws/anish/gcalendar/primary"].LatestTime)
 	if calAge < 35*time.Minute || calAge > 45*time.Minute {
 		t.Errorf("calendar age = %v, want ~40m", calAge)
 	}
-	linAge := now.Sub(byDisplay["linear-issues/acme/issues"].LatestTime)
+	linAge := now.Sub(byDisplay["linear-issues/acme/PROJ-7"].LatestTime)
 	if linAge < 55*time.Minute || linAge > 65*time.Minute {
 		t.Errorf("linear age = %v, want ~1h", linAge)
 	}
