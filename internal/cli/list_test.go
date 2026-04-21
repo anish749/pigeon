@@ -9,6 +9,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 // writeDateFile creates a date JSONL file with the given messages using the model layer.
@@ -40,6 +41,35 @@ func writeThreadFile(t *testing.T, path string, parent modelv1.MsgLine, replies 
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeLines(t *testing.T, path string, lines []modelv1.Line) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	for _, line := range lines {
+		raw, err := modelv1.Marshal(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(data, raw...)
+		data = append(data, '\n')
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRawFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -199,5 +229,130 @@ func TestExtractConversations_PreservesOrder(t *testing.T) {
 	}
 	if convs[0].Display != "slack/acme/#beta" {
 		t.Errorf("first conversation = %q, want slack/acme/#beta", convs[0].Display)
+	}
+}
+
+func TestExtractConversations_GWSSourcesAndLinear(t *testing.T) {
+	rootDir := t.TempDir()
+	root := paths.NewDataRoot(rootDir)
+
+	gwsAcct := root.AccountFor(account.New("gws", "user-at-example-com"))
+	linearAcct := root.AccountFor(account.New("linear-issues", "team"))
+
+	gmailTS := time.Date(2026, 4, 7, 9, 15, 0, 0, time.UTC)
+	calendarTS := time.Date(2026, 4, 7, 13, 30, 0, 0, time.UTC)
+	driveTS := time.Date(2026, 4, 7, 16, 45, 0, 0, time.UTC)
+	issueTS := time.Date(2026, 4, 7, 18, 5, 0, 0, time.UTC)
+
+	gmailFile := gwsAcct.Gmail().DateFile("2026-04-07").Path()
+	calendarFile := gwsAcct.Calendar("primary").DateFile("2026-04-07").Path()
+	driveFile := gwsAcct.Drive().File("recent-doc-FILEID1")
+	notesFile := driveFile.TabFile("Notes").Path()
+	commentsFile := driveFile.CommentsFile().Path()
+	issueFile := linearAcct.Linear().IssueFile("ENG-101").Path()
+
+	writeLines(t, gmailFile, []modelv1.Line{
+		{
+			Type: modelv1.LineEmail,
+			Email: &modelv1.EmailLine{
+				ID:       "email-1",
+				ThreadID: "thread-1",
+				Ts:       gmailTS,
+				From:     "alice@example.com",
+				Subject:  "Recent email",
+			},
+		},
+	})
+
+	writeLines(t, calendarFile, []modelv1.Line{
+		{
+			Type: modelv1.LineEvent,
+			Event: &modelv1.CalendarEvent{
+				Runtime: calendar.Event{
+					Id:      "event-1",
+					Updated: calendarTS.Format(time.RFC3339),
+					Start:   &calendar.EventDateTime{DateTime: calendarTS.Format(time.RFC3339)},
+				},
+				Serialized: map[string]any{
+					"id":      "event-1",
+					"updated": calendarTS.Format(time.RFC3339),
+					"start": map[string]any{
+						"dateTime": calendarTS.Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	})
+
+	writeRawFile(t, driveFile.MetaFile("2026-04-07").Path(), `{"fileId":"FILEID1","title":"Recent Doc","modifiedTime":"`+driveTS.Format(time.RFC3339)+`"}`+"\n")
+	writeRawFile(t, notesFile, "## Notes\n\nMarkdown content that should not be parsed as JSON.\n")
+	writeRawFile(t, commentsFile, "")
+
+	writeLines(t, issueFile, []modelv1.Line{
+		{
+			Type: modelv1.LineLinearIssue,
+			Issue: &modelv1.LinearIssue{
+				Runtime: modelv1.LinearIssueRuntime{
+					ID:         "issue-1",
+					Identifier: "ENG-101",
+					UpdatedAt:  issueTS.Format(time.RFC3339),
+				},
+				Serialized: map[string]any{
+					"id":         "issue-1",
+					"identifier": "ENG-101",
+					"updatedAt":  issueTS.Format(time.RFC3339),
+				},
+			},
+		},
+	})
+
+	files := []string{gmailFile, calendarFile, notesFile, commentsFile, issueFile}
+	convs, err := extractConversations(files, rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(convs) != 4 {
+		t.Fatalf("got %d sources, want 4: %+v", len(convs), convs)
+	}
+
+	if convs[0].Display != "gws/user-at-example-com/gmail" {
+		t.Errorf("convs[0].Display = %q, want gws/user-at-example-com/gmail", convs[0].Display)
+	}
+	if convs[0].Dir != gwsAcct.Gmail().Path() {
+		t.Errorf("convs[0].Dir = %q, want %q", convs[0].Dir, gwsAcct.Gmail().Path())
+	}
+	if !convs[0].LatestTime.Equal(gmailTS) {
+		t.Errorf("convs[0].LatestTime = %v, want %v", convs[0].LatestTime, gmailTS)
+	}
+
+	if convs[1].Display != "gws/user-at-example-com/gcalendar/primary" {
+		t.Errorf("convs[1].Display = %q, want gws/user-at-example-com/gcalendar/primary", convs[1].Display)
+	}
+	if convs[1].Dir != gwsAcct.Calendar("primary").Path() {
+		t.Errorf("convs[1].Dir = %q, want %q", convs[1].Dir, gwsAcct.Calendar("primary").Path())
+	}
+	if !convs[1].LatestTime.Equal(calendarTS) {
+		t.Errorf("convs[1].LatestTime = %v, want %v", convs[1].LatestTime, calendarTS)
+	}
+
+	if convs[2].Display != "gws/user-at-example-com/gdrive/recent-doc-FILEID1" {
+		t.Errorf("convs[2].Display = %q, want gws/user-at-example-com/gdrive/recent-doc-FILEID1", convs[2].Display)
+	}
+	if convs[2].Dir != driveFile.Path() {
+		t.Errorf("convs[2].Dir = %q, want %q", convs[2].Dir, driveFile.Path())
+	}
+	if !convs[2].LatestTime.Equal(driveTS) {
+		t.Errorf("convs[2].LatestTime = %v, want %v", convs[2].LatestTime, driveTS)
+	}
+
+	if convs[3].Display != "linear-issues/team/ENG-101" {
+		t.Errorf("convs[3].Display = %q, want linear-issues/team/ENG-101", convs[3].Display)
+	}
+	if convs[3].Dir != issueFile {
+		t.Errorf("convs[3].Dir = %q, want %q", convs[3].Dir, issueFile)
+	}
+	if !convs[3].LatestTime.Equal(issueTS) {
+		t.Errorf("convs[3].LatestTime = %v, want %v", convs[3].LatestTime, issueTS)
 	}
 }
