@@ -26,6 +26,26 @@ type Kind interface {
 	// LatestTs returns the most recent activity timestamp recorded in the
 	// file, or the zero time when the kind has no meaningful signal.
 	LatestTs(path string) (time.Time, error)
+	// Conversation returns the conversation identity that owns the file —
+	// the grouping unit for `list --since` output. Messaging conversations
+	// group many date and thread files under one directory; Drive docs,
+	// calendars, and Linear issues each stand alone. Root is the data root
+	// so the kind can compute a clean display label relative to it.
+	Conversation(path, root string) Conversation
+}
+
+// Conversation is the identity of a source that extractConversations groups
+// files under. Dir is what gets printed on the second line of `list --since`
+// output; Display is the first-line label.
+type Conversation struct {
+	// Dir is the absolute directory or file that uniquely identifies the
+	// conversation. For messaging this is the conversation directory; for
+	// Linear it is the issue file itself (since the issue lives in one
+	// JSONL file, not a subtree).
+	Dir string
+	// Display is a short human-readable label, typically a relative path
+	// from the data root.
+	Display string
 }
 
 // kinds is the ordered list of recognised file shapes. Ordering matters:
@@ -42,23 +62,38 @@ var kinds = []Kind{
 	messagingDateKind{},
 }
 
-// LatestTs dispatches to the registered Kind that owns the path and returns
-// its latest-activity timestamp. Unrecognised files return the zero time and
-// no error — the caller treats that as "no contribution to latest activity"
-// rather than a failure.
-func LatestTs(path string) (time.Time, error) {
+// For returns the Kind that owns the path, or nil if no kind matches.
+func For(path string) Kind {
 	for _, k := range kinds {
 		if k.Match(path) {
-			return k.LatestTs(path)
+			return k
 		}
+	}
+	return nil
+}
+
+// LatestTs is a convenience wrapper that dispatches to the matching Kind.
+// Unrecognised files return the zero time and no error — callers treat that
+// as "no contribution to latest activity" rather than a failure.
+func LatestTs(path string) (time.Time, error) {
+	if k := For(path); k != nil {
+		return k.LatestTs(path)
 	}
 	return time.Time{}, nil
 }
 
 // scanLatestTs walks a JSONL file line by line and returns the latest
-// timestamp found in any of the named top-level fields. Lines that don't
-// parse as JSON are silently skipped; lines without any of the fields
-// contribute nothing.
+// timestamp found in any of the named top-level fields.
+//
+// Corruption surfaces: a line that fails to parse as JSON, or a matched
+// field that fails to parse as a timestamp, returns an error with context.
+// This keeps pigeon's JSONL stores fail-loud on real corruption rather than
+// degrading to a silent stale timestamp.
+//
+// Missing fields are tolerated: the `{"type":"separator"}` line carries no
+// ts, and thread files mix msg/react/edit lines that may or may not have a
+// given field. Each kind declares every field name it might encounter; a
+// line that has none of them is fine.
 //
 // Kinds declare which fields carry their temporal signal:
 //
@@ -78,10 +113,12 @@ func scanLatestTs(path string, fields ...string) (time.Time, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	var latest time.Time
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
-			continue
+			return time.Time{}, fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
 		}
 		for _, field := range fields {
 			val, ok := raw[field]
@@ -90,7 +127,7 @@ func scanLatestTs(path string, fields ...string) (time.Time, error) {
 			}
 			var t time.Time
 			if err := json.Unmarshal(val, &t); err != nil {
-				continue
+				return time.Time{}, fmt.Errorf("parse %q field on line %d in %s: %w", field, lineNum, path, err)
 			}
 			if t.After(latest) {
 				latest = t
@@ -108,4 +145,16 @@ func scanLatestTs(path string, fields ...string) (time.Time, error) {
 func pathHasSegment(path, seg string) bool {
 	sep := string(filepath.Separator)
 	return strings.Contains(sep+path+sep, sep+seg+sep)
+}
+
+// relativeConv builds a Conversation whose Dir is the absolute convDir and
+// whose Display is convDir relative to the data root. Falls back to the
+// absolute path if Rel fails (e.g. different volumes). Used by kinds whose
+// conversation identity is a directory.
+func relativeConv(convDir, root string) Conversation {
+	display, err := filepath.Rel(root, convDir)
+	if err != nil {
+		display = convDir
+	}
+	return Conversation{Dir: convDir, Display: display}
 }

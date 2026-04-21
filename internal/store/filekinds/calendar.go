@@ -29,3 +29,9 @@ func (calendarDateKind) Match(path string) bool {
 func (calendarDateKind) LatestTs(path string) (time.Time, error) {
 	return scanLatestTs(path, "updated", "created")
 }
+
+func (calendarDateKind) Conversation(path, root string) Conversation {
+	// One conversation per calendar (primary, team, etc.) — the parent dir
+	// of the YYYY-MM-DD.jsonl file is <account>/gcalendar/<calID>.
+	return relativeConv(filepath.Dir(path), root)
+}

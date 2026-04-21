@@ -36,6 +36,11 @@ func (messagingDateKind) LatestTs(path string) (time.Time, error) {
 	return scanLatestTs(path, "ts")
 }
 
+func (messagingDateKind) Conversation(path, root string) Conversation {
+	// Conversation dir is the immediate parent of the date file.
+	return relativeConv(filepath.Dir(path), root)
+}
+
 // threadFileKind matches thread files:
 //
 //	<root>/<platform>/<account>/<conversation>/threads/<ts>.jsonl
@@ -53,4 +58,9 @@ func (threadFileKind) Match(path string) bool {
 
 func (threadFileKind) LatestTs(path string) (time.Time, error) {
 	return scanLatestTs(path, "ts")
+}
+
+func (threadFileKind) Conversation(path, root string) Conversation {
+	// Thread file: <conv>/threads/<ts>.jsonl — strip /threads/<ts>.jsonl.
+	return relativeConv(filepath.Dir(filepath.Dir(path)), root)
 }

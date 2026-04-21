@@ -38,6 +38,13 @@ func (driveContentKind) LatestTs(path string) (time.Time, error) {
 	return latestDriveMetaDate(filepath.Dir(path))
 }
 
+func (driveContentKind) Conversation(path, root string) Conversation {
+	// One conversation per Drive doc — the parent dir is the per-doc
+	// directory holding Notes.md, Sheet.csv, comments.jsonl, and the
+	// drive-meta sidecar.
+	return relativeConv(filepath.Dir(path), root)
+}
+
 // latestDriveMetaDate finds the newest drive-meta-YYYY-MM-DD.json in dir and
 // returns the date encoded in its filename. Returns the zero time if no meta
 // file is present (a content file without a sibling meta is possible during

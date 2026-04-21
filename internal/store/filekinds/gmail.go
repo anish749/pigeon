@@ -27,3 +27,9 @@ func (emailDateKind) Match(path string) bool {
 func (emailDateKind) LatestTs(path string) (time.Time, error) {
 	return scanLatestTs(path, "ts")
 }
+
+func (emailDateKind) Conversation(path, root string) Conversation {
+	// All gmail date files for an account collapse into the gmail dir —
+	// one inbox stream per account.
+	return relativeConv(filepath.Dir(path), root)
+}

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -118,47 +116,29 @@ type activeConv struct {
 }
 
 // extractConversations deduplicates file paths into unique conversations,
-// tracking the most recent message timestamp per conversation.
+// tracking the most recent message timestamp per conversation. The per-file
+// conversation identity (grouping key + display label) is delegated to the
+// matching filekinds.Kind, so every source — slack channels, gmail inboxes,
+// individual calendars, individual Drive docs, individual Linear issues —
+// groups at its own natural granularity rather than a fixed path depth.
 func extractConversations(files []string, root string) ([]activeConv, error) {
 	seen := make(map[string]*activeConv)
 	var order []string
 	for _, f := range files {
-		rel, err := filepath.Rel(root, f)
-		if err != nil {
+		kind := filekinds.For(f)
+		if kind == nil {
 			continue
 		}
-		parts := strings.Split(rel, string(filepath.Separator))
-		isThread := paths.IsThreadFile(f)
-		if isThread {
-			// Thread files live at <conv>/threads/<ts>.jsonl. Strip the
-			// "threads" component so the conversation dir is parts[2].
-			// Only strip when the file is actually a thread file — a
-			// conversation literally named "threads" has its own
-			// YYYY-MM-DD.jsonl children which must not lose the
-			// component.
-			for i, p := range parts {
-				if p == paths.ThreadsSubdir {
-					parts = append(parts[:i], parts[i+1:]...)
-					break
-				}
-			}
-		}
-		if len(parts) < 4 {
-			continue
-		}
-		convDir := filepath.Join(root, parts[0], parts[1], parts[2])
+		conv := kind.Conversation(f, root)
 
-		c, ok := seen[convDir]
+		c, ok := seen[conv.Dir]
 		if !ok {
-			c = &activeConv{
-				Display: strings.Join(parts[:3], "/"),
-				Dir:     convDir,
-			}
-			seen[convDir] = c
-			order = append(order, convDir)
+			c = &activeConv{Display: conv.Display, Dir: conv.Dir}
+			seen[conv.Dir] = c
+			order = append(order, conv.Dir)
 		}
 
-		ts, err := filekinds.LatestTs(f)
+		ts, err := kind.LatestTs(f)
 		if err != nil {
 			return nil, fmt.Errorf("latest ts %s: %w", f, err)
 		}
