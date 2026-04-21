@@ -177,6 +177,45 @@ func TestExtractConversations_ConversationNamedThreads(t *testing.T) {
 	}
 }
 
+// TestExtractConversations_DriveContent verifies that a Drive content file
+// (e.g. Notes.md) in the file list does NOT cause extractConversations to
+// return an error. This is the regression from the issue where list --since
+// fed markdown through the JSONL parser.
+func TestExtractConversations_DriveContent(t *testing.T) {
+	root := t.TempDir()
+	drive := paths.NewDataRoot(root).
+		AccountFor(account.New("gws", "anish")).
+		Drive().File("notes-ABC")
+
+	notesPath := filepath.Join(drive.Path(), "Notes.md")
+	if err := os.MkdirAll(drive.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notesPath, []byte("# heading\n- bullet\nplain text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Sibling meta gives the drive content its date stamp.
+	metaPath := drive.MetaFile("2026-04-15").Path()
+	if err := os.WriteFile(metaPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	convs, err := extractConversations([]string{notesPath}, root)
+	if err != nil {
+		t.Fatalf("drive markdown should not error extractConversations: %v", err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1", len(convs))
+	}
+	if convs[0].Display != "gws/anish/gdrive" {
+		t.Errorf("Display = %q, want gws/anish/gdrive", convs[0].Display)
+	}
+	want, _ := time.Parse("2006-01-02", "2026-04-15")
+	if !convs[0].LatestTime.Equal(want) {
+		t.Errorf("LatestTime = %v, want %v", convs[0].LatestTime, want)
+	}
+}
+
 func TestExtractConversations_PreservesOrder(t *testing.T) {
 	root := t.TempDir()
 	acct := paths.NewDataRoot(root).AccountFor(account.New("slack", "acme"))

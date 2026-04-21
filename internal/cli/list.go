@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
 
@@ -159,9 +157,9 @@ func extractConversations(files []string, root string) ([]activeConv, error) {
 			order = append(order, convDir)
 		}
 
-		ts, err := latestMessageTs(f, isThread)
+		ts, err := read.LatestTs(f)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", f, err)
+			return nil, fmt.Errorf("latest ts %s: %w", f, err)
 		}
 		if ts.After(c.LatestTime) {
 			c.LatestTime = ts
@@ -173,37 +171,4 @@ func extractConversations(files []string, root string) ([]activeConv, error) {
 		result[i] = *seen[key]
 	}
 	return result, nil
-}
-
-// latestMessageTs reads a JSONL file through the model layer and returns
-// the most recent message timestamp.
-func latestMessageTs(path string, isThread bool) (time.Time, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if isThread {
-		tf, err := modelv1.ParseThreadFile(data)
-		if err != nil {
-			return time.Time{}, err
-		}
-		latest := tf.Parent.Ts
-		for _, r := range tf.Replies {
-			if r.Ts.After(latest) {
-				latest = r.Ts
-			}
-		}
-		return latest, nil
-	}
-	df, err := modelv1.ParseDateFile(data)
-	if err != nil {
-		return time.Time{}, err
-	}
-	var latest time.Time
-	for _, m := range df.Messages {
-		if m.Ts.After(latest) {
-			latest = m.Ts
-		}
-	}
-	return latest, nil
 }
