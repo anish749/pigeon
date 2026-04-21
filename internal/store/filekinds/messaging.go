@@ -1,4 +1,4 @@
-package read
+package filekinds
 
 import (
 	"path/filepath"
@@ -33,7 +33,7 @@ func (messagingDateKind) Match(path string) bool {
 }
 
 func (messagingDateKind) LatestTs(path string) (time.Time, error) {
-	return scanTsField(path)
+	return scanLatestTs(path, "ts")
 }
 
 // threadFileKind matches thread files:
@@ -52,5 +52,5 @@ func (threadFileKind) Match(path string) bool {
 }
 
 func (threadFileKind) LatestTs(path string) (time.Time, error) {
-	return scanTsField(path)
+	return scanLatestTs(path, "ts")
 }

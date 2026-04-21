@@ -24,6 +24,9 @@ func GlobFiles(dir string, globs []string) ([]string, error) {
 //   - Gmail and Calendar JSONL date files.
 //   - Drive content files (.md, .csv, comments.jsonl) — discovered via
 //     their sibling drive-meta-YYYY-MM-DD.json files.
+//   - Linear issue files — discovered by content (rg -l for "updatedAt" /
+//     "createdAt" prefixes within the window), since they are named by
+//     identifier rather than date.
 //
 // When since is zero, all data files are returned.
 // When since is set:
@@ -32,6 +35,8 @@ func GlobFiles(dir string, globs []string) ([]string, error) {
 //     date falls within the window.
 //   - Thread files are filtered by content (rg -l for timestamp prefixes
 //     within the window).
+//   - Linear issue files are filtered by content (rg -l for updatedAt/
+//     createdAt prefixes within the window).
 func Glob(dir string, since time.Duration) ([]string, error) {
 	if since == 0 {
 		globs := []string{"*" + paths.FileExt}
@@ -91,8 +96,15 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	}
 
 	// Find thread files containing messages within the window.
-	patterns := threadDatePatterns(since)
-	threadFiles, err := rgFilesWithContent(dir, paths.ThreadGlobRg, patterns)
+	threadFiles, err := rgFilesWithContent(dir, paths.ThreadGlobRg, threadDatePatterns(since))
+	if err != nil {
+		return nil, err
+	}
+
+	// Find Linear issue files updated or commented within the window. Their
+	// filenames are identifier-based (e.g. PROJ-123.jsonl) so they cannot be
+	// matched by date-filename globs and need a content-based search.
+	linearFiles, err := rgFilesWithContent(dir, paths.LinearIssueGlobRg, linearDatePatterns(since))
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +112,7 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	result := append([]string{}, dateFiles...)
 	result = append(result, driveContent...)
 	result = append(result, threadFiles...)
+	result = append(result, linearFiles...)
 	return result, nil
 }
 

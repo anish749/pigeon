@@ -12,6 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/store/filekinds"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
 
@@ -157,7 +158,7 @@ func extractConversations(files []string, root string) ([]activeConv, error) {
 			order = append(order, convDir)
 		}
 
-		ts, err := read.LatestTs(f)
+		ts, err := filekinds.LatestTs(f)
 		if err != nil {
 			return nil, fmt.Errorf("latest ts %s: %w", f, err)
 		}

@@ -36,13 +36,31 @@ func dateGlobs(since time.Duration) []string {
 // appear as "ts":"YYYY-MM-DD in the serialized JSON. If the model changes
 // field names, timestamp format, or serialization order, this breaks.
 func threadDatePatterns(since time.Duration) []string {
+	return datePatternsForFields(since, "ts")
+}
+
+// linearDatePatterns generates rg -e patterns that match "updatedAt" or
+// "createdAt" timestamp prefixes inside Linear issue files for dates within
+// the window. Linear issue files are named by identifier (e.g. PROJ-123.jsonl)
+// rather than by date, so they cannot be discovered by filename alone.
+func linearDatePatterns(since time.Duration) []string {
+	return datePatternsForFields(since, "updatedAt", "createdAt")
+}
+
+// datePatternsForFields returns rg -e patterns of the form `"field":"YYYY-MM-DD`
+// for every UTC day from (now - since) through today, for each field. Used to
+// discover JSONL files with temporal signals outside their filename.
+func datePatternsForFields(since time.Duration, fields ...string) []string {
 	now := time.Now().UTC()
 	cutoff := now.Add(-since).Truncate(24 * time.Hour)
 	today := now.Truncate(24 * time.Hour)
 
 	var patterns []string
 	for d := cutoff; !d.After(today); d = d.Add(24 * time.Hour) {
-		patterns = append(patterns, `"ts":"`+d.Format("2006-01-02"))
+		date := d.Format("2006-01-02")
+		for _, f := range fields {
+			patterns = append(patterns, `"`+f+`":"`+date)
+		}
 	}
 	return patterns
 }

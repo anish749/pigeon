@@ -1,4 +1,4 @@
-package read
+package filekinds
 
 import (
 	"os"
@@ -10,8 +10,8 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 )
 
-// writeKindTestFile is a small helper for tests in this file.
-func writeKindTestFile(t *testing.T, path, content string) {
+// writeFile is a small helper for tests in this file.
+func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -68,6 +68,11 @@ func TestKindMatch_Routing(t *testing.T) {
 			path: filepath.Join(gmailAcct.Drive().File("doc-ABC").Path(), "comments.jsonl"),
 			want: "drive-content",
 		},
+		{
+			name: "linear issue file",
+			path: string(r.AccountFor(account.New("linear", "acme")).Linear().IssueFile("PROJ-123")),
+			want: "linear-issue",
+		},
 	}
 
 	for _, tc := range cases {
@@ -106,7 +111,7 @@ func TestLatestTs_MessagingDateFile(t *testing.T) {
 	path := string(conv.DateFile("2026-04-14"))
 
 	// Two messages and a reaction. Latest ts wins.
-	writeKindTestFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
+	writeFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
 {"type":"msg","id":"2","ts":"2026-04-14T10:00:00Z","sender":"b","from":"U2","text":"yo"}
 {"type":"react","ts":"2026-04-14T11:30:00Z","msg":"2","sender":"c","from":"U3","emoji":"+1"}
 `)
@@ -126,7 +131,7 @@ func TestLatestTs_ThreadFile(t *testing.T) {
 	conv := paths.NewDataRoot(dir).AccountFor(account.New("slack", "acme")).Conversation("#general")
 	path := string(conv.ThreadFile("1742100000"))
 
-	writeKindTestFile(t, path, `{"type":"msg","id":"p","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"parent"}
+	writeFile(t, path, `{"type":"msg","id":"p","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"parent"}
 {"type":"msg","id":"r1","ts":"2026-04-14T09:00:00Z","sender":"b","from":"U2","text":"reply","reply":true}
 {"type":"msg","id":"r2","ts":"2026-04-14T09:30:00Z","sender":"c","from":"U3","text":"reply2","reply":true}
 `)
@@ -146,7 +151,7 @@ func TestLatestTs_EmailDateFile(t *testing.T) {
 	acct := paths.NewDataRoot(dir).AccountFor(account.New("gws", "anish"))
 	path := string(acct.Gmail().DateFile("2026-04-14"))
 
-	writeKindTestFile(t, path, `{"type":"email","id":"e1","threadId":"t1","ts":"2026-04-14T07:00:00Z","from":"a@b.c","subject":"hi"}
+	writeFile(t, path, `{"type":"email","id":"e1","threadId":"t1","ts":"2026-04-14T07:00:00Z","from":"a@b.c","subject":"hi"}
 {"type":"email","id":"e2","threadId":"t2","ts":"2026-04-14T12:00:00Z","from":"x@y.z","subject":"yo"}
 `)
 
@@ -167,11 +172,11 @@ func TestLatestTs_DriveMarkdownUsesSiblingMeta(t *testing.T) {
 		Drive().File("notes-ABC")
 
 	notesPath := filepath.Join(fileDir.Path(), "Notes.md")
-	writeKindTestFile(t, notesPath, "# this is markdown\n- not jsonl\n")
+	writeFile(t, notesPath, "# this is markdown\n- not jsonl\n")
 
 	// Sibling meta file — driveContentKind reads the date from its filename.
 	metaPath := string(fileDir.MetaFile("2026-04-15").Path())
-	writeKindTestFile(t, metaPath, `{}`)
+	writeFile(t, metaPath, `{}`)
 
 	ts, err := LatestTs(notesPath)
 	if err != nil {
@@ -190,7 +195,7 @@ func TestLatestTs_DriveMissingMetaReturnsZero(t *testing.T) {
 		Drive().File("notes-ABC")
 
 	notesPath := filepath.Join(fileDir.Path(), "Notes.md")
-	writeKindTestFile(t, notesPath, "# markdown with no sibling meta")
+	writeFile(t, notesPath, "# markdown with no sibling meta")
 
 	ts, err := LatestTs(notesPath)
 	if err != nil {
@@ -201,31 +206,56 @@ func TestLatestTs_DriveMissingMetaReturnsZero(t *testing.T) {
 	}
 }
 
-func TestLatestTs_CalendarReturnsZero(t *testing.T) {
+func TestLatestTs_CalendarUsesUpdatedField(t *testing.T) {
 	dir := t.TempDir()
 	cal := paths.NewDataRoot(dir).
 		AccountFor(account.New("gws", "anish")).
 		Calendar("primary")
 	path := string(cal.DateFile("2026-04-14"))
 
-	// Calendar events lack a "ts" field; the kind is registered but
-	// deliberately returns zero.
-	writeKindTestFile(t, path, `{"type":"event","updated":"2026-04-14T12:00:00Z","summary":"meeting"}
+	// Calendar events lack "ts" but always carry "updated" (RFC3339) from
+	// the Google API. Two events; the newer "updated" wins even when its
+	// "created" is older than the other's "updated".
+	writeFile(t, path, `{"type":"event","created":"2025-01-01T00:00:00Z","updated":"2026-04-10T09:00:00Z","summary":"standup"}
+{"type":"event","created":"2026-04-13T00:00:00Z","updated":"2026-04-14T15:30:00.123Z","summary":"review"}
 `)
 
 	ts, err := LatestTs(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ts.IsZero() {
-		t.Errorf("got %v, want zero time", ts)
+	want, _ := time.Parse(time.RFC3339, "2026-04-14T15:30:00.123Z")
+	if !ts.Equal(want) {
+		t.Errorf("got %v, want %v", ts, want)
+	}
+}
+
+func TestLatestTs_LinearIssueScansBothFields(t *testing.T) {
+	dir := t.TempDir()
+	acct := paths.NewDataRoot(dir).AccountFor(account.New("linear", "acme"))
+	path := string(acct.Linear().IssueFile("PROJ-123"))
+
+	// Linear issue lines carry "updatedAt"; comment lines carry "createdAt".
+	// The latest across both wins — here, a comment is newer than the issue
+	// record, and its "createdAt" must be picked up.
+	writeFile(t, path, `{"type":"linear-issue","id":"i1","identifier":"PROJ-123","updatedAt":"2026-04-14T08:00:00Z"}
+{"type":"linear-comment","id":"c1","createdAt":"2026-04-14T10:15:00Z"}
+`)
+
+	ts, err := LatestTs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-04-14T10:15:00Z")
+	if !ts.Equal(want) {
+		t.Errorf("got %v, want %v", ts, want)
 	}
 }
 
 func TestLatestTs_UnknownFileReturnsZero(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "random.txt")
-	writeKindTestFile(t, path, "anything")
+	writeFile(t, path, "anything")
 
 	ts, err := LatestTs(path)
 	if err != nil {
@@ -241,7 +271,7 @@ func TestLatestTs_JSONLWithMalformedLines(t *testing.T) {
 	conv := paths.NewDataRoot(dir).AccountFor(account.New("slack", "acme")).Conversation("#general")
 	path := string(conv.DateFile("2026-04-14"))
 
-	writeKindTestFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
+	writeFile(t, path, `{"type":"msg","id":"1","ts":"2026-04-14T08:00:00Z","sender":"a","from":"U1","text":"hi"}
 not json at all
 {"incomplete":
 {"type":"msg","id":"2","ts":"2026-04-14T09:00:00Z","sender":"b","from":"U2","text":"ok"}

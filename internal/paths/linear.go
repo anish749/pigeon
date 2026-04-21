@@ -1,10 +1,34 @@
 package paths
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 const (
+	// LinearPlatform is the platform segment for Linear accounts under the
+	// data root: <root>/linear/<workspace>/...
+	LinearPlatform = "linear"
+
 	linearIssuesSubdir = "issues"
+
+	// LinearIssueGlobRg is the rg --glob pattern that matches Linear issue
+	// JSONL files nested at <workspace>/issues/<identifier>.jsonl.
+	LinearIssueGlobRg = "**/" + linearIssuesSubdir + "/*" + FileExt
 )
+
+// IsLinearIssueFile reports whether the given file path is a Linear issue
+// JSONL file: <root>/linear/<workspace>/issues/<identifier>.jsonl.
+func IsLinearIssueFile(path string) bool {
+	if filepath.Ext(path) != FileExt {
+		return false
+	}
+	if filepath.Base(filepath.Dir(path)) != linearIssuesSubdir {
+		return false
+	}
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+LinearPlatform+sep)
+}
 
 // Linear returns a LinearDir for this account.
 func (a AccountDir) Linear() LinearDir {

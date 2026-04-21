@@ -129,6 +129,51 @@ func TestGlob_SinceIncludesRecentThread(t *testing.T) {
 	}
 }
 
+func TestGlob_SinceIncludesRecentLinearIssue(t *testing.T) {
+	dir := t.TempDir()
+
+	today := time.Now().UTC().Format("2006-01-02")
+	old := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+
+	recentIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-1.jsonl")
+	writeFile(t, recentIssue, `{"type":"linear-issue","id":"i1","identifier":"PROJ-1","updatedAt":"`+today+`T12:00:00Z"}`+"\n")
+
+	oldIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-2.jsonl")
+	writeFile(t, oldIssue, `{"type":"linear-issue","id":"i2","identifier":"PROJ-2","updatedAt":"`+old+`T12:00:00Z"}`+"\n")
+
+	// An issue whose record is old but a new comment landed in the window.
+	commentedIssue := filepath.Join(dir, "linear", "acme", "issues", "PROJ-3.jsonl")
+	writeFile(t, commentedIssue,
+		`{"type":"linear-issue","id":"i3","identifier":"PROJ-3","updatedAt":"`+old+`T12:00:00Z"}`+"\n"+
+			`{"type":"linear-comment","id":"c1","createdAt":"`+today+`T13:00:00Z"}`+"\n")
+
+	files, err := Glob(dir, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+
+	gotRecent, gotOld, gotCommented := false, false, false
+	for _, f := range files {
+		switch f {
+		case recentIssue:
+			gotRecent = true
+		case oldIssue:
+			gotOld = true
+		case commentedIssue:
+			gotCommented = true
+		}
+	}
+	if !gotRecent {
+		t.Errorf("Glob missed recent linear issue %s; got: %v", recentIssue, files)
+	}
+	if gotOld {
+		t.Errorf("Glob included old-only linear issue %s", oldIssue)
+	}
+	if !gotCommented {
+		t.Errorf("Glob missed linear issue with recent comment %s", commentedIssue)
+	}
+}
+
 func TestGlob_MissingDir(t *testing.T) {
 	_, err := Glob("/nonexistent/path", 0)
 	if err == nil {

@@ -1,4 +1,4 @@
-package read
+package filekinds
 
 import (
 	"path/filepath"
@@ -25,5 +25,5 @@ func (emailDateKind) Match(path string) bool {
 }
 
 func (emailDateKind) LatestTs(path string) (time.Time, error) {
-	return scanTsField(path)
+	return scanLatestTs(path, "ts")
 }

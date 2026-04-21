@@ -1,4 +1,11 @@
-package read
+// Package filekinds classifies files under pigeon's data tree by storage
+// shape and answers questions about them. Each Kind owns its own path
+// detection and its own "when was this last active" logic, so callers never
+// re-dispatch on extension, parent directory, or JSONL schema.
+//
+// Adding a new source (e.g. Jira, GitHub) means adding a new Kind and
+// registering it in `kinds` — no caller changes.
+package filekinds
 
 import (
 	"bufio"
@@ -10,34 +17,28 @@ import (
 	"time"
 )
 
-// Kind is a recognised data file shape under the pigeon data tree. Each kind
-// owns its own path detection and its own "when was this last active" logic,
-// so callers never re-dispatch on extension, parent directory, or JSONL
-// schema.
-//
-// Adding a new source (e.g. Jira, Linear) means adding a new Kind and
-// registering it in `kinds` — no caller changes.
+// Kind is a recognised data file shape.
 type Kind interface {
 	// Name is a short identifier for logging/debugging.
 	Name() string
 	// Match reports whether this kind owns the given path.
 	Match(path string) bool
 	// LatestTs returns the most recent activity timestamp recorded in the
-	// file. Implementations return the zero time when the kind has no
-	// meaningful "latest activity" signal (e.g. calendar events, whose
-	// "updated" field is not yet surfaced here).
+	// file, or the zero time when the kind has no meaningful signal.
 	LatestTs(path string) (time.Time, error)
 }
 
 // kinds is the ordered list of recognised file shapes. Ordering matters:
-// the first matching kind wins. More specific matchers (e.g. thread files,
-// which sit under a specific parent dir) come before more general ones
-// (e.g. generic date files).
+// the first matching kind wins. More specific matchers (thread files,
+// Drive content, GWS service date files, Linear issues) come before the
+// general messaging date matcher, which is the catch-all for date-named
+// JSONL files outside GWS/Linear.
 var kinds = []Kind{
 	threadFileKind{},
 	driveContentKind{},
 	emailDateKind{},
 	calendarDateKind{},
+	linearIssueKind{},
 	messagingDateKind{},
 }
 
@@ -54,12 +55,17 @@ func LatestTs(path string) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-// scanTsField walks a JSONL file line by line and returns the latest "ts"
-// field value. Lines that don't parse or lack a "ts" field are silently
-// skipped — the scan is deliberately narrow so it works across every JSONL
-// schema in the tree that uses "ts" (slack, whatsapp, gmail) and tolerates
-// schemas that don't (calendar events, drive comments).
-func scanTsField(path string) (time.Time, error) {
+// scanLatestTs walks a JSONL file line by line and returns the latest
+// timestamp found in any of the named top-level fields. Lines that don't
+// parse as JSON are silently skipped; lines without any of the fields
+// contribute nothing.
+//
+// Kinds declare which fields carry their temporal signal:
+//
+//   - slack/whatsapp/gmail lines carry "ts"
+//   - calendar events carry "updated" (and "created")
+//   - linear issues carry "updatedAt"; linear comments carry "createdAt"
+func scanLatestTs(path string, fields ...string) (time.Time, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("open %s: %w", path, err)
@@ -73,14 +79,22 @@ func scanTsField(path string) (time.Time, error) {
 
 	var latest time.Time
 	for scanner.Scan() {
-		var rec struct {
-			Ts time.Time `json:"ts"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
 			continue
 		}
-		if rec.Ts.After(latest) {
-			latest = rec.Ts
+		for _, field := range fields {
+			val, ok := raw[field]
+			if !ok {
+				continue
+			}
+			var t time.Time
+			if err := json.Unmarshal(val, &t); err != nil {
+				continue
+			}
+			if t.After(latest) {
+				latest = t
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -90,8 +104,7 @@ func scanTsField(path string) (time.Time, error) {
 }
 
 // pathHasSegment reports whether any separator-delimited segment of path
-// equals seg. Used by kind Match implementations to route GWS service paths
-// (gmail, gcalendar, gdrive) to the right kind.
+// equals seg.
 func pathHasSegment(path, seg string) bool {
 	sep := string(filepath.Separator)
 	return strings.Contains(sep+path+sep, sep+seg+sep)
