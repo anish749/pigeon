@@ -72,7 +72,8 @@ func InitFile(f LogFile, attrs ...slog.Attr) {
 		MaxBackups: 2,
 	}
 	handler := slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level:     slog.LevelInfo,
+		AddSource: true,
 	})
 	if len(attrs) > 0 {
 		args := make([]any, len(attrs))
