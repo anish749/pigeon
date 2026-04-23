@@ -598,7 +598,7 @@ func (s *Server) checkMPDMBotAccess(ctx context.Context, req SendRequest) error 
 	if err != nil {
 		return fmt.Errorf("resolve MPDM channel: %w", err)
 	}
-	if !sender.Resolver.IsMember(channelID) {
+	if !sender.Resolver.IsBotMember(channelID) {
 		return fmt.Errorf("bot is not a member of this group DM — use --via pigeon-as-user to send as yourself")
 	}
 	return nil

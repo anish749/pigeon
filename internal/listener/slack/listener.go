@@ -105,10 +105,16 @@ func (l *Listener) handleEvent(ctx context.Context, evt slackevents.EventsAPIEve
 		l.handleReaction(ctx, innerEvt.User, innerEvt.Reaction, innerEvt.Item, true)
 	case *slackevents.MemberJoinedChannelEvent:
 		l.resolver.AddMember(innerEvt.Channel)
+		if l.pigeonBotUID != "" && innerEvt.User == l.pigeonBotUID {
+			l.resolver.AddBotMember(innerEvt.Channel)
+		}
 		slog.InfoContext(ctx, "slack: member joined channel",
 			"channel", innerEvt.Channel, "user", innerEvt.User, "account", l.acct)
 	case *slackevents.MemberLeftChannelEvent:
 		l.resolver.RemoveMember(innerEvt.Channel)
+		if l.pigeonBotUID != "" && innerEvt.User == l.pigeonBotUID {
+			l.resolver.RemoveBotMember(innerEvt.Channel)
+		}
 		slog.InfoContext(ctx, "slack: member left channel",
 			"channel", innerEvt.Channel, "user", innerEvt.User, "account", l.acct)
 	}

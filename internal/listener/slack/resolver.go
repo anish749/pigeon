@@ -199,14 +199,15 @@ func uniqueNames(names ...string) []string {
 // since a Slack user ID only ever lives in the workspace that discovered it.
 // Channel and membership state is cached locally.
 type Resolver struct {
-	api       *goslack.Client
-	botAPI    *goslack.Client // used as a fallback when the user token cannot see a channel (e.g. bot↔other-user DMs).
-	writer    *identity.Writer
-	workspace string
-	mu        sync.RWMutex
-	channels  map[string]string // channel ID → name
-	dmUsers   map[string]string // channel ID → DM partner's user ID
-	members   map[string]bool   // channel IDs the user has joined
+	api        *goslack.Client
+	botAPI     *goslack.Client // used as a fallback when the user token cannot see a channel (e.g. bot↔other-user DMs).
+	writer     *identity.Writer
+	workspace  string
+	mu         sync.RWMutex
+	channels   map[string]string // channel ID → name
+	dmUsers    map[string]string // channel ID → DM partner's user ID
+	members    map[string]bool   // channel IDs the user has joined
+	botMembers map[string]bool   // channel IDs the bot has joined
 }
 
 // NewResolver creates a new Slack name resolver backed by the per-workspace
@@ -214,13 +215,14 @@ type Resolver struct {
 // channel_not_found — typically for DMs the user is not a party to.
 func NewResolver(api, botAPI *goslack.Client, writer *identity.Writer, workspace string) *Resolver {
 	return &Resolver{
-		api:       api,
-		botAPI:    botAPI,
-		writer:    writer,
-		workspace: workspace,
-		channels:  make(map[string]string),
-		dmUsers:   make(map[string]string),
-		members:   make(map[string]bool),
+		api:        api,
+		botAPI:     botAPI,
+		writer:     writer,
+		workspace:  workspace,
+		channels:   make(map[string]string),
+		dmUsers:    make(map[string]string),
+		members:    make(map[string]bool),
+		botMembers: make(map[string]bool),
 	}
 }
 
@@ -287,6 +289,30 @@ func (r *Resolver) RemoveMember(channelID string) {
 func (r *Resolver) IsMember(channelID string) bool {
 	r.mu.RLock()
 	ok := r.members[channelID]
+	r.mu.RUnlock()
+	return ok
+}
+
+// AddBotMember marks a channel as one the bot has joined.
+func (r *Resolver) AddBotMember(channelID string) {
+	r.mu.Lock()
+	r.botMembers[channelID] = true
+	r.mu.Unlock()
+}
+
+// RemoveBotMember marks a channel as one the bot has left.
+func (r *Resolver) RemoveBotMember(channelID string) {
+	r.mu.Lock()
+	delete(r.botMembers, channelID)
+	r.mu.Unlock()
+}
+
+// IsBotMember reports whether the bot is a member of the given channel.
+// Populated from the bot-token conversations.list sweep during sync and kept
+// in sync by member_joined/left_channel events scoped to the bot's user ID.
+func (r *Resolver) IsBotMember(channelID string) bool {
+	r.mu.RLock()
+	ok := r.botMembers[channelID]
 	r.mu.RUnlock()
 	return ok
 }
