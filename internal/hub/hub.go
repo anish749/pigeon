@@ -336,9 +336,8 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 		return RouteResult{State: RouteNoSession}
 	}
 
-	rc := react
 	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &rc}:
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &react}:
 	default:
 		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
 			"account", acct, "conversation", conversation,
