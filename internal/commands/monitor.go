@@ -17,19 +17,11 @@ import (
 // once rich blocks and metadata are included, so we size up.
 const monitorReadBufferSize = 1024 * 1024
 
-// MonitorParams are the inputs RunMonitor needs. The CLI layer resolves
-// workspace, parses durations, etc., and hands a fully-built Request here.
-type MonitorParams struct {
-	Ctx     context.Context
-	Request tailapi.Request
-	Out     io.Writer
-}
-
 // RunMonitor opens an SSE stream to the daemon's /api/tail endpoint and
-// writes each JSON frame to p.Out as a single line. Blocks until the
-// server closes the connection or the context is cancelled.
-func RunMonitor(p MonitorParams) error {
-	q, err := p.Request.Encode()
+// writes each JSON frame to out as a single line. Blocks until the
+// server closes the connection or ctx is cancelled.
+func RunMonitor(ctx context.Context, req tailapi.Request, out io.Writer) error {
+	q, err := req.Encode()
 	if err != nil {
 		return fmt.Errorf("encode tail request: %w", err)
 	}
@@ -39,11 +31,11 @@ func RunMonitor(p MonitorParams) error {
 		reqURL += "?" + encoded
 	}
 
-	req, err := http.NewRequestWithContext(p.Ctx, "GET", reqURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	resp, err := daemonclient.DefaultPgnHTTPClient.Do(req)
+	resp, err := daemonclient.DefaultPgnHTTPClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -54,8 +46,8 @@ func RunMonitor(p MonitorParams) error {
 		return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	out := bufio.NewWriter(p.Out)
-	defer out.Flush()
+	bw := bufio.NewWriter(out)
+	defer bw.Flush()
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), monitorReadBufferSize)
@@ -64,10 +56,10 @@ func RunMonitor(p MonitorParams) error {
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-		if _, err := fmt.Fprintln(out, strings.TrimPrefix(line, "data: ")); err != nil {
+		if _, err := fmt.Fprintln(bw, strings.TrimPrefix(line, "data: ")); err != nil {
 			return fmt.Errorf("write frame: %w", err)
 		}
-		if err := out.Flush(); err != nil {
+		if err := bw.Flush(); err != nil {
 			return fmt.Errorf("flush: %w", err)
 		}
 	}

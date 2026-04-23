@@ -81,9 +81,5 @@ func runMonitor(cmd *cobra.Command, _ []string) error {
 		req.Since = time.Now().Add(-d)
 	}
 
-	return commands.RunMonitor(commands.MonitorParams{
-		Ctx:     cmd.Context(),
-		Request: req,
-		Out:     os.Stdout,
-	})
+	return commands.RunMonitor(cmd.Context(), req, os.Stdout)
 }
