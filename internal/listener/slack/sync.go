@@ -349,6 +349,7 @@ func syncBotDMs(ctx context.Context, botToken string, resolver *Resolver, acct a
 			slog.WarnContext(ctx, "slack sync: failed to register bot DM",
 				"channel", ch.ID, "error", err)
 		}
+		resolver.AddBotMember(ch.ID)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
