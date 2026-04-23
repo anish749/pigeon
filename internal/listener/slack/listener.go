@@ -142,7 +142,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, *msg.Message)
 	if err != nil {
-		slog.WarnContext(ctx, "slack: skipping message, cannot resolve",
+		slog.WarnContext(ctx, "slack: skipping message, cannot resolve sender",
 			"channel", msg.Channel, "ts", msg.TimeStamp, "error", err, "account", l.acct)
 		return
 	}

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	gosync "sync"
 	"time"
 
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
@@ -194,8 +194,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 
 		msgs, err := fetchHistory(ctx, api, gate, ch.ID, oldest, activityCutoff)
 		if err != nil {
-			errStr := err.Error()
-			if strings.Contains(errStr, "channel_not_found") || strings.Contains(errStr, "is_archived") {
+			if slackerr.IsChannelNotFound(err) || slackerr.Is(err, "is_archived") {
 				if err := ms.AdvanceCursor(ch.ID, oldest); err != nil {
 					slog.WarnContext(ctx, "slack sync: save cursor failed", "channel", channelName, "error", err)
 				}
@@ -219,7 +218,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 
 			rs, err := resolver.ResolveSender(ctx, ch.ID, msg.Msg)
 			if err != nil {
-				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve",
+				slog.WarnContext(ctx, "slack sync: skipping message, cannot resolve sender",
 					"channel", channelName, "ts", msg.Timestamp, "error", err)
 				continue
 			}

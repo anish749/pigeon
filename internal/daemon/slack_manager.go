@@ -129,7 +129,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 
 	userAPI := goslack.New(sl.UserToken)
 	writer := identity.NewWriter(m.idStore, m.dataRoot.AccountFor(account.New("slack", sl.Workspace)).Identity())
-	resolver := slacklistener.NewResolver(userAPI, writer, sl.Workspace)
+	resolver := slacklistener.NewResolver(userAPI, botAPI, writer, sl.Workspace)
 	users, channels, err := resolver.Load(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to preload Slack names", "account", acct, "error", err)
