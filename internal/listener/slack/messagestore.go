@@ -68,24 +68,26 @@ func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text str
 }
 
 // AppendReaction stores a reaction or unreaction event in the date file
-// corresponding to the target message's timestamp.
-func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emoji string, remove bool) error {
+// corresponding to the target message's timestamp, and returns the ReactLine
+// that was written so the caller can forward it downstream (e.g. to the hub).
+func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emoji string, remove bool) (modelv1.ReactLine, error) {
 	lineType := modelv1.LineReaction
 	if remove {
 		lineType = modelv1.LineUnreaction
 	}
-	line := modelv1.Line{
-		Type: lineType,
-		React: &modelv1.ReactLine{
-			Ts:       ParseTimestamp(msgTS),
-			MsgID:    msgTS,
-			Sender:   sender,
-			SenderID: senderID,
-			Emoji:    emoji,
-			Remove:   remove,
-		},
+	react := modelv1.ReactLine{
+		Ts:       ParseTimestamp(msgTS),
+		MsgID:    msgTS,
+		Sender:   sender,
+		SenderID: senderID,
+		Emoji:    emoji,
+		Remove:   remove,
 	}
-	return ms.store.Append(ms.acct, channelName, line)
+	line := modelv1.Line{Type: lineType, React: &react}
+	if err := ms.store.Append(ms.acct, channelName, line); err != nil {
+		return modelv1.ReactLine{}, err
+	}
+	return react, nil
 }
 
 // AppendEdit stores a message edit event in the date file corresponding

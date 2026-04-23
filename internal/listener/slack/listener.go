@@ -291,8 +291,10 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	if err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
+	react, err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove)
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
+		return
 	}
 
 	slog.InfoContext(ctx, "slack reaction saved",
@@ -301,13 +303,7 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 	// Route the reaction to the connected session. The listener only sees
 	// reactions for channels the bot has visibility into (DMs/MPDMs and
 	// channels it's a member of), so there is no additional filter here.
-	res := l.onReaction(l.acct, channelName, hub.ReactionInfo{
-		MsgID:    item.Timestamp,
-		Sender:   userName,
-		SenderID: userID,
-		Emoji:    emoji,
-		Remove:   remove,
-	})
+	res := l.onReaction(l.acct, channelName, react)
 	slog.InfoContext(ctx, "slack reaction routed", "result", res, "account", l.acct)
 }
 

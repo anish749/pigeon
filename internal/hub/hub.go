@@ -40,18 +40,11 @@ type RouteResult struct {
 // from disk.
 type MessageNotifyFunc func(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult
 
-// ReactionInfo describes a single reaction or unreaction event to be routed
-// to a connected session.
-type ReactionInfo struct {
-	MsgID    string
-	Sender   string
-	SenderID string
-	Emoji    string
-	Remove   bool
-}
-
 // ReactionNotifyFunc is called by listeners when a reaction event arrives.
-type ReactionNotifyFunc func(acct account.Account, conversation string, r ReactionInfo) RouteResult
+// The react payload is the exact ReactLine written to disk — the hub
+// forwards it verbatim to session delivery and the broadcast bus without
+// constructing new timestamps or regenerating fields.
+type ReactionNotifyFunc func(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -81,8 +74,8 @@ type channel struct {
 
 type deliverySignal struct {
 	kind         signalKind
-	conversation string        // only set for signalNewMessage and signalReaction
-	reaction     *ReactionInfo // only set for signalReaction
+	conversation string             // only set for signalNewMessage and signalReaction
+	reaction     *modelv1.ReactLine // only set for signalReaction
 }
 
 type signalKind int
@@ -317,17 +310,9 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 // the given account and conversation. Non-blocking — returns immediately.
 //
 // The reaction is also published to the broadcast bus for monitor
-// subscribers, independent of session state. The fallback formatter is
-// used so we don't do a disk lookup on the listener hot path.
-func (h *Hub) RouteReaction(acct account.Account, conversation string, r ReactionInfo) RouteResult {
-	react := modelv1.ReactLine{
-		Ts:       time.Now(),
-		MsgID:    r.MsgID,
-		Sender:   r.Sender,
-		SenderID: r.SenderID,
-		Emoji:    r.Emoji,
-		Remove:   r.Remove,
-	}
+// subscribers, independent of session state. The ReactLine is forwarded
+// as-is — no timestamp or field reconstruction.
+func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
 	h.broadcast.Publish(Event{
 		Kind:         EventReaction,
 		Ts:           react.Ts,
@@ -336,7 +321,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, r Reactio
 		Account:      acct.Name,
 		Conversation: conversation,
 		Content:      strings.Join(modelv1.FormatReactionFallbackNotification(react, time.Local), "\n"),
-		MsgID:        r.MsgID,
+		MsgID:        react.MsgID,
 	})
 
 	key := acct.String()
@@ -351,7 +336,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, r Reactio
 		return RouteResult{State: RouteNoSession}
 	}
 
-	rc := r
+	rc := react
 	select {
 	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &rc}:
 	default:
@@ -554,7 +539,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 // deliverReaction sends a reaction (or unreaction) event to the connected
 // session. Reactions are delivered out-of-band: they are not gated by the
 // last_delivered cursor since reactions often target older messages.
-func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) {
+func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
@@ -565,17 +550,8 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		return
 	}
 
-	react := modelv1.ReactLine{
-		Ts:       time.Now(),
-		MsgID:    r.MsgID,
-		Sender:   r.Sender,
-		SenderID: r.SenderID,
-		Emoji:    r.Emoji,
-		Remove:   r.Remove,
-	}
-
 	var lines []string
-	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
+	if msg := h.lookupMessage(ch.acct, conversation, react.MsgID); msg != nil {
 		lines = modelv1.FormatReactionNotification(*msg, react, time.Local)
 	} else {
 		lines = modelv1.FormatReactionFallbackNotification(react, time.Local)
