@@ -562,9 +562,16 @@ func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, str
 
 	// API fallback: try looking up the query as a channel ID directly.
 	// This handles channels that exist on disk but weren't in the last sync.
+	// If the user token returns channel_not_found, retry via the bot token —
+	// the bot is a party to DMs the pigeon user isn't.
 	ch, err := r.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
 		ChannelID: query,
 	})
+	if err != nil && slackerr.IsChannelNotFound(err) {
+		ch, err = r.botAPI.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+			ChannelID: query,
+		})
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to resolve slack channel", "query", query, "error", err)
 		return "", "", fmt.Errorf("no channel matching %q — use the exact channel or contact name from 'pigeon list'", query)
