@@ -15,6 +15,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
@@ -199,6 +200,7 @@ func uniqueNames(names ...string) []string {
 // Channel and membership state is cached locally.
 type Resolver struct {
 	api       *goslack.Client
+	botAPI    *goslack.Client // used as a fallback when the user token cannot see a channel (e.g. bot↔other-user DMs).
 	writer    *identity.Writer
 	workspace string
 	mu        sync.RWMutex
@@ -208,10 +210,12 @@ type Resolver struct {
 }
 
 // NewResolver creates a new Slack name resolver backed by the per-workspace
-// identity writer.
-func NewResolver(api *goslack.Client, writer *identity.Writer, workspace string) *Resolver {
+// identity writer. botAPI is used as a fallback when the user token returns
+// channel_not_found — typically for DMs the user is not a party to.
+func NewResolver(api, botAPI *goslack.Client, writer *identity.Writer, workspace string) *Resolver {
 	return &Resolver{
 		api:       api,
+		botAPI:    botAPI,
 		writer:    writer,
 		workspace: workspace,
 		channels:  make(map[string]string),
@@ -417,6 +421,8 @@ func (r *Resolver) SenderName(ctx context.Context, msg goslack.Msg) (string, str
 }
 
 // ChannelName resolves a Slack channel ID to a formatted name. Falls back to API lookup on cache miss.
+// If the user token returns channel_not_found (e.g. a DM between the bot and
+// another user, where the pigeon user is not a party), retries via the bot token.
 func (r *Resolver) ChannelName(ctx context.Context, channelID string) (string, error) {
 	r.mu.RLock()
 	name, ok := r.channels[channelID]
@@ -429,7 +435,15 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) (string, e
 		ChannelID: channelID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("resolve channel %s: %w", channelID, err)
+		if r.botAPI == nil || !slackerr.IsChannelNotFound(err) {
+			return "", fmt.Errorf("resolve channel %s: %w", channelID, err)
+		}
+		ch, err = r.botAPI.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+			ChannelID: channelID,
+		})
+		if err != nil {
+			return "", fmt.Errorf("resolve channel %s via bot: %w", channelID, err)
+		}
 	}
 	name = FormatChannelName(*ch)
 	if ch.IsIM {
