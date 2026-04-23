@@ -435,7 +435,7 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) (string, e
 		ChannelID: channelID,
 	})
 	if err != nil {
-		if r.botAPI == nil || !slackerr.IsChannelNotFound(err) {
+		if !slackerr.IsChannelNotFound(err) {
 			return "", fmt.Errorf("resolve channel %s: %w", channelID, err)
 		}
 		ch, err = r.botAPI.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
