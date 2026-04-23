@@ -10,6 +10,10 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 )
 
+// defaultSubscriberBufferSize is the fallback channel capacity for a
+// broadcast subscriber when Subscribe is called with bufSize <= 0.
+const defaultSubscriberBufferSize = 64
+
 // EventKind distinguishes event types on the broadcast bus.
 type EventKind string
 
@@ -69,7 +73,7 @@ func NewBroadcast() *Broadcast {
 // closes the channel. The cancel func is idempotent.
 func (b *Broadcast) Subscribe(filter Filter, bufSize int) (<-chan Event, func()) {
 	if bufSize <= 0 {
-		bufSize = 64
+		bufSize = defaultSubscriberBufferSize
 	}
 	s := &subscriber{
 		id:     b.nextID.Add(1),
