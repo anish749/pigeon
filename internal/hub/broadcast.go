@@ -114,9 +114,3 @@ func (b *Broadcast) Publish(e Event) {
 	}
 }
 
-// Subscribers returns the current subscriber count (diagnostics / tests).
-func (b *Broadcast) Subscribers() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return len(b.subs)
-}

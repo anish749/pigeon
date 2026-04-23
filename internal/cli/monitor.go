@@ -1,19 +1,15 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/account"
-	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/commands"
+	"github.com/anish749/pigeon/internal/tailapi"
 	"github.com/anish749/pigeon/internal/timeutil"
 )
 
@@ -52,29 +48,29 @@ func runMonitor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("get since flag: %w", err)
 	}
 
-	q := url.Values{}
+	req := tailapi.Request{}
 
-	// Workspace resolution happens at the CLI layer. If the user set
-	// --workspace or PIGEON_WORKSPACE, activeWorkspace is populated;
-	// we expand it into the accounts= list here and send that to the
-	// daemon. If the user also passed --platform/--account, those
-	// override the workspace list.
+	// Workspace resolves at the CLI layer. --platform/--account override
+	// the workspace account list if both are set.
 	switch {
-	case acctName != "" && platform != "":
+	case platform != "" && acctName != "":
 		if activeWorkspace != nil {
 			if err := validateAccountInWorkspace(account.New(platform, acctName)); err != nil {
 				return err
 			}
 		}
-		q.Set("accounts", platform+":"+acctName)
-	case platform != "" && acctName == "":
-		accts := scopedAccounts(platform)
-		if len(accts) == 0 {
-			return fmt.Errorf("no configured accounts for platform %q", platform)
+		req.Accounts = []account.Account{account.New(platform, acctName)}
+	case platform != "":
+		if activeWorkspace == nil {
+			return fmt.Errorf("--platform without --account requires an active workspace")
 		}
-		q.Set("accounts", joinAccounts(accts))
+		accts := activeWorkspace.AccountsForPlatform(platform)
+		if len(accts) == 0 {
+			return fmt.Errorf("workspace %q has no %s accounts", activeWorkspace.Name, platform)
+		}
+		req.Accounts = accts
 	case activeWorkspace != nil:
-		q.Set("accounts", joinAccounts(activeWorkspace.Accounts))
+		req.Accounts = activeWorkspace.Accounts
 	}
 
 	if since != "" {
@@ -82,61 +78,12 @@ func runMonitor(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid --since value %q: %w", since, err)
 		}
-		q.Set("since", time.Now().Add(-d).UTC().Format(time.RFC3339))
+		req.Since = time.Now().Add(-d)
 	}
 
-	reqURL := "http://pigeon/api/tail"
-	if encoded := q.Encode(); encoded != "" {
-		reqURL += "?" + encoded
-	}
-
-	req, err := http.NewRequestWithContext(cmd.Context(), "GET", reqURL, nil)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	resp, err := daemonclient.DefaultPgnHTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("connect to daemon: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	out := bufio.NewWriter(os.Stdout)
-	defer out.Flush()
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		fmt.Fprintln(out, strings.TrimPrefix(line, "data: "))
-		out.Flush()
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read stream: %w", err)
-	}
-	return nil
-}
-
-// scopedAccounts returns the configured accounts for the given platform,
-// limited to the active workspace if one is set.
-func scopedAccounts(platform string) []account.Account {
-	if activeWorkspace == nil {
-		return nil
-	}
-	return activeWorkspace.AccountsForPlatform(platform)
-}
-
-func joinAccounts(accts []account.Account) string {
-	parts := make([]string, 0, len(accts))
-	for _, a := range accts {
-		parts = append(parts, a.Platform+":"+a.Name)
-	}
-	return strings.Join(parts, ",")
+	return commands.RunMonitor(commands.MonitorParams{
+		Ctx:     cmd.Context(),
+		Request: req,
+		Out:     os.Stdout,
+	})
 }

@@ -11,19 +11,21 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/tailapi"
 )
+
+// tailSubscriberBufferSize is the event-channel capacity for a single
+// tail client. Sized large enough to absorb short bursts while the
+// client is reading; slow consumers beyond this point see drops logged
+// by Broadcast.Publish.
+const tailSubscriberBufferSize = 128
 
 // TailHandler returns an http.HandlerFunc that serves the stateless
 // /api/tail SSE endpoint. Each `data:` frame is one Event.
 //
-// Query params (all optional):
-//   - platform: filter to a single platform (e.g. "slack", "whatsapp")
-//   - account:  filter to a single account (requires platform)
-//   - accounts: comma-separated list of "platform:account" pairs; if
-//     present, platform/account params are ignored. Used by the CLI
-//     after workspace resolution.
-//   - since:    RFC3339 timestamp; replay history from this point before
-//     streaming live events. Omit to only stream live.
+// The request payload (accounts filter, since timestamp) is decoded
+// from query parameters via tailapi.Decode — see internal/tailapi for
+// the wire contract.
 //
 // No cursor, no session binding, no server-side state.
 func (h *Hub) TailHandler() http.HandlerFunc {
@@ -34,22 +36,12 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 			return
 		}
 
-		q := r.URL.Query()
-		filter, err := parseTailFilter(q)
+		req, err := tailapi.Decode(r.URL.Query())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		var sinceTime time.Time
-		if s := q.Get("since"); s != "" {
-			t, err := time.Parse(time.RFC3339, s)
-			if err != nil {
-				http.Error(w, "invalid since: must be RFC3339 timestamp", http.StatusBadRequest)
-				return
-			}
-			sinceTime = t
-		}
+		filter := Filter{Accounts: req.Accounts}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -58,22 +50,22 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 		// Subscribe BEFORE historical replay so we don't miss any event
 		// that lands during replay. We dedupe by timestamp against
 		// replayStart when draining the live buffer.
-		events, cancel := h.broadcast.Subscribe(filter, 128)
+		events, cancel := h.broadcast.Subscribe(filter, tailSubscriberBufferSize)
 		defer cancel()
 
 		slog.Info("tail client connected",
-			"accounts", len(filter.Accounts), "since", sinceTime)
+			"accounts", len(filter.Accounts), "since", req.Since)
 
 		// Announce stream is up so the client knows setup worked.
 		writeFrame(w, flusher, map[string]any{
 			"kind":    "system",
-			"content": fmt.Sprintf("pigeon tail connected (accounts=%d, since=%s)", len(filter.Accounts), sinceTime.Format(time.RFC3339)),
+			"content": fmt.Sprintf("pigeon tail connected (accounts=%d, since=%s)", len(filter.Accounts), req.Since.Format(time.RFC3339)),
 			"ts":      time.Now(),
 		})
 
 		replayStart := time.Now()
-		if !sinceTime.IsZero() {
-			if err := h.replayHistory(w, flusher, filter, sinceTime); err != nil {
+		if !req.Since.IsZero() {
+			if err := h.replayHistory(w, flusher, filter, req.Since); err != nil {
 				slog.Warn("tail: historical replay error", "error", err)
 			}
 		}
@@ -90,52 +82,13 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 				}
 				// Skip events that predate the replay cutover — they
 				// were already streamed by replayHistory.
-				if !sinceTime.IsZero() && e.Ts.Before(replayStart) {
+				if !req.Since.IsZero() && e.Ts.Before(replayStart) {
 					continue
 				}
 				writeFrame(w, flusher, e)
 			}
 		}
 	}
-}
-
-// parseTailFilter builds a Filter from query params.
-func parseTailFilter(q map[string][]string) (Filter, error) {
-	get := func(k string) string {
-		if v, ok := q[k]; ok && len(v) > 0 {
-			return v[0]
-		}
-		return ""
-	}
-
-	if raw := get("accounts"); raw != "" {
-		var accts []account.Account
-		for _, pair := range strings.Split(raw, ",") {
-			pair = strings.TrimSpace(pair)
-			if pair == "" {
-				continue
-			}
-			parts := strings.SplitN(pair, ":", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				return Filter{}, fmt.Errorf("invalid accounts entry %q: expected platform:account", pair)
-			}
-			accts = append(accts, account.New(parts[0], parts[1]))
-		}
-		return Filter{Accounts: accts}, nil
-	}
-
-	platform := get("platform")
-	acct := get("account")
-	if acct != "" && platform == "" {
-		return Filter{}, fmt.Errorf("account param requires platform")
-	}
-	if platform == "" {
-		return Filter{}, nil
-	}
-	if acct == "" {
-		return Filter{}, fmt.Errorf("platform filter without account is not supported yet; pass accounts=platform:name")
-	}
-	return Filter{Accounts: []account.Account{account.New(platform, acct)}}, nil
 }
 
 // replayHistory streams events from disk for the given filter, starting
