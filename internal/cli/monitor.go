@@ -20,22 +20,15 @@ import (
 func newMonitorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "monitor",
-		Short:   "Stream incoming messages to stdout (peek-only)",
+		Short:   "Stream incoming messages to stdout",
 		GroupID: groupReading,
 		Long: `Stream incoming messages and reactions as JSON lines to stdout.
-
-The output is suitable for piping into tools like jq or grep --line-buffered.
-Each line is a single event. Designed to be run under Claude Code's Monitor
-tool.
-
-No cursor is maintained — running monitor does not affect MCP channel
-delivery to any Claude Code session. Safe to run alongside ` + "`pigeon claude`" + `.`,
+Each line is one event.`,
 		Example: `  pigeon monitor
-  pigeon monitor --platform=slack
   pigeon monitor --platform=slack --account=acme-corp
-  pigeon monitor --workspace=eng
-  pigeon monitor --since=5m
-  pigeon monitor | jq -r '.content'`,
+  pigeon monitor --workspace=eng --since=5m
+  pigeon monitor | jq -r '.content'
+  pigeon monitor | grep --line-buffered '"kind":"reaction"'`,
 		PreRunE: ensureDaemon,
 		RunE:    runMonitor,
 	}
@@ -46,9 +39,18 @@ delivery to any Claude Code session. Safe to run alongside ` + "`pigeon claude`"
 }
 
 func runMonitor(cmd *cobra.Command, _ []string) error {
-	platform, _ := cmd.Flags().GetString("platform")
-	acctName, _ := cmd.Flags().GetString("account")
-	since, _ := cmd.Flags().GetString("since")
+	platform, err := cmd.Flags().GetString("platform")
+	if err != nil {
+		return fmt.Errorf("get platform flag: %w", err)
+	}
+	acctName, err := cmd.Flags().GetString("account")
+	if err != nil {
+		return fmt.Errorf("get account flag: %w", err)
+	}
+	since, err := cmd.Flags().GetString("since")
+	if err != nil {
+		return fmt.Errorf("get since flag: %w", err)
+	}
 
 	q := url.Values{}
 
