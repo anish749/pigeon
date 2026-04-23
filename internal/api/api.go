@@ -128,6 +128,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("POST /api/react", s.handleReact)
 	mux.HandleFunc("POST /api/delete", s.handleDeleteMsg)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
+	mux.HandleFunc("GET /api/tail", s.hub.TailHandler())
 	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
 	mux.HandleFunc("GET /api/status", s.handleStatus)

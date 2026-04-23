@@ -7,23 +7,26 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
-// Write persists a message to the appropriate date file. Does not advance the
-// cursor — only sync should do that via AdvanceCursor.
-func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Via:      via,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
+// Write persists a message to the appropriate date file and returns the
+// MsgLine that was written so the caller can publish it downstream (e.g.
+// to the hub broadcast). Does not advance the cursor — only sync should
+// do that via AdvanceCursor.
+func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) (modelv1.MsgLine, error) {
+	msg := modelv1.MsgLine{
+		ID:       slackTS,
+		Ts:       ts,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
+		Via:      via,
+		Text:     text,
+		RawType:  modelv1.RawTypeSlack,
+		Raw:      raw.AsSerializable(),
 	}
-	return ms.store.Append(ms.acct, rs.ChannelName, line)
+	line := modelv1.Line{Type: modelv1.LineMessage, Msg: &msg}
+	if err := ms.store.Append(ms.acct, rs.ChannelName, line); err != nil {
+		return modelv1.MsgLine{}, err
+	}
+	return msg, nil
 }
 
 // WriteThreadMessage writes a message to a thread file.

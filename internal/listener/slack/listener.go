@@ -167,11 +167,16 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	// Write to channel date file unless it's a thread-only reply.
 	// thread_broadcast replies appear in both channel and thread.
+	var written modelv1.MsgLine
+	var haveWritten bool
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+		w, err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, slackraw.NewSlackRawContent(*msg.Message))
+		if err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
+		written = w
+		haveWritten = true
 	}
 
 	// Write thread replies to the thread file
@@ -194,15 +199,32 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
+	//
+	// If we didn't write a channel message (thread-only reply), fall back
+	// to a minimal MsgLine built from the resolver/event fields so the
+	// broadcast still sees it.
+	payload := written
+	if !haveWritten {
+		payload = modelv1.MsgLine{
+			ID:       msg.TimeStamp,
+			Ts:       ts,
+			Sender:   rs.SenderName,
+			SenderID: rs.SenderID,
+			Via:      via,
+			Text:     text,
+			RawType:  modelv1.RawTypeSlack,
+			Raw:      slackraw.NewSlackRawContent(*msg.Message).AsSerializable(),
+		}
+	}
 	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
-		result = l.onMessage(l.acct, rs.ChannelName)
+		result = l.onMessage(l.acct, rs.ChannelName, payload)
 	case "group":
-		result = l.onMessage(l.acct, rs.ChannelName)
+		result = l.onMessage(l.acct, rs.ChannelName, payload)
 	case "channel":
 		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
-			result = l.onMessage(l.acct, rs.ChannelName)
+			result = l.onMessage(l.acct, rs.ChannelName, payload)
 		}
 	default:
 		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
