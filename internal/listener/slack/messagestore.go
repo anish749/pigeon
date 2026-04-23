@@ -7,12 +7,11 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
-// Write persists a message to the appropriate date file and returns the
-// MsgLine that was written so the caller can publish it downstream (e.g.
-// to the hub broadcast). Does not advance the cursor — only sync should
-// do that via AdvanceCursor.
-func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) (modelv1.MsgLine, error) {
-	msg := modelv1.MsgLine{
+// buildMsgLine is the single construction site for a Slack MsgLine.
+// All Write* methods build their payload here so callers that need the
+// written line (e.g. the hub broadcast) can rely on a consistent shape.
+func buildMsgLine(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) modelv1.MsgLine {
+	return modelv1.MsgLine{
 		ID:       slackTS,
 		Ts:       ts,
 		Sender:   rs.SenderName,
@@ -22,6 +21,14 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 		RawType:  modelv1.RawTypeSlack,
 		Raw:      raw.AsSerializable(),
 	}
+}
+
+// Write persists a message to the appropriate date file and returns the
+// MsgLine that was written so the caller can publish it downstream (e.g.
+// to the hub broadcast). Does not advance the cursor — only sync should
+// do that via AdvanceCursor.
+func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slackTS string, via modelv1.Via, raw slackraw.SlackRawContent) (modelv1.MsgLine, error) {
+	msg := buildMsgLine(rs, text, ts, slackTS, via, raw)
 	line := modelv1.Line{Type: modelv1.LineMessage, Msg: &msg}
 	if err := ms.store.Append(ms.acct, rs.ChannelName, line); err != nil {
 		return modelv1.MsgLine{}, err
@@ -29,39 +36,25 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 	return msg, nil
 }
 
-// WriteThreadMessage writes a message to a thread file.
-func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Via:      via,
-			Text:     text,
-			Reply:    isReply,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
+// WriteThreadMessage writes a message to a thread file and returns the
+// MsgLine that was written. The isReply flag distinguishes actual thread
+// replies from the context parent fetched when the thread is first seen.
+func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via, raw slackraw.SlackRawContent) (modelv1.MsgLine, error) {
+	msg := buildMsgLine(rs, text, ts, slackTS, via, raw)
+	msg.Reply = isReply
+	line := modelv1.Line{Type: modelv1.LineMessage, Msg: &msg}
+	if err := ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line); err != nil {
+		return modelv1.MsgLine{}, err
 	}
-	return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
+	return msg, nil
 }
 
 // WriteThreadContext writes a channel context message to a thread file.
+// Via is not set for context messages — they are historical fetches that
+// predate the pigeon identity model.
 func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID:       slackTS,
-			Ts:       ts,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
-	}
+	msg := buildMsgLine(rs, text, ts, slackTS, "", raw)
+	line := modelv1.Line{Type: modelv1.LineMessage, Msg: &msg}
 	return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
 }
 

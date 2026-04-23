@@ -165,30 +165,36 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	isThreadReply := msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp
 
-	// Write to channel date file unless it's a thread-only reply.
-	// thread_broadcast replies appear in both channel and thread.
-	var written modelv1.MsgLine
-	var haveWritten bool
+	// Write to the channel date file and/or thread file. The MsgLine
+	// returned by whichever write fires is what we route to the hub.
+	// thread_broadcast replies appear in both files; channel write wins
+	// as the routing payload in that case.
+	raw := slackraw.NewSlackRawContent(*msg.Message)
+
+	var payload modelv1.MsgLine
+	var have bool
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		w, err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, slackraw.NewSlackRawContent(*msg.Message))
+		p, err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, raw)
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
-		written = w
-		haveWritten = true
+		payload, have = p, true
 	}
 
-	// Write thread replies to the thread file
 	if isThreadReply {
 		// Only fetch the parent from Slack API if the thread file doesn't exist yet.
 		if !l.messages.ThreadExists(rs.ChannelName, msg.ThreadTimeStamp) {
 			l.ensureThreadParent(ctx, msg.Channel, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+		p, err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, raw)
+		if err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
+		}
+		if !have {
+			payload = p
 		}
 	}
 
@@ -199,23 +205,6 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — only when the bot is @mentioned
-	//
-	// If we didn't write a channel message (thread-only reply), fall back
-	// to a minimal MsgLine built from the resolver/event fields so the
-	// broadcast still sees it.
-	payload := written
-	if !haveWritten {
-		payload = modelv1.MsgLine{
-			ID:       msg.TimeStamp,
-			Ts:       ts,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Via:      via,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      slackraw.NewSlackRawContent(*msg.Message).AsSerializable(),
-		}
-	}
 	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
@@ -277,7 +266,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, threadTS s
 		return
 	}
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, slackraw.NewSlackRawContent(parent.Msg)); err != nil {
+	if _, err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, slackraw.NewSlackRawContent(parent.Msg)); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}

@@ -575,7 +575,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 			}
 			ts := ParseTimestamp(reply.Timestamp)
 			isReply := reply.Timestamp != msg.Timestamp // parent vs reply
-			if err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), slackraw.NewSlackRawContent(reply.Msg)); err != nil {
+			if _, err := ms.WriteThreadMessage(rs, msg.Timestamp, text, ts, reply.Timestamp, isReply, DetermineVia(reply.Msg, false), slackraw.NewSlackRawContent(reply.Msg)); err != nil {
 				slog.WarnContext(ctx, "slack sync: thread write failed", "error", err)
 			}
 			if err := writeReactions(ctx, ms, resolver, channelName, reply); err != nil {
