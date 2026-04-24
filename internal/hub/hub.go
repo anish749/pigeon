@@ -271,13 +271,13 @@ func (h *Hub) Unregister(sessionID string) {
 // subscribers, independent of session state.
 func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
 	// Publish to broadcast first — independent of session existence.
-	h.broadcast.Publish(Event{
-		Kind:         EventMessage,
-		Ts:           msg.Ts,
-		Acct:         acct,
-		Conversation: conversation,
-		Content:      strings.Join(modelv1.FormatMsgLine(msg, time.Local), "\n"),
-		MsgID:        msg.ID,
+	h.broadcast.Publish(NotifMsg{
+		Envelope: Envelope{
+			Kind:         EventMessage,
+			Account:      acct,
+			Conversation: conversation,
+		},
+		MsgLine: msg,
 	})
 
 	key := acct.String()
@@ -310,13 +310,17 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 // as-is — no timestamp or field reconstruction.
 func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
 	lines := h.formatReactionLines(acct, conversation, react)
-	h.broadcast.Publish(Event{
-		Kind:         EventReaction,
-		Ts:           react.Ts,
-		Acct:         acct,
-		Conversation: conversation,
-		Content:      strings.Join(lines, "\n"),
-		MsgID:        react.MsgID,
+	kind := EventReaction
+	if react.Remove {
+		kind = EventUnreact
+	}
+	h.broadcast.Publish(NotifReact{
+		Envelope: Envelope{
+			Kind:         kind,
+			Account:      acct,
+			Conversation: conversation,
+		},
+		ReactLine: react,
 	})
 
 	key := acct.String()

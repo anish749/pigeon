@@ -130,17 +130,19 @@ func TestTailHandler_LiveEventsFlow(t *testing.T) {
 
 	var gotMsg bool
 	for _, f := range frames {
-		if f["kind"] == "message" && f["msg_id"] == "abc.123" {
+		if f["kind"] == "message" && f["id"] == "abc.123" {
 			gotMsg = true
-			acctMap, _ := f["account"].(map[string]any)
-			if acctMap["platform"] != "slack" || acctMap["name"] != "acme" {
-				t.Errorf("platform/account wrong: %+v", f)
+			if f["platform"] != "slack" || f["name"] != "acme" {
+				t.Errorf("platform/name wrong: %+v", f)
 			}
 			if f["conversation"] != "#general" {
 				t.Errorf("conversation wrong: %+v", f)
 			}
-			if !strings.Contains(f["content"].(string), "hello world") {
-				t.Errorf("content missing text: %+v", f["content"])
+			if f["text"] != "hello world" {
+				t.Errorf("text wrong: got %v", f["text"])
+			}
+			if f["sender"] != "alice" {
+				t.Errorf("sender wrong: got %v", f["sender"])
 			}
 		}
 	}
@@ -168,18 +170,15 @@ func TestTailHandler_FilterScopesToAccount(t *testing.T) {
 		if f["kind"] != "message" {
 			continue
 		}
-		if acctMap, _ := f["account"].(map[string]any); acctMap["name"] == "other" {
-			t.Errorf("filter leaked: got event for account=other: %+v", f)
+		if f["name"] == "other" {
+			t.Errorf("filter leaked: got event for name=other: %+v", f)
 		}
 	}
 
 	// Sanity: the acme event did come through.
 	var sawAcme bool
 	for _, f := range frames {
-		if f["kind"] != "message" {
-			continue
-		}
-		if acctMap, _ := f["account"].(map[string]any); acctMap["name"] == "acme" {
+		if f["kind"] == "message" && f["name"] == "acme" {
 			sawAcme = true
 		}
 	}

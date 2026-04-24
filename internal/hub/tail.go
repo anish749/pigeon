@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/tailapi"
 )
 
@@ -62,7 +60,7 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 		// Send a minimal "connected" frame. This also forces the first
 		// body flush on HTTP/2 and any other transport that holds
 		// headers until a body byte lands.
-		if err := writeFrame(w, flusher, Event{
+		if err := writeFrame(w, flusher, NotifSystem{
 			Kind:    EventSystem,
 			Ts:      time.Now(),
 			Content: "connected",
@@ -76,7 +74,7 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 				// Replay is best-effort; tell the client what broke, then
 				// keep the live stream open so they still get new events.
 				slog.Warn("tail: historical replay error", "error", err)
-				if werr := writeFrame(w, flusher, Event{
+				if werr := writeFrame(w, flusher, NotifSystem{
 					Kind:    EventSystem,
 					Ts:      time.Now(),
 					Content: "replay error: " + err.Error(),
@@ -152,15 +150,15 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 				continue
 			}
 			for _, m := range df.Messages {
-				e := Event{
-					Kind:         EventMessage,
-					Ts:           m.Ts,
-					Acct:         acct,
-					Conversation: conv,
-					Content:      strings.Join(modelv1.FormatMsg(m, time.Local), "\n"),
-					MsgID:        m.ID,
+				n := NotifMsg{
+					Envelope: Envelope{
+						Kind:         EventMessage,
+						Account:      acct,
+						Conversation: conv,
+					},
+					MsgLine: m.MsgLine,
 				}
-				if werr := writeFrame(w, flusher, e); werr != nil {
+				if werr := writeFrame(w, flusher, n); werr != nil {
 					// Client disconnected mid-replay. Return the write
 					// error — the handler will stop the stream.
 					return fmt.Errorf("write replay frame: %w", werr)
