@@ -23,6 +23,7 @@ func displaySender(sender string, via Via) string {
 		return sender
 	}
 }
+
 // FormatMsgLine renders a message line (without reactions) as display lines.
 // loc controls the timezone for display (pass time.Local for user's timezone).
 func FormatMsgLine(m MsgLine, loc *time.Location) []string {
