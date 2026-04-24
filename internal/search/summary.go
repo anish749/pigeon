@@ -217,8 +217,7 @@ func lineSender(l modelv1.Line) string {
 func formatMatchLine(l modelv1.Line, loc *time.Location) []string {
 	switch l.Type {
 	case modelv1.LineMessage:
-		resolved := modelv1.ResolvedMsg{MsgLine: *l.Msg}
-		return modelv1.FormatMsg(resolved, loc)
+		return modelv1.FormatMsgLine(*l.Msg, loc)
 	case modelv1.LineEmail:
 		tsStr := l.Email.Ts.In(loc).Format("2006-01-02 15:04:05")
 		sender := l.Email.FromName
