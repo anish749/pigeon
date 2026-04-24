@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
@@ -20,7 +21,11 @@ const monitorReadBufferSize = 1024 * 1024
 // RunMonitor opens an SSE stream to the daemon's /api/tail endpoint and
 // writes each JSON frame to out as a single line. Blocks until the
 // server closes the connection or ctx is cancelled.
-func RunMonitor(ctx context.Context, req tailapi.Request, out io.Writer) error {
+//
+// out is *os.File rather than io.Writer: os.File has no Go-level buffering,
+// so each Fprintln is a direct write syscall — events are never held in a
+// Go buffer before reaching the pipe consumer.
+func RunMonitor(ctx context.Context, req tailapi.Request, out *os.File) error {
 	q, err := req.Encode()
 	if err != nil {
 		return fmt.Errorf("encode tail request: %w", err)
@@ -49,9 +54,6 @@ func RunMonitor(ctx context.Context, req tailapi.Request, out io.Writer) error {
 		return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	// os.Stdout / os.File has no Go-level buffering, so each Fprintln
-	// is a direct write syscall. No bufio.Writer needed — it would only
-	// delay the output without reducing syscall count.
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), monitorReadBufferSize)
 	for scanner.Scan() {
