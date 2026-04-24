@@ -1,9 +1,9 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -62,16 +62,21 @@ func TestRunMonitor_WritesFramesToOut(t *testing.T) {
 		flusher.Flush()
 	})
 
-	var buf bytes.Buffer
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := RunMonitor(ctx, tailapi.Request{}, &buf)
-	if err != nil {
+	if err := RunMonitor(ctx, tailapi.Request{}, w); err != nil {
 		t.Fatalf("RunMonitor: %v", err)
 	}
+	w.Close()
+	out, _ := io.ReadAll(r)
+	r.Close()
 
-	got := buf.String()
+	got := string(out)
 	wantLines := []string{
 		`{"kind":"system","content":"connected"}`,
 		`{"kind":"message","content":"hi"}`,
@@ -100,11 +105,15 @@ func TestRunMonitor_EncodesRequestIntoQuery(t *testing.T) {
 		Since:    time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC),
 	}
 
-	var buf bytes.Buffer
+	_, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer w.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	_ = RunMonitor(ctx, sent, &buf) // may error on context deadline, we don't care
+	_ = RunMonitor(ctx, sent, w) // may error on context deadline, we don't care
 
 	if decodeErr != nil {
 		t.Fatalf("server decode: %v", decodeErr)
@@ -144,16 +153,20 @@ func TestRunMonitor_NonOKStatusReturnsError(t *testing.T) {
 				http.Error(w, tt.body, tt.status)
 			})
 
-			var buf bytes.Buffer
-			err := RunMonitor(context.Background(), tailapi.Request{}, &buf)
-			if err == nil {
-				t.Fatalf("expected error, got nil (output: %q)", buf.String())
+			_, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("pipe: %v", err)
 			}
-			if !strings.Contains(err.Error(), tt.wantInErrorMsg) {
-				t.Errorf("error %q does not contain %q", err, tt.wantInErrorMsg)
+			defer w.Close()
+			runErr := RunMonitor(context.Background(), tailapi.Request{}, w)
+			if runErr == nil {
+				t.Fatalf("expected error, got nil")
 			}
-			if !strings.Contains(err.Error(), tt.body) {
-				t.Errorf("error %q does not contain body %q", err, tt.body)
+			if !strings.Contains(runErr.Error(), tt.wantInErrorMsg) {
+				t.Errorf("error %q does not contain %q", runErr, tt.wantInErrorMsg)
+			}
+			if !strings.Contains(runErr.Error(), tt.body) {
+				t.Errorf("error %q does not contain body %q", runErr, tt.body)
 			}
 		})
 	}
@@ -170,15 +183,21 @@ func TestRunMonitor_SkipsNonDataLines(t *testing.T) {
 		flusher.Flush()
 	})
 
-	var buf bytes.Buffer
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	_ = RunMonitor(ctx, tailapi.Request{}, &buf)
+	_ = RunMonitor(ctx, tailapi.Request{}, w)
+	w.Close()
+	outBytes, _ := io.ReadAll(r)
+	r.Close()
 
 	// Only `data:` lines should make it through. Event: lines and
 	// comments are dropped.
-	out := buf.String()
+	out := string(outBytes)
 	if !strings.Contains(out, `{"kind":"message"}`) {
 		t.Errorf("missing message frame: %q", out)
 	}
