@@ -316,6 +316,7 @@ MAINTENANCE
 		newReadCmd(),
 		newGlobCmd(),
 		newGrepCmd(),
+		newMonitorCmd(),
 
 		// Sending
 		newSendCmd(),

@@ -161,6 +161,6 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		"from", senderName, "conv", convDir, "text_len", len(text))
 
 	if l.onMessage != nil {
-		l.onMessage(l.acct, convDir)
+		l.onMessage(l.acct, convDir, *line.Msg)
 	}
 }

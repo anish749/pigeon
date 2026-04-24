@@ -165,25 +165,36 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 
 	isThreadReply := msg.ThreadTimeStamp != "" && msg.ThreadTimeStamp != msg.TimeStamp
 
-	// Write to channel date file unless it's a thread-only reply.
-	// thread_broadcast replies appear in both channel and thread.
+	// Write to the channel date file and/or thread file. The MsgLine
+	// returned by whichever write fires is what we route to the hub.
+	// thread_broadcast replies appear in both files; channel write wins
+	// as the routing payload in that case.
+	raw := slackraw.NewSlackRawContent(*msg.Message)
+
+	var payload modelv1.MsgLine
+	var have bool
 	if !isThreadReply || msg.SubType == "thread_broadcast" {
-		if err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+		p, err := l.messages.Write(rs, text, ts, msg.TimeStamp, via, raw)
+		if err != nil {
 			slog.ErrorContext(ctx, "failed to write slack message", "error", err, "account", l.acct)
 			return
 		}
+		payload, have = p, true
 	}
 
-	// Write thread replies to the thread file
 	if isThreadReply {
 		// Only fetch the parent from Slack API if the thread file doesn't exist yet.
 		if !l.messages.ThreadExists(rs.ChannelName, msg.ThreadTimeStamp) {
 			l.ensureThreadParent(ctx, msg.Channel, msg.ThreadTimeStamp)
 		}
 
-		if err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+		p, err := l.messages.WriteThreadMessage(rs, msg.ThreadTimeStamp, text, ts, msg.TimeStamp, true, via, raw)
+		if err != nil {
 			slog.ErrorContext(ctx, "failed to write thread reply", "error", err,
 				"account", l.acct, "thread_ts", msg.ThreadTimeStamp)
+		}
+		if !have {
+			payload = p
 		}
 	}
 
@@ -197,12 +208,12 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
-		result = l.onMessage(l.acct, rs.ChannelName)
+		result = l.onMessage(l.acct, rs.ChannelName, payload)
 	case "group":
-		result = l.onMessage(l.acct, rs.ChannelName)
+		result = l.onMessage(l.acct, rs.ChannelName, payload)
 	case "channel":
 		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
-			result = l.onMessage(l.acct, rs.ChannelName)
+			result = l.onMessage(l.acct, rs.ChannelName, payload)
 		}
 	default:
 		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
@@ -255,7 +266,7 @@ func (l *Listener) ensureThreadParent(ctx context.Context, channelID, threadTS s
 		return
 	}
 	ts := ParseTimestamp(parent.Timestamp)
-	if err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, slackraw.NewSlackRawContent(parent.Msg)); err != nil {
+	if _, err := l.messages.WriteThreadMessage(parentRS, threadTS, text, ts, parent.Timestamp, false, modelv1.ViaOrganic, slackraw.NewSlackRawContent(parent.Msg)); err != nil {
 		slog.WarnContext(ctx, "failed to write thread parent", "error", err,
 			"account", l.acct, "thread_ts", threadTS)
 	}
@@ -280,8 +291,10 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	if err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove); err != nil {
+	react, err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove)
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
+		return
 	}
 
 	slog.InfoContext(ctx, "slack reaction saved",
@@ -290,13 +303,7 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 	// Route the reaction to the connected session. The listener only sees
 	// reactions for channels the bot has visibility into (DMs/MPDMs and
 	// channels it's a member of), so there is no additional filter here.
-	res := l.onReaction(l.acct, channelName, hub.ReactionInfo{
-		MsgID:    item.Timestamp,
-		Sender:   userName,
-		SenderID: userID,
-		Emoji:    emoji,
-		Remove:   remove,
-	})
+	res := l.onReaction(l.acct, channelName, react)
 	slog.InfoContext(ctx, "slack reaction routed", "result", res, "account", l.acct)
 }
 

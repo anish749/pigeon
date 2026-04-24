@@ -35,21 +35,16 @@ type RouteResult struct {
 }
 
 // MessageNotifyFunc is called by listeners when a new message has been
-// written to disk.
-type MessageNotifyFunc func(acct account.Account, conversation string) RouteResult
-
-// ReactionInfo describes a single reaction or unreaction event to be routed
-// to a connected session.
-type ReactionInfo struct {
-	MsgID    string
-	Sender   string
-	SenderID string
-	Emoji    string
-	Remove   bool
-}
+// written to disk. The msg payload is passed through so the hub can
+// publish a pre-formatted event to the broadcast bus without re-reading
+// from disk.
+type MessageNotifyFunc func(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult
 
 // ReactionNotifyFunc is called by listeners when a reaction event arrives.
-type ReactionNotifyFunc func(acct account.Account, conversation string, r ReactionInfo) RouteResult
+// The react payload is the exact ReactLine written to disk — the hub
+// forwards it verbatim to session delivery and the broadcast bus without
+// constructing new timestamps or regenerating fields.
+type ReactionNotifyFunc func(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -79,8 +74,8 @@ type channel struct {
 
 type deliverySignal struct {
 	kind         signalKind
-	conversation string        // only set for signalNewMessage and signalReaction
-	reaction     *ReactionInfo // only set for signalReaction
+	conversation string             // only set for signalNewMessage and signalReaction
+	reaction     *modelv1.ReactLine // only set for signalReaction
 }
 
 type signalKind int
@@ -93,14 +88,19 @@ const (
 
 // Hub manages active MCP sessions and routes incoming messages to them.
 type Hub struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session // SessionID → connected session
-	channels map[string]*channel // account slug → delivery channel
-	store    store.Store
-	dataRoot paths.DataRoot
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu        sync.RWMutex
+	sessions  map[string]*Session // SessionID → connected session
+	channels  map[string]*channel // account slug → delivery channel
+	store     store.Store
+	dataRoot  paths.DataRoot
+	broadcast *Broadcast // in-memory fanout bus for /api/tail
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
+
+// Broadcast returns the hub's broadcast bus. The daemon's /api/tail
+// handler subscribes here to stream events to monitor clients.
+func (h *Hub) Broadcast() *Broadcast { return h.broadcast }
 
 // New creates a Hub, loads session files, starts delivery goroutines, and
 // watches for new session files. Returns an error if session files cannot
@@ -113,12 +113,13 @@ func New(ctx context.Context, s store.Store, dataRoot paths.DataRoot) (*Hub, err
 
 	ctx, cancel := context.WithCancel(ctx)
 	h := &Hub{
-		sessions: make(map[string]*Session),
-		channels: make(map[string]*channel),
-		store:    s,
-		dataRoot: dataRoot,
-		ctx:      ctx,
-		cancel:   cancel,
+		sessions:  make(map[string]*Session),
+		channels:  make(map[string]*channel),
+		store:     s,
+		dataRoot:  dataRoot,
+		broadcast: NewBroadcast(),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	for _, s := range sessions {
@@ -267,7 +268,22 @@ func (h *Hub) Unregister(sessionID string) {
 
 // Route signals that a new message has arrived for the given account and
 // conversation. Non-blocking — returns immediately.
-func (h *Hub) Route(acct account.Account, conversation string) RouteResult {
+//
+// The message is also published to the broadcast bus for monitor
+// subscribers, independent of session state.
+func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
+	// Publish to broadcast first — independent of session existence.
+	h.broadcast.Publish(Event{
+		Kind:         EventMessage,
+		Ts:           msg.Ts,
+		Acct:         acct,
+		Platform:     acct.Platform,
+		Account:      acct.Name,
+		Conversation: conversation,
+		Content:      strings.Join(modelv1.FormatMsg(modelv1.ResolvedMsg{MsgLine: msg}, time.Local), "\n"),
+		MsgID:        msg.ID,
+	})
+
 	key := acct.String()
 
 	h.mu.RLock()
@@ -292,7 +308,22 @@ func (h *Hub) Route(acct account.Account, conversation string) RouteResult {
 
 // RouteReaction signals that a reaction (or unreaction) event has arrived for
 // the given account and conversation. Non-blocking — returns immediately.
-func (h *Hub) RouteReaction(acct account.Account, conversation string, r ReactionInfo) RouteResult {
+//
+// The reaction is also published to the broadcast bus for monitor
+// subscribers, independent of session state. The ReactLine is forwarded
+// as-is — no timestamp or field reconstruction.
+func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
+	h.broadcast.Publish(Event{
+		Kind:         EventReaction,
+		Ts:           react.Ts,
+		Acct:         acct,
+		Platform:     acct.Platform,
+		Account:      acct.Name,
+		Conversation: conversation,
+		Content:      strings.Join(modelv1.FormatReactionFallbackNotification(react, time.Local), "\n"),
+		MsgID:        react.MsgID,
+	})
+
 	key := acct.String()
 
 	h.mu.RLock()
@@ -305,9 +336,8 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, r Reactio
 		return RouteResult{State: RouteNoSession}
 	}
 
-	rc := r
 	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &rc}:
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &react}:
 	default:
 		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
 			"account", acct, "conversation", conversation,
@@ -508,7 +538,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 // deliverReaction sends a reaction (or unreaction) event to the connected
 // session. Reactions are delivered out-of-band: they are not gated by the
 // last_delivered cursor since reactions often target older messages.
-func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) {
+func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
@@ -519,17 +549,8 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, r ReactionInfo) 
 		return
 	}
 
-	react := modelv1.ReactLine{
-		Ts:       time.Now(),
-		MsgID:    r.MsgID,
-		Sender:   r.Sender,
-		SenderID: r.SenderID,
-		Emoji:    r.Emoji,
-		Remove:   r.Remove,
-	}
-
 	var lines []string
-	if msg := h.lookupMessage(ch.acct, conversation, r.MsgID); msg != nil {
+	if msg := h.lookupMessage(ch.acct, conversation, react.MsgID); msg != nil {
 		lines = modelv1.FormatReactionNotification(*msg, react, time.Local)
 	} else {
 		lines = modelv1.FormatReactionFallbackNotification(react, time.Local)
