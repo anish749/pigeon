@@ -52,11 +52,11 @@ check_path() {
 # --- dev mode: build from local source ---
 # Usage: ./install.sh dev
 if [ "${1:-}" = "dev" ]; then
+  trap 'rm -f /tmp/pigeon.dev' EXIT
   COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
   echo "Building dev-${COMMIT} from local source..."
   go build -ldflags "-X main.version=dev-${COMMIT}" -o /tmp/pigeon.dev ./cmd/pigeon
   swap_binary /tmp/pigeon.dev
-  rm -f /tmp/pigeon.dev
   install_skill .claude/skills/pigeon/SKILL.md
   check_path
   echo ""
