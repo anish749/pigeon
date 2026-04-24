@@ -23,8 +23,14 @@ Each line is one event.`,
 		Example: `  pigeon monitor
   pigeon monitor --platform=slack --account=acme-corp
   pigeon monitor --workspace=eng --since=5m
-  pigeon monitor | jq -r '.content'
-  pigeon monitor | grep --line-buffered '"kind":"reaction"'`,
+
+  # Filter by kind (output stays as full JSON lines)
+  pigeon monitor | grep --line-buffered '"kind":"message"'
+  pigeon monitor | grep --line-buffered '"kind":"reaction"'
+
+  # Scope to one conversation or one parent message
+  pigeon monitor | jq --unbuffered -c 'select(.conversation == "#engineering")'
+  pigeon monitor | jq --unbuffered -c 'select(.kind == "reaction" and .msg_id == "1711568938.123456")'`,
 		PreRunE: ensureDaemon,
 		RunE:    runMonitor,
 	}
