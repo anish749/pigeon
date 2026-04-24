@@ -19,7 +19,13 @@ swap_binary() {
   install -m 755 "$bin" "${INSTALL_DIR}/pigeon"
   echo "Installed pigeon to ${INSTALL_DIR}/pigeon"
   echo "Starting daemon..."
-  "${INSTALL_DIR}/pigeon" daemon start
+  if ! "${INSTALL_DIR}/pigeon" daemon start; then
+    echo "" >&2
+    echo "Error: daemon failed to start. The binary is installed but the daemon is not running." >&2
+    echo "Check for port conflicts or config issues, then retry:" >&2
+    echo "  ${INSTALL_DIR}/pigeon daemon start" >&2
+    exit 1
+  fi
 }
 
 # Install skill from a local file path or an https:// URL.
