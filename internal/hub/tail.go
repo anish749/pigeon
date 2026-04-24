@@ -156,8 +156,6 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 					Kind:         EventMessage,
 					Ts:           m.Ts,
 					Acct:         acct,
-					Platform:     acct.Platform,
-					Account:      acct.Name,
 					Conversation: conv,
 					Content:      strings.Join(modelv1.FormatMsg(m, time.Local), "\n"),
 					MsgID:        m.ID,

@@ -2,6 +2,7 @@ package hub
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,5 +190,60 @@ func TestLookupMessage_NoConversation(t *testing.T) {
 	got := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
 	if got != nil {
 		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+func TestFormatReactionLines_MessageFound(t *testing.T) {
+	h, s, acct := setupLookup(t)
+
+	if err := s.Append(acct, "#general", modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
+			Sender: "Alice", SenderID: "U001", Text: "hello world",
+		},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	react := modelv1.ReactLine{
+		MsgID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
+		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
+	}
+	lines := h.formatReactionLines(acct, "#general", react)
+
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty lines")
+	}
+	// Full notification includes the original message text.
+	if !strings.Contains(lines[0], "hello world") {
+		t.Errorf("first line %q should contain original message text", lines[0])
+	}
+	if !strings.Contains(lines[0], "Bob") {
+		t.Errorf("first line %q should contain reactor name", lines[0])
+	}
+}
+
+func TestFormatReactionLines_MessageNotFound(t *testing.T) {
+	h, _, acct := setupLookup(t)
+
+	react := modelv1.ReactLine{
+		MsgID: "9999999999.999999", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
+		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
+	}
+	lines := h.formatReactionLines(acct, "#general", react)
+
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty lines")
+	}
+	// Fallback notification omits original message text.
+	if strings.Contains(lines[0], "hello world") {
+		t.Errorf("fallback line %q should not contain original message text", lines[0])
+	}
+	if !strings.Contains(lines[0], "Bob") {
+		t.Errorf("fallback line %q should contain reactor name", lines[0])
+	}
+	if !strings.Contains(lines[0], "thumbsup") {
+		t.Errorf("fallback line %q should contain emoji", lines[0])
 	}
 }
