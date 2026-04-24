@@ -126,67 +126,92 @@ func TestFormatConvMeta_Empty(t *testing.T) {
 	}
 }
 
-func TestFormatMsgLine_Full(t *testing.T) {
-	m := MsgLine{
-		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
-		Sender: "Alice", SenderID: "U1", Text: "hello world",
+func TestFormatMsgLine(t *testing.T) {
+	istLoc := time.FixedZone("IST", 5*60*60+30*60)
+	tests := []struct {
+		name        string
+		msg         MsgLine
+		loc         *time.Location
+		wantLines   int
+		wantHeader  string   // exact match on lines[0] when non-empty
+		wantInHead  []string // substrings that must appear in lines[0]
+		wantPrefix  string   // required prefix on lines[0]
+		wantInLine1 string   // substring that must appear in lines[1] (when wantLines >= 2)
+	}{
+		{
+			name: "full",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
+				Sender: "Alice", SenderID: "U1", Text: "hello world",
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantHeader: "[2026-03-16 09:15:02] [M1] Alice (U1): hello world",
+		},
+		{
+			name: "reply indented",
+			msg: MsgLine{
+				ID: "R1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true,
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantPrefix: "  ",
+		},
+		{
+			name: "timezone",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Alice", SenderID: "U1", Text: "hello",
+			},
+			loc:        istLoc,
+			wantLines:  1,
+			wantInHead: []string{"14:30:00"},
+		},
+		{
+			name: "via decoration",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Jeremiah", SenderID: "U1", Text: "hello",
+				Via: ViaToPigeon,
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantInHead: []string{"sent to pigeon by Jeremiah (U1)"},
+		},
+		{
+			name: "with raw",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Alice", SenderID: "U1", Text: "hello",
+				Raw: map[string]any{"blocks": []any{"test"}},
+			},
+			loc:         time.UTC,
+			wantLines:   2,
+			wantInLine1: "blocks",
+		},
 	}
-	lines := FormatMsgLine(m, time.UTC)
-	if len(lines) != 1 {
-		t.Fatalf("lines = %d, want 1", len(lines))
-	}
-	if lines[0] != "[2026-03-16 09:15:02] [M1] Alice (U1): hello world" {
-		t.Errorf("got %q", lines[0])
-	}
-}
-
-func TestFormatMsgLine_Reply(t *testing.T) {
-	m := MsgLine{
-		ID: "R1", Ts: ts(2026, 3, 16, 9, 0, 0),
-		Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true,
-	}
-	lines := FormatMsgLine(m, time.UTC)
-	if !strings.HasPrefix(lines[0], "  ") {
-		t.Errorf("reply should be indented, got %q", lines[0])
-	}
-}
-
-func TestFormatMsgLine_Timezone(t *testing.T) {
-	loc := time.FixedZone("IST", 5*60*60+30*60)
-	m := MsgLine{
-		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-		Sender: "Alice", SenderID: "U1", Text: "hello",
-	}
-	lines := FormatMsgLine(m, loc)
-	if !strings.Contains(lines[0], "14:30:00") {
-		t.Errorf("expected IST time, got %q", lines[0])
-	}
-}
-
-func TestFormatMsgLine_Via(t *testing.T) {
-	m := MsgLine{
-		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-		Sender: "Jeremiah", SenderID: "U1", Text: "hello",
-		Via: ViaToPigeon,
-	}
-	lines := FormatMsgLine(m, time.UTC)
-	if !strings.Contains(lines[0], "sent to pigeon by Jeremiah (U1)") {
-		t.Errorf("expected decorated sender, got %q", lines[0])
-	}
-}
-
-func TestFormatMsgLine_WithRaw(t *testing.T) {
-	m := MsgLine{
-		ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
-		Sender: "Alice", SenderID: "U1", Text: "hello",
-		Raw: map[string]any{"blocks": []any{"test"}},
-	}
-	lines := FormatMsgLine(m, time.UTC)
-	if len(lines) < 2 {
-		t.Fatalf("lines = %d, want at least 2 (header + raw)", len(lines))
-	}
-	if !strings.Contains(lines[1], "blocks") {
-		t.Errorf("raw line = %q, want blocks JSON", lines[1])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := FormatMsgLine(tt.msg, tt.loc)
+			if len(lines) != tt.wantLines {
+				t.Fatalf("lines = %d, want %d (got %q)", len(lines), tt.wantLines, lines)
+			}
+			if tt.wantHeader != "" && lines[0] != tt.wantHeader {
+				t.Errorf("header = %q, want %q", lines[0], tt.wantHeader)
+			}
+			if tt.wantPrefix != "" && !strings.HasPrefix(lines[0], tt.wantPrefix) {
+				t.Errorf("header = %q, want prefix %q", lines[0], tt.wantPrefix)
+			}
+			for _, sub := range tt.wantInHead {
+				if !strings.Contains(lines[0], sub) {
+					t.Errorf("header = %q, want substring %q", lines[0], sub)
+				}
+			}
+			if tt.wantInLine1 != "" && !strings.Contains(lines[1], tt.wantInLine1) {
+				t.Errorf("line 1 = %q, want substring %q", lines[1], tt.wantInLine1)
+			}
+		})
 	}
 }
 
