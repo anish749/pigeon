@@ -98,10 +98,6 @@ type Hub struct {
 	cancel    context.CancelFunc
 }
 
-// Broadcast returns the hub's broadcast bus. The daemon's /api/tail
-// handler subscribes here to stream events to monitor clients.
-func (h *Hub) Broadcast() *Broadcast { return h.broadcast }
-
 // New creates a Hub, loads session files, starts delivery goroutines, and
 // watches for new session files. Returns an error if session files cannot
 // be read (no sessions configured yet is not an error). Call Stop() to shut down.
@@ -320,7 +316,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 		Platform:     acct.Platform,
 		Account:      acct.Name,
 		Conversation: conversation,
-		Content:      strings.Join(modelv1.FormatReactionFallbackNotification(react, time.Local), "\n"),
+		Content:      strings.Join(h.formatReactionLines(acct, conversation, react), "\n"),
 		MsgID:        react.MsgID,
 	})
 
@@ -437,9 +433,7 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalNewMessage:
 				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
 			case signalReaction:
-				if sig.reaction != nil {
-					h.deliverReaction(ch, sig.conversation, *sig.reaction)
-				}
+				h.deliverReaction(ch, sig.conversation, *sig.reaction)
 			}
 		}
 	}
@@ -549,12 +543,7 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 		return
 	}
 
-	var lines []string
-	if msg := h.lookupMessage(ch.acct, conversation, react.MsgID); msg != nil {
-		lines = modelv1.FormatReactionNotification(*msg, react, time.Local)
-	} else {
-		lines = modelv1.FormatReactionFallbackNotification(react, time.Local)
-	}
+	lines := h.formatReactionLines(ch.acct, conversation, react)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
@@ -566,6 +555,13 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 		slog.Error("failed to deliver reaction",
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
+}
+
+func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) []string {
+	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
+		return modelv1.FormatReactionNotification(*msg, react, time.Local)
+	}
+	return modelv1.FormatReactionFallbackNotification(react, time.Local)
 }
 
 // lookupMessage searches for a message by ID in a conversation using grep.
