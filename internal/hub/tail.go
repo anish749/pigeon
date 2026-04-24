@@ -50,8 +50,9 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 		flusher.Flush() // commit headers immediately so the client learns the stream is up
 
 		// Subscribe BEFORE historical replay so we don't miss any event
-		// that lands during replay. Live events are deduped by timestamp
-		// against replayStart when draining.
+		// that lands during replay. Events that were both in replay and
+		// on the bus within that window will be emitted twice; consumers
+		// that need exactly-once should filter on msg_id.
 		events, cancel := h.broadcast.Subscribe(filter, tailSubscriberBufferSize)
 		defer cancel()
 
@@ -70,7 +71,6 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 			return
 		}
 
-		replayStart := time.Now()
 		if !req.Since.IsZero() {
 			if err := h.replayHistory(w, flusher, filter, req.Since); err != nil {
 				// Replay is best-effort; tell the client what broke, then
@@ -96,11 +96,6 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 			case e, ok := <-events:
 				if !ok {
 					return
-				}
-				// Skip events that predate the replay cutover — they
-				// were already streamed by replayHistory.
-				if !req.Since.IsZero() && e.Ts.Before(replayStart) {
-					continue
 				}
 				if err := writeFrame(w, flusher, e); err != nil {
 					slog.Info("tail client write failed, closing", "error", err)
