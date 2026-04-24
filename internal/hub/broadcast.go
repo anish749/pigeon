@@ -16,6 +16,10 @@ type EventKind string
 const (
 	EventMessage  EventKind = "message"
 	EventReaction EventKind = "reaction"
+	// EventSystem is used by the tail handler for out-of-band signals
+	// (connection ready, replay errors). Not published through the bus —
+	// the handler writes it directly to the response.
+	EventSystem EventKind = "system"
 )
 
 // Event is a single notification published to the broadcast bus.
@@ -25,9 +29,9 @@ type Event struct {
 	Kind         EventKind       `json:"kind"`
 	Ts           time.Time       `json:"ts"`
 	Acct         account.Account `json:"-"`
-	Platform     string          `json:"platform"`
-	Account      string          `json:"account"`
-	Conversation string          `json:"conversation"`
+	Platform     string          `json:"platform,omitempty"`
+	Account      string          `json:"account,omitempty"`
+	Conversation string          `json:"conversation,omitempty"`
 	Content      string          `json:"content"`
 	MsgID        string          `json:"msg_id,omitempty"`
 }

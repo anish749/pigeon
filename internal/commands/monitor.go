@@ -42,13 +42,16 @@ func RunMonitor(ctx context.Context, req tailapi.Request, out io.Writer) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("daemon returned %d (failed to read body: %w)", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	bw := bufio.NewWriter(out)
-	defer bw.Flush()
-
+	// os.Stdout / os.File has no Go-level buffering, so each Fprintln
+	// is a direct write syscall. No bufio.Writer needed — it would only
+	// delay the output without reducing syscall count.
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), monitorReadBufferSize)
 	for scanner.Scan() {
@@ -56,11 +59,8 @@ func RunMonitor(ctx context.Context, req tailapi.Request, out io.Writer) error {
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-		if _, err := fmt.Fprintln(bw, strings.TrimPrefix(line, "data: ")); err != nil {
-			return fmt.Errorf("write frame: %w", err)
-		}
-		if err := bw.Flush(); err != nil {
-			return fmt.Errorf("flush: %w", err)
+		if _, err := fmt.Fprintln(out, strings.TrimPrefix(line, "data: ")); err != nil {
+			return fmt.Errorf("write frame to out: %w", err)
 		}
 	}
 	if err := scanner.Err(); err != nil {

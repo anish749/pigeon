@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -46,27 +47,43 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
+		flusher.Flush() // commit headers immediately so the client learns the stream is up
 
 		// Subscribe BEFORE historical replay so we don't miss any event
-		// that lands during replay. We dedupe by timestamp against
-		// replayStart when draining the live buffer.
+		// that lands during replay. Live events are deduped by timestamp
+		// against replayStart when draining.
 		events, cancel := h.broadcast.Subscribe(filter, tailSubscriberBufferSize)
 		defer cancel()
 
 		slog.Info("tail client connected",
 			"accounts", len(filter.Accounts), "since", req.Since)
 
-		// Announce stream is up so the client knows setup worked.
-		writeFrame(w, flusher, map[string]any{
-			"kind":    "system",
-			"content": fmt.Sprintf("pigeon tail connected (accounts=%d, since=%s)", len(filter.Accounts), req.Since.Format(time.RFC3339)),
-			"ts":      time.Now(),
-		})
+		// Send a minimal "connected" frame. This also forces the first
+		// body flush on HTTP/2 and any other transport that holds
+		// headers until a body byte lands.
+		if err := writeFrame(w, flusher, Event{
+			Kind:    EventSystem,
+			Ts:      time.Now(),
+			Content: "connected",
+		}); err != nil {
+			slog.Info("tail client disconnected before connect frame", "error", err)
+			return
+		}
 
 		replayStart := time.Now()
 		if !req.Since.IsZero() {
 			if err := h.replayHistory(w, flusher, filter, req.Since); err != nil {
+				// Replay is best-effort; tell the client what broke, then
+				// keep the live stream open so they still get new events.
 				slog.Warn("tail: historical replay error", "error", err)
+				if werr := writeFrame(w, flusher, Event{
+					Kind:    EventSystem,
+					Ts:      time.Now(),
+					Content: "replay error: " + err.Error(),
+				}); werr != nil {
+					slog.Info("tail client disconnected during replay error frame", "error", werr)
+					return
+				}
 			}
 		}
 
@@ -85,14 +102,19 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 				if !req.Since.IsZero() && e.Ts.Before(replayStart) {
 					continue
 				}
-				writeFrame(w, flusher, e)
+				if err := writeFrame(w, flusher, e); err != nil {
+					slog.Info("tail client write failed, closing", "error", err)
+					return
+				}
 			}
 		}
 	}
 }
 
 // replayHistory streams events from disk for the given filter, starting
-// at sinceTime. Uses ReadConversation per account+conversation.
+// at sinceTime. Per-account and per-conversation read failures are
+// collected and returned as a single joined error — the caller can
+// surface that to the client. Write failures short-circuit the walk.
 func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter Filter, sinceTime time.Time) error {
 	since := time.Since(sinceTime)
 	if since < 0 {
@@ -100,6 +122,7 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 	}
 
 	accounts := filter.Accounts
+	var errs []error
 	if len(accounts) == 0 {
 		// No filter = every account we know about via store.
 		platforms, err := h.store.ListPlatforms()
@@ -109,7 +132,7 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 		for _, p := range platforms {
 			names, err := h.store.ListAccounts(p)
 			if err != nil {
-				slog.Warn("tail replay: list accounts failed", "platform", p, "error", err)
+				errs = append(errs, fmt.Errorf("list accounts for platform %q: %w", p, err))
 				continue
 			}
 			for _, n := range names {
@@ -121,16 +144,16 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 	for _, acct := range accounts {
 		convs, err := h.store.ListConversations(acct)
 		if err != nil {
-			slog.Warn("tail replay: list conversations failed", "account", acct, "error", err)
+			errs = append(errs, fmt.Errorf("list conversations for %s: %w", acct, err))
 			continue
 		}
 		for _, conv := range convs {
 			df, err := h.store.ReadConversation(acct, conv, store.ReadOpts{Since: since})
-			if err != nil || df == nil {
-				if err != nil {
-					slog.Warn("tail replay: read conversation failed",
-						"account", acct, "conversation", conv, "error", err)
-				}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("read %s/%s: %w", acct, conv, err))
+				continue
+			}
+			if df == nil {
 				continue
 			}
 			for _, m := range df.Messages {
@@ -144,19 +167,27 @@ func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter 
 					Content:      strings.Join(modelv1.FormatMsg(m, time.Local), "\n"),
 					MsgID:        m.ID,
 				}
-				writeFrame(w, flusher, e)
+				if werr := writeFrame(w, flusher, e); werr != nil {
+					// Client disconnected mid-replay. Return the write
+					// error — the handler will stop the stream.
+					return fmt.Errorf("write replay frame: %w", werr)
+				}
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
-func writeFrame(w http.ResponseWriter, flusher http.Flusher, v any) {
+// writeFrame marshals v as a single SSE `data:` frame and flushes it.
+// Returns the marshal or write error so the caller can decide to stop.
+func writeFrame(w http.ResponseWriter, flusher http.Flusher, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("tail: marshal frame failed", "error", err)
-		return
+		return fmt.Errorf("marshal frame: %w", err)
 	}
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return fmt.Errorf("write frame: %w", err)
+	}
 	flusher.Flush()
+	return nil
 }
