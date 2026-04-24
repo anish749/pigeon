@@ -30,7 +30,7 @@ Each line is one event.`,
 	}
 	cmd.Flags().StringP("platform", "p", "", "filter by platform (slack, whatsapp)")
 	cmd.Flags().StringP("account", "a", "", "filter by account (requires --platform)")
-	cmd.Flags().String("since", "", "replay history from this duration ago (e.g. 5m, 2h)")
+	cmd.Flags().StringP("since", "s", "", "replay history from this duration ago (e.g. 5m, 2h)")
 	return cmd
 }
 
