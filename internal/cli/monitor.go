@@ -24,16 +24,13 @@ Each line is one event.`,
   pigeon monitor --platform=slack --account=acme-corp
   pigeon monitor --workspace=eng --since=5m
 
-  # Filter with grep
+  # Filter by kind (output stays as full JSON lines)
   pigeon monitor | grep --line-buffered '"kind":"message"'
   pigeon monitor | grep --line-buffered '"kind":"reaction"'
 
-  # Format a readable line with jq
-  pigeon monitor | jq --unbuffered -r '"[\(.ts[11:19])] \(.platform)/\(.conversation): \(.content)"'
-
   # Scope to one conversation or one parent message
-  pigeon monitor | jq --unbuffered 'select(.conversation == "#engineering")'
-  pigeon monitor | jq --unbuffered 'select(.kind == "reaction" and .msg_id == "1711568938.123456")'`,
+  pigeon monitor | jq --unbuffered -c 'select(.conversation == "#engineering")'
+  pigeon monitor | jq --unbuffered -c 'select(.kind == "reaction" and .msg_id == "1711568938.123456")'`,
 		PreRunE: ensureDaemon,
 		RunE:    runMonitor,
 	}
