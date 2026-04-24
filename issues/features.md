@@ -132,9 +132,9 @@ This change spans two places:
 - **Skill**: mention that the agent always knows how to talk to a new person versus an existing person — a new person gets an introduction and then the ask; an existing person gets a response that matches the prior tone.
 - **Daemon**: within a session, the daemon tracks whether the agent has previously sent a message to a given person. If the agent has not yet sent to that person in this session, prompt the agent to read the message history first to understand tone, energy, and audience before responding.
 
-## Tail: per-message and per-conversation filtering
+## Tail: scope monitor to a workstream
 
-The tail feature introduced in PR #291 (`pigeon monitor` / `/api/tail`) does not yet support filtering. Add per-message and per-conversation filters so subscribers can narrow the stream rather than receiving everything the hub broadcasts.
+The tail feature introduced in PR #291 (`pigeon monitor` / `/api/tail`) does not yet support scoping. When someone is working on a workstream, they should be able to scope the monitor to that workstream so the stream only carries events relevant to that effort.
 
 ## Unified read abstraction across messaging and GWS
 
