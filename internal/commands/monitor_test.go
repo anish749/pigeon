@@ -172,6 +172,52 @@ func TestRunMonitor_NonOKStatusReturnsError(t *testing.T) {
 	}
 }
 
+func TestRunMonitor_HandlesLargeFrame(t *testing.T) {
+	// 4 MiB payload — larger than the old 1 MiB bufio.Scanner cap.
+	// The new bufio.Reader path has no fixed size limit.
+	const payloadSize = 4 * 1024 * 1024
+	payload := strings.Repeat("x", payloadSize)
+
+	startFakeDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: %s\n\n", payload)
+		flusher.Flush()
+	})
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Drain the read end concurrently so the pipe doesn't block the writer
+	// at 64 KiB (the kernel pipe buffer is much smaller than the payload).
+	done := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		done <- out
+	}()
+
+	if err := RunMonitor(ctx, tailapi.Request{}, w); err != nil {
+		t.Fatalf("RunMonitor: %v", err)
+	}
+	w.Close()
+	out := <-done
+	r.Close()
+
+	// Expect the full payload followed by a single trailing newline from Fprintln.
+	want := payload + "\n"
+	if len(out) != len(want) {
+		t.Fatalf("output length mismatch: got %d bytes, want %d", len(out), len(want))
+	}
+	if string(out) != want {
+		t.Errorf("payload content mismatch (first 64 bytes got=%q want=%q)",
+			string(out[:64]), want[:64])
+	}
+}
+
 func TestRunMonitor_SkipsNonDataLines(t *testing.T) {
 	startFakeDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
