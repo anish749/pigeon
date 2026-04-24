@@ -97,35 +97,59 @@ func TestBlocksEquivalentToText(t *testing.T) {
 			want:    true,
 		},
 		{
+			name: "bold span wraps as *x*",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("warning", &goslack.RichTextSectionTextStyle{Bold: true}),
+			),
+			rawText: "*warning*",
+			want:    true,
+		},
+		{
+			name: "italic span wraps as _x_",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("nb", &goslack.RichTextSectionTextStyle{Italic: true}),
+			),
+			rawText: "_nb_",
+			want:    true,
+		},
+		{
+			name: "strike span wraps as ~x~",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("wrong", &goslack.RichTextSectionTextStyle{Strike: true}),
+			),
+			rawText: "~wrong~",
+			want:    true,
+		},
+		{
+			name: "html-escape ampersand in plain text",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("UK & EU", nil),
+			),
+			rawText: "UK &amp; EU",
+			want:    true,
+		},
+		{
+			name: "html-escape angle brackets",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("a<b && c>d", nil),
+			),
+			rawText: "a&lt;b &amp;&amp; c&gt;d",
+			want:    true,
+		},
+		{
+			name: "html-escape inside link anchor",
+			blocks: richText(
+				goslack.NewRichTextSectionLinkElement("https://e.com/?a=1&b=2", "x&y", nil),
+			),
+			rawText: "<https://e.com/?a=1&amp;b=2|x&amp;y>",
+			want:    true,
+		},
+		{
 			name: "mismatched text returns false",
 			blocks: richText(
 				goslack.NewRichTextSectionTextElement("hello", nil),
 			),
 			rawText: "hola",
-			want:    false,
-		},
-		{
-			name: "bold span is not equivalent",
-			blocks: richText(
-				goslack.NewRichTextSectionTextElement("warning", &goslack.RichTextSectionTextStyle{Bold: true}),
-			),
-			rawText: "*warning*",
-			want:    false,
-		},
-		{
-			name: "italic span is not equivalent",
-			blocks: richText(
-				goslack.NewRichTextSectionTextElement("nb", &goslack.RichTextSectionTextStyle{Italic: true}),
-			),
-			rawText: "_nb_",
-			want:    false,
-		},
-		{
-			name: "strike span is not equivalent",
-			blocks: richText(
-				goslack.NewRichTextSectionTextElement("wrong", &goslack.RichTextSectionTextStyle{Strike: true}),
-			),
-			rawText: "~wrong~",
 			want:    false,
 		},
 		{

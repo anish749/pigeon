@@ -1,20 +1,19 @@
 // Command verify-slack-equiv walks every Slack JSONL under
-// ~/.local/share/pigeon/slack and measures how often a rich_text block is
-// semantically equivalent to the stored text field. The purpose is to decide
-// whether it's safe to drop blocks at write time when they carry no
-// information beyond text.
+// ~/.local/share/pigeon/slack and measures what transformation Slack applies
+// when it produces the message `text` field from the `blocks` field. It does
+// so by hypothesis testing: render each rich_text block under a set of
+// candidate rules (e.g. "bold spans wrap as *text*", "& becomes &amp;"),
+// compare against the stored text (post-resolve), and count how often each
+// rule actually holds on real data.
 //
-// Stored `text` is post-resolve (user/channel mentions already rewritten to
-// @name / #name). Blocks carry the wire form (<@Uxxx>, <#Cxxx>). So a direct
-// string compare understates true equivalence for messages that contain
-// mentions. The harness reports three buckets:
+// The goal is to derive the renderer's rules from the data rather than
+// guessing defensively.
 //
-//	direct       — rendered wire form == stored text (no mentions involved)
-//	mention-only — differences are confined to mention tokens; structure matches
-//	divergent    — genuine content difference (lists, styled spans, etc.)
-//
-// It also separates messages with attachments/files, which are kept regardless
-// of whether blocks are equivalent, because those carry independent content.
+// Stored `text` is post-resolve (user/channel mentions rewritten to names).
+// Blocks carry the wire form (<@Uxxx>, <#Cxxx>). Matching therefore splits
+// the render into literal segments separated by mention placeholders, then
+// walks the stored text forward matching each literal; whatever lies between
+// is accepted as the resolved mention.
 package main
 
 import (
@@ -23,51 +22,63 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
-type bucket string
+type rules struct {
+	Bold       bool
+	Italic     bool
+	Strike     bool
+	HTMLEscape bool
+}
 
-const (
-	bucketNoBlocks        bucket = "no_blocks"
-	bucketDirectMatch     bucket = "direct_match"
-	bucketMentionMatch    bucket = "mention_only_match"
-	bucketUnsupported     bucket = "unsupported_block_type"
-	bucketStyledSpan      bucket = "styled_span"
-	bucketMultiBlock      bucket = "multi_block"
-	bucketNotRichText     bucket = "not_rich_text"
-	bucketDivergent        bucket = "divergent"
-	bucketDivergentEntity  bucket = "divergent_html_entity"
-	bucketDivergentEmoji   bucket = "divergent_emoji_alias"
-	bucketAttachOrFileAlso bucket = "has_attachments_or_files"
-)
+// all enabled, for the maximal-rule render attempt.
+var rulesAll = rules{Bold: true, Italic: true, Strike: true, HTMLEscape: true}
 
-type sample struct {
-	path    string
-	id      string
-	text    string
-	render  string
+// features records which rule opportunities exist in a single block:
+// whether it actually contains a bold span, an escapable character, etc.
+type features struct {
+	HasBold        bool
+	HasItalic      bool
+	HasStrike      bool
+	HasEscapable   bool // any & < > in the block's rendered output
+	HasMention     bool // user / channel / usergroup / broadcast
+	HasEmoji       bool
+	HasLink        bool
+	HasCode        bool
+	MultiSection   bool // more than one rich_text_section in the block
+	Unsupported    bool // a child element kind we don't render (list, quote, preformatted, etc.)
+	NotRichText    bool // top-level block isn't rich_text
+	MultipleBlocks bool
+}
+
+const mentionPlaceholder = "\x00M\x00"
+
+type outcome struct {
+	Matched    bool   // did any rule combination reach equivalence?
+	UsedRules  rules  // which rules were required (minimal set that matched)
+	WireRender string // render with no style rules, for divergent samples
+	Stored     string
 }
 
 func main() {
 	root := filepath.Join(os.Getenv("HOME"), ".local", "share", "pigeon", "slack")
 
-	counts := map[bucket]int{}
-	samples := map[bucket][]sample{}
-	addSample := func(b bucket, s sample) {
-		if len(samples[b]) < 5 {
-			samples[b] = append(samples[b], s)
-		}
+	c := counters{
+		ruleUsed:          map[string]int{},
+		ruleApplicable:    map[string]int{},
+		ruleMatchesGiven:  map[string]int{},
+		ruleSoleFix:       map[string]int{},
+		featureMatchGiven: map[string]int{},
+		featureAny:        map[string]int{},
 	}
 
-	totalMsgs := 0
+	var divergentSamples []outcome
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
@@ -88,37 +99,167 @@ func main() {
 			if line.Msg == nil || line.Msg.RawType != modelv1.RawTypeSlack {
 				continue
 			}
-			totalMsgs++
+			c.total++
 			raw := line.Msg.Raw
 			if raw == nil {
-				counts[bucketNoBlocks]++
 				continue
 			}
-			// If attachments or files present, blocks stay regardless.
 			if _, ok := raw["attachments"]; ok {
-				counts[bucketAttachOrFileAlso]++
-				addSample(bucketAttachOrFileAlso, sample{path: path, id: line.Msg.ID, text: line.Msg.Text})
+				c.hasAttachOrFile++
 				continue
 			}
 			if _, ok := raw["files"]; ok {
-				counts[bucketAttachOrFileAlso]++
+				c.hasAttachOrFile++
 				continue
 			}
 			blocksAny, ok := raw["blocks"]
 			if !ok {
-				counts[bucketNoBlocks]++
 				continue
 			}
 			blocks, ok := parseBlocks(blocksAny)
 			if !ok || len(blocks.BlockSet) == 0 {
-				counts[bucketNoBlocks]++
 				continue
 			}
-			b, s := classify(blocks, line.Msg.Text)
-			counts[b]++
-			s.path = path
-			s.id = line.Msg.ID
-			addSample(b, s)
+			c.withBlocks++
+			feat, ok := analyzeFeatures(blocks)
+			if !ok {
+				c.notRichText++
+				continue
+			}
+			if feat.MultipleBlocks {
+				c.multiBlock++
+				continue
+			}
+			if feat.Unsupported {
+				c.unsupported++
+				continue
+			}
+
+			rt := blocks.BlockSet[0].(*goslack.RichTextBlock)
+			stored := line.Msg.Text
+
+			// Feature counts for observational reporting.
+			if feat.HasMention {
+				c.featureAny["mention"]++
+			}
+			if feat.HasEmoji {
+				c.featureAny["emoji"]++
+			}
+			if feat.HasLink {
+				c.featureAny["link"]++
+			}
+			if feat.HasCode {
+				c.featureAny["code"]++
+			}
+
+			// Rule applicability counts (for verification rate).
+			if feat.HasBold {
+				c.ruleApplicable["bold"]++
+			}
+			if feat.HasItalic {
+				c.ruleApplicable["italic"]++
+			}
+			if feat.HasStrike {
+				c.ruleApplicable["strike"]++
+			}
+			if feat.HasEscapable {
+				c.ruleApplicable["html_escape"]++
+			}
+
+			// Strict attempt: no rules applied at all (not even html escape).
+			// Must reach stored text via direct or mention-resolved match.
+			if s, ok := render(rt, rules{}); ok && matchOrMentionMatch(s, stored) {
+				c.directNoRules++
+				// Subclassify into direct vs mention for parity with older numbers.
+				if s == stored {
+					// pure direct
+				} else {
+					c.mentionNoRules++
+				}
+				continue
+			}
+
+			// Try maximal rules.
+			maxRender, ok := render(rt, rulesAll)
+			maxMatches := ok && matchOrMentionMatch(maxRender, stored)
+
+			// Test each rule in isolation to measure per-rule contribution.
+			// "sole_fix" means enabling *only* this rule flipped the strict
+			// failure into a match — the rule alone is necessary and sufficient
+			// for this message. Lets us verify rules that aren't entangled.
+			for _, r := range []string{"bold", "italic", "strike", "html_escape"} {
+				trial := rules{}
+				switch r {
+				case "bold":
+					if !feat.HasBold {
+						continue
+					}
+					trial.Bold = true
+				case "italic":
+					if !feat.HasItalic {
+						continue
+					}
+					trial.Italic = true
+				case "strike":
+					if !feat.HasStrike {
+						continue
+					}
+					trial.Strike = true
+				case "html_escape":
+					if !feat.HasEscapable {
+						continue
+					}
+					trial.HTMLEscape = true
+				}
+				out, ok := render(rt, trial)
+				if ok && matchOrMentionMatch(out, stored) {
+					c.ruleSoleFix[r]++
+				}
+			}
+
+			if !maxMatches {
+				c.divergent++
+				// Show the full-rule render so styled-span samples display
+				// meaningfully. The render still has mention placeholders
+				// (shown as "\x00M\x00"); readers can infer what resolves.
+				if len(divergentSamples) < 20 {
+					divergentSamples = append(divergentSamples, outcome{
+						WireRender: maxRender,
+						Stored:     stored,
+					})
+				}
+				continue
+			}
+
+			// Maximal match succeeded. Find minimal rule subset that matches.
+			used := minimalRuleSet(rt, stored, feat)
+			c.matchedWithRules++
+			if used.Bold {
+				c.ruleUsed["bold"]++
+			}
+			if used.Italic {
+				c.ruleUsed["italic"]++
+			}
+			if used.Strike {
+				c.ruleUsed["strike"]++
+			}
+			if used.HTMLEscape {
+				c.ruleUsed["html_escape"]++
+			}
+
+			// Rule-matches-given: feature present and (with rules allowed) it resolved.
+			if feat.HasBold {
+				c.ruleMatchesGiven["bold"]++
+			}
+			if feat.HasItalic {
+				c.ruleMatchesGiven["italic"]++
+			}
+			if feat.HasStrike {
+				c.ruleMatchesGiven["strike"]++
+			}
+			if feat.HasEscapable {
+				c.ruleMatchesGiven["html_escape"]++
+			}
 		}
 		return nil
 	})
@@ -127,104 +268,80 @@ func main() {
 		os.Exit(1)
 	}
 
-	printReport(totalMsgs, counts, samples)
+	report(c, divergentSamples)
 }
 
-// parseBlocks takes the raw.blocks map[string]any value and reconstructs
-// goslack.Blocks by round-tripping through JSON.
-func parseBlocks(v any) (goslack.Blocks, bool) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return goslack.Blocks{}, false
-	}
-	var bs goslack.Blocks
-	if err := json.Unmarshal(data, &bs); err != nil {
-		return goslack.Blocks{}, false
-	}
-	return bs, true
-}
-
-// Resolver mentions in stored text preserve display names verbatim, which can
-// contain spaces (e.g. "@Donna Dev"). Regex masking is unreliable — instead
-// we render the block as a sequence of literal fragments separated by mention
-// sentinels, then check whether the stored text matches by walking forward
-// through each literal. Whatever lies between the literals is treated as the
-// resolved mention.
-const mentionPlaceholder = "\x00MENTION\x00"
-
-// classify decides which bucket a single message with blocks falls into.
-func classify(bs goslack.Blocks, storedText string) (bucket, sample) {
+// analyzeFeatures inspects a single block and records what kinds of content
+// it contains. Returns (_, false) if the block isn't rich_text.
+func analyzeFeatures(bs goslack.Blocks) (features, bool) {
+	var feat features
 	if len(bs.BlockSet) > 1 {
-		return bucketMultiBlock, sample{text: storedText}
+		feat.MultipleBlocks = true
+		return feat, true
 	}
 	rt, ok := bs.BlockSet[0].(*goslack.RichTextBlock)
 	if !ok {
-		return bucketNotRichText, sample{text: storedText}
+		feat.NotRichText = true
+		return feat, false
 	}
-	if b, s := richTextBucket(rt, storedText); b != "" {
-		return b, s
+	if len(rt.Elements) > 1 {
+		feat.MultiSection = true
 	}
-	// Render twice: once in wire form (exact fidelity) and once with mention
-	// placeholders (for comparing against the post-resolve stored text).
-	wire, ok := slackraw.RenderRichTextForVerify(rt)
-	if !ok {
-		return bucketUnsupported, sample{text: storedText}
+	for _, el := range rt.Elements {
+		sec, isSection := el.(*goslack.RichTextSection)
+		if !isSection {
+			feat.Unsupported = true
+			continue
+		}
+		for _, inner := range sec.Elements {
+			switch e := inner.(type) {
+			case *goslack.RichTextSectionTextElement:
+				if e.Style != nil {
+					if e.Style.Bold {
+						feat.HasBold = true
+					}
+					if e.Style.Italic {
+						feat.HasItalic = true
+					}
+					if e.Style.Strike {
+						feat.HasStrike = true
+					}
+					if e.Style.Code {
+						feat.HasCode = true
+					}
+				}
+				if containsEscapable(e.Text) {
+					feat.HasEscapable = true
+				}
+			case *goslack.RichTextSectionUserElement,
+				*goslack.RichTextSectionChannelElement,
+				*goslack.RichTextSectionUserGroupElement,
+				*goslack.RichTextSectionBroadcastElement:
+				feat.HasMention = true
+			case *goslack.RichTextSectionLinkElement:
+				feat.HasLink = true
+				if containsEscapable(e.URL) || containsEscapable(e.Text) {
+					feat.HasEscapable = true
+				}
+			case *goslack.RichTextSectionEmojiElement:
+				feat.HasEmoji = true
+			default:
+				feat.Unsupported = true
+			}
+		}
 	}
-	if wire == storedText {
-		return bucketDirectMatch, sample{text: storedText, render: wire}
-	}
-	placeholder, ok := renderWithMentionPlaceholders(rt)
-	if ok && strings.Contains(placeholder, mentionPlaceholder) &&
-		matchesWithMentions(storedText, placeholder) {
-		return bucketMentionMatch, sample{text: storedText, render: wire}
-	}
-	// Subclassify divergences that look like systematic, lossy encoding.
-	switch divergeReason(wire, storedText) {
-	case "html_entity":
-		return bucketDivergentEntity, sample{text: storedText, render: wire}
-	case "emoji_alias":
-		return bucketDivergentEmoji, sample{text: storedText, render: wire}
-	}
-	return bucketDivergent, sample{text: storedText, render: wire}
+	return feat, true
 }
 
-// divergeReason probes whether the only difference between wire and stored
-// text is a known systematic rewrite Slack applies to message text fallback.
-// Returns a label for the category, or "" if the divergence is something else.
-func divergeReason(wire, stored string) string {
-	// HTML-entity escaping: Slack rewrites & → &amp;, > → &gt;, < → &lt;
-	// in the text field but not in blocks.
-	entityFix := strings.NewReplacer("&amp;", "&", "&gt;", ">", "&lt;", "<")
-	if entityFix.Replace(stored) == wire {
-		return "html_entity"
-	}
-	// Emoji alias collapse: match if both sides have the same non-emoji spans
-	// but different :name: tokens at the same positions.
-	if onlyEmojiNamesDiffer(wire, stored) {
-		return "emoji_alias"
-	}
-	return ""
+func containsEscapable(s string) bool {
+	return strings.ContainsAny(s, "&<>")
 }
 
-// onlyEmojiNamesDiffer reports whether wire and stored are identical except
-// at :name: tokens (where Slack may have swapped aliases like :+1: ↔ :thumbsup:).
-func onlyEmojiNamesDiffer(wire, stored string) bool {
-	re := regexp.MustCompile(`:[a-zA-Z0-9_+\-]+:`)
-	wireMasked := re.ReplaceAllString(wire, "\x00E\x00")
-	storedMasked := re.ReplaceAllString(stored, "\x00E\x00")
-	if wireMasked != storedMasked {
-		return false
-	}
-	// Require that at least one :name: actually appeared (otherwise we'd
-	// accept trivial "no emojis at all" matches, which shouldn't happen
-	// since we already compared earlier).
-	return re.FindString(wire) != ""
-}
-
-// renderWithMentionPlaceholders mirrors renderRichText but substitutes a
-// sentinel for user / channel / usergroup / broadcast elements, so the
-// harness can match against post-resolve stored text.
-func renderWithMentionPlaceholders(rt *goslack.RichTextBlock) (string, bool) {
+// render converts a rich_text block to its stored-text form under the given
+// rules. Non-text element kinds (mentions, links, emoji) are rendered to
+// wire form with a mention placeholder substituted in. Fails (returns false)
+// if the block contains an element kind we can't handle.
+func render(rt *goslack.RichTextBlock, r rules) (string, bool) {
 	var b strings.Builder
 	for i, el := range rt.Elements {
 		if i > 0 {
@@ -237,15 +354,8 @@ func renderWithMentionPlaceholders(rt *goslack.RichTextBlock) (string, bool) {
 		for _, inner := range sec.Elements {
 			switch e := inner.(type) {
 			case *goslack.RichTextSectionTextElement:
-				if e.Style != nil && (e.Style.Bold || e.Style.Italic || e.Style.Strike) {
+				if !renderText(&b, e, r) {
 					return "", false
-				}
-				if e.Style != nil && e.Style.Code {
-					b.WriteByte('`')
-					b.WriteString(e.Text)
-					b.WriteByte('`')
-				} else {
-					b.WriteString(e.Text)
 				}
 			case *goslack.RichTextSectionUserElement,
 				*goslack.RichTextSectionChannelElement,
@@ -253,10 +363,16 @@ func renderWithMentionPlaceholders(rt *goslack.RichTextBlock) (string, bool) {
 				*goslack.RichTextSectionBroadcastElement:
 				b.WriteString(mentionPlaceholder)
 			case *goslack.RichTextSectionLinkElement:
-				if e.Text == "" {
-					fmt.Fprintf(&b, "<%s>", e.URL)
+				url := e.URL
+				anchor := e.Text
+				if r.HTMLEscape {
+					url = escapeHTML(url)
+					anchor = escapeHTML(anchor)
+				}
+				if anchor == "" {
+					fmt.Fprintf(&b, "<%s>", url)
 				} else {
-					fmt.Fprintf(&b, "<%s|%s>", e.URL, e.Text)
+					fmt.Fprintf(&b, "<%s|%s>", url, anchor)
 				}
 			case *goslack.RichTextSectionEmojiElement:
 				fmt.Fprintf(&b, ":%s:", e.Name)
@@ -268,154 +384,222 @@ func renderWithMentionPlaceholders(rt *goslack.RichTextBlock) (string, bool) {
 	return b.String(), true
 }
 
-// matchesWithMentions reports whether storedText can be produced from the
-// placeholder string by substituting each MENTION placeholder with some
-// non-empty resolved value (e.g. "@Donna Dev" or "#general"). The check is
-// structural: first and last literals must anchor to the ends of storedText
-// (so mentions that happen to contain an interior literal don't swallow
-// the boundary). Middle literals are matched greedily at their first
-// occurrence — that's a simplification, but it's sound for the messages
-// we see in practice.
-func matchesWithMentions(storedText, placeholder string) bool {
+func renderText(b *strings.Builder, e *goslack.RichTextSectionTextElement, r rules) bool {
+	text := e.Text
+	if r.HTMLEscape {
+		text = escapeHTML(text)
+	}
+	if e.Style == nil {
+		b.WriteString(text)
+		return true
+	}
+	// Apply the styles that are enabled AND present.
+	if e.Style.Bold && !r.Bold {
+		return false
+	}
+	if e.Style.Italic && !r.Italic {
+		return false
+	}
+	if e.Style.Strike && !r.Strike {
+		return false
+	}
+	// Order matters for nested styles; Slack's text fallback composes them
+	// with code innermost then strike / italic / bold outward. We compose the
+	// same order and validate empirically by match rate.
+	if e.Style.Code {
+		text = "`" + text + "`"
+	}
+	if e.Style.Strike {
+		text = "~" + text + "~"
+	}
+	if e.Style.Italic {
+		text = "_" + text + "_"
+	}
+	if e.Style.Bold {
+		text = "*" + text + "*"
+	}
+	b.WriteString(text)
+	return true
+}
+
+func escapeHTML(s string) string {
+	// Exact replacements Slack applies to the text field.
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+// matchOrMentionMatch compares a rendered string (with mention placeholders)
+// against stored text, allowing each placeholder to stand for any non-empty
+// resolved value.
+func matchOrMentionMatch(rendered, stored string) bool {
+	if !strings.Contains(rendered, mentionPlaceholder) {
+		return rendered == stored
+	}
+	return matchesWithMentions(stored, rendered)
+}
+
+func matchesWithMentions(stored, placeholder string) bool {
 	parts := strings.Split(placeholder, mentionPlaceholder)
-	// Anchor first literal as prefix.
-	if !strings.HasPrefix(storedText, parts[0]) {
+	if !strings.HasPrefix(stored, parts[0]) {
 		return false
 	}
-	storedText = storedText[len(parts[0]):]
-	// Anchor last literal as suffix, when there is more than one part.
+	stored = stored[len(parts[0]):]
 	last := parts[len(parts)-1]
-	if !strings.HasSuffix(storedText, last) {
+	if !strings.HasSuffix(stored, last) {
 		return false
 	}
-	storedText = storedText[:len(storedText)-len(last)]
+	stored = stored[:len(stored)-len(last)]
 	middle := parts[1 : len(parts)-1]
-	// storedText now consists of (mention)(middle[0])(mention)...(middle[n-1])(mention),
-	// with len(middle)+1 mentions, each required to be at least one character.
 	for _, lit := range middle {
-		idx := strings.Index(storedText, lit)
+		idx := strings.Index(stored, lit)
 		if idx < 1 {
-			// idx < 0 → not found; idx == 0 → empty mention preceding.
 			return false
 		}
-		storedText = storedText[idx+len(lit):]
+		stored = stored[idx+len(lit):]
 	}
-	// Final (trailing) mention must have at least one character.
-	return len(storedText) >= 1
+	return len(stored) >= 1 || len(parts) == 1
 }
 
-// richTextBucket fast-paths some cases to specific buckets before the main
-// render step, so the report shows why BlocksEquivalentToText returned false.
-func richTextBucket(rt *goslack.RichTextBlock, storedText string) (bucket, sample) {
-	if len(rt.Elements) == 0 {
-		return bucketUnsupported, sample{text: storedText}
+// minimalRuleSet finds the smallest rule subset whose rendered output matches
+// storedText. We already know rulesAll matches. We try each ablation by
+// turning off one rule at a time; if the match still holds, that rule wasn't
+// needed. Rules not relevant to the block (no bold span → bold off) don't
+// change the render, so this doesn't inflate attribution.
+func minimalRuleSet(rt *goslack.RichTextBlock, stored string, feat features) rules {
+	cand := rulesAll
+	toggle := []func(r *rules){
+		func(r *rules) { r.Bold = false },
+		func(r *rules) { r.Italic = false },
+		func(r *rules) { r.Strike = false },
+		func(r *rules) { r.HTMLEscape = false },
 	}
-	// Check for unsupported element kinds or styled spans, to report them as
-	// distinct buckets instead of lumping into "divergent".
-	for _, el := range rt.Elements {
-		sec, isSection := el.(*goslack.RichTextSection)
-		if !isSection {
-			return bucketUnsupported, sample{text: storedText}
-		}
-		for _, inner := range sec.Elements {
-			if te, ok := inner.(*goslack.RichTextSectionTextElement); ok {
-				if te.Style != nil && (te.Style.Bold || te.Style.Italic || te.Style.Strike) {
-					return bucketStyledSpan, sample{text: storedText}
-				}
-			}
+	for _, off := range toggle {
+		trial := cand
+		off(&trial)
+		out, ok := render(rt, trial)
+		if ok && matchOrMentionMatch(out, stored) {
+			cand = trial
 		}
 	}
-	return "", sample{}
+	// A rule is only "used" if it was on in the minimal set AND the feature
+	// was present in the block.
+	if !feat.HasBold {
+		cand.Bold = false
+	}
+	if !feat.HasItalic {
+		cand.Italic = false
+	}
+	if !feat.HasStrike {
+		cand.Strike = false
+	}
+	if !feat.HasEscapable {
+		cand.HTMLEscape = false
+	}
+	return cand
 }
 
-func printReport(total int, counts map[bucket]int, samples map[bucket][]sample) {
-	order := []bucket{
-		bucketDirectMatch,
-		bucketMentionMatch,
-		bucketStyledSpan,
-		bucketMultiBlock,
-		bucketUnsupported,
-		bucketNotRichText,
-		bucketDivergentEntity,
-		bucketDivergentEmoji,
-		bucketDivergent,
-		bucketAttachOrFileAlso,
-		bucketNoBlocks,
+func parseBlocks(v any) (goslack.Blocks, bool) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return goslack.Blocks{}, false
 	}
-	fmt.Printf("Slack messages scanned:         %d\n", total)
-	fmt.Println()
-	withBlocks := 0
-	for _, b := range order {
-		if b == bucketNoBlocks || b == bucketAttachOrFileAlso {
-			continue
-		}
-		withBlocks += counts[b]
+	var bs goslack.Blocks
+	if err := json.Unmarshal(data, &bs); err != nil {
+		return goslack.Blocks{}, false
 	}
-	fmt.Printf("Messages with blocks (no atts): %d\n", withBlocks)
-	fmt.Println()
-	for _, b := range order {
-		n := counts[b]
-		pct := 0.0
-		if withBlocks > 0 && b != bucketNoBlocks && b != bucketAttachOrFileAlso {
-			pct = float64(n) / float64(withBlocks) * 100
-		}
-		fmt.Printf("  %-28s %7d  %6.2f%%\n", b, n, pct)
-	}
-	fmt.Println()
-	equivalent := counts[bucketDirectMatch] + counts[bucketMentionMatch]
-	if withBlocks > 0 {
-		fmt.Printf("Would-drop (direct + mention):  %d / %d  (%.2f%% of blocks)\n",
-			equivalent, withBlocks, float64(equivalent)/float64(withBlocks)*100)
+	return bs, true
+}
+
+type counters struct {
+	total             int
+	withBlocks        int
+	hasAttachOrFile   int
+	directNoRules     int
+	mentionNoRules    int
+	matchedWithRules  int
+	ruleUsed          map[string]int
+	ruleApplicable    map[string]int
+	ruleMatchesGiven  map[string]int
+	ruleSoleFix       map[string]int
+	featureMatchGiven map[string]int
+	featureAny        map[string]int
+	divergent         int
+	multiBlock        int
+	notRichText       int
+	unsupported       int
+}
+
+func report(c counters, samples []outcome) {
+	fmt.Printf("Slack messages scanned:           %d\n", c.total)
+	fmt.Printf("With blocks, no attachments:      %d\n", c.withBlocks)
+	fmt.Printf("  not rich_text (kept):           %d\n", c.notRichText)
+	fmt.Printf("  multi-block (kept):             %d\n", c.multiBlock)
+	fmt.Printf("  unsupported element (kept):     %d\n", c.unsupported)
+	matchable := c.withBlocks - c.notRichText - c.multiBlock - c.unsupported
+	fmt.Printf("  matchable single rich_text:     %d\n\n", matchable)
+
+	strict := c.directNoRules
+	withRules := c.matchedWithRules
+	matched := strict + withRules
+	fmt.Println("Matchable breakdown:")
+	fmt.Printf("  matched strict (no style/entity rules): %d  (%.2f%%)\n",
+		strict, pct(strict, matchable))
+	fmt.Printf("  matched only after rules applied:       %d  (%.2f%%)\n",
+		withRules, pct(withRules, matchable))
+	fmt.Printf("  still divergent after all rules:        %d  (%.2f%%)\n\n",
+		c.divergent, pct(c.divergent, matchable))
+	fmt.Printf("  total resolved under some rule set:     %d  (%.2f%%)\n\n",
+		matched, pct(matched, matchable))
+
+	// Rule verification: for each rule, how often was it needed, and of
+	// messages where the rule's feature was present, what fraction resolved
+	// (under full rule set)?
+	// Per-rule verification:
+	//   feat-count    — messages where the rule's feature is present in the block
+	//   sole-fix      — messages where enabling ONLY this rule flips strict-fail to match
+	//                   (strong evidence the rule faithfully describes Slack's behavior)
+	//   needed-by     — messages in the minimal-rule match where this rule was required
+	//   any-resolve   — messages with the feature that resolve under full rules
+	fmt.Println("Per-rule verification:")
+	fmt.Printf("  %-14s %-11s %-11s %-11s %s\n", "rule", "feat-count", "sole-fix", "needed-by", "any-resolve")
+	for _, r := range []string{"bold", "italic", "strike", "html_escape"} {
+		feat := c.ruleApplicable[r]
+		sole := c.ruleSoleFix[r]
+		need := c.ruleUsed[r]
+		matched := c.ruleMatchesGiven[r]
+		fmt.Printf("  %-14s %-11d %-11d %-11d %d / %d (%.2f%%)\n",
+			r, feat, sole, need, matched, feat, pct(matched, feat))
 	}
 	fmt.Println()
 
-	// Show samples for the interesting buckets.
-	interesting := []bucket{bucketDivergent, bucketDivergentEntity, bucketDivergentEmoji, bucketStyledSpan, bucketMultiBlock, bucketUnsupported, bucketNotRichText}
-	for _, b := range interesting {
-		ss := samples[b]
-		if len(ss) == 0 {
-			continue
-		}
-		fmt.Printf("=== %s samples (%d shown of %d total) ===\n", b, len(ss), counts[b])
-		for i, s := range ss {
-			fmt.Printf("[%d] %s  id=%s\n", i+1, trimPath(s.path), s.id)
-			fmt.Printf("    text:   %s\n", truncate(s.text, 200))
-			if s.render != "" {
-				fmt.Printf("    render: %s\n", truncate(s.render, 200))
-			}
-		}
-		fmt.Println()
+	fmt.Println("Feature co-occurrence (matchable population):")
+	for _, k := range sortedKeys(c.featureAny) {
+		fmt.Printf("  %-14s %d\n", k, c.featureAny[k])
 	}
+	fmt.Println()
 
-	// Workspace breakdown of direct matches.
-	fmt.Println("=== per-workspace direct-match samples ===")
-	ws := map[string]int{}
-	for _, s := range samples[bucketDirectMatch] {
-		ws[workspace(s.path)]++
-	}
-	keys := make([]string, 0, len(ws))
-	for k := range ws {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		fmt.Printf("  %-20s %d\n", k, ws[k])
+	if len(samples) > 0 {
+		fmt.Printf("=== divergent samples (%d shown of %d) ===\n", len(samples), c.divergent)
+		for i, s := range samples {
+			fmt.Printf("[%d] text:   %s\n", i+1, truncate(s.Stored, 220))
+			fmt.Printf("    render: %s\n", truncate(s.WireRender, 220))
+		}
 	}
 }
 
-func trimPath(p string) string {
-	home := os.Getenv("HOME")
-	return strings.TrimPrefix(p, home)
+func pct(n, d int) float64 {
+	if d == 0 {
+		return 0
+	}
+	return float64(n) / float64(d) * 100
 }
 
-func workspace(p string) string {
-	parts := strings.Split(p, string(os.PathSeparator))
-	for i, part := range parts {
-		if part == "slack" && i+1 < len(parts) {
-			return parts[i+1]
-		}
+func sortedKeys(m map[string]int) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
 	}
-	return "?"
+	sort.Strings(ks)
+	return ks
 }
 
 func truncate(s string, n int) string {
