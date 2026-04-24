@@ -12,7 +12,6 @@ import (
 
 const (
 	workstreamsFile = "workstreams.json"
-	affinitiesFile  = "affinities.json"
 	proposalsFile   = "proposals.json"
 )
 
@@ -96,60 +95,6 @@ func (s *FS) loadWorkstreams() ([]models.Workstream, error) {
 		return nil, err
 	}
 	return list, nil
-}
-
-// --- Affinities ---
-
-// affinityRecord is the on-disk representation of a single conversation's
-// affinity entries. ConversationKey can't be a JSON map key directly.
-type affinityRecord struct {
-	Key     models.ConversationKey `json:"key"`
-	Entries []models.AffinityEntry `json:"entries"`
-}
-
-func (s *FS) GetAffinities(key models.ConversationKey) ([]models.AffinityEntry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	records, err := s.loadAffinities()
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range records {
-		if r.Key == key {
-			return r.Entries, nil
-		}
-	}
-	return nil, nil
-}
-
-func (s *FS) PutAffinities(key models.ConversationKey, entries []models.AffinityEntry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	records, err := s.loadAffinities()
-	if err != nil {
-		return err
-	}
-	found := false
-	for i, r := range records {
-		if r.Key == key {
-			records[i].Entries = entries
-			found = true
-			break
-		}
-	}
-	if !found {
-		records = append(records, affinityRecord{Key: key, Entries: entries})
-	}
-	return s.save(affinitiesFile, records)
-}
-
-func (s *FS) loadAffinities() ([]affinityRecord, error) {
-	var records []affinityRecord
-	if err := s.load(affinitiesFile, &records); err != nil {
-		return nil, err
-	}
-	return records, nil
 }
 
 // --- Proposals ---

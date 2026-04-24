@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
@@ -54,45 +53,6 @@ func TestFSRoundTrip(t *testing.T) {
 		}
 		if ok {
 			t.Error("expected not found")
-		}
-	})
-
-	t.Run("affinities", func(t *testing.T) {
-		key := models.ConversationKey{
-			Account:      account.New("slack", "test-workspace"),
-			Conversation: "C123",
-		}
-		entries := []models.AffinityEntry{
-			{WorkstreamID: "ws-alpha", Strength: 5, LastSignal: ts},
-		}
-		if err := s.PutAffinities(key, entries); err != nil {
-			t.Fatal(err)
-		}
-		got, err := s.GetAffinities(key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 1 || got[0].Strength != 5 {
-			t.Errorf("got %+v", got)
-		}
-
-		// Update.
-		entries[0].Strength = 10
-		if err := s.PutAffinities(key, entries); err != nil {
-			t.Fatal(err)
-		}
-		got, _ = s.GetAffinities(key)
-		if got[0].Strength != 10 {
-			t.Error("strength not updated")
-		}
-
-		// Missing key.
-		got, err = s.GetAffinities(models.ConversationKey{Conversation: "nope"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != nil {
-			t.Errorf("expected nil, got %+v", got)
 		}
 	})
 
