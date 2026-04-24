@@ -25,28 +25,51 @@ When running this from an agent, do not set a timeout. This is a persistent
 listener, not a one-shot command — a timeout will cause the agent to miss
 messages that arrive after the cutoff.
 
-Each line is a JSON object with these fields:
+Each line is a flat JSON object. Fields depend on kind.
 
-  kind         "message", "reaction", or "system"
-  ts           RFC3339 timestamp
-  account      {"platform": "slack", "name": "acme-corp"}
-  conversation channel or conversation name (e.g. "#engineering")
-  content      pre-formatted message text (e.g. "Alice: hello world")
-  msg_id       message ID; on reactions, identifies the parent message
+Envelope (present on message, reaction, unreact):
+  kind          "message", "reaction", "unreact", or "system"
+  platform      platform slug, e.g. "slack", "whatsapp"
+  name          account name (e.g. "acme-corp")
+  conversation  channel or DM name (e.g. "#engineering", "@alice")
 
-Note: content is a pre-formatted string — there are no separate sender or
-text fields. Filter by .kind and .conversation; read .content for the text.`,
+Message (kind=message):
+  id            platform message ID
+  ts            message timestamp (RFC3339)
+  sender        display name of the author
+  from          platform user ID of the author
+  text          message body
+  via           message pathway (omitted if empty)
+  reply         true if this is a thread reply
+  replyTo       quoted message ID (omitted if empty)
+  attach        attachments (omitted if none)
+  rawType       platform raw-content type (omitted if empty)
+  raw           platform-specific raw payload (omitted if empty)
+
+Reaction (kind=reaction for adds, kind=unreact for removes):
+  ts            reaction timestamp (RFC3339)
+  msg           target message ID
+  sender        display name of the reactor
+  from          platform user ID of the reactor
+  emoji         emoji name (e.g. "thumbsup")
+  via           message pathway (omitted if empty)
+
+System (kind=system):
+  ts            RFC3339 timestamp
+  content       status text ("connected", "replay error: ...")`,
 		Example: `  pigeon monitor
   pigeon monitor --platform=slack --account=acme-corp
   pigeon monitor --workspace=eng --since=5m
 
   # Filter by kind (output stays as full JSON lines)
   pigeon monitor | grep --line-buffered '"kind":"message"'
-  pigeon monitor | grep --line-buffered '"kind":"reaction"'
+  pigeon monitor | jq --unbuffered -c 'select(.kind == "reaction" or .kind == "unreact")'
 
-  # Scope to one conversation or one event kind
+  # Scope to one conversation
   pigeon monitor | jq --unbuffered -c 'select(.conversation == "#engineering")'
-  pigeon monitor | jq --unbuffered -c 'select(.kind == "reaction")'`,
+
+  # Project fields out of message events
+  pigeon monitor | jq --unbuffered -c 'select(.kind == "message") | {sender, text, conversation}'`,
 		PreRunE: ensureDaemon,
 		RunE:    runMonitor,
 	}

@@ -24,6 +24,15 @@ const (
 	EventSystem EventKind = "system"
 )
 
+// The Envelope, NotifMsg, NotifReact, and NotifSystem types below define
+// the wire shape of every JSON frame emitted by /api/tail. The schema
+// documentation in internal/cli/monitor.go (Long help text) and
+// docs/monitor-fanout-sketch.md mirrors these struct definitions.
+// When you add, remove, or rename a field here — or change a json tag
+// on an embedded type such as modelv1.MsgLine or modelv1.ReactLine —
+// update both those documents to match. Agents rely on the help text
+// for the field list; drift will silently produce wrong filters.
+
 // Envelope carries the routing metadata common to message and reaction
 // notifications. It embeds account.Account so that Platform and Name are
 // promoted as top-level JSON fields.
