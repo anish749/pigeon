@@ -219,6 +219,27 @@ WORKFLOW — READING MESSAGES
 
 ─────────────────────────────────────────────────────────
 
+WORKFLOW — WATCHING LIVE TRAFFIC
+
+  list, read, and grep operate on history that has already been synced
+  to disk. pigeon monitor streams events the moment they arrive, for
+  when you need to act on something while you are still mid-task:
+
+    - You sent a question or a PR and are waiting on the reply
+    - A colleague will ping you when a review is done, or a long-running
+      job finishes and posts an update
+    - A calendar invite, email, or Slack thread you want to respond to
+      without breaking flow to check manually
+
+  Each event is one JSON line on stdout, so it pairs naturally with
+  background watchers that treat each line as a notification —
+  including Claude Code's Monitor tool, which pulls each arriving event
+  into an ongoing session without the user having to poll.
+
+  See 'pigeon monitor --help' for filter flags and output recipes.
+
+─────────────────────────────────────────────────────────
+
 WORKFLOW — SENDING MESSAGES
 
   pigeon send whatsapp -a +14155551234 -c Alice -m "hey!"
