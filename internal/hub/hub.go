@@ -276,7 +276,7 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 		Ts:           msg.Ts,
 		Acct:         acct,
 		Conversation: conversation,
-		Content:      strings.Join(modelv1.FormatMsg(modelv1.ResolvedMsg{MsgLine: msg}, time.Local), "\n"),
+		Content:      strings.Join(modelv1.FormatMsgLine(msg, time.Local), "\n"),
 		MsgID:        msg.ID,
 	})
 
