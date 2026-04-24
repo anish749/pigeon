@@ -338,9 +338,10 @@ func containsEscapable(s string) bool {
 }
 
 // render converts a rich_text block to its stored-text form under the given
-// rules. Non-text element kinds (mentions, links, emoji) are rendered to
-// wire form with a mention placeholder substituted in. Fails (returns false)
-// if the block contains an element kind we can't handle.
+// rules. Non-text element kinds (mentions) are rendered as a placeholder so
+// the harness can match against post-resolve text. Fails (returns false) if
+// any style flag is set on an element but the corresponding rule is off — so
+// the strict call (rules{}) fails whenever styling is present.
 func render(rt *goslack.RichTextBlock, r rules) (string, bool) {
 	var b strings.Builder
 	for i, el := range rt.Elements {
@@ -351,80 +352,133 @@ func render(rt *goslack.RichTextBlock, r rules) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		for _, inner := range sec.Elements {
-			switch e := inner.(type) {
-			case *goslack.RichTextSectionTextElement:
-				if !renderText(&b, e, r) {
-					return "", false
-				}
-			case *goslack.RichTextSectionUserElement,
-				*goslack.RichTextSectionChannelElement,
-				*goslack.RichTextSectionUserGroupElement,
-				*goslack.RichTextSectionBroadcastElement:
-				b.WriteString(mentionPlaceholder)
-			case *goslack.RichTextSectionLinkElement:
-				url := e.URL
-				anchor := e.Text
-				if r.HTMLEscape {
-					url = escapeHTML(url)
-					anchor = escapeHTML(anchor)
-				}
-				if anchor == "" {
-					fmt.Fprintf(&b, "<%s>", url)
-				} else {
-					fmt.Fprintf(&b, "<%s|%s>", url, anchor)
-				}
-			case *goslack.RichTextSectionEmojiElement:
-				fmt.Fprintf(&b, ":%s:", e.Name)
-			default:
-				return "", false
-			}
+		if !renderSection(&b, sec, r) {
+			return "", false
 		}
 	}
 	return b.String(), true
 }
 
-func renderText(b *strings.Builder, e *goslack.RichTextSectionTextElement, r rules) bool {
-	text := e.Text
-	if r.HTMLEscape {
-		text = escapeHTML(text)
+var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+func renderSection(b *strings.Builder, s *goslack.RichTextSection, r rules) bool {
+	var bold, italic, strike, code bool
+	for _, el := range s.Elements {
+		st := styleOf(el)
+		// Respect the rules mask: a style that's present but not enabled in
+		// the rule set causes the render to fail, mirroring the strict
+		// pre-rule behavior used for ablation.
+		if st != nil {
+			if st.Bold && !r.Bold {
+				return false
+			}
+			if st.Italic && !r.Italic {
+				return false
+			}
+			if st.Strike && !r.Strike {
+				return false
+			}
+		}
+		// Close styles being turned off, innermost first.
+		if code && (st == nil || !st.Code) {
+			b.WriteByte('`')
+			code = false
+		}
+		if strike && (st == nil || !st.Strike) {
+			b.WriteByte('~')
+			strike = false
+		}
+		if italic && (st == nil || !st.Italic) {
+			b.WriteByte('_')
+			italic = false
+		}
+		if bold && (st == nil || !st.Bold) {
+			b.WriteByte('*')
+			bold = false
+		}
+		// Open styles being turned on, outermost first.
+		if st != nil {
+			if st.Bold && !bold {
+				b.WriteByte('*')
+				bold = true
+			}
+			if st.Italic && !italic {
+				b.WriteByte('_')
+				italic = true
+			}
+			if st.Strike && !strike {
+				b.WriteByte('~')
+				strike = true
+			}
+			if st.Code && !code {
+				b.WriteByte('`')
+				code = true
+			}
+		}
+		if !renderContent(b, el, r) {
+			return false
+		}
 	}
-	if e.Style == nil {
-		b.WriteString(text)
-		return true
+	if code {
+		b.WriteByte('`')
 	}
-	// Apply the styles that are enabled AND present.
-	if e.Style.Bold && !r.Bold {
-		return false
+	if strike {
+		b.WriteByte('~')
 	}
-	if e.Style.Italic && !r.Italic {
-		return false
+	if italic {
+		b.WriteByte('_')
 	}
-	if e.Style.Strike && !r.Strike {
-		return false
+	if bold {
+		b.WriteByte('*')
 	}
-	// Order matters for nested styles; Slack's text fallback composes them
-	// with code innermost then strike / italic / bold outward. We compose the
-	// same order and validate empirically by match rate.
-	if e.Style.Code {
-		text = "`" + text + "`"
-	}
-	if e.Style.Strike {
-		text = "~" + text + "~"
-	}
-	if e.Style.Italic {
-		text = "_" + text + "_"
-	}
-	if e.Style.Bold {
-		text = "*" + text + "*"
-	}
-	b.WriteString(text)
 	return true
 }
 
-func escapeHTML(s string) string {
-	// Exact replacements Slack applies to the text field.
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+func styleOf(el goslack.RichTextSectionElement) *goslack.RichTextSectionTextStyle {
+	switch e := el.(type) {
+	case *goslack.RichTextSectionTextElement:
+		return e.Style
+	case *goslack.RichTextSectionUserElement:
+		return e.Style
+	case *goslack.RichTextSectionChannelElement:
+		return e.Style
+	case *goslack.RichTextSectionEmojiElement:
+		return e.Style
+	case *goslack.RichTextSectionLinkElement:
+		return e.Style
+	case *goslack.RichTextSectionTeamElement:
+		return e.Style
+	}
+	return nil
+}
+
+func renderContent(b *strings.Builder, el goslack.RichTextSectionElement, r rules) bool {
+	maybeEscape := func(s string) string {
+		if r.HTMLEscape {
+			return htmlEscaper.Replace(s)
+		}
+		return s
+	}
+	switch e := el.(type) {
+	case *goslack.RichTextSectionTextElement:
+		b.WriteString(maybeEscape(e.Text))
+	case *goslack.RichTextSectionUserElement,
+		*goslack.RichTextSectionChannelElement,
+		*goslack.RichTextSectionUserGroupElement,
+		*goslack.RichTextSectionBroadcastElement:
+		b.WriteString(mentionPlaceholder)
+	case *goslack.RichTextSectionLinkElement:
+		if e.Text == "" {
+			fmt.Fprintf(b, "<%s>", maybeEscape(e.URL))
+		} else {
+			fmt.Fprintf(b, "<%s|%s>", maybeEscape(e.URL), maybeEscape(e.Text))
+		}
+	case *goslack.RichTextSectionEmojiElement:
+		fmt.Fprintf(b, ":%s:", e.Name)
+	default:
+		return false
+	}
+	return true
 }
 
 // matchOrMentionMatch compares a rendered string (with mention placeholders)

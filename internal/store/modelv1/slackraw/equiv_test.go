@@ -145,6 +145,43 @@ func TestBlocksEquivalentToText(t *testing.T) {
 			want:    true,
 		},
 		{
+			name: "strike run across user + text shares one wrapper",
+			blocks: richText(
+				&goslack.RichTextSectionUserElement{Type: goslack.RTSEUser, UserID: "U123", Style: &goslack.RichTextSectionTextStyle{Strike: true}},
+				goslack.NewRichTextSectionTextElement(" we are merging", &goslack.RichTextSectionTextStyle{Strike: true}),
+				goslack.NewRichTextSectionTextElement(" trailing", nil),
+			),
+			rawText: "~<@U123> we are merging~ trailing",
+			want:    true,
+		},
+		{
+			name: "bold run across two text elements shares one wrapper",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("first ", &goslack.RichTextSectionTextStyle{Bold: true}),
+				goslack.NewRichTextSectionTextElement("second", &goslack.RichTextSectionTextStyle{Bold: true}),
+			),
+			rawText: "*first second*",
+			want:    true,
+		},
+		{
+			name: "nested bold + italic wraps in order *_x_*",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("both", &goslack.RichTextSectionTextStyle{Bold: true, Italic: true}),
+			),
+			rawText: "*_both_*",
+			want:    true,
+		},
+		{
+			name: "italic starts mid-run inside bold",
+			blocks: richText(
+				goslack.NewRichTextSectionTextElement("b ", &goslack.RichTextSectionTextStyle{Bold: true}),
+				goslack.NewRichTextSectionTextElement("bi", &goslack.RichTextSectionTextStyle{Bold: true, Italic: true}),
+				goslack.NewRichTextSectionTextElement(" b", &goslack.RichTextSectionTextStyle{Bold: true}),
+			),
+			rawText: "*b _bi_ b*",
+			want:    true,
+		},
+		{
 			name: "mismatched text returns false",
 			blocks: richText(
 				goslack.NewRichTextSectionTextElement("hello", nil),

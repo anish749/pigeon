@@ -19,11 +19,17 @@ import (
 // The renderer's rules were derived empirically from Slack's behavior on
 // ~16k single-rich_text messages across five workspaces:
 //
-//   - text spans with Bold/Italic/Strike/Code styles wrap as *x* / _x_ / ~x~ / `x`
-//   - & < > in text content are HTML-escaped to &amp; / &lt; / &gt;
-//   - user / channel / usergroup / broadcast elements render in wire form
-//   - link elements render as <url> or <url|anchor>
-//   - emoji elements render as :name:
+//   - Bold / Italic / Strike / Code styles wrap as *x* / _x_ / ~x~ / `x`.
+//     Consecutive elements sharing a style share a single wrapper: Slack
+//     emits `~<@U> text~`, not `~<@U>~~ text~`, when a user mention and a
+//     text span both carry strike.
+//   - Any section element kind can carry Style (text, user, channel, emoji,
+//     link, team). Usergroup and broadcast do not.
+//   - `&`, `<`, `>` in text content and link URLs/anchors are HTML-escaped
+//     to `&amp;`, `&lt;`, `&gt;`.
+//   - user / channel / usergroup / broadcast elements render in wire form.
+//   - link elements render as <url> or <url|anchor>.
+//   - emoji elements render as :name:.
 //
 // Elements we don't model (list, quote, preformatted) produce a different
 // text fallback; for those we return false and keep the blocks in storage.
@@ -48,6 +54,8 @@ func RenderRichTextForVerify(rt *goslack.RichTextBlock) (string, bool) {
 	return renderRichText(rt)
 }
 
+var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 // renderRichText converts a rich_text block back to Slack's text fallback.
 // Returns (_, false) for any construct we don't model — lists, quotes, and
 // rich_text_preformatted are the known-unhandled kinds.
@@ -68,59 +76,111 @@ func renderRichText(rt *goslack.RichTextBlock) (string, bool) {
 	return b.String(), true
 }
 
+// renderSection walks a rich_text_section, emitting style wrappers at run
+// boundaries. Adjacent elements sharing a style flag share one wrapper.
+// Wrappers nest in the order bold → italic → strike → code (outer → inner),
+// mirroring how Slack composes its text fallback.
 func renderSection(b *strings.Builder, s *goslack.RichTextSection) bool {
+	var bold, italic, strike, code bool
 	for _, el := range s.Elements {
-		switch e := el.(type) {
-		case *goslack.RichTextSectionTextElement:
-			b.WriteString(wrapStyledText(e))
-		case *goslack.RichTextSectionUserElement:
-			fmt.Fprintf(b, "<@%s>", e.UserID)
-		case *goslack.RichTextSectionChannelElement:
-			fmt.Fprintf(b, "<#%s>", e.ChannelID)
-		case *goslack.RichTextSectionUserGroupElement:
-			fmt.Fprintf(b, "<!subteam^%s>", e.UsergroupID)
-		case *goslack.RichTextSectionLinkElement:
-			if e.Text == "" {
-				fmt.Fprintf(b, "<%s>", escapeHTML(e.URL))
-			} else {
-				fmt.Fprintf(b, "<%s|%s>", escapeHTML(e.URL), escapeHTML(e.Text))
+		st := elementStyle(el)
+		// Close styles being turned off, innermost first.
+		if code && (st == nil || !st.Code) {
+			b.WriteByte('`')
+			code = false
+		}
+		if strike && (st == nil || !st.Strike) {
+			b.WriteByte('~')
+			strike = false
+		}
+		if italic && (st == nil || !st.Italic) {
+			b.WriteByte('_')
+			italic = false
+		}
+		if bold && (st == nil || !st.Bold) {
+			b.WriteByte('*')
+			bold = false
+		}
+		// Open styles being turned on, outermost first.
+		if st != nil {
+			if st.Bold && !bold {
+				b.WriteByte('*')
+				bold = true
 			}
-		case *goslack.RichTextSectionEmojiElement:
-			fmt.Fprintf(b, ":%s:", e.Name)
-		case *goslack.RichTextSectionBroadcastElement:
-			fmt.Fprintf(b, "<!%s>", e.Range)
-		default:
+			if st.Italic && !italic {
+				b.WriteByte('_')
+				italic = true
+			}
+			if st.Strike && !strike {
+				b.WriteByte('~')
+				strike = true
+			}
+			if st.Code && !code {
+				b.WriteByte('`')
+				code = true
+			}
+		}
+		if !renderElementContent(b, el) {
 			return false
 		}
+	}
+	if code {
+		b.WriteByte('`')
+	}
+	if strike {
+		b.WriteByte('~')
+	}
+	if italic {
+		b.WriteByte('_')
+	}
+	if bold {
+		b.WriteByte('*')
 	}
 	return true
 }
 
-// wrapStyledText applies Slack's text-fallback style wrappers in the order
-// Slack composes them (code innermost, then strike, italic, bold outermost).
-func wrapStyledText(e *goslack.RichTextSectionTextElement) string {
-	text := escapeHTML(e.Text)
-	if e.Style == nil {
-		return text
+func elementStyle(el goslack.RichTextSectionElement) *goslack.RichTextSectionTextStyle {
+	switch e := el.(type) {
+	case *goslack.RichTextSectionTextElement:
+		return e.Style
+	case *goslack.RichTextSectionUserElement:
+		return e.Style
+	case *goslack.RichTextSectionChannelElement:
+		return e.Style
+	case *goslack.RichTextSectionEmojiElement:
+		return e.Style
+	case *goslack.RichTextSectionLinkElement:
+		return e.Style
+	case *goslack.RichTextSectionTeamElement:
+		return e.Style
 	}
-	if e.Style.Code {
-		text = "`" + text + "`"
-	}
-	if e.Style.Strike {
-		text = "~" + text + "~"
-	}
-	if e.Style.Italic {
-		text = "_" + text + "_"
-	}
-	if e.Style.Bold {
-		text = "*" + text + "*"
-	}
-	return text
+	return nil
 }
 
-// escapeHTML applies the same &/</> escaping Slack applies to the text field.
-var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-
-func escapeHTML(s string) string {
-	return htmlEscaper.Replace(s)
+// renderElementContent writes one element's content with no style wrappers.
+// The caller is responsible for emitting wrappers around runs.
+func renderElementContent(b *strings.Builder, el goslack.RichTextSectionElement) bool {
+	switch e := el.(type) {
+	case *goslack.RichTextSectionTextElement:
+		b.WriteString(htmlEscaper.Replace(e.Text))
+	case *goslack.RichTextSectionUserElement:
+		fmt.Fprintf(b, "<@%s>", e.UserID)
+	case *goslack.RichTextSectionChannelElement:
+		fmt.Fprintf(b, "<#%s>", e.ChannelID)
+	case *goslack.RichTextSectionUserGroupElement:
+		fmt.Fprintf(b, "<!subteam^%s>", e.UsergroupID)
+	case *goslack.RichTextSectionLinkElement:
+		if e.Text == "" {
+			fmt.Fprintf(b, "<%s>", htmlEscaper.Replace(e.URL))
+		} else {
+			fmt.Fprintf(b, "<%s|%s>", htmlEscaper.Replace(e.URL), htmlEscaper.Replace(e.Text))
+		}
+	case *goslack.RichTextSectionEmojiElement:
+		fmt.Fprintf(b, ":%s:", e.Name)
+	case *goslack.RichTextSectionBroadcastElement:
+		fmt.Fprintf(b, "<!%s>", e.Range)
+	default:
+		return false
+	}
+	return true
 }
