@@ -19,7 +19,7 @@ type EventKind string
 const (
     EventMessage  EventKind = "message"
     EventReaction EventKind = "reaction"
-    EventSystem   EventKind = "system" // daemon-lifecycle; deferred
+    EventSystem   EventKind = "system" // tail connection + replay-error frames
 )
 
 // Event is a single notification published to the broadcast bus.
@@ -29,9 +29,11 @@ type Event struct {
     Kind         EventKind
     Ts           time.Time
     Acct         account.Account
+    Platform     string
+    Account      string
     Conversation string
-    Content      string         // formatted text, same shape as session delivery
-    Meta         map[string]any // platform, account, conversation, kind, msg_id, ...
+    Content      string // formatted text, same shape as session delivery
+    MsgID        string
 }
 
 // Filter selects which events a subscriber receives. An empty Accounts
@@ -60,8 +62,8 @@ func (b *Broadcast) Subscribe(filter Filter, bufSize int) (<-chan Event, func())
 func (b *Broadcast) Publish(e Event)
 ```
 
-Conversation-level filtering and event-kind filtering are deferred.
-Client-side `jq`/`grep` covers both for v1.
+Conversation-level filtering is deferred. Client-side `jq`/`grep`
+covers it for v1.
 
 ## 2. `Route` signature change
 
@@ -79,8 +81,9 @@ type MessageNotifyFunc func(acct account.Account, conversation string, msg model
 func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult
 ```
 
-Reaction path is already carrying the payload via `ReactionInfo`, so
-`RouteReaction`'s signature stays the same.
+Reaction path follows the same pattern: `RouteReaction` takes a
+`modelv1.ReactLine` so the listener forwards the exact line it wrote
+to disk, no timestamp or field reconstruction.
 
 ### Route behavior
 
@@ -108,20 +111,22 @@ available regardless of when the daemon started. The broadcast bus only
 deals with live events from "now" forward.
 
 ```
-Client connects:  GET /api/tail?since=2026-04-01T00:00:00Z&workspace=eng
+Client connects:  GET /api/tail?q=<encoded request>
 
 Handler:
-  1. Subscribe to broadcast (buffer live events in memory as they arrive)
-  2. Resolve filter: workspace → []account, or (platform, account)
-  3. Historical replay from disk via read.Glob + store, up to replayStart
-  4. Drain buffered live events where ts >= replayStart
-  5. Stream live until client disconnects, then unsubscribe
+  1. Decode the request (accounts filter + since)
+  2. Subscribe to broadcast
+  3. Historical replay from disk via store, if since is set
+  4. Stream live until client disconnects, then unsubscribe
 ```
 
 - No server state between connections.
 - `since=` can be arbitrarily old; streamed as long as the files exist.
-- Steps 1→4 close the replay/live gap (standard log-tail dedup pattern).
-- Monitor dies and restarts → client resends `since=`. Server remembers nothing.
+- Workspace expansion happens at the CLI layer; the handler only sees
+  a concrete list of accounts.
+- An event that lands in both replay and the live window is emitted
+  twice. Consumers that need exactly-once filter on `msg_id`.
+- Monitor dies and restarts → client resends the request. Server remembers nothing.
 
 ## 4. Wiring
 
@@ -132,14 +137,11 @@ SSE handler (`TailHandler`) lives next to the existing `SSEHandler` in
 
 ## 5. Open questions / deferred
 
-- **Workspace expansion** — done at the HTTP handler using
-  `internal/workspace`, resolving `workspace=foo` to `[]account.Account`
-  and populating `Filter.Accounts`.
 - **Conversation-level filtering** — deferred; client-side filtering
   handles v1.
-- **Dropped event observability** — `Publish` logs on drop; consider
-  emitting a synthetic `{"_dropped": N}` frame later.
-- **System events** (listener crashed, account reconnected) — same bus,
-  `EventSystem` kind, add later.
+- **Dropped event observability** — `Publish` logs on drop.
+- **Listener-lifecycle system events** (listener crashed, account
+  reconnected) — same bus, `EventSystem` kind, not emitted today.
+  `EventSystem` is currently only used by the tail handler itself.
 - **Reaction enrichment** — monitor sees fallback-formatted reactions
   only; revisit if consumers need parent-message context inline.
