@@ -28,9 +28,7 @@ const (
 type Event struct {
 	Kind         EventKind       `json:"kind"`
 	Ts           time.Time       `json:"ts"`
-	Acct         account.Account `json:"-"`
-	Platform     string          `json:"platform,omitempty"`
-	Account      string          `json:"account,omitempty"`
+	Acct         account.Account `json:"account"`
 	Conversation string          `json:"conversation,omitempty"`
 	Content      string          `json:"content"`
 	MsgID        string          `json:"msg_id,omitempty"`
@@ -114,4 +112,3 @@ func (b *Broadcast) Publish(e Event) {
 		}
 	}
 }
-
