@@ -18,22 +18,39 @@ type EventKind string
 
 const (
     EventMessage  EventKind = "message"
-    EventReaction EventKind = "reaction"
-    EventSystem   EventKind = "system" // tail connection + replay-error frames
+    EventReaction EventKind = "reaction" // reaction added
+    EventUnreact  EventKind = "unreact"  // reaction removed
+    EventSystem   EventKind = "system"   // tail connection + replay-error frames
 )
 
-// Event is a single notification published to the broadcast bus.
-// Content is pre-formatted once at publish time so N subscribers share
-// the same formatting work.
-type Event struct {
-    Kind         EventKind
-    Ts           time.Time
-    Acct         account.Account
-    Platform     string
-    Account      string
-    Conversation string
-    Content      string // formatted text, same shape as session delivery
-    MsgID        string
+// Envelope carries the common routing metadata. It embeds account.Account
+// so that Platform and Name are promoted as top-level JSON fields.
+type Envelope struct {
+    Kind            EventKind
+    account.Account
+    Conversation    string
+}
+
+// Notification is the published payload. Three concrete types implement it:
+// NotifMsg embeds modelv1.MsgLine, NotifReact embeds modelv1.ReactLine,
+// NotifSystem carries a Content string for lifecycle frames (connection
+// ready, replay error).
+type Notification interface { envelope() Envelope }
+
+type NotifMsg struct {
+    Envelope
+    modelv1.MsgLine
+}
+
+type NotifReact struct {
+    Envelope
+    modelv1.ReactLine
+}
+
+type NotifSystem struct {
+    Kind    EventKind
+    Ts      time.Time
+    Content string
 }
 
 // Filter selects which events a subscriber receives. An empty Accounts
@@ -52,14 +69,14 @@ type Broadcast struct { /* ... */ }
 func NewBroadcast() *Broadcast
 
 // Subscribe registers a subscriber with the given filter and buffer size.
-// Returns the event channel and a cancel func that unsubscribes and
-// closes the channel. The cancel func is idempotent.
-func (b *Broadcast) Subscribe(filter Filter, bufSize int) (<-chan Event, func())
+// Returns the notification channel and a cancel func that unsubscribes
+// and closes the channel. The cancel func is idempotent.
+func (b *Broadcast) Subscribe(filter Filter, bufSize int) (<-chan Notification, func())
 
-// Publish fans an event out to every matching subscriber. Non-blocking:
-// if a subscriber's buffer is full, the event is dropped for that
+// Publish fans a notification out to every matching subscriber. Non-blocking:
+// if a subscriber's buffer is full, the notification is dropped for that
 // subscriber and a warning is logged.
-func (b *Broadcast) Publish(e Event)
+func (b *Broadcast) Publish(n Notification)
 ```
 
 Conversation-level filtering is deferred. Client-side `jq`/`grep`

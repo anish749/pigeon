@@ -8,6 +8,12 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 )
 
+// msgNotif builds a minimal NotifMsg with the given account — enough for
+// filter matching tests. Callers don't care about the payload shape here.
+func msgNotif(acct account.Account) NotifMsg {
+	return NotifMsg{Envelope: Envelope{Kind: EventMessage, Account: acct}}
+}
+
 func TestBroadcast_FilterMatch(t *testing.T) {
 	slackAcme := account.New("slack", "acme")
 	slackOther := account.New("slack", "other")
@@ -16,43 +22,43 @@ func TestBroadcast_FilterMatch(t *testing.T) {
 	tests := []struct {
 		name    string
 		filter  Filter
-		event   Event
+		notif   NotifMsg
 		wantHit bool
 	}{
 		{
 			name:    "empty filter matches any account",
 			filter:  Filter{},
-			event:   Event{Acct: slackAcme},
+			notif:   msgNotif(slackAcme),
 			wantHit: true,
 		},
 		{
 			name:    "single-account filter matches that account",
 			filter:  Filter{Accounts: []account.Account{slackAcme}},
-			event:   Event{Acct: slackAcme},
+			notif:   msgNotif(slackAcme),
 			wantHit: true,
 		},
 		{
 			name:    "single-account filter rejects other account",
 			filter:  Filter{Accounts: []account.Account{slackAcme}},
-			event:   Event{Acct: slackOther},
+			notif:   msgNotif(slackOther),
 			wantHit: false,
 		},
 		{
 			name:    "multi-account filter matches any listed",
 			filter:  Filter{Accounts: []account.Account{slackAcme, whatsapp}},
-			event:   Event{Acct: whatsapp},
+			notif:   msgNotif(whatsapp),
 			wantHit: true,
 		},
 		{
 			name:    "multi-account filter rejects unlisted",
 			filter:  Filter{Accounts: []account.Account{slackAcme, whatsapp}},
-			event:   Event{Acct: slackOther},
+			notif:   msgNotif(slackOther),
 			wantHit: false,
 		},
 		{
 			name:    "platform difference alone matters",
 			filter:  Filter{Accounts: []account.Account{slackAcme}},
-			event:   Event{Acct: account.New("whatsapp", "acme")},
+			notif:   msgNotif(account.New("whatsapp", "acme")),
 			wantHit: false,
 		},
 	}
@@ -63,19 +69,21 @@ func TestBroadcast_FilterMatch(t *testing.T) {
 			ch, cancel := b.Subscribe(tt.filter, 4)
 			defer cancel()
 
-			b.Publish(tt.event)
+			b.Publish(tt.notif)
 
 			select {
 			case got := <-ch:
 				if !tt.wantHit {
-					t.Fatalf("expected no event, got %+v", got)
+					t.Fatalf("expected no notif, got %+v", got)
 				}
-				if got.Acct != tt.event.Acct {
-					t.Errorf("account mismatch: got %v, want %v", got.Acct, tt.event.Acct)
+				gotAcct := got.envelope().Account
+				wantAcct := tt.notif.envelope().Account
+				if gotAcct != wantAcct {
+					t.Errorf("account mismatch: got %v, want %v", gotAcct, wantAcct)
 				}
 			case <-time.After(50 * time.Millisecond):
 				if tt.wantHit {
-					t.Fatalf("expected event, got none")
+					t.Fatalf("expected notif, got none")
 				}
 			}
 		})
@@ -87,8 +95,8 @@ func TestBroadcast_DropsWhenBufferFull(t *testing.T) {
 		name    string
 		bufSize int
 		publish int
-		wantMin int // minimum number received; extras beyond buffer may be dropped
-		wantMax int // maximum number received; must not exceed bufSize when we don't read
+		wantMin int
+		wantMax int
 	}{
 		{
 			name:    "under buffer: all delivered",
@@ -119,12 +127,10 @@ func TestBroadcast_DropsWhenBufferFull(t *testing.T) {
 			ch, cancel := b.Subscribe(Filter{}, tt.bufSize)
 			defer cancel()
 
-			// Publish without reading — exercises the drop path.
 			for i := 0; i < tt.publish; i++ {
-				b.Publish(Event{Kind: EventMessage})
+				b.Publish(msgNotif(account.Account{}))
 			}
 
-			// Now drain everything that made it in.
 			received := 0
 			for {
 				select {
@@ -132,7 +138,7 @@ func TestBroadcast_DropsWhenBufferFull(t *testing.T) {
 					received++
 				case <-time.After(20 * time.Millisecond):
 					if received < tt.wantMin || received > tt.wantMax {
-						t.Errorf("received %d events, want %d..%d", received, tt.wantMin, tt.wantMax)
+						t.Errorf("received %d notifs, want %d..%d", received, tt.wantMin, tt.wantMax)
 					}
 					return
 				}
@@ -145,7 +151,6 @@ func TestBroadcast_CancelIdempotent(t *testing.T) {
 	b := NewBroadcast()
 	_, cancel := b.Subscribe(Filter{}, 4)
 
-	// Call multiple times — must not panic or double-close.
 	cancel()
 	cancel()
 	cancel()
@@ -157,7 +162,6 @@ func TestBroadcast_CancelClosesChannel(t *testing.T) {
 
 	cancel()
 
-	// Reading from a closed channel returns immediately.
 	select {
 	case _, ok := <-ch:
 		if ok {
@@ -173,11 +177,9 @@ func TestBroadcast_PublishAfterCancelDoesNotPanic(t *testing.T) {
 	_, cancel := b.Subscribe(Filter{}, 4)
 	cancel()
 
-	// Publish to a broadcast whose only subscriber has cancelled must
-	// not panic and must not block.
 	done := make(chan struct{})
 	go func() {
-		b.Publish(Event{Kind: EventMessage})
+		b.Publish(msgNotif(account.Account{}))
 		close(done)
 	}()
 	select {
@@ -194,34 +196,34 @@ func TestBroadcast_MultipleSubscribersIndependent(t *testing.T) {
 	whatsapp := account.New("whatsapp", "+14155551234")
 
 	tests := []struct {
-		name        string
-		subAFilter  Filter
-		subBFilter  Filter
-		event       Event
+		name         string
+		subAFilter   Filter
+		subBFilter   Filter
+		notif        NotifMsg
 		wantAReceive bool
 		wantBReceive bool
 	}{
 		{
-			name:        "both unfiltered both receive",
-			subAFilter:  Filter{},
-			subBFilter:  Filter{},
-			event:       Event{Acct: slackAcme},
+			name:         "both unfiltered both receive",
+			subAFilter:   Filter{},
+			subBFilter:   Filter{},
+			notif:        msgNotif(slackAcme),
 			wantAReceive: true,
 			wantBReceive: true,
 		},
 		{
-			name:        "disjoint filters only matching receives",
-			subAFilter:  Filter{Accounts: []account.Account{slackAcme}},
-			subBFilter:  Filter{Accounts: []account.Account{whatsapp}},
-			event:       Event{Acct: slackAcme},
+			name:         "disjoint filters only matching receives",
+			subAFilter:   Filter{Accounts: []account.Account{slackAcme}},
+			subBFilter:   Filter{Accounts: []account.Account{whatsapp}},
+			notif:        msgNotif(slackAcme),
 			wantAReceive: true,
 			wantBReceive: false,
 		},
 		{
-			name:        "overlapping filters both receive",
-			subAFilter:  Filter{Accounts: []account.Account{slackAcme}},
-			subBFilter:  Filter{Accounts: []account.Account{slackAcme, whatsapp}},
-			event:       Event{Acct: slackAcme},
+			name:         "overlapping filters both receive",
+			subAFilter:   Filter{Accounts: []account.Account{slackAcme}},
+			subBFilter:   Filter{Accounts: []account.Account{slackAcme, whatsapp}},
+			notif:        msgNotif(slackAcme),
 			wantAReceive: true,
 			wantBReceive: true,
 		},
@@ -234,7 +236,7 @@ func TestBroadcast_MultipleSubscribersIndependent(t *testing.T) {
 			defer cancelA()
 			defer cancelB()
 
-			b.Publish(tt.event)
+			b.Publish(tt.notif)
 
 			aGot := drainOne(chA, 50*time.Millisecond)
 			bGot := drainOne(chB, 50*time.Millisecond)
@@ -250,23 +252,21 @@ func TestBroadcast_MultipleSubscribersIndependent(t *testing.T) {
 }
 
 func TestBroadcast_ConcurrentPublishersAndSubscribers(t *testing.T) {
-	// Smoke test for races; run under `go test -race`.
 	b := NewBroadcast()
 
 	const (
-		publishers    = 8
-		perPublisher  = 100
-		subscribers   = 4
+		publishers   = 8
+		perPublisher = 100
+		subscribers  = 4
 	)
 
-	// Start subscribers first so they see all publishes.
 	var wgSubs sync.WaitGroup
 	received := make([]int, subscribers)
 	for i := 0; i < subscribers; i++ {
 		ch, cancel := b.Subscribe(Filter{}, 1024)
 		defer cancel()
 		wgSubs.Add(1)
-		go func(idx int, ch <-chan Event) {
+		go func(idx int, ch <-chan Notification) {
 			defer wgSubs.Done()
 			for {
 				select {
@@ -288,23 +288,21 @@ func TestBroadcast_ConcurrentPublishersAndSubscribers(t *testing.T) {
 		go func() {
 			defer wgPubs.Done()
 			for j := 0; j < perPublisher; j++ {
-				b.Publish(Event{Kind: EventMessage})
+				b.Publish(msgNotif(account.Account{}))
 			}
 		}()
 	}
 	wgPubs.Wait()
 	wgSubs.Wait()
 
-	// Each subscriber should have received approximately publishers*perPublisher;
-	// some drops are acceptable since bufSize is 1024 and we publish 800.
 	for i, n := range received {
 		if n == 0 {
-			t.Errorf("subscriber %d received 0 events", i)
+			t.Errorf("subscriber %d received 0 notifs", i)
 		}
 	}
 }
 
-func drainOne(ch <-chan Event, timeout time.Duration) bool {
+func drainOne(ch <-chan Notification, timeout time.Duration) bool {
 	select {
 	case <-ch:
 		return true
