@@ -23,10 +23,9 @@ func displaySender(sender string, via Via) string {
 		return sender
 	}
 }
-
-// FormatMsg renders a resolved message with its reactions as display lines.
+// FormatMsgLine renders a message line (without reactions) as display lines.
 // loc controls the timezone for display (pass time.Local for user's timezone).
-func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
+func FormatMsgLine(m MsgLine, loc *time.Location) []string {
 	prefix := ""
 	if m.Reply {
 		prefix = "  "
@@ -39,7 +38,19 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 
 	lines = append(lines, formatRaw(m.Raw, prefix+"    ")...)
 
+	return lines
+}
+
+// FormatMsg renders a resolved message with its reactions as display lines.
+// loc controls the timezone for display (pass time.Local for user's timezone).
+func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
+	lines := FormatMsgLine(m.MsgLine, loc)
+
 	if len(m.Reactions) > 0 {
+		prefix := ""
+		if m.Reply {
+			prefix = "  "
+		}
 		lines = append(lines, prefix+"    "+formatReactions(m.Reactions))
 	}
 
