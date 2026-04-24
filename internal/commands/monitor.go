@@ -3,6 +3,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,11 +13,6 @@ import (
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/tailapi"
 )
-
-// monitorReadBufferSize caps the SSE scanner buffer. A single `data:`
-// frame for a slack message can exceed the default 64 KiB bufio limit
-// once rich blocks and metadata are included, so we size up.
-const monitorReadBufferSize = 1024 * 1024
 
 // RunMonitor opens an SSE stream to the daemon's /api/tail endpoint and
 // writes each JSON frame to out as a single line. Blocks until the
@@ -54,19 +50,25 @@ func RunMonitor(ctx context.Context, req tailapi.Request, out *os.File) error {
 		return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), monitorReadBufferSize)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
+	// bufio.Reader.ReadString grows its return allocation to whatever the
+	// line actually is — no fixed cap to tune, no OOM guard beyond the OS.
+	// Internal 4 KiB read buffer just batches syscalls; not a latency source.
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			trimmed := strings.TrimRight(line, "\r\n")
+			if payload, ok := strings.CutPrefix(trimmed, "data: "); ok {
+				if _, werr := fmt.Fprintln(out, payload); werr != nil {
+					return fmt.Errorf("write frame to out: %w", werr)
+				}
+			}
 		}
-		if _, err := fmt.Fprintln(out, strings.TrimPrefix(line, "data: ")); err != nil {
-			return fmt.Errorf("write frame to out: %w", err)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("read stream: %w", err)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read stream: %w", err)
-	}
-	return nil
 }
