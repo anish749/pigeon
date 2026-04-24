@@ -72,10 +72,12 @@ type channel struct {
 	signal    chan deliverySignal
 }
 
+type formattedReactionLines []string
+
 type deliverySignal struct {
-	kind         signalKind
-	conversation string             // only set for signalNewMessage and signalReaction
-	reaction     *modelv1.ReactLine // only set for signalReaction
+	kind          signalKind
+	conversation  string                 // only set for signalNewMessage and signalReaction
+	reactionLines formattedReactionLines // only set for signalReaction
 }
 
 type signalKind int
@@ -309,6 +311,7 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 // subscribers, independent of session state. The ReactLine is forwarded
 // as-is — no timestamp or field reconstruction.
 func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
+	lines := h.formatReactionLines(acct, conversation, react)
 	h.broadcast.Publish(Event{
 		Kind:         EventReaction,
 		Ts:           react.Ts,
@@ -316,7 +319,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 		Platform:     acct.Platform,
 		Account:      acct.Name,
 		Conversation: conversation,
-		Content:      strings.Join(h.formatReactionLines(acct, conversation, react), "\n"),
+		Content:      strings.Join(lines, "\n"),
 		MsgID:        react.MsgID,
 	})
 
@@ -333,7 +336,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reaction: &react}:
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reactionLines: lines}:
 	default:
 		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
 			"account", acct, "conversation", conversation,
@@ -433,7 +436,7 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalNewMessage:
 				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
 			case signalReaction:
-				h.deliverReaction(ch, sig.conversation, *sig.reaction)
+				h.deliverReaction(ch, sig.conversation, sig.reactionLines)
 			}
 		}
 	}
@@ -532,7 +535,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 // deliverReaction sends a reaction (or unreaction) event to the connected
 // session. Reactions are delivered out-of-band: they are not gated by the
 // last_delivered cursor since reactions often target older messages.
-func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
+func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedReactionLines) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
@@ -542,8 +545,6 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
 		return
 	}
-
-	lines := h.formatReactionLines(ch.acct, conversation, react)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
@@ -557,7 +558,7 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 	}
 }
 
-func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) []string {
+func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) formattedReactionLines {
 	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
 		return modelv1.FormatReactionNotification(*msg, react, time.Local)
 	}
