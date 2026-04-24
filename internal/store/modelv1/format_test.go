@@ -126,6 +126,95 @@ func TestFormatConvMeta_Empty(t *testing.T) {
 	}
 }
 
+func TestFormatMsgLine(t *testing.T) {
+	istLoc := time.FixedZone("IST", 5*60*60+30*60)
+	tests := []struct {
+		name        string
+		msg         MsgLine
+		loc         *time.Location
+		wantLines   int
+		wantHeader  string   // exact match on lines[0] when non-empty
+		wantInHead  []string // substrings that must appear in lines[0]
+		wantPrefix  string   // required prefix on lines[0]
+		wantInLine1 string   // substring that must appear in lines[1] (when wantLines >= 2)
+	}{
+		{
+			name: "full",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
+				Sender: "Alice", SenderID: "U1", Text: "hello world",
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantHeader: "[2026-03-16 09:15:02] [M1] Alice (U1): hello world",
+		},
+		{
+			name: "reply indented",
+			msg: MsgLine{
+				ID: "R1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "reply", Reply: true,
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantPrefix: "  ",
+		},
+		{
+			name: "timezone",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Alice", SenderID: "U1", Text: "hello",
+			},
+			loc:        istLoc,
+			wantLines:  1,
+			wantInHead: []string{"14:30:00"},
+		},
+		{
+			name: "via decoration",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Jeremiah", SenderID: "U1", Text: "hello",
+				Via: ViaToPigeon,
+			},
+			loc:        time.UTC,
+			wantLines:  1,
+			wantInHead: []string{"sent to pigeon by Jeremiah (U1)"},
+		},
+		{
+			name: "with raw",
+			msg: MsgLine{
+				ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Alice", SenderID: "U1", Text: "hello",
+				Raw: map[string]any{"blocks": []any{"test"}},
+			},
+			loc:         time.UTC,
+			wantLines:   2,
+			wantInLine1: "blocks",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := FormatMsgLine(tt.msg, tt.loc)
+			if len(lines) != tt.wantLines {
+				t.Fatalf("lines = %d, want %d (got %q)", len(lines), tt.wantLines, lines)
+			}
+			if tt.wantHeader != "" && lines[0] != tt.wantHeader {
+				t.Errorf("header = %q, want %q", lines[0], tt.wantHeader)
+			}
+			if tt.wantPrefix != "" && !strings.HasPrefix(lines[0], tt.wantPrefix) {
+				t.Errorf("header = %q, want prefix %q", lines[0], tt.wantPrefix)
+			}
+			for _, sub := range tt.wantInHead {
+				if !strings.Contains(lines[0], sub) {
+					t.Errorf("header = %q, want substring %q", lines[0], sub)
+				}
+			}
+			if tt.wantInLine1 != "" && !strings.Contains(lines[1], tt.wantInLine1) {
+				t.Errorf("line 1 = %q, want substring %q", lines[1], tt.wantInLine1)
+			}
+		})
+	}
+}
+
 func TestFormatMsg_Full(t *testing.T) {
 	m := ResolvedMsg{
 		MsgLine: MsgLine{
