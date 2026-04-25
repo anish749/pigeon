@@ -50,11 +50,11 @@ var (
 	_ DataFile = PendingDeletesFile("")
 	_ DataFile = DriveMetaFile{}
 
-	_ LogFile = MessagingDateFile("")
-	_ LogFile = EmailDateFile("")
-	_ LogFile = CalendarDateFile("")
-	_ LogFile = ThreadFile("")
-	_ LogFile = CommentsFile("")
+	_ LogFile     = MessagingDateFile("")
+	_ LogFile     = EmailDateFile("")
+	_ LogFile     = CalendarDateFile("")
+	_ LogFile     = ThreadFile("")
+	_ LogFile     = CommentsFile("")
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
 	_ ContentFile = FormulaFile("")
@@ -176,7 +176,7 @@ type PendingDeletesFile string
 
 // Path returns the file path as a string.
 func (p PendingDeletesFile) Path() string { return string(p) }
-func (PendingDeletesFile) dataFile()    {}
+func (PendingDeletesFile) dataFile()      {}
 
 // WorkstreamStoreDir is a path to a workspace's persistent workstream store
 // directory: <base>/.workspaces/<name>/workstream/.

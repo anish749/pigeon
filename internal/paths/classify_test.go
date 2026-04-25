@@ -202,4 +202,3 @@ func TestClassify_RoundTripsConstructors(t *testing.T) {
 		})
 	}
 }
-
