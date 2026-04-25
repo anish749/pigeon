@@ -279,6 +279,45 @@ func TestLatestTs_DriveContent_UsesSiblingMetaDate(t *testing.T) {
 	}
 }
 
+// TestLatestTs_CommentsFile_UsesSiblingMetaDate is a regression for a bug
+// where CommentsFile was bucketed with messaging/email/thread in LatestTs
+// and scanned for "ts" — but Drive comments JSONL lines carry createdTime
+// and modifiedTime, never "ts". Effect: any Drive doc whose only recent
+// activity was a comment thread would show a zero LatestTs and a stale
+// age in pigeon list --since. Fix: treat CommentsFile like other Drive
+// content (TabFile, SheetFile, FormulaFile) — the per-doc drive-meta
+// sidecar is the canonical "when did this doc change" anchor and is
+// rewritten in the same handler that rewrites comments.jsonl.
+func TestLatestTs_CommentsFile_UsesSiblingMetaDate(t *testing.T) {
+	root := t.TempDir()
+	driveFile := paths.NewDataRoot(root).
+		AccountFor(account.New("gws", "anish")).
+		Drive().File("doc-abc")
+	if err := os.MkdirAll(driveFile.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(driveFile.MetaFile("2026-04-07").Path(), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A real-shaped Drive comment line — carries createdTime / modifiedTime,
+	// no "ts" field. The previous dispatch would scan for "ts" and find
+	// nothing, returning zero.
+	comments := driveFile.CommentsFile()
+	body := `{"id":"c1","author":{"displayName":"x"},"content":"hi","createdTime":"2026-04-07T10:00:00Z","modifiedTime":"2026-04-07T10:00:00Z"}` + "\n"
+	if err := os.WriteFile(comments.Path(), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LatestTs(comments)
+	if err != nil {
+		t.Fatalf("LatestTs: %v", err)
+	}
+	want, _ := time.Parse("2006-01-02", "2026-04-07")
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v (sibling drive-meta date)", got, want)
+	}
+}
+
 func TestLatestTs_DriveMarkdown_DoesNotParseAsJSONL(t *testing.T) {
 	// Regression: the original list --since crash. Drive markdown was being
 	// fed through ParseDateFile and failing on '#' chars. With the typed
