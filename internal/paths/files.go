@@ -80,3 +80,37 @@ type AttachmentFile string
 
 // Path returns the file path as a string.
 func (a AttachmentFile) Path() string { return string(a) }
+
+// MaintenanceFile is a path to an account's .maintenance.json state sidecar.
+type MaintenanceFile string
+
+// Path returns the file path as a string.
+func (m MaintenanceFile) Path() string { return string(m) }
+
+// SyncCursorsFile is a path to an account's .sync-cursors.yaml file.
+type SyncCursorsFile string
+
+// Path returns the file path as a string.
+func (s SyncCursorsFile) Path() string { return string(s) }
+
+// PollMetricsFile is a path to an account's .poll-metrics.jsonl operational
+// log, appended one record per poll per service.
+type PollMetricsFile string
+
+// Path returns the file path as a string.
+func (p PollMetricsFile) Path() string { return string(p) }
+
+// PendingDeletesFile is a path to a Gmail account's .pending-email-deletes
+// queue file, written one email ID per line by the poller and drained during
+// maintenance.
+type PendingDeletesFile string
+
+// Path returns the file path as a string.
+func (p PendingDeletesFile) Path() string { return string(p) }
+
+// WorkstreamStoreDir is a path to a workspace's persistent workstream store
+// directory: <base>/.workspaces/<name>/workstream/.
+type WorkstreamStoreDir string
+
+// Path returns the directory path as a string.
+func (w WorkstreamStoreDir) Path() string { return string(w) }

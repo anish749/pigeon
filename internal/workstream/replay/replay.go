@@ -94,7 +94,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 
 	// Set up persistence and manager.
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
-	st := arstore.NewFS(storeDir)
+	st := arstore.NewFS(storeDir.Path())
 	claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
 	sc := manager.NewStatCollector()
 	mgr := manager.New(claude, sc, cfg, st, logger)

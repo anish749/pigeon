@@ -233,8 +233,8 @@ func TestMaintain(t *testing.T) {
 	}
 
 	// Verify maintenance state file exists
-	stateFile := s.root.AccountFor(acct).MaintenancePath()
-	if _, err := os.Stat(stateFile); err != nil {
+	stateFile := s.root.AccountFor(acct).MaintenanceFile()
+	if _, err := os.Stat(stateFile.Path()); err != nil {
 		t.Error("maintenance state file not created")
 	}
 }
@@ -1283,7 +1283,7 @@ func TestAppendPendingDelete(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(gmailDir.PendingDeletesPath())
+	data, err := os.ReadFile(gmailDir.PendingDeletesFile().Path())
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -1336,7 +1336,7 @@ func TestApplyPendingEmailDeletes(t *testing.T) {
 	}
 
 	// Pending file should be gone.
-	if _, err := os.Stat(gmailDir.PendingDeletesPath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(gmailDir.PendingDeletesFile().Path()); !os.IsNotExist(err) {
 		t.Error("pending deletes file should be removed after maintenance")
 	}
 

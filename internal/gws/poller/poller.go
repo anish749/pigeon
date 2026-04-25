@@ -112,7 +112,7 @@ func (p *Poller) runAndRecord(service string, fn func() (int, error)) {
 		m.Err = err.Error()
 		slog.Error("poll "+service, "err", err)
 	}
-	if writeErr := appendMetric(p.accountDir.PollMetricsPath(), m); writeErr != nil {
+	if writeErr := appendMetric(p.accountDir.PollMetricsFile(), m); writeErr != nil {
 		slog.Error("append poll metric", "service", service, "err", writeErr)
 	}
 }

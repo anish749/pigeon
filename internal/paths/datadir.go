@@ -23,21 +23,37 @@ func SearchDir(platform, accountName string) string {
 	}
 }
 
-// ConvMetaFilename is the filename for a conversation's metadata sidecar.
-const ConvMetaFilename = ".meta.json"
+const (
+	// ConvMetaFilename is the filename for a conversation's metadata sidecar.
+	ConvMetaFilename = ".meta.json"
 
-// FileExt is the file extension for all message data files.
-const FileExt = ".jsonl"
+	// FileExt is the file extension for all message data files.
+	FileExt = ".jsonl"
 
-// IdentitySubdir is the subdirectory name for identity files within an account directory.
-const IdentitySubdir = "identity"
+	// IdentitySubdir is the subdirectory name for identity files within an account directory.
+	IdentitySubdir = "identity"
 
-// PeopleFilename is the filename for the per-account identity JSONL file.
-const PeopleFilename = "people.jsonl"
+	// PeopleFilename is the filename for the per-account identity JSONL file.
+	PeopleFilename = "people.jsonl"
 
-// PeopleFileGlob is the rg --glob pattern that matches all people.jsonl
-// identity files under a data root.
-const PeopleFileGlob = "**/" + IdentitySubdir + "/" + PeopleFilename
+	// PeopleFileGlob is the rg --glob pattern that matches all people.jsonl
+	// identity files under a data root.
+	PeopleFileGlob = "**/" + IdentitySubdir + "/" + PeopleFilename
+
+	// SyncCursorsFilename is the filename for an account's per-poller sync cursors.
+	SyncCursorsFilename = ".sync-cursors.yaml"
+
+	// MaintenanceFilename is the filename for an account's maintenance state sidecar.
+	MaintenanceFilename = ".maintenance.json"
+
+	// WorkspacesSubdir is the top-level directory under the data root that holds
+	// per-workspace state (one subdirectory per workspace name).
+	WorkspacesSubdir = ".workspaces"
+
+	// WorkstreamSubdir is the per-workspace subdirectory that holds the persistent
+	// workstream store: <root>/.workspaces/<name>/workstream/.
+	WorkstreamSubdir = "workstream"
+)
 
 // Data directory type hierarchy:
 //
@@ -84,12 +100,12 @@ type WorkspaceDir struct {
 
 // Path returns the workspace directory path.
 func (w WorkspaceDir) Path() string {
-	return filepath.Join(w.root.base, ".workspaces", w.name)
+	return filepath.Join(w.root.base, WorkspacesSubdir, w.name)
 }
 
 // WorkstreamStore returns the path to the workstream store directory.
-func (w WorkspaceDir) WorkstreamStore() string {
-	return filepath.Join(w.Path(), "workstream")
+func (w WorkspaceDir) WorkstreamStore() WorkstreamStoreDir {
+	return WorkstreamStoreDir(filepath.Join(w.Path(), WorkstreamSubdir))
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/
@@ -126,14 +142,14 @@ func (a AccountDir) Identity() IdentityDir {
 	return IdentityDir{account: a}
 }
 
-// SyncCursorsPath returns the path to the sync cursors file for this account.
-func (a AccountDir) SyncCursorsPath() string {
-	return filepath.Join(a.Path(), ".sync-cursors.yaml")
+// SyncCursorsFile returns the path to the sync cursors file for this account.
+func (a AccountDir) SyncCursorsFile() SyncCursorsFile {
+	return SyncCursorsFile(filepath.Join(a.Path(), SyncCursorsFilename))
 }
 
-// MaintenancePath returns the path to the maintenance state file for this account.
-func (a AccountDir) MaintenancePath() string {
-	return filepath.Join(a.Path(), ".maintenance.json")
+// MaintenanceFile returns the path to the maintenance state file for this account.
+func (a AccountDir) MaintenanceFile() MaintenanceFile {
+	return MaintenanceFile(filepath.Join(a.Path(), MaintenanceFilename))
 }
 
 // ConversationDir represents a conversation directory: <base>/<platform>/<account-slug>/<conversation>/
