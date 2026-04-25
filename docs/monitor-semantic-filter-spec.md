@@ -83,15 +83,13 @@ All output is newline-delimited JSON. The first line is the preview; the
 rest is the filtered live stream.
 
 ```
-{"kind":"preview","would_route":[...],"would_skip":[...],"ambiguous":[...],"threshold":0.54,"intent_sha":"ab12cd"}
+{"kind":"preview","would_route":[...],"would_skip":[...],"ambiguous":[...]}
 {"kind":"system","content":"listening"}
 <routed message events, same shape as `pigeon monitor` output>
 ```
 
 The preview is a single JSON object, not multiple lines — one read, one
-parse, complete picture. Including `threshold` and `intent_sha` in the
-preview lets the caller log and display the exact contract the stream is
-operating under.
+parse, complete picture.
 
 `would_route`, `would_skip`, and `ambiguous` are each a list of example
 message events drawn from recent traffic (discussed value: last 24h).
@@ -101,11 +99,9 @@ They are illustrative, not calibrative.
 
 ### Embeddings, not LLMs
 
-Scoring is done with a dense embedding model (discussed default:
-`text-embedding-3-small`). This was agreed explicitly — LLM-per-message
-classification was considered and rejected on cost, latency, and
-determinism grounds. Embedding cost at realistic Slack traffic volumes
-is fractions of a cent per day; per-call latency is sub-100ms.
+Scoring is done with embeddings rather than per-message LLM
+classification. This much was agreed. Nothing else about how
+embeddings are produced or which model is used has been agreed.
 
 At startup, the tool computes:
 
@@ -165,8 +161,7 @@ If stage 2 passes, route `m`.
 Motivation: individual messages like "sounds good" or "yes" have no
 semantic content on their own but are perfectly meaningful in context.
 Embedding the surrounding window captures that context. The fallback
-runs only when stage 1 rejects, so it costs one extra embedding on miss
-— negligible at these volumes.
+runs only when stage 1 rejects.
 
 ### Per-conversation window buffer
 
@@ -179,9 +174,7 @@ Stage 2 reads from this buffer. Lookup is O(1).
 Agreed: the user-facing CLI surface should be minimal. Only the intent
 components are required inputs.
 
-- **Embedder model** — hidden default. Override flag allowed but not
-  required.
-- **Window size W** — hidden default (5). Override allowed.
+- **Window size W** — hidden default (5).
 - **Threshold** — not exposed at all. Computed from the intent. The
   caller does not set it.
 
