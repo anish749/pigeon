@@ -58,7 +58,7 @@ func TestClient_JSON(t *testing.T) {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
 
-	c := New("haiku", 120*time.Second, slog.Default())
+	c := New("haiku", slog.Default(), WithTimeout(120*time.Second))
 
 	// Prompt crafted to reliably route to the provided workstream.
 	prompt := `You are a workstream classifier. Classify the messages below against the active workstreams.
@@ -116,7 +116,7 @@ func TestClient_Text(t *testing.T) {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run live claude CLI test")
 	}
 
-	c := New("haiku", 120*time.Second, slog.Default())
+	c := New("haiku", slog.Default(), WithTimeout(120*time.Second))
 
 	prompt := `Update the focus description for a workstream called "Infrastructure" that tracks server reliability and on-call incidents.
 

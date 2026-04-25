@@ -19,7 +19,7 @@ import (
 
 // RunWorkstreamDiscover discovers workstreams for one or all workspaces by
 // reading signals and running LLM-based batch analysis.
-func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFlag string, since, until time.Time, model string, timeout time.Duration, logger *slog.Logger, w io.Writer) error {
+func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFlag string, since, until time.Time, model string, logger *slog.Logger, w io.Writer) error {
 	var workspaces []*workspace.Workspace
 	if workspaceFlag != "" {
 		ws, err := workspace.GetCurrentWorkspace(cfg, workspaceFlag)
@@ -38,7 +38,7 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 		}
 	}
 
-	claude := clients.New(model, timeout, logger)
+	claude := clients.New(model, logger)
 	disc := discovery.NewLLMDiscovery(claude, logger)
 
 	root := paths.DefaultDataRoot()

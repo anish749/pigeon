@@ -32,7 +32,6 @@ func newWorkstreamCmd() *cobra.Command {
 
 func newWorkstreamDiscoverCmd() *cobra.Command {
 	var sinceStr, untilStr, workspaceFlag, model string
-	var timeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "discover",
@@ -62,7 +61,7 @@ func newWorkstreamDiscoverCmd() *cobra.Command {
 			}
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-			return commands.RunWorkstreamDiscover(cmd.Context(), appCfg, workspaceFlag, since, until, model, timeout, logger, os.Stdout)
+			return commands.RunWorkstreamDiscover(cmd.Context(), appCfg, workspaceFlag, since, until, model, logger, os.Stdout)
 		},
 	}
 
@@ -70,7 +69,6 @@ func newWorkstreamDiscoverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace to discover (default: all workspaces)")
 	cmd.Flags().StringVar(&model, "model", "haiku", "Claude model for discovery")
-	cmd.Flags().DurationVar(&timeout, "timeout", 60*time.Second, "Timeout per LLM call")
 
 	return cmd
 }
