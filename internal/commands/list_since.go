@@ -2,8 +2,11 @@ package commands
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,6 +213,11 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 // fail-loud on real corruption rather than degrading to a stale timestamp.
 // Lines that simply lack the named fields are tolerated; not every line in
 // a file carries every field (separators, mixed line types in threads).
+//
+// Uses bufio.Reader.ReadBytes('\n') rather than bufio.Scanner so there is
+// no per-line size cap to tune — pigeon stores can hold large lines (email
+// HTML bodies, base64 attachments) and the read allocation grows to fit.
+// Same idiom the monitor SSE consumer uses (commands/monitor.go).
 func scanLatestTs(path string, fields ...string) (time.Time, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -217,37 +225,41 @@ func scanLatestTs(path string, fields ...string) (time.Time, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	// Email HTML bodies can be large; bump the per-line buffer past the
-	// 64KB default.
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-
+	reader := bufio.NewReader(f)
 	var latest time.Time
 	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
-			return time.Time{}, fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lineNum++
+			trimmed := bytes.TrimRight(line, "\r\n")
+			if len(trimmed) > 0 {
+				var raw map[string]json.RawMessage
+				if err := json.Unmarshal(trimmed, &raw); err != nil {
+					return time.Time{}, fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
+				}
+				for _, field := range fields {
+					val, ok := raw[field]
+					if !ok {
+						continue
+					}
+					var t time.Time
+					if err := json.Unmarshal(val, &t); err != nil {
+						return time.Time{}, fmt.Errorf("parse %q on line %d in %s: %w", field, lineNum, path, err)
+					}
+					if t.After(latest) {
+						latest = t
+					}
+				}
+			}
 		}
-		for _, field := range fields {
-			val, ok := raw[field]
-			if !ok {
-				continue
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return latest, nil
 			}
-			var t time.Time
-			if err := json.Unmarshal(val, &t); err != nil {
-				return time.Time{}, fmt.Errorf("parse %q on line %d in %s: %w", field, lineNum, path, err)
-			}
-			if t.After(latest) {
-				latest = t
-			}
+			return time.Time{}, fmt.Errorf("read %s: %w", path, readErr)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return time.Time{}, fmt.Errorf("scan %s: %w", path, err)
-	}
-	return latest, nil
 }
 
 // latestDriveMetaDate returns the newest drive-meta-YYYY-MM-DD.json date
