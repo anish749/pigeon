@@ -19,13 +19,13 @@ import (
 //
 // Order of dispatch matters and is from most specific to least specific:
 //   - drive-meta-YYYY-MM-DD.json (full-filename + extension match)
-//   - account-level state files (.maintenance.json, .sync-cursors.yaml,
-//     .poll-metrics.jsonl, .pending-email-deletes)
-//   - conversation-level sidecar (.meta.json)
-//   - identity people.jsonl (parent dir == identity)
+//   - account-level state files (MaintenanceFilename, SyncCursorsFilename,
+//     pollMetricsFile, pendingDeletesFile)
+//   - conversation-level sidecar (ConvMetaFilename)
+//   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
 //   - Linear issue file (parent dir == issues, under linear-issues platform)
-//   - thread file (parent dir == threads, filename != date)
+//   - thread file (parent dir == ThreadsSubdir, filename != date)
 //   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Messaging by location
 //
 // A drive-meta filename whose date portion is malformed returns nil rather
@@ -41,9 +41,9 @@ func Classify(path string) DataFile {
 
 	// 2. Account-level state files (exact filename matches).
 	switch base {
-	case ".maintenance.json":
+	case MaintenanceFilename:
 		return MaintenanceFile(path)
-	case ".sync-cursors.yaml":
+	case SyncCursorsFilename:
 		return SyncCursorsFile(path)
 	case pollMetricsFile:
 		return PollMetricsFile(path)
