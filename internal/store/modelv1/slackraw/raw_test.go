@@ -58,6 +58,102 @@ func TestNewSlackRawContent_Blocks(t *testing.T) {
 	}
 }
 
+// blocksFromText is a helper that builds a single rich_text block whose
+// only content is one text element. Used to keep table cases readable.
+func blocksFromText(s string) goslack.Blocks {
+	return goslack.Blocks{
+		BlockSet: []goslack.Block{
+			goslack.NewRichTextBlock("blk",
+				goslack.NewRichTextSection(
+					goslack.NewRichTextSectionTextElement(s, nil),
+				),
+			),
+		},
+	}
+}
+
+func TestNewSlackRawContent_BlockEquivalence(t *testing.T) {
+	tests := []struct {
+		name         string
+		msg          goslack.Msg
+		wantBlocks   bool
+		wantAttaches int
+		wantFiles    int
+	}{
+		{
+			name: "blocks render to text — dropped",
+			msg: goslack.Msg{
+				Text:   "Hello world",
+				Blocks: blocksFromText("Hello world"),
+			},
+			wantBlocks: false,
+		},
+		{
+			name: "blocks diverge from text — kept (huddle system message)",
+			msg: goslack.Msg{
+				Text:   "",
+				Blocks: blocksFromText("A huddle started"),
+			},
+			wantBlocks: true,
+		},
+		{
+			name: "equivalent blocks + attachments — blocks dropped, attachments preserved",
+			msg: goslack.Msg{
+				Text:        "see the attached",
+				Blocks:      blocksFromText("see the attached"),
+				Attachments: []goslack.Attachment{{Title: "PR", Fallback: "PR fallback"}},
+			},
+			wantBlocks:   false,
+			wantAttaches: 1,
+		},
+		{
+			name: "equivalent blocks + files — blocks dropped, files preserved",
+			msg: goslack.Msg{
+				Text:   "image attached",
+				Blocks: blocksFromText("image attached"),
+				Files:  []goslack.File{{Name: "img.png", Mimetype: "image/png"}},
+			},
+			wantBlocks: false,
+			wantFiles:  1,
+		},
+		{
+			// In production, msg.Text is the pre-resolve wire form, so a
+			// user-mention in blocks lines up byte-for-byte with the text.
+			name: "wire-form mention in text — equivalent, dropped",
+			msg: goslack.Msg{
+				Text: "hey <@U123ABC> ping",
+				Blocks: goslack.Blocks{
+					BlockSet: []goslack.Block{
+						goslack.NewRichTextBlock("blk",
+							goslack.NewRichTextSection(
+								goslack.NewRichTextSectionTextElement("hey ", nil),
+								goslack.NewRichTextSectionUserElement("U123ABC", nil),
+								goslack.NewRichTextSectionTextElement(" ping", nil),
+							),
+						),
+					},
+				},
+			},
+			wantBlocks: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := NewSlackRawContent(tc.msg)
+			if (rc.Blocks != nil) != tc.wantBlocks {
+				t.Errorf("Blocks present = %v, want %v", rc.Blocks != nil, tc.wantBlocks)
+			}
+			if len(rc.Attachments) != tc.wantAttaches {
+				t.Errorf("Attachments count = %d, want %d", len(rc.Attachments), tc.wantAttaches)
+			}
+			if len(rc.Files) != tc.wantFiles {
+				t.Errorf("Files count = %d, want %d", len(rc.Files), tc.wantFiles)
+			}
+		})
+	}
+}
+
 func TestNewSlackRawContent_RoundTrip(t *testing.T) {
 	msg := goslack.Msg{
 		Files: []goslack.File{
