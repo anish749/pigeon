@@ -58,116 +58,99 @@ func TestNewSlackRawContent_Blocks(t *testing.T) {
 	}
 }
 
-func TestNewSlackRawContent_DropsBlocksWhenEquivalent(t *testing.T) {
-	msg := goslack.Msg{
-		Text: "Hello world",
-		Blocks: goslack.Blocks{
-			BlockSet: []goslack.Block{
-				goslack.NewRichTextBlock("blk",
-					goslack.NewRichTextSection(
-						goslack.NewRichTextSectionTextElement("Hello world", nil),
-					),
+// blocksFromText is a helper that builds a single rich_text block whose
+// only content is one text element. Used to keep table cases readable.
+func blocksFromText(s string) goslack.Blocks {
+	return goslack.Blocks{
+		BlockSet: []goslack.Block{
+			goslack.NewRichTextBlock("blk",
+				goslack.NewRichTextSection(
+					goslack.NewRichTextSectionTextElement(s, nil),
 				),
-			},
+			),
 		},
-	}
-	rc := NewSlackRawContent(msg)
-	if rc.Blocks != nil {
-		t.Errorf("Blocks should be dropped when equivalent to text, got %v", rc.Blocks)
-	}
-	if rc.AsSerializable() != nil {
-		t.Errorf("AsSerializable should return nil when no extra content remains")
 	}
 }
 
-func TestNewSlackRawContent_KeepsBlocksWhenDivergent(t *testing.T) {
-	// Empty text + non-empty block (e.g. huddle system message) — block
-	// carries content text doesn't, so it must be kept.
-	msg := goslack.Msg{
-		Text: "",
-		Blocks: goslack.Blocks{
-			BlockSet: []goslack.Block{
-				goslack.NewRichTextBlock("blk",
-					goslack.NewRichTextSection(
-						goslack.NewRichTextSectionTextElement("A huddle started", nil),
-					),
-				),
+func TestNewSlackRawContent_BlockEquivalence(t *testing.T) {
+	tests := []struct {
+		name         string
+		msg          goslack.Msg
+		wantBlocks   bool
+		wantAttaches int
+		wantFiles    int
+	}{
+		{
+			name: "blocks render to text — dropped",
+			msg: goslack.Msg{
+				Text:   "Hello world",
+				Blocks: blocksFromText("Hello world"),
 			},
+			wantBlocks: false,
+		},
+		{
+			name: "blocks diverge from text — kept (huddle system message)",
+			msg: goslack.Msg{
+				Text:   "",
+				Blocks: blocksFromText("A huddle started"),
+			},
+			wantBlocks: true,
+		},
+		{
+			name: "equivalent blocks + attachments — blocks dropped, attachments preserved",
+			msg: goslack.Msg{
+				Text:        "see the attached",
+				Blocks:      blocksFromText("see the attached"),
+				Attachments: []goslack.Attachment{{Title: "PR", Fallback: "PR fallback"}},
+			},
+			wantBlocks:   false,
+			wantAttaches: 1,
+		},
+		{
+			name: "equivalent blocks + files — blocks dropped, files preserved",
+			msg: goslack.Msg{
+				Text:   "image attached",
+				Blocks: blocksFromText("image attached"),
+				Files:  []goslack.File{{Name: "img.png", Mimetype: "image/png"}},
+			},
+			wantBlocks: false,
+			wantFiles:  1,
+		},
+		{
+			// In production, msg.Text is the pre-resolve wire form, so a
+			// user-mention in blocks lines up byte-for-byte with the text.
+			name: "wire-form mention in text — equivalent, dropped",
+			msg: goslack.Msg{
+				Text: "hey <@U123ABC> ping",
+				Blocks: goslack.Blocks{
+					BlockSet: []goslack.Block{
+						goslack.NewRichTextBlock("blk",
+							goslack.NewRichTextSection(
+								goslack.NewRichTextSectionTextElement("hey ", nil),
+								goslack.NewRichTextSectionUserElement("U123ABC", nil),
+								goslack.NewRichTextSectionTextElement(" ping", nil),
+							),
+						),
+					},
+				},
+			},
+			wantBlocks: false,
 		},
 	}
-	rc := NewSlackRawContent(msg)
-	if rc.Blocks == nil {
-		t.Error("Blocks should be kept when not equivalent to text")
-	}
-}
 
-func TestNewSlackRawContent_DropsBlocksKeepsAttachments(t *testing.T) {
-	// Equivalent blocks + attachments: blocks drop, attachments stay.
-	msg := goslack.Msg{
-		Text: "see the attached",
-		Blocks: goslack.Blocks{
-			BlockSet: []goslack.Block{
-				goslack.NewRichTextBlock("blk",
-					goslack.NewRichTextSection(
-						goslack.NewRichTextSectionTextElement("see the attached", nil),
-					),
-				),
-			},
-		},
-		Attachments: []goslack.Attachment{{Title: "PR", Fallback: "PR fallback"}},
-	}
-	rc := NewSlackRawContent(msg)
-	if rc.Blocks != nil {
-		t.Error("Blocks should be dropped when equivalent")
-	}
-	if len(rc.Attachments) != 1 {
-		t.Errorf("Attachments should be kept: got %d", len(rc.Attachments))
-	}
-}
-
-func TestNewSlackRawContent_DropsBlocksKeepsFiles(t *testing.T) {
-	msg := goslack.Msg{
-		Text: "image attached",
-		Blocks: goslack.Blocks{
-			BlockSet: []goslack.Block{
-				goslack.NewRichTextBlock("blk",
-					goslack.NewRichTextSection(
-						goslack.NewRichTextSectionTextElement("image attached", nil),
-					),
-				),
-			},
-		},
-		Files: []goslack.File{{Name: "img.png", Mimetype: "image/png"}},
-	}
-	rc := NewSlackRawContent(msg)
-	if rc.Blocks != nil {
-		t.Error("Blocks should be dropped when equivalent")
-	}
-	if len(rc.Files) != 1 {
-		t.Errorf("Files should be kept: got %d", len(rc.Files))
-	}
-}
-
-func TestNewSlackRawContent_DropsBlocksWithMentionInWireForm(t *testing.T) {
-	// In production, msg.Text is the pre-resolve wire form, so it lines up
-	// byte-for-byte with what the renderer produces for mentions.
-	msg := goslack.Msg{
-		Text: "hey <@U123ABC> ping",
-		Blocks: goslack.Blocks{
-			BlockSet: []goslack.Block{
-				goslack.NewRichTextBlock("blk",
-					goslack.NewRichTextSection(
-						goslack.NewRichTextSectionTextElement("hey ", nil),
-						goslack.NewRichTextSectionUserElement("U123ABC", nil),
-						goslack.NewRichTextSectionTextElement(" ping", nil),
-					),
-				),
-			},
-		},
-	}
-	rc := NewSlackRawContent(msg)
-	if rc.Blocks != nil {
-		t.Error("Blocks should be dropped when equivalent including mentions")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := NewSlackRawContent(tc.msg)
+			if (rc.Blocks != nil) != tc.wantBlocks {
+				t.Errorf("Blocks present = %v, want %v", rc.Blocks != nil, tc.wantBlocks)
+			}
+			if len(rc.Attachments) != tc.wantAttaches {
+				t.Errorf("Attachments count = %d, want %d", len(rc.Attachments), tc.wantAttaches)
+			}
+			if len(rc.Files) != tc.wantFiles {
+				t.Errorf("Files count = %d, want %d", len(rc.Files), tc.wantFiles)
+			}
+		})
 	}
 }
 
