@@ -1505,3 +1505,86 @@ func TestListGWSServices_Empty(t *testing.T) {
 		t.Errorf("got %d services, want 0", len(infos))
 	}
 }
+
+// TestReadConversation_OrphanThreadReply_Surfaced verifies that a thread reply
+// is still returned even when the thread file never received its parent line
+// (e.g. the listener's parent fetch failed). Without the orphan-handling path,
+// such replies are silently dropped because Parent.ID is empty.
+func TestReadConversation_OrphanThreadReply_Surfaced(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	// Old parent on a date file that won't be selected by Since=5m.
+	parentTS := "1700000001.000001"
+	oldParent := msgLine(parentTS, time.Now().Add(-7*24*time.Hour), "Alice", "U001", "old discussion")
+	if err := s.Append(acct, conv, oldParent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+
+	// Thread file holds only the reply — parent line was never written.
+	recentReply := msgLine("1700000002.000002", time.Now().Add(-10*time.Second), "Bob", "U002", "replying to old thread")
+	recentReply.Msg.Reply = true
+	if err := s.AppendThread(acct, conv, parentTS, recentReply); err != nil {
+		t.Fatalf("AppendThread: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, conv, ReadOpts{Since: 5 * time.Minute})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+
+	var found bool
+	for _, m := range df.Messages {
+		if m.ID == "1700000002.000002" {
+			found = true
+			if !m.Reply {
+				t.Errorf("orphan reply Reply flag = false, want true")
+			}
+			if m.Text != "replying to old thread" {
+				t.Errorf("Text = %q, want %q", m.Text, "replying to old thread")
+			}
+		}
+	}
+	if !found {
+		var ids []string
+		for _, m := range df.Messages {
+			ids = append(ids, m.ID)
+		}
+		t.Errorf("orphan reply not surfaced; got %d messages: %v", len(df.Messages), ids)
+	}
+}
+
+// TestReadConversation_ThreadReply_OldParentInDateFile verifies the realistic
+// production case: parent is in an old date file outside the Since window,
+// the thread file holds parent+reply, and a recent reply must surface alone
+// (the old parent is correctly filtered out by the Since cutoff).
+func TestReadConversation_ThreadReply_OldParentInDateFile(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	parentTS := "1700000001.000001"
+	oldParent := msgLine(parentTS, time.Now().Add(-7*24*time.Hour), "Alice", "U001", "old discussion")
+	if err := s.Append(acct, conv, oldParent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, conv, parentTS, oldParent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	recentReply := msgLine("1700000002.000002", time.Now().Add(-10*time.Second), "Bob", "U002", "fresh reply")
+	recentReply.Msg.Reply = true
+	if err := s.AppendThread(acct, conv, parentTS, recentReply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, conv, ReadOpts{Since: 5 * time.Minute})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 1 || df.Messages[0].ID != "1700000002.000002" {
+		var ids []string
+		for _, m := range df.Messages {
+			ids = append(ids, m.ID)
+		}
+		t.Errorf("want only the fresh reply, got %d: %v", len(df.Messages), ids)
+	}
+}
