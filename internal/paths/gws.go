@@ -229,6 +229,16 @@ func (m DriveMetaFile) Dir() string { return m.dir }
 // Name returns the filename (without the directory).
 func (m DriveMetaFile) Name() string { return m.name }
 
+// Date returns the modification date encoded in the drive-meta filename.
+// The filename is validated at construction (via ParseDriveMetaPath or
+// DriveFileDir.MetaFile), so this re-parse is infallible for any value
+// produced through the typed constructors.
+func (m DriveMetaFile) Date() time.Time {
+	dateStr := strings.TrimSuffix(strings.TrimPrefix(m.name, driveMetaFilePrefix), driveMetaFileExt)
+	t, _ := time.Parse("2006-01-02", dateStr)
+	return t
+}
+
 // ContentFiles returns absolute paths of the Drive content files (markdown
 // tabs, CSV sheets, comments JSONL) that this meta file describes. The meta
 // file is the anchor of identity for a Drive file at a specific modification
