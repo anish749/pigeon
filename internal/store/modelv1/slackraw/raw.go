@@ -19,12 +19,19 @@ type SlackRawContent struct {
 // NewSlackRawContent extracts Slack-specific content (blocks, attachments,
 // files) from a message into a typed struct. Returns an empty struct if the
 // message has no extra content beyond text.
+//
+// Blocks that render to exactly the message's text fallback are dropped —
+// they would be pure duplication of msg.Text. The rendering rules for that
+// determination live in BlocksEquivalentToText. msg.Text must be the
+// pre-resolve wire-form text (the Slack event payload is in this form
+// before any ResolveText pass), which is what callers in this codebase
+// currently pass.
 func NewSlackRawContent(msg goslack.Msg) SlackRawContent {
 	if len(msg.Attachments) == 0 && len(msg.Blocks.BlockSet) == 0 && len(msg.Files) == 0 {
 		return SlackRawContent{}
 	}
 	content := SlackRawContent{}
-	if len(msg.Blocks.BlockSet) > 0 {
+	if len(msg.Blocks.BlockSet) > 0 && !BlocksEquivalentToText(msg.Blocks, msg.Text) {
 		content.Blocks = &msg.Blocks
 	}
 	if len(msg.Attachments) > 0 {
