@@ -53,6 +53,14 @@ const (
 	// WorkstreamSubdir is the per-workspace subdirectory that holds the persistent
 	// workstream store: <root>/.workspaces/<name>/workstream/.
 	WorkstreamSubdir = "workstream"
+
+	// WorkstreamsFilename is the filename for a workspace's persisted workstream
+	// list inside the workstream store directory.
+	WorkstreamsFilename = "workstreams.json"
+
+	// WorkstreamProposalsFilename is the filename for a workspace's persisted
+	// proposal list inside the workstream store directory.
+	WorkstreamProposalsFilename = "proposals.json"
 )
 
 // Data directory type hierarchy:

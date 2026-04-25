@@ -78,8 +78,8 @@ func TestGlob_NoSince(t *testing.T) {
 
 	// All paths should be absolute.
 	for _, f := range files {
-		if !filepath.IsAbs(f) {
-			t.Errorf("path is not absolute: %s", f)
+		if !filepath.IsAbs(f.Path()) {
+			t.Errorf("path is not absolute: %s", f.Path())
 		}
 	}
 }
@@ -95,12 +95,12 @@ func TestGlob_SinceFiltersDates(t *testing.T) {
 	// Should include today's date file and today's thread, but not the
 	// old date file or old thread.
 	for _, f := range files {
-		base := filepath.Base(f)
+		base := filepath.Base(f.Path())
 		if base == time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")+".jsonl" {
-			t.Errorf("Glob returned old date file: %s", f)
+			t.Errorf("Glob returned old date file: %s", f.Path())
 		}
 		if base == "1700000000.jsonl" {
-			t.Errorf("Glob returned old thread file: %s", f)
+			t.Errorf("Glob returned old thread file: %s", f.Path())
 		}
 	}
 
@@ -119,7 +119,7 @@ func TestGlob_SinceIncludesRecentThread(t *testing.T) {
 
 	hasThread := false
 	for _, f := range files {
-		if filepath.Base(f) == "1742100000.jsonl" {
+		if filepath.Base(f.Path()) == "1742100000.jsonl" {
 			hasThread = true
 			break
 		}

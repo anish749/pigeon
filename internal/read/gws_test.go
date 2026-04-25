@@ -85,7 +85,7 @@ func TestGlob_GWS_NoSince(t *testing.T) {
 	//       = 8 files
 	if len(files) != 8 {
 		for _, f := range files {
-			t.Logf("  %s", f)
+			t.Logf("  %s", f.Path())
 		}
 		t.Errorf("got %d files, want 8", len(files))
 	}
@@ -93,7 +93,7 @@ func TestGlob_GWS_NoSince(t *testing.T) {
 	// Should include files of all three extensions.
 	var mdCount, csvCount, jsonlCount int
 	for _, f := range files {
-		switch filepath.Ext(f) {
+		switch filepath.Ext(f.Path()) {
 		case ".md":
 			mdCount++
 		case ".csv":
@@ -129,16 +129,17 @@ func TestGlob_GWS_SinceFiltersDriveContent(t *testing.T) {
 	hasOldGmail := false
 
 	for _, f := range files {
+		p := f.Path()
 		switch {
-		case strings.Contains(f, "recent-doc-FILEID1") && strings.HasSuffix(f, ".md"):
+		case strings.Contains(p, "recent-doc-FILEID1") && strings.HasSuffix(p, ".md"):
 			hasRecentMD = true
-		case strings.Contains(f, "old-doc-FILEID2") && strings.HasSuffix(f, ".md"):
+		case strings.Contains(p, "old-doc-FILEID2") && strings.HasSuffix(p, ".md"):
 			hasOldMD = true
-		case strings.Contains(f, "recent-sheet-FILEID3") && strings.HasSuffix(f, ".csv"):
+		case strings.Contains(p, "recent-sheet-FILEID3") && strings.HasSuffix(p, ".csv"):
 			hasRecentCSV = true
-		case strings.Contains(f, "gmail") && strings.Contains(filepath.Base(f), time.Now().UTC().Format("2006-01-02")):
+		case strings.Contains(p, "gmail") && strings.Contains(filepath.Base(p), time.Now().UTC().Format("2006-01-02")):
 			hasRecentGmail = true
-		case strings.Contains(f, "gmail") && strings.Contains(filepath.Base(f), time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")):
+		case strings.Contains(p, "gmail") && strings.Contains(filepath.Base(p), time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")):
 			hasOldGmail = true
 		}
 	}
@@ -161,8 +162,8 @@ func TestGlob_GWS_SinceFiltersDriveContent(t *testing.T) {
 
 	// Drive meta files themselves should not be in the output.
 	for _, f := range files {
-		if strings.Contains(filepath.Base(f), "drive-meta-") {
-			t.Errorf("drive-meta file should not be in output: %s", f)
+		if strings.Contains(filepath.Base(f.Path()), "drive-meta-") {
+			t.Errorf("drive-meta file should not be in output: %s", f.Path())
 		}
 	}
 }
@@ -178,8 +179,9 @@ func TestGlob_GWS_SinceExcludesOldComments(t *testing.T) {
 	// old-doc-FILEID2/comments.jsonl should NOT be returned because the
 	// sibling drive-meta file's date (30 days ago) is outside the window.
 	for _, f := range files {
-		if strings.Contains(f, "old-doc-FILEID2") && strings.HasSuffix(f, "comments.jsonl") {
-			t.Errorf("old drive comments should not be returned: %s", f)
+		p := f.Path()
+		if strings.Contains(p, "old-doc-FILEID2") && strings.HasSuffix(p, "comments.jsonl") {
+			t.Errorf("old drive comments should not be returned: %s", p)
 		}
 	}
 }
@@ -289,14 +291,14 @@ func TestGlob_GWS_Mixed(t *testing.T) {
 	// drive-meta-*.json should NOT be in the output.
 	if len(files) != 3 {
 		for _, f := range files {
-			t.Logf("  %s", f)
+			t.Logf("  %s", f.Path())
 		}
 		t.Errorf("got %d files, want 3", len(files))
 	}
 
 	for _, f := range files {
-		if strings.Contains(filepath.Base(f), "drive-meta-") {
-			t.Errorf("drive-meta file should not be in Glob output: %s", f)
+		if strings.Contains(filepath.Base(f.Path()), "drive-meta-") {
+			t.Errorf("drive-meta file should not be in Glob output: %s", f.Path())
 		}
 	}
 
@@ -305,12 +307,13 @@ func TestGlob_GWS_Mixed(t *testing.T) {
 	hasGmail := false
 	hasDriveMD := false
 	for _, f := range files {
+		p := f.Path()
 		switch {
-		case strings.Contains(f, "/slack/"):
+		case strings.Contains(p, "/slack/"):
 			hasMessaging = true
-		case strings.Contains(f, "/gmail/"):
+		case strings.Contains(p, "/gmail/"):
 			hasGmail = true
-		case strings.HasSuffix(f, ".md"):
+		case strings.HasSuffix(p, ".md"):
 			hasDriveMD = true
 		}
 	}

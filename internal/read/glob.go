@@ -16,8 +16,9 @@ func GlobFiles(dir string, globs []string) ([]string, error) {
 	return rgFiles(dir, globs)
 }
 
-// Glob returns absolute paths to data files under dir, sorted by modification
-// time (most recent first).
+// Glob returns typed data files under dir, sorted by modification time (most
+// recent first). Each returned value is a paths.DataFile carrying its
+// classified type alongside the path string.
 //
 // Files covered:
 //   - Messaging JSONL date files and thread files (slack, whatsapp).
@@ -32,7 +33,13 @@ func GlobFiles(dir string, globs []string) ([]string, error) {
 //     date falls within the window.
 //   - Thread files are filtered by content (rg -l for timestamp prefixes
 //     within the window).
-func Glob(dir string, since time.Duration) ([]string, error) {
+//
+// Every discovered path is run through paths.Classify. Paths that no kind
+// owns are logged and dropped — see classifyAndCollect — so callers never
+// receive an unrecognised file. The audit at the time of writing showed
+// zero such paths in practice; the log is the regression alarm if Glob's
+// discovery selectors ever drift past the registry.
+func Glob(dir string, since time.Duration) ([]paths.DataFile, error) {
 	if since == 0 {
 		globs := []string{"*" + paths.FileExt}
 		for _, ext := range paths.DriveContentExts {
@@ -45,7 +52,7 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 			return nil, err
 		}
 		reverseStrings(files) // most recent first
-		return files, nil
+		return classifyAndCollect(files), nil
 	}
 
 	dateFileGlobs := dateGlobs(since)
@@ -100,7 +107,25 @@ func Glob(dir string, since time.Duration) ([]string, error) {
 	result := append([]string{}, dateFiles...)
 	result = append(result, driveContent...)
 	result = append(result, threadFiles...)
-	return result, nil
+	return classifyAndCollect(result), nil
+}
+
+// classifyAndCollect runs each path through paths.Classify, dropping any
+// that do not match a known kind. Drops are logged with slog.Warn so a
+// drift between Glob's discovery selectors and the registry shows up in
+// daemon/CLI logs — silent omission was the original failure mode this
+// boundary is meant to retire.
+func classifyAndCollect(in []string) []paths.DataFile {
+	out := make([]paths.DataFile, 0, len(in))
+	for _, p := range in {
+		k := paths.Classify(p)
+		if k == nil {
+			slog.Warn("read.Glob: dropping unrecognised path", "path", p)
+			continue
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 // expandDriveMetaMatches resolves each drive-meta file into the content

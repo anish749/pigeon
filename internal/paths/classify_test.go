@@ -127,6 +127,23 @@ func TestClassify(t *testing.T) {
 			want: IssueFile("/data/linear-issues/acme/issues/PROJ-123.jsonl"),
 		},
 
+		// Workstream router state.
+		{
+			name: "workstream list",
+			path: "/data/.workspaces/acme/workstream/workstreams.json",
+			want: WorkstreamsFile("/data/.workspaces/acme/workstream/workstreams.json"),
+		},
+		{
+			name: "workstream proposals",
+			path: "/data/.workspaces/acme/workstream/proposals.json",
+			want: WorkstreamProposalsFile("/data/.workspaces/acme/workstream/proposals.json"),
+		},
+		{
+			name: "workstreams.json outside workstream subdir is not classified",
+			path: "/data/.workspaces/acme/affinityrouter/workstreams.json",
+			want: nil,
+		},
+
 		// Negative cases.
 		{
 			name: "drive meta with malformed date returns nil",
@@ -184,6 +201,8 @@ func TestClassify_RoundTripsConstructors(t *testing.T) {
 		{"PendingDeletesFile", gwsAcct.Gmail().PendingDeletesFile()},
 		{"CalendarDateFile", gwsAcct.Calendar("primary").DateFile("2026-04-07")},
 		{"IssueFile", root.AccountFor(account.New("linear-issues", "acme")).Linear().IssueFile("PROJ-123")},
+		{"WorkstreamsFile", root.Workspace("acme").WorkstreamStore().WorkstreamsFile()},
+		{"WorkstreamProposalsFile", root.Workspace("acme").WorkstreamStore().ProposalsFile()},
 	}
 
 	for _, tt := range cases {

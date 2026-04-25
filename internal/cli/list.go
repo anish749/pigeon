@@ -82,7 +82,9 @@ func runListSince(platform, account, since string) error {
 		if err != nil {
 			return err
 		}
-		allFiles = append(allFiles, files...)
+		for _, f := range files {
+			allFiles = append(allFiles, f.Path())
+		}
 	}
 	if len(allFiles) == 0 {
 		fmt.Println("No conversations found.")

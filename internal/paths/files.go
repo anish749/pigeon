@@ -1,5 +1,7 @@
 package paths
 
+import "path/filepath"
+
 // DataFile is the top-level sealed interface implemented by every typed file
 // path under pigeon's data tree. The unexported dataFile() method restricts
 // implementations to this package, so a value typed as DataFile is guaranteed
@@ -51,6 +53,8 @@ var (
 	_ DataFile = SyncCursorsFile("")
 	_ DataFile = PollMetricsFile("")
 	_ DataFile = PendingDeletesFile("")
+	_ DataFile = WorkstreamsFile("")
+	_ DataFile = WorkstreamProposalsFile("")
 	_ DataFile = DriveMetaFile{}
 )
 
@@ -178,3 +182,29 @@ type WorkstreamStoreDir string
 
 // Path returns the directory path as a string.
 func (w WorkstreamStoreDir) Path() string { return string(w) }
+
+// WorkstreamsFile returns the path to this store's workstreams.json file.
+func (w WorkstreamStoreDir) WorkstreamsFile() WorkstreamsFile {
+	return WorkstreamsFile(filepath.Join(string(w), WorkstreamsFilename))
+}
+
+// ProposalsFile returns the path to this store's proposals.json file.
+func (w WorkstreamStoreDir) ProposalsFile() WorkstreamProposalsFile {
+	return WorkstreamProposalsFile(filepath.Join(string(w), WorkstreamProposalsFilename))
+}
+
+// WorkstreamsFile is a path to a workspace's persisted workstream list:
+// <root>/.workspaces/<name>/workstream/workstreams.json.
+type WorkstreamsFile string
+
+// Path returns the file path as a string.
+func (w WorkstreamsFile) Path() string { return string(w) }
+func (WorkstreamsFile) dataFile()      {}
+
+// WorkstreamProposalsFile is a path to a workspace's persisted proposal list:
+// <root>/.workspaces/<name>/workstream/proposals.json.
+type WorkstreamProposalsFile string
+
+// Path returns the file path as a string.
+func (w WorkstreamProposalsFile) Path() string { return string(w) }
+func (WorkstreamProposalsFile) dataFile()      {}
