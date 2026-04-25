@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"testing"
@@ -100,6 +101,90 @@ func TestConnectedClaudeSessions_SessionWithNoChannel(t *testing.T) {
 	}
 	if got[0].Account != "" {
 		t.Errorf("Account = %q, want empty for orphan session", got[0].Account)
+	}
+}
+
+// TestDrainConversation_IncludesThreadReplies verifies that thread-only replies
+// (not broadcast to the channel) are delivered via drainConversation. This is
+// the bug described in #254: thread replies are written to thread files, but
+// the hub's drain reads via ReadConversation — which must interleave them.
+func TestDrainConversation_IncludesThreadReplies(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	// Write a parent message to the date file.
+	now := time.Now()
+	parent := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "P1", Ts: now.Add(-10 * time.Second),
+			Sender: "Alice", SenderID: "U001", Text: "channel message",
+		},
+	}
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+
+	// Write a thread-only reply to the thread file (not broadcast to channel).
+	threadReply := modelv1.Line{
+		Type: modelv1.LineMessage,
+		Msg: &modelv1.MsgLine{
+			ID: "R1", Ts: now.Add(-5 * time.Second),
+			Sender: "Bob", SenderID: "U002", Text: "thread-only reply", Reply: true,
+		},
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", threadReply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	// Set up a session that captures delivered messages.
+	var delivered []NotificationMsg
+	sess := &Session{
+		SessionID: "sess-1",
+		CWD:       "/tmp",
+		Send: func(_ context.Context, msg NotificationMsg) error {
+			delivered = append(delivered, msg)
+			return nil
+		},
+		Ready: make(chan struct{}),
+	}
+	close(sess.Ready)
+	h.sessions["sess-1"] = sess
+
+	ch := &channel{
+		acct:      acct,
+		sessionID: "sess-1",
+		signal:    make(chan deliverySignal, signalBufferSize),
+	}
+
+	// Drain with lastDelivered from 1 minute ago — both messages should be in range.
+	lastDelivered := now.Add(-1 * time.Minute)
+	h.drainConversation(ch, "#general", lastDelivered)
+
+	if len(delivered) == 0 {
+		t.Fatal("drainConversation delivered nothing — thread reply was lost")
+	}
+
+	// The delivered content should contain the thread reply text.
+	content := delivered[0].Content()
+	if !strings.Contains(content, "thread-only reply") {
+		t.Errorf("delivered content missing thread reply.\ngot:\n%s", content)
 	}
 }
 
