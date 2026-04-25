@@ -96,12 +96,6 @@ func (c *Client) run(ctx context.Context, systemPrompt, prompt string) (string, 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			if c.timeout != nil {
-				return "", fmt.Errorf("timed out after %s", *c.timeout)
-			}
-			return "", fmt.Errorf("timed out: %w", ctx.Err())
-		}
 		return "", fmt.Errorf("claude CLI: %w: %s", err, stderr.String())
 	}
 
