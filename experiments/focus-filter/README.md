@@ -7,8 +7,8 @@ this directory is the apparatus that produced them.
 ## Setup
 
 Each script is a self-contained `uv` script with inline dependencies.
-No shared install needed — `uv run experiments/<script>.py` will set up
-the environment on first use.
+No shared install needed — `uv run experiments/focus-filter/<script>.py`
+will set up the environment on first use.
 
 Two pieces of state the scripts read:
 
@@ -31,19 +31,19 @@ is whatever the local pigeon daemon has synced.
 pigeon workstream discover --workspace <name> --since 2026-04-01
 
 # 2. Sample messages and label them with the Claude judge.
-uv run experiments/label_signals_v2.py --workspace <name>
+uv run experiments/focus-filter/label_signals_v2.py --workspace <name>
 
 # 3. Inspect focus-prose geometry — check whether the discovered
 #    workstreams are sufficiently distinct from each other.
-uv run experiments/analyze_focus_geometry.py
+uv run experiments/focus-filter/analyze_focus_geometry.py
 
 # 4. Sweep routing variants and operating points.
-uv run experiments/evaluate_recall_wake.py
-uv run experiments/evaluate_multi_workspace.py    # F1-based, earlier framing
-uv run experiments/test_embedders.py              # MiniLM vs bge vs e5
+uv run experiments/focus-filter/evaluate_recall_wake.py
+uv run experiments/focus-filter/evaluate_multi_workspace.py    # F1-based, earlier framing
+uv run experiments/focus-filter/test_embedders.py              # MiniLM vs bge vs e5
 
 # 5. Inspect specific failure cases.
-uv run experiments/inspect_errors.py --workspace <name>
+uv run experiments/focus-filter/inspect_errors.py --workspace <name>
 ```
 
 ## What each script measures

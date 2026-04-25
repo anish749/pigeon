@@ -231,7 +231,7 @@ proposing a workstream as a routing target.
 
 This section records the experimental path from the original
 multi-vector spec to the simpler shape above. All numbers reproduce
-from `experiments/` in the validation worktree.
+from `experiments/focus-filter/` in the validation worktree.
 
 ### 2.1 The validation problem
 
@@ -484,13 +484,14 @@ upstream of where this spec operates.
 
 ### 2.9 Files used in the validation
 
-- `experiments/evaluate_recall_wake.py` — the final metric harness
-- `experiments/evaluate_multi_workspace.py` — earlier F1-based sweep
-- `experiments/analyze_focus_geometry.py` — focus-prose pairwise
-  analysis used to identify mergeable workstreams
-- `experiments/test_embedders.py` — comparison across MiniLM, bge, e5
-- `experiments/label_signals_v2.py` — judge-labelling pipeline
-- `experiments/workstreams.json` — workstream config + post-merge
-  remap
-- `experiments/labels-{X,Y,Z}.json` — Claude Haiku judge labels
-- `experiments/RECOMMENDATION.md` — interim writeups across rounds
+All under `experiments/focus-filter/`:
+
+- `evaluate_recall_wake.py` — the final metric harness
+- `evaluate_multi_workspace.py` — earlier F1-based sweep
+- `analyze_focus_geometry.py` — focus-prose pairwise analysis used to
+  identify mergeable workstreams
+- `test_embedders.py` — comparison across MiniLM, bge, e5
+- `label_signals_v2.py` — judge-labelling pipeline
+- `workstreams.json` (gitignored) — workstream config + post-merge
+  remap; see `workstreams.example.json` for the schema
+- `labels-{X,Y,Z}.json` (gitignored) — Claude Haiku judge labels
