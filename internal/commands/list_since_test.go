@@ -326,6 +326,103 @@ func TestLatestTs_StandaloneKindsReturnZero(t *testing.T) {
 	}
 }
 
+// --- per-source conversation grouping ---
+
+func TestExtractConversations_PerDocDriveGrouping(t *testing.T) {
+	// Two Drive docs under the same account should produce two
+	// conversations, not collapse to one.
+	root := t.TempDir()
+	drive := paths.NewDataRoot(root).AccountFor(account.New("gws", "anish")).Drive()
+	docA := drive.File("doc-A")
+	docB := drive.File("doc-B")
+	for _, p := range []string{docA.Path(), docB.Path()} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(docA.MetaFile("2026-04-07").Path(), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docB.MetaFile("2026-04-06").Path(), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tabA := docA.TabFile("Notes")
+	tabB := docB.TabFile("Notes")
+	for _, p := range []string{tabA.Path(), tabB.Path()} {
+		if err := os.WriteFile(p, []byte("# heading"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	convs, err := extractConversations([]paths.DataFile{tabA, tabB}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (per-doc): %+v", len(convs), convs)
+	}
+}
+
+func TestExtractConversations_PerCalendarGrouping(t *testing.T) {
+	// Two calendars under the same account should produce two conversations.
+	root := t.TempDir()
+	gws := paths.NewDataRoot(root).AccountFor(account.New("gws", "anish"))
+	primary := gws.Calendar("primary").DateFile("2026-04-07")
+	team := gws.Calendar("team@example.com").DateFile("2026-04-07")
+
+	body := `{"id":"e1","updated":"2026-04-07T10:00:00Z"}` + "\n"
+	for _, df := range []paths.CalendarDateFile{primary, team} {
+		if err := os.MkdirAll(filepath.Dir(df.Path()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(df.Path(), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	convs, err := extractConversations([]paths.DataFile{primary, team}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (per-calendar): %+v", len(convs), convs)
+	}
+}
+
+func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
+	root := t.TempDir()
+	linear := paths.NewDataRoot(root).AccountFor(account.New("linear-issues", "acme")).Linear()
+	issue1 := linear.IssueFile("PROJ-123")
+	issue2 := linear.IssueFile("PROJ-124")
+
+	body := `{"updatedAt":"2026-04-07T10:00:00Z"}` + "\n"
+	for _, f := range []paths.IssueFile{issue1, issue2} {
+		if err := os.MkdirAll(filepath.Dir(f.Path()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f.Path(), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	convs, err := extractConversations([]paths.DataFile{issue1, issue2}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (per-issue): %+v", len(convs), convs)
+	}
+	// Display should drop the redundant /issues/ segment.
+	for _, c := range convs {
+		if !filepath.IsAbs(c.Dir) {
+			t.Errorf("Dir should be absolute, got %q", c.Dir)
+		}
+		if !(c.Display == "linear-issues/acme/PROJ-123.jsonl" || c.Display == "linear-issues/acme/PROJ-124.jsonl") {
+			t.Errorf("unexpected display: %q", c.Display)
+		}
+	}
+}
+
 func TestLatestTs_MalformedJSONLFailsLoud(t *testing.T) {
 	root := t.TempDir()
 	conv := paths.NewDataRoot(root).AccountFor(account.New("slack", "acme")).Conversation("#general")

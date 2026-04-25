@@ -15,9 +15,9 @@ import (
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
-// RunListSince prints conversations with activity within the given duration
+// RunListSince prints listConvs with activity within the given duration
 // window, scoped by the active workspace and optional platform/account.
-// Each line is "<display>  last: <age> ago" followed by the conversation
+// Each line is "<display>  last: <age> ago" followed by the listConv
 // directory path on the next line.
 func RunListSince(ws *workspace.Workspace, platform, account, since string) error {
 	sinceDur, err := timeutil.ParseDuration(since)
@@ -39,7 +39,7 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 		allFiles = append(allFiles, files...)
 	}
 	if len(allFiles) == 0 {
-		fmt.Println("No conversations found.")
+		fmt.Println("No listConvs found.")
 		return nil
 	}
 
@@ -49,7 +49,7 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 		return err
 	}
 	if len(convs) == 0 {
-		fmt.Println("No conversations found.")
+		fmt.Println("No listConvs found.")
 		return nil
 	}
 
@@ -65,54 +65,37 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 	return nil
 }
 
-// activeConv represents a conversation discovered from file paths.
+// activeConv represents a listConv discovered from file paths.
 type activeConv struct {
-	Display    string    // platform/account/conversation
-	Dir        string    // absolute conversation directory
+	Display    string    // platform/account/listConv
+	Dir        string    // absolute listConv directory
 	LatestTime time.Time // most recent activity timestamp
 }
 
-// extractConversations deduplicates files into unique conversations,
-// tracking the most recent activity timestamp per conversation. Today the
-// grouping uses the legacy parts[0:3] heuristic — a follow-up commit
-// replaces it with a paths.DataFile-aware dispatch so per-source granularity
-// (per-doc Drive, per-issue Linear, per-calendar) is preserved.
+// extractConversations deduplicates files into unique listConvs,
+// tracking the most recent activity timestamp per listConv. Grouping
+// granularity is per-kind so each source surfaces at its natural unit:
+// messaging listConvs group all date+thread files under one dir, but
+// each Drive doc, each calendar, and each Linear issue stand alone.
 func extractConversations(files []paths.DataFile, root string) ([]activeConv, error) {
 	seen := make(map[string]*activeConv)
 	var order []string
 	for _, f := range files {
-		path := f.Path()
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			continue
-		}
-		parts := strings.Split(rel, string(filepath.Separator))
-		if _, isThread := f.(paths.ThreadFile); isThread {
-			for i, p := range parts {
-				if p == paths.ThreadsSubdir {
-					parts = append(parts[:i], parts[i+1:]...)
-					break
-				}
-			}
-		}
-		if len(parts) < 4 {
-			continue
-		}
-		convDir := filepath.Join(root, parts[0], parts[1], parts[2])
-
-		c, ok := seen[convDir]
+		conv, ok := listConvFor(f, root)
 		if !ok {
-			c = &activeConv{
-				Display: strings.Join(parts[:3], "/"),
-				Dir:     convDir,
-			}
-			seen[convDir] = c
-			order = append(order, convDir)
+			continue
+		}
+
+		c, exists := seen[conv.Dir]
+		if !exists {
+			c = &activeConv{Display: conv.Display, Dir: conv.Dir}
+			seen[conv.Dir] = c
+			order = append(order, conv.Dir)
 		}
 
 		ts, err := LatestTs(f)
 		if err != nil {
-			return nil, fmt.Errorf("latest ts %s: %w", path, err)
+			return nil, fmt.Errorf("latest ts %s: %w", f.Path(), err)
 		}
 		if ts.After(c.LatestTime) {
 			c.LatestTime = ts
@@ -124,6 +107,65 @@ func extractConversations(files []paths.DataFile, root string) ([]activeConv, er
 		result[i] = *seen[key]
 	}
 	return result, nil
+}
+
+// listConv is the grouping identity used by `list --since`. Dir is the
+// uniqueness key (the directory or file that defines a listConv in this
+// view); Display is the user-facing label.
+type listConv struct {
+	Dir     string
+	Display string
+}
+
+// listConvFor returns the listConv that owns f, dispatched on the
+// typed paths.DataFile so each kind groups at its own natural unit. The
+// boolean is false when f belongs to a kind that does not surface in
+// `list --since` output (sidecars, queues, identity files, attachments).
+func listConvFor(f paths.DataFile, root string) (listConv, bool) {
+	switch v := f.(type) {
+	case paths.MessagingDateFile:
+		// <plat>/<acct>/<conv>/YYYY-MM-DD.jsonl — parent dir is the listConv.
+		return relativeConv(filepath.Dir(v.Path()), root), true
+	case paths.ThreadFile:
+		// <plat>/<acct>/<conv>/threads/<ts>.jsonl — strip /threads/<ts>.jsonl.
+		return relativeConv(filepath.Dir(filepath.Dir(v.Path())), root), true
+	case paths.EmailDateFile:
+		// gws/<acct>/gmail/YYYY-MM-DD.jsonl — group at the gmail dir
+		// (one stream per account, no per-day split in the listing).
+		return relativeConv(filepath.Dir(v.Path()), root), true
+	case paths.CalendarDateFile:
+		// gws/<acct>/gcalendar/<calID>/YYYY-MM-DD.jsonl — per-calendar.
+		return relativeConv(filepath.Dir(v.Path()), root), true
+	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile, paths.DriveMetaFile:
+		// gws/<acct>/gdrive/<doc>/{Notes.md,Sheet.csv,comments.jsonl,drive-meta-*.json}
+		// — per-doc dir.
+		return relativeConv(filepath.Dir(f.Path()), root), true
+	case paths.IssueFile:
+		// linear-issues/<acct>/issues/<id>.jsonl — each issue is its own
+		// listConv. Dir is the file itself (no per-issue subdir);
+		// Display drops the redundant "issues" segment for readability.
+		display, err := filepath.Rel(root, v.Path())
+		if err != nil {
+			display = v.Path()
+		}
+		display = strings.Replace(display, string(filepath.Separator)+"issues"+string(filepath.Separator), string(filepath.Separator), 1)
+		return listConv{Dir: v.Path(), Display: display}, true
+	}
+	// AttachmentFile, ConvMetaFile, PeopleFile, MaintenanceFile,
+	// SyncCursorsFile, PollMetricsFile, PendingDeletesFile, WorkstreamsFile,
+	// WorkstreamProposalsFile — not surfaced in list --since.
+	return listConv{}, false
+}
+
+// relativeConv builds a listConv whose Dir is convDir and whose Display
+// is convDir relative to the data root. Falls back to the absolute path if
+// Rel fails (different volumes).
+func relativeConv(convDir, root string) listConv {
+	display, err := filepath.Rel(root, convDir)
+	if err != nil {
+		display = convDir
+	}
+	return listConv{Dir: convDir, Display: display}
 }
 
 // LatestTs returns the most recent activity timestamp recorded by the file,
