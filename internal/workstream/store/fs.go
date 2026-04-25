@@ -89,6 +89,26 @@ func (s *FS) PutWorkstream(ws models.Workstream) error {
 	return s.save(workstreamsFile, all)
 }
 
+func (s *FS) DeleteWorkstream(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	all, err := s.loadWorkstreams()
+	if err != nil {
+		return err
+	}
+	out := make([]models.Workstream, 0, len(all))
+	for _, w := range all {
+		if w.ID != id {
+			out = append(out, w)
+		}
+	}
+	if len(out) == len(all) {
+		return nil
+	}
+	return s.save(workstreamsFile, out)
+}
+
 func (s *FS) loadWorkstreams() ([]models.Workstream, error) {
 	var list []models.Workstream
 	if err := s.load(workstreamsFile, &list); err != nil {

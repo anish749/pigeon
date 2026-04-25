@@ -16,6 +16,8 @@ type Store interface {
 	ActiveWorkstreams() ([]models.Workstream, error)
 	// PutWorkstream creates or updates a workstream.
 	PutWorkstream(models.Workstream) error
+	// DeleteWorkstream removes a workstream by ID. Returns nil if not found.
+	DeleteWorkstream(id string) error
 
 	// GetProposal returns a proposal by ID. Returns nil and false if not found.
 	GetProposal(id string) (*models.Proposal, bool, error)
