@@ -41,6 +41,24 @@ type LinearIssueCursor struct {
 	UpdatedAfter string `yaml:"updated_after,omitempty"`
 }
 
+// JiraCursors holds polling cursors for a single Jira project. The daemon
+// loads and saves them via FSStore.LoadJiraCursors / SaveJiraCursors so that
+// the poller can resume where it left off across restarts. Each project on
+// each site has its own cursor file, since the JQL incremental query
+// (`updated > "<cursor>"`) is project-scoped.
+type JiraCursors struct {
+	Issues JiraIssueCursor `yaml:"issues,omitempty"`
+}
+
+// JiraIssueCursor holds the incremental sync cursor for Jira issues.
+// UpdatedAfter is stored as RFC 3339 (the same form Jira returns in
+// fields.updated). The poller reformats it to "yyyy-MM-dd HH:mm" before
+// interpolating into JQL — JQL silently returns zero matches for any other
+// date format, so this conversion is mandatory.
+type JiraIssueCursor struct {
+	UpdatedAfter string `yaml:"updated_after,omitempty"`
+}
+
 // SlackCursors maps channel ID to the last synced Slack message timestamp.
 // The daemon loads and saves them via FSStore.LoadSlackCursors / SaveSlackCursors
 // so that sync and the real-time listener can resume where they left off.

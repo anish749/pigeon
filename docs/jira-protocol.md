@@ -277,14 +277,22 @@ dedup on disk.
 ```
 ~/.local/share/pigeon/
 └── jira-issues/                           # platform
-    └── {site-slug}/                       # e.g. acme (from acme.atlassian.net)
-        └── {project-key}/                 # e.g. ENG
+    └── {account-slug}/                    # slugified pigeon-config `account` field
+        └── {project-key}/                 # e.g. ENG (case preserved)
             ├── .sync-cursors.yaml         # cursor state
             └── issues/
                 ├── ENG-101.jsonl          # all activity for ENG-101
                 ├── ENG-142.jsonl          # all activity for ENG-142
                 └── ENG-205.jsonl
 ```
+
+`{account-slug}` is `account.Account.NameSlug()` applied to the entry's
+`account:` config field — i.e. the user-supplied display label,
+slugified the same way every other pigeon platform slugifies account
+names. The Jira server URL is **not** part of the path; it lives only
+in the bound `jira-cli` config and is read at runtime to construct the
+HTTP client. Two pigeon entries with the same `account:` value collide
+on disk, so account labels must be unique across entries.
 
 ### Why Per-Issue Files
 
@@ -306,22 +314,18 @@ against a single site + single default project per config file,
 switched via `JIRA_CONFIG_FILE` or the `-c/--config` flag.
 
 Pigeon mirrors this by scoping cursors and storage to
-`{site-slug}/{project-key}`. Each configured project gets an
+`{account-slug}/{project-key}`. Each configured project gets an
 independent cursor and directory. The poller iterates over all
-configured (site, project) pairs on each cycle.
+configured (account, project) pairs on each cycle.
 
-The site slug is derived from the `server` field in the bound
-`jira-cli` config — for `https://acme.atlassian.net` the slug is
-`acme`. For on-premise installations (e.g. `https://jira.internal.example.com`),
-the slug is the lowercase first DNS label (`jira`), or, when that
-would collide with another host, the first two labels joined with `-`
-(`jira-internal`). Collision resolution is a config-time concern;
-when ambiguous, pigeon falls back to using the entry's `account`
-field as the slug.
+A multi-site setup uses one pigeon `jira:` entry per site, each with
+its own `account:` label and `jira_config:` path. The label is what
+appears on disk; the URL embedded in `jira-cli`'s YAML is purely a
+runtime detail.
 
 ### Cursor File
 
-Path: `jira-issues/{site-slug}/{project-key}/.sync-cursors.yaml`
+Path: `jira-issues/{account-slug}/{project-key}/.sync-cursors.yaml`
 
 ```yaml
 issues:
@@ -787,7 +791,7 @@ Only the fields needed to construct a `jira.Config` for `pkg/jira.NewClient`:
 
 | jira-cli YAML key | Used as |
 |---|---|
-| `server` | `jira.Config.Server` (also: site-slug for directory layout) |
+| `server` | `jira.Config.Server` (runtime only — not part of any on-disk path) |
 | `login` | `jira.Config.Login` |
 | `auth_type` | `jira.Config.AuthType` (`basic`, `bearer`, or `mtls`) |
 | `insecure` | `jira.Config.Insecure` |

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"time"
 
+	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
 	calendar "google.golang.org/api/calendar/v3"
 	drive "google.golang.org/api/drive/v3"
 )
@@ -44,6 +45,8 @@ const (
 	LineEvent         LineType = "event"
 	LineLinearIssue   LineType = "linear-issue"
 	LineLinearComment LineType = "linear-comment"
+	LineJiraIssue     LineType = "jira-issue"
+	LineJiraComment   LineType = "jira-comment"
 )
 
 // MsgLine represents a message event.
@@ -122,6 +125,8 @@ type Line struct {
 	Event         *CalendarEvent
 	Issue         *LinearIssue
 	LinearComment *LinearComment
+	JiraIssue     *JiraIssue
+	JiraComment   *JiraComment
 }
 
 // Ts returns the timestamp of the line's inner type. Returns the zero time
@@ -162,6 +167,36 @@ func (l Line) Ts() time.Time {
 				return t
 			}
 		}
+	case LineJiraIssue:
+		if l.JiraIssue != nil {
+			if t := jiraParseTime(l.JiraIssue.Runtime.Fields.Updated); !t.IsZero() {
+				return t
+			}
+		}
+	case LineJiraComment:
+		if l.JiraComment != nil {
+			if t := jiraParseTime(l.JiraComment.Runtime.Created); !t.IsZero() {
+				return t
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// jiraParseTime parses Jira's timestamp format. The Jira REST API returns
+// timestamps as RFC 3339 with millisecond precision and a numeric offset
+// (e.g. "2026-04-05T09:44:15.076+0000") rather than the canonical "...Z" form
+// — note the offset has no colon. time.RFC3339 expects "...Z07:00", so we
+// have to try both layouts.
+func jiraParseTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05.000-0700", s); err == nil {
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
 	}
 	return time.Time{}
 }
@@ -194,6 +229,18 @@ func (l Line) ID() (string, bool) {
 	case LineLinearComment:
 		if l.LinearComment != nil {
 			return l.LinearComment.Runtime.ID, true
+		}
+	case LineJiraIssue:
+		if l.JiraIssue != nil {
+			// pkg/jira.Issue does not model `id`. The dedup key lives in
+			// the raw HTTP body — extract it from Serialized.
+			if id, ok := l.JiraIssue.Serialized["id"].(string); ok {
+				return id, true
+			}
+		}
+	case LineJiraComment:
+		if l.JiraComment != nil {
+			return l.JiraComment.Runtime.ID, true
 		}
 	}
 	return "", false
@@ -246,6 +293,10 @@ func Marshal(l Line) ([]byte, error) {
 		return marshalRaw(l.Issue.Serialized, string(LineLinearIssue))
 	case LineLinearComment:
 		return marshalRaw(l.LinearComment.Serialized, string(LineLinearComment))
+	case LineJiraIssue:
+		return marshalRaw(l.JiraIssue.Serialized, string(LineJiraIssue))
+	case LineJiraComment:
+		return marshalRaw(l.JiraComment.Serialized, string(LineJiraComment))
 	default:
 		return nil, fmt.Errorf("marshal line: unknown type %q", l.Type)
 	}
@@ -323,6 +374,20 @@ func Parse(line string) (Line, error) {
 			return Line{}, fmt.Errorf("parse linear comment line: %w", err)
 		}
 		l.LinearComment = &LinearComment{Runtime: runtime, Serialized: serialized}
+	case LineJiraIssue:
+		var runtime jira.Issue
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse jira issue line: %w", err)
+		}
+		l.JiraIssue = &JiraIssue{Runtime: runtime, Serialized: serialized}
+	case LineJiraComment:
+		var runtime JiraCommentRuntime
+		serialized, err := unmarshalRaw(data, &runtime)
+		if err != nil {
+			return Line{}, fmt.Errorf("parse jira comment line: %w", err)
+		}
+		l.JiraComment = &JiraComment{Runtime: runtime, Serialized: serialized}
 	case "":
 		return Line{}, fmt.Errorf("parse line: missing type field")
 	default:
