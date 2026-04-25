@@ -155,8 +155,11 @@ other pigeon sources.
   the poller loops with `from = 0, limit, 2*limit, ...` until an empty
   page returns.
 
-A reasonable `limit` is 100; raising it further offers no advantage
-because `/search/jql` enforces its own server-side cap.
+A reasonable `limit` is 100. The `/search/jql` endpoint enforces a
+hard range of `[1, 5000]` on the `maxResults` query parameter — calls
+with `limit=0` return HTTP 400 (verified against Jira Cloud, April
+2026). The poller must never pass `0` even when "no results expected"
+is the intent.
 
 ### Incremental Sync
 
@@ -191,6 +194,22 @@ understands the formats `yyyy-MM-dd HH:mm`, `yyyy/MM/dd HH:mm`,
 to `yyyy-MM-dd HH:mm` (UTC) before interpolating it into the JQL
 string, and stores the original RFC 3339 form so no precision is lost
 on round-trip.
+
+> **⚠ Silent parse failure.** Verified against Jira Cloud
+> (April 2026): JQL does **not** raise an error for unparseable date
+> strings. Any malformed cutoff — RFC 3339, ISO 8601 with `Z`, junk
+> like `"banana"` — is silently treated as never-true, causing the
+> query to return zero matches. The poller would then believe nothing
+> has changed, fail to advance the cursor, and continue returning
+> empty results indefinitely with no error in the logs. Implementations
+> must:
+>
+> 1. Format the cursor to one of the four accepted JQL forms before
+>    interpolation (the poller already does this — never pass through
+>    the stored RFC 3339 form).
+> 2. Validate at boot that a known-good probe (e.g. `updated > "2010-01-01"`)
+>    returns a non-zero count for at least one configured project. A
+>    zero count there is the canary for a silent format regression.
 
 JQL date filters are minute-precision. The poller rounds the cursor
 *down* to the minute when formatting for JQL, which means a single
