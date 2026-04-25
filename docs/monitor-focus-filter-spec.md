@@ -55,22 +55,23 @@ manager differs.
 ### 1.3 CLI surface
 
 ```
-pigeon monitor --focus "<workstream focus prose>" [--threshold 0.22]
+pigeon monitor --focus "<workstream focus prose>"
 ```
 
 `pigeon monitor` already exists today and emits all events from the
 broadcast bus to stdout as newline-delimited JSON. This spec extends it
-with two flags:
+with one flag:
 
 - **`--focus`** *(string, required when filtering)*. A natural-language
   description of what the caller cares about. For Pattern A this is
   the workstream's focus from `pigeon workstream discover`. For
   Pattern B this is whatever the session declares.
-- **`--threshold`** *(float, default 0.22)*. Cosine threshold above
-  which a message is routed.
 
 When `--focus` is omitted, `pigeon monitor` behaves as today (no
 filtering). When set, only matching messages are emitted.
+
+The cosine threshold is an internal implementation constant tied to
+the embedder, not a caller-visible knob. See Section 1.5 for why.
 
 Multi-intent subscription from a single invocation is **out of scope**
 for this spec — Pattern A spawns N filter processes, one per intent.
@@ -106,24 +107,40 @@ Notes:
 
 ### 1.5 The threshold
 
-Threshold defaults to **0.22** with `all-MiniLM-L6-v2`. This is the
-midpoint of the empirically observed natural-separation band
-[0.20, 0.25] across three test workspaces of different sizes.
+The cosine threshold is hardcoded inside the filter implementation:
+**0.22 with `all-MiniLM-L6-v2`** (the model the existing
+`embed/sidecar.py` already serves). It is not exposed to callers.
 
-Two presets the CLI may expose for callers who don't want to tune:
+The reasoning:
 
-- **`--mode recall`** → τ = 0.18. More relevant work reaches the
-  session at the cost of more noise messages waking it. Choose when
-  the cost of missing relevant work outweighs the cost of agent-side
-  triage.
-- **`--mode default`** → τ = 0.22. Balanced.
+- **No caller is in a position to choose a cosine value.** A
+  workstream daemon spawning per-workstream filters doesn't know what
+  cosine the focus prose embeds at; a Claude session declaring
+  "I'm working on X" definitely doesn't. Exposing the number turns
+  into "everyone passes the default", which means the flag is
+  pretending to be a knob it isn't.
+- **The empirical optimum is stable across workspaces.** Across the
+  three test workspaces in Section 2, the threshold where
+  wake-rate-on-noise drops below 0.30 lives in [0.20, 0.25]. A single
+  hardcoded value of 0.22 covers all three within a percentage point
+  of recall.
+- **If it ever needs retuning, it's a binary change, not an API
+  change.** Adjusting the constant in the filter implementation is
+  cheap. Plumbing a new flag through every caller's invocation is
+  expensive and asks the caller to know things they don't.
 
-Both presets simply set `--threshold`; the underlying algorithm is
-the same.
-
-A different embedder requires a different default. With
+A different embedder requires a different constant. With
 `BAAI/bge-base-en-v1.5` the natural separation lives near 0.55; with
-`intfloat/e5-base-v2` near 0.80.
+`intfloat/e5-base-v2` near 0.80. Embedder choice and threshold are
+co-determined and live together in the filter implementation.
+
+If cross-workspace variance turns out to bite in production (e.g.,
+some workspace's traffic distribution puts the natural knee outside
+[0.20, 0.25] for MiniLM), the planned follow-up is **auto-tune at
+startup**: sample the last N hours of traffic from the broadcast bus,
+compute the cosine distribution to the focus, pick the knee, set the
+threshold. Still no caller-visible knob. This is deliberately not in
+the v1 surface — the data does not motivate it yet.
 
 ### 1.6 Metrics the filter is optimised for
 
@@ -173,8 +190,11 @@ calibration step; it's just a threshold.
   consistently lowered recall and raised noise wake rate together.
 - Multi-intent subscription from one invocation. Spawn one filter
   per intent.
-- Per-workstream threshold tuning at the daemon level. The threshold
-  is a per-invocation parameter; the caller sets it.
+- Caller-visible threshold tuning. The threshold is an internal
+  constant; callers do not pass it.
+- Auto-tune from sampled traffic. Plausible follow-up if production
+  shows the hardcoded threshold is wrong for some workspace, but
+  the validation data does not motivate building it now.
 - LLM-based per-message classification. Not tested directly, but
   unnecessary under fan-in framing — the agent on the receiving end
   is the real classifier; the filter only needs to be cheap and
