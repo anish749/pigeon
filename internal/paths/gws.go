@@ -139,8 +139,8 @@ func (g GmailDir) Path() string {
 }
 
 // DateFile returns the path to a daily email file.
-func (g GmailDir) DateFile(date string) DateFile {
-	return DateFile(filepath.Join(g.Path(), date+FileExt))
+func (g GmailDir) DateFile(date string) EmailDateFile {
+	return EmailDateFile(filepath.Join(g.Path(), date+FileExt))
 }
 
 // PendingDeletesFile returns the path to the pending email deletes file.
@@ -160,8 +160,8 @@ func (c CalendarDir) Path() string {
 }
 
 // DateFile returns the path to a daily events file.
-func (c CalendarDir) DateFile(date string) DateFile {
-	return DateFile(filepath.Join(c.Path(), date+FileExt))
+func (c CalendarDir) DateFile(date string) CalendarDateFile {
+	return CalendarDateFile(filepath.Join(c.Path(), date+FileExt))
 }
 
 // DriveDir represents the gdrive directory: <account>/gdrive/

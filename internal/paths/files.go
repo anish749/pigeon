@@ -17,34 +17,57 @@ type ContentFile interface {
 
 // Compile-time interface guards.
 var (
-	_ LogFile =DateFile("")
-	_ LogFile =ThreadFile("")
-	_ LogFile =CommentsFile("")
+	_ LogFile     = MessagingDateFile("")
+	_ LogFile     = EmailDateFile("")
+	_ LogFile     = CalendarDateFile("")
+	_ LogFile     = ThreadFile("")
+	_ LogFile     = CommentsFile("")
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
 	_ ContentFile = FormulaFile("")
 )
 
-// DateFile is a path to a daily JSONL file (gmail or calendar).
-type DateFile string
+// MessagingDateFile is a path to a daily JSONL file in a messaging
+// conversation (slack, whatsapp): <root>/<plat>/<acct>/<conv>/YYYY-MM-DD.jsonl.
+// Lines carry a top-level "ts" field; conversations group by parent dir.
+type MessagingDateFile string
 
 // Path returns the file path as a string.
-func (d DateFile) Path() string { return string(d) }
-func (DateFile) logFile()      {}
+func (d MessagingDateFile) Path() string { return string(d) }
+func (MessagingDateFile) logFile()       {}
+
+// EmailDateFile is a path to a daily JSONL file under a Gmail account:
+// <root>/gws/<acct>/gmail/YYYY-MM-DD.jsonl.
+// Lines carry a top-level "ts" field; the account is the conversation unit.
+type EmailDateFile string
+
+// Path returns the file path as a string.
+func (d EmailDateFile) Path() string { return string(d) }
+func (EmailDateFile) logFile()       {}
+
+// CalendarDateFile is a path to a daily JSONL file under a single calendar:
+// <root>/gws/<acct>/gcalendar/<calID>/YYYY-MM-DD.jsonl.
+// Lines carry "updated" and "created" fields; the calendar id is the
+// conversation unit.
+type CalendarDateFile string
+
+// Path returns the file path as a string.
+func (d CalendarDateFile) Path() string { return string(d) }
+func (CalendarDateFile) logFile()       {}
 
 // ThreadFile is a path to a thread's JSONL file.
 type ThreadFile string
 
 // Path returns the file path as a string.
 func (t ThreadFile) Path() string { return string(t) }
-func (ThreadFile) logFile()      {}
+func (ThreadFile) logFile()       {}
 
 // CommentsFile is a path to a Drive file's comments JSONL.
 type CommentsFile string
 
 // Path returns the file path as a string.
 func (c CommentsFile) Path() string { return string(c) }
-func (CommentsFile) logFile()      {}
+func (CommentsFile) logFile()       {}
 
 // ConvMetaFile is a path to a conversation's .meta.json sidecar (messaging data).
 // Drive file metadata uses DriveMetaFile (see paths/gws.go) which carries the
