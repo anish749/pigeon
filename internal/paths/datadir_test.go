@@ -71,19 +71,19 @@ func TestConversationDir_ThreadFile(t *testing.T) {
 	}
 }
 
-func TestAccountDir_SyncCursorsPath(t *testing.T) {
+func TestAccountDir_SyncCursorsFile(t *testing.T) {
 	acct := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws"))
-	got := acct.SyncCursorsPath()
+	got := acct.SyncCursorsFile()
 	if got.Path() != "/tmp/test/slack/ws/.sync-cursors.yaml" {
-		t.Errorf("SyncCursorsPath() = %q, want /tmp/test/slack/ws/.sync-cursors.yaml", got.Path())
+		t.Errorf("SyncCursorsFile() = %q, want /tmp/test/slack/ws/.sync-cursors.yaml", got.Path())
 	}
 }
 
-func TestAccountDir_MaintenancePath(t *testing.T) {
+func TestAccountDir_MaintenanceFile(t *testing.T) {
 	acct := NewDataRoot("/tmp/test").AccountFor(account.New("slack", "ws"))
-	got := acct.MaintenancePath()
+	got := acct.MaintenanceFile()
 	if got.Path() != "/tmp/test/slack/ws/.maintenance.json" {
-		t.Errorf("MaintenancePath() = %q, want /tmp/test/slack/ws/.maintenance.json", got.Path())
+		t.Errorf("MaintenanceFile() = %q, want /tmp/test/slack/ws/.maintenance.json", got.Path())
 	}
 }
 

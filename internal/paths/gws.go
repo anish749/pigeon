@@ -111,10 +111,10 @@ func (a AccountDir) Gmail() GmailDir {
 	return GmailDir{account: a}
 }
 
-// PollMetricsPath returns the path to the poll metrics JSONL file for this
+// PollMetricsFile returns the path to the poll metrics JSONL file for this
 // account. One line is appended per service per poll cycle — used to analyze
 // poll hit-rate and latency for debouncer / adaptive-interval decisions.
-func (a AccountDir) PollMetricsPath() PollMetricsFile {
+func (a AccountDir) PollMetricsFile() PollMetricsFile {
 	return PollMetricsFile(filepath.Join(a.Path(), pollMetricsFile))
 }
 
@@ -143,8 +143,8 @@ func (g GmailDir) DateFile(date string) DateFile {
 	return DateFile(filepath.Join(g.Path(), date+FileExt))
 }
 
-// PendingDeletesPath returns the path to the pending email deletes file.
-func (g GmailDir) PendingDeletesPath() PendingDeletesFile {
+// PendingDeletesFile returns the path to the pending email deletes file.
+func (g GmailDir) PendingDeletesFile() PendingDeletesFile {
 	return PendingDeletesFile(filepath.Join(g.Path(), pendingDeletesFile))
 }
 

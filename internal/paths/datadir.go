@@ -140,13 +140,13 @@ func (a AccountDir) Identity() IdentityDir {
 	return IdentityDir{account: a}
 }
 
-// SyncCursorsPath returns the path to the sync cursors file for this account.
-func (a AccountDir) SyncCursorsPath() SyncCursorsFile {
+// SyncCursorsFile returns the path to the sync cursors file for this account.
+func (a AccountDir) SyncCursorsFile() SyncCursorsFile {
 	return SyncCursorsFile(filepath.Join(a.Path(), SyncCursorsFilename))
 }
 
-// MaintenancePath returns the path to the maintenance state file for this account.
-func (a AccountDir) MaintenancePath() MaintenanceFile {
+// MaintenanceFile returns the path to the maintenance state file for this account.
+func (a AccountDir) MaintenanceFile() MaintenanceFile {
 	return MaintenanceFile(filepath.Join(a.Path(), MaintenanceFilename))
 }
 

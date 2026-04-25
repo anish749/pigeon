@@ -309,7 +309,7 @@ func (s *FSStore) ListGWSServices(acct account.Account) ([]GWSServiceInfo, error
 func (s *FSStore) Maintain(acct account.Account) error {
 	ad := s.root.AccountFor(acct)
 	dir := ad.Path()
-	stateFile := ad.MaintenancePath()
+	stateFile := ad.MaintenanceFile()
 	state, err := loadMaintenanceState(stateFile)
 	if err != nil {
 		return err
@@ -567,29 +567,29 @@ func (s *FSStore) SaveDriveMeta(mf paths.DriveMetaFile, m *modelv1.DocMeta) erro
 // LoadGWSCursors reads GWS polling cursors for the given account.
 // Returns empty cursors if the file does not exist yet (first-run case).
 func (s *FSStore) LoadGWSCursors(acct paths.AccountDir) (*GWSCursors, error) {
-	return loadCursors[GWSCursors](acct.SyncCursorsPath())
+	return loadCursors[GWSCursors](acct.SyncCursorsFile())
 }
 
 // SaveGWSCursors writes GWS polling cursors for the given account.
 func (s *FSStore) SaveGWSCursors(acct paths.AccountDir, c *GWSCursors) error {
-	return s.saveCursors(acct.SyncCursorsPath(), c)
+	return s.saveCursors(acct.SyncCursorsFile(), c)
 }
 
 // LoadLinearCursors reads Linear polling cursors for the given account.
 // Returns empty cursors if the file does not exist yet (first-run case).
 func (s *FSStore) LoadLinearCursors(acct paths.AccountDir) (*LinearCursors, error) {
-	return loadCursors[LinearCursors](acct.SyncCursorsPath())
+	return loadCursors[LinearCursors](acct.SyncCursorsFile())
 }
 
 // SaveLinearCursors writes Linear polling cursors for the given account.
 func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) error {
-	return s.saveCursors(acct.SyncCursorsPath(), c)
+	return s.saveCursors(acct.SyncCursorsFile(), c)
 }
 
 // LoadSlackCursors reads Slack per-channel cursors for the given account.
 // Returns an empty map if the file does not exist yet (first-run case).
 func (s *FSStore) LoadSlackCursors(acct paths.AccountDir) (SlackCursors, error) {
-	c, err := loadCursors[SlackCursors](acct.SyncCursorsPath())
+	c, err := loadCursors[SlackCursors](acct.SyncCursorsFile())
 	if err != nil {
 		return nil, err
 	}
@@ -602,7 +602,7 @@ func (s *FSStore) LoadSlackCursors(acct paths.AccountDir) (SlackCursors, error) 
 
 // SaveSlackCursors writes Slack per-channel cursors for the given account.
 func (s *FSStore) SaveSlackCursors(acct paths.AccountDir, c SlackCursors) error {
-	return s.saveCursors(acct.SyncCursorsPath(), c)
+	return s.saveCursors(acct.SyncCursorsFile(), c)
 }
 
 // loadCursors reads a YAML cursor file into a typed struct. Returns a zero
@@ -683,7 +683,7 @@ func (s *FSStore) RemoveDriveFile(driveDir paths.DriveDir, fileID string) error 
 // The poller calls this when history.list reports a message was deleted.
 // The actual removal from date files happens during maintenance.
 func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) error {
-	path := gmailDir.PendingDeletesPath().Path()
+	path := gmailDir.PendingDeletesFile().Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create gmail dir: %w", err)
 	}
@@ -701,7 +701,7 @@ func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) e
 // applyPendingEmailDeletes reads the pending-email-deletes file, removes
 // matching email lines from gmail date files, and deletes the pending file.
 func (s *FSStore) applyPendingEmailDeletes(gmailDir paths.GmailDir) error {
-	pendingPath := gmailDir.PendingDeletesPath().Path()
+	pendingPath := gmailDir.PendingDeletesFile().Path()
 	data, err := os.ReadFile(pendingPath)
 	if err != nil {
 		if os.IsNotExist(err) {
