@@ -225,6 +225,10 @@ func IsIdentityFile(path string) bool {
 // PeopleFile is the absolute path to a people.jsonl identity file.
 type PeopleFile string
 
+// Path returns the file path as a string.
+func (p PeopleFile) Path() string { return string(p) }
+func (PeopleFile) dataFile()      {}
+
 // IdentityDir represents the identity directory for an account:
 //
 //	<base>/<platform>/<account-slug>/identity/

@@ -3,6 +3,7 @@ package paths
 import "path/filepath"
 
 const (
+	linearPlatform     = "linear-issues"
 	linearIssuesSubdir = "issues"
 )
 
@@ -37,6 +38,7 @@ type IssueFile string
 // Path returns the file path as a string.
 func (f IssueFile) Path() string { return string(f) }
 func (IssueFile) logFile()       {}
+func (IssueFile) dataFile()      {}
 
-// Compile-time interface guard.
+// Compile-time interface guard. LogFile transitively implies DataFile.
 var _ LogFile = IssueFile("")

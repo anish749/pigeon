@@ -221,6 +221,7 @@ type DriveMetaFile struct {
 
 // Path returns the full file path.
 func (m DriveMetaFile) Path() string { return filepath.Join(m.dir, m.name) }
+func (DriveMetaFile) dataFile()      {}
 
 // Dir returns the directory containing this meta file.
 func (m DriveMetaFile) Dir() string { return m.dir }
