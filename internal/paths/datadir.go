@@ -169,8 +169,8 @@ func (c ConversationDir) MetaFile() ConvMetaFile {
 }
 
 // DateFile returns the path to a daily message file.
-func (c ConversationDir) DateFile(date string) DateFile {
-	return DateFile(filepath.Join(c.Path(), date+FileExt))
+func (c ConversationDir) DateFile(date string) MessagingDateFile {
+	return MessagingDateFile(filepath.Join(c.Path(), date+FileExt))
 }
 
 // Thread directory and file glob patterns for search tools.

@@ -943,12 +943,12 @@ func TestAppendLineAndReadLines(t *testing.T) {
 	path := filepath.Join(root.Path(), "test.jsonl")
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := s.AppendLine(paths.DateFile(path), gwsEmailLine(id)); err != nil {
+		if err := s.AppendLine(paths.EmailDateFile(path), gwsEmailLine(id)); err != nil {
 			t.Fatalf("AppendLine(%q): %v", id, err)
 		}
 	}
 
-	lines, err := s.ReadLines(paths.DateFile(path))
+	lines, err := s.ReadLines(paths.EmailDateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -968,11 +968,11 @@ func TestWriteLines_Overwrite(t *testing.T) {
 	path := filepath.Join(root.Path(), "write.jsonl")
 
 	initial := []modelv1.Line{gwsEmailLine("a"), gwsEmailLine("b")}
-	if err := s.WriteLines(paths.DateFile(path), initial); err != nil {
+	if err := s.WriteLines(paths.EmailDateFile(path), initial); err != nil {
 		t.Fatalf("WriteLines: %v", err)
 	}
 
-	lines, err := s.ReadLines(paths.DateFile(path))
+	lines, err := s.ReadLines(paths.EmailDateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -981,10 +981,10 @@ func TestWriteLines_Overwrite(t *testing.T) {
 	}
 
 	// Overwrite with fewer lines — verifies replacement, not append.
-	if err := s.WriteLines(paths.DateFile(path), []modelv1.Line{gwsEmailLine("c")}); err != nil {
+	if err := s.WriteLines(paths.EmailDateFile(path), []modelv1.Line{gwsEmailLine("c")}); err != nil {
 		t.Fatalf("WriteLines overwrite: %v", err)
 	}
-	lines, err = s.ReadLines(paths.DateFile(path))
+	lines, err = s.ReadLines(paths.EmailDateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines after overwrite: %v", err)
 	}
@@ -998,13 +998,13 @@ func TestWriteLines_Empty(t *testing.T) {
 	s := NewFSStore(root)
 	path := filepath.Join(root.Path(), "empty.jsonl")
 
-	if err := s.WriteLines(paths.DateFile(path), []modelv1.Line{gwsEmailLine("a")}); err != nil {
+	if err := s.WriteLines(paths.EmailDateFile(path), []modelv1.Line{gwsEmailLine("a")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.WriteLines(paths.DateFile(path), nil); err != nil {
+	if err := s.WriteLines(paths.EmailDateFile(path), nil); err != nil {
 		t.Fatalf("WriteLines empty: %v", err)
 	}
-	lines, err := s.ReadLines(paths.DateFile(path))
+	lines, err := s.ReadLines(paths.EmailDateFile(path))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestWriteLines_Empty(t *testing.T) {
 func TestReadLines_NonExistent(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)
-	lines, err := s.ReadLines(paths.DateFile(filepath.Join(root.Path(), "nope.jsonl")))
+	lines, err := s.ReadLines(paths.EmailDateFile(filepath.Join(root.Path(), "nope.jsonl")))
 	if err != nil {
 		t.Fatalf("ReadLines: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestReadLines_CorruptLines(t *testing.T) {
 	s := NewFSStore(root)
 	path := filepath.Join(root.Path(), "corrupt.jsonl")
 
-	if err := s.AppendLine(paths.DateFile(path), gwsEmailLine("good1")); err != nil {
+	if err := s.AppendLine(paths.EmailDateFile(path), gwsEmailLine("good1")); err != nil {
 		t.Fatal(err)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -1039,11 +1039,11 @@ func TestReadLines_CorruptLines(t *testing.T) {
 	}
 	f.WriteString("not valid json\n")
 	f.Close()
-	if err := s.AppendLine(paths.DateFile(path), gwsEmailLine("good2")); err != nil {
+	if err := s.AppendLine(paths.EmailDateFile(path), gwsEmailLine("good2")); err != nil {
 		t.Fatal(err)
 	}
 
-	lines, err := s.ReadLines(paths.DateFile(path))
+	lines, err := s.ReadLines(paths.EmailDateFile(path))
 	if err == nil {
 		t.Fatal("expected error for corrupt line")
 	}

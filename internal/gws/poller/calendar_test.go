@@ -199,7 +199,7 @@ func readAllEvents(t *testing.T, s *store.FSStore, calDir string) []*modelv1.Cal
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
 		}
-		lines, readErr := s.ReadLines(paths.DateFile(path))
+		lines, readErr := s.ReadLines(paths.CalendarDateFile(path))
 		if readErr != nil {
 			t.Logf("warning: read %s: %v", path, readErr)
 		}
