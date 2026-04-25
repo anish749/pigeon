@@ -14,6 +14,7 @@ type Config struct {
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
 	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+	Jira     []JiraConfig     `yaml:"jira,omitempty"`
 
 	// Workspaces define named account groupings. When a workspace is active,
 	// identity resolution and reads are scoped to that workspace's accounts.
@@ -34,12 +35,23 @@ type WorkspaceConfig struct {
 	GWS      []string `yaml:"gws,omitempty"`
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
 	Linear   []string `yaml:"linear,omitempty"`
+	Jira     []string `yaml:"jira,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.
 type LinearConfig struct {
 	Workspace string `yaml:"workspace"` // Linear workspace slug
 	Account   string `yaml:"account"`   // display name for pigeon
+}
+
+// JiraConfig holds configuration for a single Atlassian site (one set of
+// credentials covering one or more projects). Pigeon reads server, login,
+// and auth fields from the bound jira-cli config rather than duplicating
+// them here. The token is sourced from JIRA_API_TOKEN at daemon start.
+type JiraConfig struct {
+	JiraConfig string   `yaml:"jira_config,omitempty"` // path to jira-cli yaml; empty = default resolution chain
+	Projects   []string `yaml:"projects"`              // project keys to ingest (one cursor per project)
+	Account    string   `yaml:"account"`               // display name; also drives the on-disk slug via account.NameSlug
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
@@ -150,6 +162,29 @@ func (c *Config) AddLinear(entry LinearConfig) {
 		}
 	}
 	c.Linear = append(c.Linear, entry)
+}
+
+// AddJira upserts a Jira configuration entry by account label. The label is
+// the unique key because it doubles as the on-disk slug; two entries with
+// the same account would collide on disk.
+func (c *Config) AddJira(entry JiraConfig) {
+	for i, existing := range c.Jira {
+		if existing.Account == entry.Account {
+			c.Jira[i] = entry
+			return
+		}
+	}
+	c.Jira = append(c.Jira, entry)
+}
+
+// RemoveJira removes a Jira configuration entry by account label.
+func (c *Config) RemoveJira(account string) {
+	for i, existing := range c.Jira {
+		if existing.Account == account {
+			c.Jira = append(c.Jira[:i], c.Jira[i+1:]...)
+			return
+		}
+	}
 }
 
 // AddGWS upserts a GWS configuration entry by email.
