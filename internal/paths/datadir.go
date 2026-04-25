@@ -39,6 +39,20 @@ const PeopleFilename = "people.jsonl"
 // identity files under a data root.
 const PeopleFileGlob = "**/" + IdentitySubdir + "/" + PeopleFilename
 
+// SyncCursorsFilename is the filename for an account's per-poller sync cursors.
+const SyncCursorsFilename = ".sync-cursors.yaml"
+
+// MaintenanceFilename is the filename for an account's maintenance state sidecar.
+const MaintenanceFilename = ".maintenance.json"
+
+// WorkspacesSubdir is the top-level directory under the data root that holds
+// per-workspace state (one subdirectory per workspace name).
+const WorkspacesSubdir = ".workspaces"
+
+// WorkstreamSubdir is the per-workspace subdirectory that holds the persistent
+// workstream store: <root>/.workspaces/<name>/workstream/.
+const WorkstreamSubdir = "workstream"
+
 // Data directory type hierarchy:
 //
 //	DataRoot → PlatformDir → AccountDir → ConversationDir
@@ -84,12 +98,12 @@ type WorkspaceDir struct {
 
 // Path returns the workspace directory path.
 func (w WorkspaceDir) Path() string {
-	return filepath.Join(w.root.base, ".workspaces", w.name)
+	return filepath.Join(w.root.base, WorkspacesSubdir, w.name)
 }
 
 // WorkstreamStore returns the path to the workstream store directory.
 func (w WorkspaceDir) WorkstreamStore() WorkstreamStoreDir {
-	return WorkstreamStoreDir(filepath.Join(w.Path(), "workstream"))
+	return WorkstreamStoreDir(filepath.Join(w.Path(), WorkstreamSubdir))
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/
@@ -128,12 +142,12 @@ func (a AccountDir) Identity() IdentityDir {
 
 // SyncCursorsPath returns the path to the sync cursors file for this account.
 func (a AccountDir) SyncCursorsPath() SyncCursorsFile {
-	return SyncCursorsFile(filepath.Join(a.Path(), ".sync-cursors.yaml"))
+	return SyncCursorsFile(filepath.Join(a.Path(), SyncCursorsFilename))
 }
 
 // MaintenancePath returns the path to the maintenance state file for this account.
 func (a AccountDir) MaintenancePath() MaintenanceFile {
-	return MaintenanceFile(filepath.Join(a.Path(), ".maintenance.json"))
+	return MaintenanceFile(filepath.Join(a.Path(), MaintenanceFilename))
 }
 
 // ConversationDir represents a conversation directory: <base>/<platform>/<account-slug>/<conversation>/
