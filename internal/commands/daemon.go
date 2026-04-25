@@ -178,6 +178,9 @@ func DaemonRun(version string) error {
 	linearMgr := daemon.NewLinearManager(store, tracker)
 	go linearMgr.Run(ctx, cfg.Linear)
 
+	jiraMgr := daemon.NewJiraManager(store, tracker)
+	go jiraMgr.Run(ctx, cfg.Jira)
+
 	go apiServer.Start(ctx, paths.SocketPath())
 
 	// Periodic update check — re-execs the daemon when a new version is installed.
@@ -194,7 +197,8 @@ func DaemonRun(version string) error {
 		"whatsapp_accounts", len(cfg.WhatsApp),
 		"slack_workspaces", len(cfg.Slack),
 		"gws_accounts", len(cfg.GWS),
-		"linear_workspaces", len(cfg.Linear))
+		"linear_workspaces", len(cfg.Linear),
+		"jira_accounts", len(cfg.Jira))
 
 	select {
 	case <-ctx.Done():
