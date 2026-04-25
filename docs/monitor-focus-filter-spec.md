@@ -164,11 +164,13 @@ is what produced τ = 0.22 as the cross-workspace default.
 
 When a filter starts, before live events flow, it should emit a
 single JSON line summarising what it will route. The preview is a
-UX surface for the caller to verify they spelled the focus
-correctly and that it matches the kind of traffic they expect.
+UX surface for the caller to verify the focus prose actually matches
+the kind of traffic they expect — i.e. that they spelled the focus
+correctly and that it isn't accidentally aligned with an unrelated
+chunk of the workspace's content.
 
 ```json
-{"kind":"preview","focus_sha":"<short hash>","threshold":0.22,
+{"kind":"preview",
  "would_route_examples":[<up to K recent matching events>],
  "would_skip_examples":[<up to K recent non-matching events>]}
 ```
