@@ -20,8 +20,8 @@ import (
 // Order of dispatch matters and is from most specific to least specific:
 //   - drive-meta-YYYY-MM-DD.json (full-filename + extension match)
 //   - account-level state files (MaintenanceFilename, SyncCursorsFilename,
-//     pollMetricsFile, pendingDeletesFile)
-//   - conversation-level sidecar (ConvMetaFilename)
+//     pollMetricsFile, pendingDeletesFile, ConvMetaFilename)
+//   - workstream router state (parent dir == WorkstreamSubdir)
 //   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
 //   - Linear issue file (parent dir == issues, under linear-issues platform)
@@ -55,12 +55,24 @@ func Classify(path string) DataFile {
 
 	parent := filepath.Base(filepath.Dir(path))
 
-	// 3. Identity people file: <acct>/identity/people.jsonl.
+	// 3. Workstream router state: <root>/.workspaces/<name>/workstream/{file}.
+	// Filename match plus parent-dir == WorkstreamSubdir distinguishes these
+	// from arbitrary JSON files of the same name elsewhere in the tree.
+	if parent == WorkstreamSubdir {
+		switch base {
+		case WorkstreamsFilename:
+			return WorkstreamsFile(path)
+		case WorkstreamProposalsFilename:
+			return WorkstreamProposalsFile(path)
+		}
+	}
+
+	// 4. Identity people file: <acct>/identity/people.jsonl.
 	if parent == IdentitySubdir && base == PeopleFilename {
 		return PeopleFile(path)
 	}
 
-	// 4. Drive subtree: anything under a gdrive segment.
+	// 5. Drive subtree: anything under a gdrive segment.
 	if pathHasSegment(path, GdriveSubdir) {
 		if pathHasSegment(path, attachSubdir) {
 			return AttachmentFile(path)
@@ -77,7 +89,7 @@ func Classify(path string) DataFile {
 		}
 	}
 
-	// 5. Linear issue file: <root>/linear-issues/<acct>/issues/<id>.jsonl.
+	// 6. Linear issue file: <root>/linear-issues/<acct>/issues/<id>.jsonl.
 	// Issue identifiers are platform-specific strings (PROJ-123 etc.), so the
 	// match is by parent-dir name + the linear-issues platform segment, not
 	// by filename pattern.
@@ -85,14 +97,14 @@ func Classify(path string) DataFile {
 		return IssueFile(path)
 	}
 
-	// 6. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
+	// 7. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
 	// excludes YYYY-MM-DD.jsonl so a conversation literally named "threads"
 	// keeps its date children classified as messaging-date below.
 	if IsThreadFile(path) {
 		return ThreadFile(path)
 	}
 
-	// 7. Date-named JSONL — disambiguate by location segment.
+	// 8. Date-named JSONL — disambiguate by location segment.
 	if IsDateFile(base) {
 		switch {
 		case pathHasSegment(path, GmailSubdir):
