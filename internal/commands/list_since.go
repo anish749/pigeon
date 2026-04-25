@@ -18,9 +18,9 @@ import (
 	"github.com/anish749/pigeon/internal/workspace"
 )
 
-// RunListSince prints listConvs with activity within the given duration
+// RunListSince prints conversations with activity within the given duration
 // window, scoped by the active workspace and optional platform/account.
-// Each line is "<display>  last: <age> ago" followed by the listConv
+// Each line is "<display>  last: <age> ago" followed by the conversation
 // directory path on the next line.
 func RunListSince(ws *workspace.Workspace, platform, account, since string) error {
 	sinceDur, err := timeutil.ParseDuration(since)
@@ -42,7 +42,7 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 		allFiles = append(allFiles, files...)
 	}
 	if len(allFiles) == 0 {
-		fmt.Println("No listConvs found.")
+		fmt.Println("No conversations found.")
 		return nil
 	}
 
@@ -52,7 +52,7 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 		return err
 	}
 	if len(convs) == 0 {
-		fmt.Println("No listConvs found.")
+		fmt.Println("No conversations found.")
 		return nil
 	}
 
@@ -68,17 +68,17 @@ func RunListSince(ws *workspace.Workspace, platform, account, since string) erro
 	return nil
 }
 
-// activeConv represents a listConv discovered from file paths.
+// activeConv represents a conversation discovered from file paths.
 type activeConv struct {
-	Display    string    // platform/account/listConv
-	Dir        string    // absolute listConv directory
+	Display    string    // platform/account/conversation
+	Dir        string    // absolute conversation directory
 	LatestTime time.Time // most recent activity timestamp
 }
 
-// extractConversations deduplicates files into unique listConvs,
-// tracking the most recent activity timestamp per listConv. Grouping
+// extractConversations deduplicates files into unique conversations,
+// tracking the most recent activity timestamp per conversation. Grouping
 // granularity is per-kind so each source surfaces at its natural unit:
-// messaging listConvs group all date+thread files under one dir, but
+// messaging conversations group all date+thread files under one dir, but
 // each Drive doc, each calendar, and each Linear issue stand alone.
 func extractConversations(files []paths.DataFile, root string) ([]activeConv, error) {
 	seen := make(map[string]*activeConv)
@@ -113,21 +113,22 @@ func extractConversations(files []paths.DataFile, root string) ([]activeConv, er
 }
 
 // listConv is the grouping identity used by `list --since`. Dir is the
-// uniqueness key (the directory or file that defines a listConv in this
-// view); Display is the user-facing label.
+// uniqueness key (the directory or file that defines a conversation in this
+// view); Display is the user-facing label. Named listConv to avoid clashing
+// with commands/read.go's conversation type.
 type listConv struct {
 	Dir     string
 	Display string
 }
 
-// listConvFor returns the listConv that owns f, dispatched on the
+// listConvFor returns the conversation that owns f, dispatched on the
 // typed paths.DataFile so each kind groups at its own natural unit. The
 // boolean is false when f belongs to a kind that does not surface in
 // `list --since` output (sidecars, queues, identity files, attachments).
 func listConvFor(f paths.DataFile, root string) (listConv, bool) {
 	switch v := f.(type) {
 	case paths.MessagingDateFile:
-		// <plat>/<acct>/<conv>/YYYY-MM-DD.jsonl — parent dir is the listConv.
+		// <plat>/<acct>/<conv>/YYYY-MM-DD.jsonl — parent dir is the conversation.
 		return relativeConv(filepath.Dir(v.Path()), root), true
 	case paths.ThreadFile:
 		// <plat>/<acct>/<conv>/threads/<ts>.jsonl — strip /threads/<ts>.jsonl.
@@ -145,7 +146,7 @@ func listConvFor(f paths.DataFile, root string) (listConv, bool) {
 		return relativeConv(filepath.Dir(f.Path()), root), true
 	case paths.IssueFile:
 		// linear-issues/<acct>/issues/<id>.jsonl — each issue is its own
-		// listConv. Dir is the file itself (no per-issue subdir);
+		// conversation. Dir is the file itself (no per-issue subdir);
 		// Display drops the redundant "issues" segment for readability.
 		display, err := filepath.Rel(root, v.Path())
 		if err != nil {
