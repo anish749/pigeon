@@ -644,22 +644,66 @@ maintaining a parallel auth/config story. The user must have
 2. **Create an Atlassian API token** at
    `https://id.atlassian.com/manage-profile/security/api-tokens`
    (Cloud) or generate a Personal Access Token (Server / on-prem).
-   `jira init` does not create tokens — it consumes one.
+   `jira init` does not create tokens — it consumes one. See "SSO and
+   the API Token Gotcha" below before doing this if your Jira sits
+   behind Okta / SAML / Google SSO.
 3. **Export the token**: `export JIRA_API_TOKEN=<token>`. For Server
    PATs, also `export JIRA_AUTH_TYPE=bearer`.
-4. **Initialize `jira-cli`**: `jira init` walks the user through
+4. **Pre-flight check** (recommended — faster than retrying `jira init`
+   if something is off):
+
+   ```sh
+   curl -s -u "<your-atlassian-email>:$JIRA_API_TOKEN" \
+     https://<your-site>.atlassian.net/rest/api/3/myself | head -c 400
+   ```
+
+   - 200 + JSON with `accountId`, `emailAddress`, `displayName` → token
+     and email are correct, proceed.
+   - 401 → token / email mismatch (re-read the SSO section below).
+   - 404 → server URL typo.
+5. **Initialize `jira-cli`**: `jira init` walks the user through
    `installation` (cloud / local), `server`, `login`, and a default
    `project`. It calls live API endpoints (`/project`, `/field`,
    `/board`) under the exported token to populate the YAML, so step 2
-   must come first.
-5. **Verify**: `jira me` should print the authenticated user.
-6. **Add a pigeon config entry** (see "Configuration" below).
-7. **Run `pigeon setup jira <account>`** — pigeon reads the jira-cli
+   must come first. For Cloud, **always pick `auth_type: basic`** —
+   `bearer` is for Server PATs only, even when your Cloud login goes
+   through SSO.
+6. **Verify**: `jira me` should print the authenticated user.
+7. **Add a pigeon config entry** (see "Configuration" below).
+8. **Run `pigeon setup jira <account>`** — pigeon reads the jira-cli
    config, calls `client.Me()` (or equivalent) to verify, prints the
    configured projects, and exits.
 
-If the user already runs `jira-cli` for daily work, only steps 6 and 7
+If the user already runs `jira-cli` for daily work, only steps 7 and 8
 are new.
+
+### SSO and the API Token Gotcha
+
+Atlassian Cloud sites at `*.atlassian.net` are usually fronted by
+Okta, Google, or another SAML/SSO provider for browser login. **The
+SSO password is never the API credential.** SSO governs the browser
+session; REST API calls authenticate with HTTP Basic using
+`<email>:<api_token>`, where `<api_token>` is generated at
+`https://id.atlassian.com/manage-profile/security/api-tokens`.
+
+Three failure modes that all surface as `401 unauthorized` in
+`jira init`:
+
+- **Exported the SSO password as `JIRA_API_TOKEN`.** Will always 401.
+  Generate a real API token at the link above. The token page is
+  reachable even when your org enforces SSO — it's an
+  Atlassian-account-level setting, not an org SSO setting.
+- **Wrong email for `login`.** The login must be the email tied to the
+  Atlassian account that created the token, not necessarily your
+  corporate email. They are usually the same, but if your Atlassian
+  account was set up with a personal email, the corporate one will
+  401.
+- **Picked `bearer` as `auth_type`.** Bearer is for self-hosted Jira
+  Server / Data Center with PATs. Cloud always uses `basic` even with
+  SSO.
+
+The pre-flight `curl` in step 4 catches all three before you waste a
+round of `jira init`.
 
 ## Configuration
 
