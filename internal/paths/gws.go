@@ -230,13 +230,17 @@ func (m DriveMetaFile) Dir() string { return m.dir }
 func (m DriveMetaFile) Name() string { return m.name }
 
 // Date returns the modification date encoded in the drive-meta filename.
-// The filename is validated at construction (via ParseDriveMetaPath or
-// DriveFileDir.MetaFile), so this re-parse is infallible for any value
-// produced through the typed constructors.
-func (m DriveMetaFile) Date() time.Time {
+// Returns an error if the date portion fails to parse — should not happen
+// for values produced through ParseDriveMetaPath or DriveFileDir.MetaFile
+// (both validate the date at construction), but propagating the error
+// keeps a corrupted struct from silently producing a zero time.
+func (m DriveMetaFile) Date() (time.Time, error) {
 	dateStr := strings.TrimSuffix(strings.TrimPrefix(m.name, driveMetaFilePrefix), driveMetaFileExt)
-	t, _ := time.Parse("2006-01-02", dateStr)
-	return t
+	t, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse drive-meta date %q in %s: %w", dateStr, m.name, err)
+	}
+	return t, nil
 }
 
 // ContentFiles returns absolute paths of the Drive content files (markdown

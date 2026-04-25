@@ -197,7 +197,7 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 	case paths.FormulaFile:
 		return latestDriveMetaDate(filepath.Dir(v.Path()))
 	case paths.DriveMetaFile:
-		return v.Date(), nil
+		return v.Date()
 	}
 	// AttachmentFile, ConvMetaFile, PeopleFile, MaintenanceFile,
 	// SyncCursorsFile, PollMetricsFile, PendingDeletesFile,
@@ -283,7 +283,11 @@ func latestDriveMetaDate(dir string) (time.Time, error) {
 		if !ok {
 			continue
 		}
-		if d := meta.Date(); d.After(latest) {
+		d, err := meta.Date()
+		if err != nil {
+			return time.Time{}, fmt.Errorf("drive-meta %s: %w", entry.Name(), err)
+		}
+		if d.After(latest) {
 			latest = d
 		}
 	}
