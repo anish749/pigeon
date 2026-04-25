@@ -12,40 +12,61 @@ work with pigeon's Jira storage should be here.
 ## Storage Philosophy
 
 Jira data follows the same raw-storage pattern as Linear, Google
-Calendar events, and Drive comments: each JSONL line is the **raw CLI
-JSON output** plus a single injected `type` discriminator. Pigeon does
-not pick a subset of "interesting" fields — the full JSON response from
-the `jira` CLI lands on disk verbatim. This makes storage lossless
-against any field we don't currently use and future-proof against schema
-changes in the Jira REST API.
+Calendar events, and Drive comments: each JSONL line is the **raw HTTP
+response body** from the Jira REST API plus a single injected `type`
+discriminator. Pigeon does not pick a subset of "interesting" fields —
+the full JSON response lands on disk verbatim. This makes storage
+lossless against any field we don't currently use and future-proof
+against schema changes in the Jira REST API.
 
-The `jira` CLI
-([ankitpokhrel/jira-cli](https://github.com/ankitpokhrel/jira-cli)) is
-the sole interface to the Jira REST API. Pigeon shells out to it for
-all data fetching — there is no direct HTTP client code.
-Authentication, pagination of individual calls, cloud-vs-server API
-version selection (v2/v3), and the Atlassian Document Format / markdown
-round-trip are all the CLI's responsibility.
+Pigeon imports
+[ankitpokhrel/jira-cli](https://github.com/ankitpokhrel/jira-cli)'s
+`pkg/jira` package directly as a Go library — no subprocess. Two
+client methods cover the entire ingest path:
 
-### Why `view --raw`, not `list --raw`
+- `client.Search(jql, limit)` (v3, `/search/jql?fields=*all`) or
+  `client.SearchV2(jql, from, limit)` (v2, offset paging) — used to
+  discover issue keys whose `updated` is past the cursor.
+- `client.GetIssueRaw(key)` / `client.GetIssueV2Raw(key)` — returns
+  the raw HTTP response body for `GET /rest/api/3/issue/{key}` (or v2)
+  as a `string`. This is the lossless byte-for-byte payload pigeon
+  writes to disk.
 
-The CLI exposes two JSON modes but they are not equivalent:
+The `jira` CLI binary is still required, but only as a peer tool: the
+user runs `jira init` to generate the credential config that pigeon
+reads, and any agent-driven write actions (commenting, transitioning,
+creating issues) go through the CLI directly. Pigeon never invokes
+the binary at runtime.
 
-- `jira issue view KEY --raw` prints the **raw HTTP response body** from
-  `GET /rest/api/3/issue/{key}` (or v2 for server installations). Every
-  field the Jira API returns — including fields pigeon never touches —
-  is preserved. Comments live inside this response at
+`pkg/jira` owns authentication wiring, cloud-vs-server API version
+selection (v2/v3), and the Atlassian Document Format / markdown
+round-trip. Pigeon owns cursor management, JQL composition, and
+pagination loops (see "Polling and Sync" below — `pkg/jira`'s `Search`
+function does not internally page v3 token-based responses, so the
+poller drives that loop).
+
+### Why `GetIssueRaw`, not `Search` results
+
+`pkg/jira` exposes two ways to obtain issue data, and they are not
+equivalent:
+
+- `client.GetIssueRaw(key)` returns the **raw HTTP response body** from
+  `GET /rest/api/3/issue/{key}` as a string. Every field the Jira API
+  returns — including ones `pkg/jira`'s typed structs do not model —
+  is preserved verbatim. Comments live inside this response at
   `fields.comment.comments[]`.
-- `jira issue list --raw` prints a **trimmed, CLI-parsed struct** — the
-  `jira.Issue` Go type from
+- `client.Search(jql, limit)` returns `*SearchResult` whose `Issues`
+  field is `[]*jira.Issue` — a **trimmed, parsed struct** declared in
   [`pkg/jira/types.go`](https://github.com/ankitpokhrel/jira-cli/blob/main/pkg/jira/types.go).
   Many fields (attachments, custom fields, work log, votes, changelog,
-  etc.) are dropped.
+  worklog, etc.) are dropped because the `IssueFields` Go type doesn't
+  define them; they are present in the HTTP body but never reach the
+  caller.
 
-For lossless on-disk storage, pigeon **always writes the `view --raw`
-JSON**, never the `list --raw` JSON. The list call is only used to
-discover which issue keys changed; the view call is the source of
-truth.
+For lossless on-disk storage, pigeon **always writes the
+`GetIssueRaw` body**, never the `Search` payload. The search call is
+only used to discover which issue keys changed; the per-issue raw
+fetch is the source of truth.
 
 ## Deduplication Rule
 
@@ -65,80 +86,96 @@ if a project is moved or renamed in Jira; the `id` never does.
 
 ## Polling and Sync
 
-Jira has webhooks but the `jira` CLI is HTTP-only, so all sync is
-poll-based.
+`pkg/jira` is HTTP-only, so all sync is poll-based.
 
-| Data type | CLI command | Cursor |
+| Data type | Client call | Cursor |
 |-----------|-------------|--------|
-| Issue keys | `jira issue list -q "updated > '<cursor>'" --plain --no-headers --columns key --paginate 0:100` | `updated` timestamp |
-| Issue body + comments | `jira issue view <KEY> --raw` | Per-issue, fetched when the issue key appears in the list query |
+| Issue keys | `client.Search(jql, limit)` (v3) or `client.SearchV2(jql, from, limit)` (v2), where `jql = "updated > '<cursor>' AND project in (...)"`. The poller iterates through `Issues[]` and only reads each `*jira.Issue.Key`. | `updated` timestamp |
+| Issue body + comments | `client.GetIssueRaw(key)` (v3) or `client.GetIssueV2Raw(key)` (v2) | Per-issue, fetched when the issue key appears in the search results |
 
-Two CLI calls per changed issue: one list (discovery) + one view per
-key (fetch). This mirrors how the Linear poller uses `issue query` +
+Two API calls per changed issue: one search (discovery) + one raw
+fetch per key. This mirrors how the Linear poller uses `issue query` +
 `issue view`.
 
 ### Why Two Calls Per Issue
 
-`jira issue list --raw` would give us one JSON blob for every changed
-issue in a single HTTP round-trip, but — as noted under "Why
-`view --raw`" above — its output is lossy. The alternative of writing
-the trimmed form is worse than taking the extra HTTP call per issue:
-losing fields silently on disk defeats the point of raw storage.
+`Search` already returns the parsed issues in one HTTP round-trip,
+but — as noted under "Why `GetIssueRaw`" above — `*jira.Issue` is
+the trimmed Go view, not the raw HTTP body. Writing the trimmed form
+to disk would silently drop every field `IssueFields` does not model.
+Issuing one extra `GetIssueRaw` per changed issue is the cost of
+lossless storage.
 
-For the discovery step we therefore use `--plain --columns key` (a
-simple tab-separated list of keys) rather than `--raw`. It's the
-cheapest mode the CLI offers for "just give me the matching keys".
+For the discovery step we therefore care only about the `Key` field on
+each returned `*jira.Issue`; the rest of the parsed payload is
+discarded.
 
 ### First-Run Backfill
 
 Jira issues, like Linear issues, are mutable entities. The backfill
-fetches two sets:
+fetches two JQL sets, one project at a time:
 
 1. **All active issues** (any status category except Done):
 
    ```
-   jira issue list -q "statusCategory != Done" \
-       --plain --no-headers --columns key --paginate 0:100
+   project = "<KEY>" AND statusCategory != Done
    ```
 
 2. **Recently closed issues** (Done status category, updated in the
    last 90 days):
 
    ```
-   jira issue list -q "statusCategory = Done AND updated > -90d" \
-       --plain --no-headers --columns key --paginate 0:100
+   project = "<KEY>" AND statusCategory = Done AND updated > -90d
    ```
 
-For each returned key, the poller runs `jira issue view <KEY> --raw`
-and writes:
+Each JQL is passed to `client.Search` (v3) or `client.SearchV2` (v2)
+and paginated until exhausted (see "Pagination" below). The poller
+collects the `Key` from each returned `*jira.Issue`, then for each key
+calls `client.GetIssueRaw(key)` and writes:
 
-- One issue line (the top-level response with comments stripped).
-- One comment line per entry in `fields.comment.comments[]`.
-
-Pagination — the `--paginate` flag caps at 100 issues per call — is
-handled by the poller, which loops incrementing the `from` offset until
-an empty page returns. This differs from Linear, where `--limit=0`
-opts into full server-side pagination; `jira` CLI has no equivalent.
+- One issue line (the top-level response with `fields.comment.comments`
+  stripped).
+- One comment line per entry that was originally in
+  `fields.comment.comments[]`.
 
 The 90-day window for closed issues matches the backfill depth used by
 other pigeon sources.
+
+#### Pagination
+
+`pkg/jira` paginates differently across versions:
+
+- **v3**: `client.Search` calls `/search/jql` once and returns
+  `SearchResult{IsLast bool, NextPageToken string, Issues []*Issue}`.
+  The function does **not** accept a token, so the poller cannot pass
+  `nextPageToken` back through `Search`. To continue past the first
+  page, the poller calls `client.Get(ctx, "/search/jql?jql=...&nextPageToken=...&fields=*all", nil)`
+  directly until `IsLast` is true.
+- **v2**: `client.SearchV2(jql, from, limit)` accepts an offset, so
+  the poller loops with `from = 0, limit, 2*limit, ...` until an empty
+  page returns.
+
+A reasonable `limit` is 100; raising it further offers no advantage
+because `/search/jql` enforces its own server-side cap.
 
 ### Incremental Sync
 
 Each poll cycle:
 
 1. Load cursor (last `updated` timestamp) from `.sync-cursors.yaml`.
-2. Run `jira issue list -q "updated > '<cursor>'" --plain --no-headers --columns key --paginate 0:100`,
-   looping pages until exhausted.
-3. For each returned key:
-   a. Run `jira issue view <KEY> --raw`.
+2. Build JQL: `updated > "<cursor>" AND project in (PROJ1, PROJ2, ...)`
+   (or one project per cycle, if the poller iterates per project).
+3. Call `client.Search(jql, 100)` (v3) or `client.SearchV2(jql, 0, 100)`
+   (v2), looping pages until exhausted (see "Pagination" above).
+4. For each returned `*jira.Issue`, take its `.Key`, then:
+   a. Call `client.GetIssueRaw(key)` (v3) or `client.GetIssueV2Raw(key)` (v2).
    b. Append the issue snapshot to `issues/{KEY}.jsonl` (with
       `fields.comment.comments` removed from the line).
    c. Append each comment as a separate `jira-comment` line to the
       same file.
-4. Update the cursor to the maximum `fields.updated` across all issues
+5. Update the cursor to the maximum `fields.updated` across all issues
    fetched in this batch.
-5. Save the cursor.
+6. Save the cursor.
 
 The JQL `updated > "<cursor>"` clause is the incremental cursor. It
 returns issues whose `updated` is strictly after the given timestamp.
@@ -162,21 +199,23 @@ this without harm.
 
 ### Comment Fetching
 
-Comments are fetched as part of `jira issue view --raw`, which returns
-the full issue. The poller only calls `issue view` for keys that
-appeared in the incremental list (i.e. issues that changed since the
-last poll).
+Comments are fetched as part of `client.GetIssueRaw`, which returns
+the full issue body. The poller only calls `GetIssueRaw` for keys
+that appeared in the incremental search (i.e. issues that changed
+since the last poll).
 
-Comments are nested under `fields.comment.comments[]` in the view
-response. Each comment has an `id`, and the dedup rule (keep last by
-ID) handles re-appends of already-seen comments.
+Comments are nested under `fields.comment.comments[]` in the response.
+Each comment has an `id`, and the dedup rule (keep last by ID) handles
+re-appends of already-seen comments.
 
 The `fields.comment` object also carries `total`, `startAt`, and
 `maxResults`. On a very active issue, only the most recent N comments
-(default 1,000 on Jira Cloud) come back in the view response. Pigeon
-does not paginate comments — if a single issue has more than 1,000
-comments, older ones will be missed. This matches the `jira-cli`
-behaviour and is listed under Known Limitations.
+(default 1,000 on Jira Cloud) come back in the issue body. Pigeon
+does not paginate comments separately — if a single issue has more
+than 1,000 comments, older ones will be missed. `pkg/jira` does not
+expose a paginated comment endpoint either, so a future fix would
+need a direct call to `/rest/api/3/issue/{key}/comment`. This is
+listed under Known Limitations.
 
 Jira Cloud returns comment bodies as Atlassian Document Format (ADF)
 JSON when using API v3. Server installations return them as wiki
@@ -199,11 +238,12 @@ changed issues). Steady-state polling on a moderately active project
 (5–20 changes per hour) is a few dozen calls per hour. This is well
 inside any documented Atlassian rate limit.
 
-If the CLI returns a non-zero exit code with stderr matching HTTP 429,
-the poller logs an error, skips the cursor update, and retries on the
-next tick. Linear handles rate-limit backoff inside its CLI; `jira`
-does not, so pigeon treats 429s as transient errors and relies on the
-30-second tick to space out retries.
+If the client returns an error wrapping HTTP 429 (surfaced via
+`*jira.ErrUnexpectedResponse` from `pkg/jira` with `Status` set to
+`429 Too Many Requests`), the poller logs an error, skips the cursor
+update, and retries on the next tick. `pkg/jira` does not implement
+backoff or `Retry-After` honoring, so pigeon treats 429s as transient
+errors and relies on the 30-second tick to space out retries.
 
 ### Cursor Expiry
 
@@ -242,22 +282,23 @@ the human-readable key.
 
 Unlike Linear (one workspace ≈ one team ≈ one issue namespace), Jira
 lets a single Atlassian site host many projects with independent key
-prefixes (`ENG-`, `OPS-`, `MKT-`, …). The `jira` CLI itself is
-configured against a single site + single default project per config
-file, switched via `JIRA_CONFIG_FILE` or the `-c/--config` flag.
+prefixes (`ENG-`, `OPS-`, `MKT-`, …). `jira-cli` itself is configured
+against a single site + single default project per config file,
+switched via `JIRA_CONFIG_FILE` or the `-c/--config` flag.
 
 Pigeon mirrors this by scoping cursors and storage to
 `{site-slug}/{project-key}`. Each configured project gets an
 independent cursor and directory. The poller iterates over all
 configured (site, project) pairs on each cycle.
 
-The site slug is derived from the Jira server URL — for
-`https://acme.atlassian.net` the slug is `acme`. For on-premise
-installations (e.g. `https://jira.internal.example.com`), the slug is
-the lowercase first DNS label (`jira`), or, when that would collide
-with another host, the first two labels joined with `-`
-(`jira-internal`). Collision resolution is a config-time concern and
-documented alongside the site's entry in `config.yaml`.
+The site slug is derived from the `server` field in the bound
+`jira-cli` config — for `https://acme.atlassian.net` the slug is
+`acme`. For on-premise installations (e.g. `https://jira.internal.example.com`),
+the slug is the lowercase first DNS label (`jira`), or, when that
+would collide with another host, the first two labels joined with `-`
+(`jira-internal`). Collision resolution is a config-time concern;
+when ambiguous, pigeon falls back to using the entry's `account`
+field as the slug.
 
 ### Cursor File
 
@@ -276,7 +317,7 @@ and rounded down to minute precision when formatted into JQL.
 
 ### Issue Line
 
-Each line is the **raw `jira issue view --raw` JSON for one issue**
+Each line is the **raw `client.GetIssueRaw(key)` JSON for one issue**
 with `fields.comment.comments` removed, plus a `"type":"jira-issue"`
 discriminator. The comment array is stripped out of the issue line
 because comments are written as their own `jira-comment` lines —
@@ -325,9 +366,9 @@ but the raw `fields.updated` field on disk is left verbatim.
 ### Comment Line
 
 Each line is one entry from `fields.comment.comments[]` in the
-`issue view --raw` response, plus a `"type":"jira-comment"`
-discriminator and the parent issue key for grep-ability. Everything
-else is verbatim from the CLI output.
+`GetIssueRaw` response, plus a `"type":"jira-comment"` discriminator
+and the parent issue key for grep-ability. Everything else is
+verbatim from the API response.
 
 ```json
 {"type":"jira-comment","issueKey":"ENG-142","id":"10501","self":"https://acme.atlassian.net/rest/api/3/issue/10042/comment/10501","author":{"accountId":"6e...","displayName":"Bob Jones","emailAddress":"bob@acme.com"},"body":{"version":1,"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Looks good — can we add a retry on timeout?"}]}]},"created":"2026-04-08T14:04:31.883+0000","updated":"2026-04-08T14:04:31.883+0000","jsdPublic":true}
@@ -375,51 +416,72 @@ the full set of unique comments.
 
 ## Go Type Definitions
 
-Jira types follow the same dual-representation pattern as Linear,
-`CalendarEvent`, and `DriveComment`:
+Jira types follow the same dual-representation pattern as
+`CalendarEvent` (`internal/store/modelv1/gws_event.go`): a typed
+Runtime view for in-process code (dedup, cursor extraction, file
+routing) and a `Serialized map[string]any` that is the source of
+truth for disk storage.
 
 ```go
-// JiraIssue holds the raw CLI JSON (Serialized) and a minimal
-// parsed struct (Runtime) for dedup, cursor extraction, and file routing.
+import jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+
+// JiraIssue holds the raw HTTP response (Serialized) and the typed
+// pkg/jira.Issue (Runtime) for dedup, cursor extraction, and file routing.
 type JiraIssue struct {
-    Runtime    JiraIssueRuntime
-    Serialized map[string]any
+    Runtime    jira.Issue       // pkg/jira's typed Issue (Key + IssueFields)
+    Serialized map[string]any   // raw HTTP body from GetIssueRaw, source of truth on disk
 }
+```
 
-type JiraIssueRuntime struct {
-    ID     string           `json:"id"`
-    Key    string           `json:"key"`
-    Fields JiraIssueFields  `json:"fields"`
-}
+For issues, `pkg/jira.Issue` already carries every field pigeon needs:
+`Key` (file routing), `Fields.Updated` (cursor), and `Fields.Created`,
+`Fields.Status`, `Fields.Assignee`, etc. (formatting). The numeric
+`id` used as the dedup key is **not** modeled by `pkg/jira.Issue`;
+it lives in the raw response. Pigeon extracts it from the
+`Serialized` map (`Serialized["id"].(string)`) at write time and uses
+that for the dedup index.
 
-type JiraIssueFields struct {
-    Updated string `json:"updated"`
-}
-
-// JiraComment holds the raw CLI JSON (Serialized) and a minimal
-// parsed struct (Runtime) for dedup.
+```go
+// JiraComment is a single entry from fields.comment.comments[]. pkg/jira
+// does not expose a named comment type — IssueFields.Comment.Comments
+// is an anonymous struct (see pkg/jira/types.go:105-113) — so the
+// Runtime here is a small local type defined by pigeon.
 type JiraComment struct {
     Runtime    JiraCommentRuntime
-    Serialized map[string]any
+    Serialized map[string]any   // raw fields.comment.comments[i] JSON, source of truth
 }
 
 type JiraCommentRuntime struct {
     ID       string `json:"id"`
-    IssueKey string `json:"issueKey"`
+    IssueKey string `json:"issueKey"` // injected by pigeon, not in raw API output
     Created  string `json:"created"`
-    Updated  string `json:"updated"`
+    Updated  string `json:"updated"`  // present in raw API output but not in pkg/jira.Issue.Fields.Comment
 }
 ```
 
-The Runtime structs are intentionally minimal — only the fields needed
-for dedup (`id`), cursor tracking (`fields.updated`), and file routing
-(`key`, `issueKey`). Everything else lives in `Serialized` and
-round-trips through disk unchanged.
+`JiraCommentRuntime` is intentionally minimal — only the fields needed
+for dedup (`id`), filtering by parent (`issueKey`), and ordering
+(`created`, `updated`). All other fields (`author`, `body`, `self`,
+`jsdPublic`, …) live in `Serialized` and round-trip unchanged.
 
-The `fields.comment.comments` array is stripped from the Serialized
-map before the issue line is written, so the issue snapshot never
-double-stores comment bodies. The original `fields.comment.total`,
-`maxResults`, and `startAt` metadata is preserved.
+### Building Serialized
+
+Both Runtime and Serialized are populated from the same raw JSON
+returned by `client.GetIssueRaw`. The poller does:
+
+1. `raw, err := client.GetIssueRaw(key)` → `string` of the full body.
+2. `json.Unmarshal([]byte(raw), &issue.Runtime)` to populate
+   `jira.Issue` (typed view, missing fields are tolerated).
+3. `json.Unmarshal([]byte(raw), &issue.Serialized)` to populate the
+   raw map (lossless).
+4. Lift `comments := issue.Serialized["fields"]["comment"]["comments"]`
+   into a separate slice, then delete that nested key. The mutated
+   `Serialized` becomes the issue line; each lifted comment becomes a
+   `JiraComment` (with `IssueKey` injected) and writes a comment line.
+
+The original `fields.comment.total`, `maxResults`, and `startAt` keys
+are preserved — only the `comments` array itself is stripped, so
+issue lines never double-store comment bodies.
 
 ## Read Protocol Integration
 
@@ -570,53 +632,142 @@ Maintenance is lightweight because individual issue files are small
 (tens to low hundreds of lines). It can run opportunistically without
 blocking reads or writes.
 
+## Setup
+
+Pigeon piggybacks on the user's existing `jira-cli` setup rather than
+maintaining a parallel auth/config story. The user must have
+`jira-cli` installed and initialized before pigeon can ingest Jira.
+
+1. **Install `jira-cli`.** Homebrew, downloadable releases, Nix, or
+   Docker — see the
+   [installation guide](https://github.com/ankitpokhrel/jira-cli/wiki/Installation).
+2. **Create an Atlassian API token** at
+   `https://id.atlassian.com/manage-profile/security/api-tokens`
+   (Cloud) or generate a Personal Access Token (Server / on-prem).
+   `jira init` does not create tokens — it consumes one.
+3. **Export the token**: `export JIRA_API_TOKEN=<token>`. For Server
+   PATs, also `export JIRA_AUTH_TYPE=bearer`.
+4. **Initialize `jira-cli`**: `jira init` walks the user through
+   `installation` (cloud / local), `server`, `login`, and a default
+   `project`. It calls live API endpoints (`/project`, `/field`,
+   `/board`) under the exported token to populate the YAML, so step 2
+   must come first.
+5. **Verify**: `jira me` should print the authenticated user.
+6. **Add a pigeon config entry** (see "Configuration" below).
+7. **Run `pigeon setup jira <account>`** — pigeon reads the jira-cli
+   config, calls `client.Me()` (or equivalent) to verify, prints the
+   configured projects, and exits.
+
+If the user already runs `jira-cli` for daily work, only steps 6 and 7
+are new.
+
 ## Configuration
 
-Jira sites and projects are configured in `config.yaml`:
+Pigeon's only Jira-specific config is *which `jira-cli` config(s) to
+read, and which projects on each site to ingest*. Server URL, login,
+auth type, mTLS, and `insecure` flag are all sourced from the
+`jira-cli` YAML — pigeon does not duplicate them.
 
 ```yaml
 jira:
-  - site: acme                          # slug derived from the server URL
-    server: https://acme.atlassian.net  # full Jira site URL
-    project: ENG                        # project key
-    config_file: ~/.config/pigeon/jira/acme-eng.yml   # path to the jira-cli config
-    account: acme-eng                   # display name for pigeon
-  - site: acme
-    server: https://acme.atlassian.net
-    project: OPS
-    config_file: ~/.config/pigeon/jira/acme-ops.yml
-    account: acme-ops
+  - jira_config: ~/.config/.jira/.config.yml   # optional; defaults to $JIRA_CONFIG_FILE or jira-cli's default path
+    projects: [ENG, OPS]                       # projects on this site to ingest
+    account: acme                              # display name shown by `pigeon list`
 ```
 
-The `config_file` field points at a `jira-cli` config generated via
-`jira init`. Pigeon invokes the CLI with `JIRA_CONFIG_FILE=<path>` set
-in the environment, which is the supported way to multiplex multiple
-Jira projects from one host. Auth tokens live where `jira-cli` puts
-them (env `JIRA_API_TOKEN`, `.netrc`, or the system keyring) and are
-never read by pigeon directly.
+For a single-site, single-project user the entry is a one-liner:
 
-The `account` field is the display name shown by `pigeon list` and used
-for directory naming scoping (it composes with `site` and `project` in
-the directory layout only as metadata — on disk the path is always
-`{site}/{project}/`).
+```yaml
+jira:
+  - projects: [ENG]
+    account: acme
+```
+
+### Field semantics
+
+- **`jira_config`** (string, optional): Path to a `jira-cli` YAML.
+  Resolution order: explicit value here → `$JIRA_CONFIG_FILE` env →
+  `jira-cli`'s default (`~/.config/.jira/.config.yml`). Set this when
+  you maintain multiple `jira-cli` configs (e.g. one per Atlassian
+  site).
+- **`projects`** (list of string, required): Project keys on the site
+  whose issues should be ingested. The poller filters JQL with
+  `project in (PROJECT_KEYS...)`. Auth is site-scoped (one token per
+  Atlassian site), so a single `jira_config` covers all projects in
+  this list.
+- **`account`** (string, required): Display name pigeon uses in
+  listings and for human-readable references. Independent of the
+  on-disk directory path.
+
+### Multi-site
+
+Use one entry per site, each pointing at its own `jira-cli` config:
+
+```yaml
+jira:
+  - jira_config: ~/.config/.jira/acme-cloud.yml
+    projects: [ENG, OPS]
+    account: acme
+  - jira_config: ~/.config/.jira/contoso-onprem.yml
+    projects: [SUPPORT]
+    account: contoso
+```
+
+V1 assumes a single `JIRA_API_TOKEN` env var covers all sites. If a
+user genuinely needs different tokens per site, multi-token routing is
+deferred to a later version (per-entry `api_token_env` override is the
+expected shape).
+
+### What pigeon reads from the jira-cli YAML
+
+Only the fields needed to construct a `jira.Config` for `pkg/jira.NewClient`:
+
+| jira-cli YAML key | Used as |
+|---|---|
+| `server` | `jira.Config.Server` (also: site-slug for directory layout) |
+| `login` | `jira.Config.Login` |
+| `auth_type` | `jira.Config.AuthType` (`basic`, `bearer`, or `mtls`) |
+| `insecure` | `jira.Config.Insecure` |
+| `mtls.ca_cert`, `mtls.client_cert`, `mtls.client_key` | `jira.Config.MTLSConfig` (when `auth_type: mtls`) |
+| `installation` | Selects v3 (cloud) vs v2 (local) endpoint methods |
+
+Discovered fields written by `jira init` (`project.key`, `board`,
+`epic.name`, `epic.link`, `issue.types[]`, `issue.fields.custom[]`)
+are ignored. They exist for `jira-cli`'s write commands and do not
+affect read-only ingest.
+
+### Token sourcing
+
+The API token is **always** read from the `JIRA_API_TOKEN` environment
+variable. `pkg/jira` itself supports `.netrc` and OS keyring fallbacks
+inside its CLI, but `jira.Config.APIToken` is a plain string — pigeon
+populates it from env. If `JIRA_API_TOKEN` is unset, the daemon logs
+an error on startup and disables Jira ingest until the token is
+exported.
+
+Users who currently rely on `.netrc` or keyring with `jira-cli` will
+need to also `export JIRA_API_TOKEN` for pigeon. This is a deliberate
+V1 simplification.
 
 ## Known Limitations
 
-- **No real-time events.** Jira has webhooks but the CLI wrapper is
-  poll-based. Updates are delayed by at most one poll interval (30s).
+- **No real-time events.** Jira has webhooks but `pkg/jira` is
+  HTTP-only. Updates are delayed by at most one poll interval (30s).
 - **ADF is not greppable as plain text.** On Jira Cloud, comment and
   description bodies are stored as ADF JSON. Substring search across
   text runs requires `jq` to flatten the document. Server
   installations (API v2) return plain strings and are unaffected.
-- **Per-call pagination caps at 100.** Unlike the Linear CLI's
-  `--limit=0`, `jira issue list` requires the poller to loop
-  `--paginate <from>:100` pages. Large batches (first backfill on a
-  long-lived project) cost many HTTP round-trips.
-- **Comments past ~1,000 per issue are truncated.** `jira issue view`
+- **`pkg/jira.Search` does not loop v3 token pagination.** The
+  function calls `/search/jql` once and returns the first page plus a
+  `NextPageToken`, but exposes no API to pass that token back. The
+  poller must call `Client.Get` directly (with the same query plus
+  `&nextPageToken=...`) to walk subsequent pages. V2 is unaffected
+  (`SearchV2` accepts an offset).
+- **Comments past ~1,000 per issue are truncated.** `GetIssueRaw`
   returns at most the server's default comment `maxResults` (1,000 on
   Cloud). Issues with more comments will lose older ones. Fixing this
   would require a separate `/rest/api/3/issue/{key}/comment`
-  pagination loop, which the CLI does not expose.
+  pagination loop, which `pkg/jira` does not expose.
 - **JQL date precision is one minute.** The `updated > "<cursor>"`
   filter is minute-granular. The poller may re-fetch issues whose
   `updated` is within the overlap minute; dedup-on-ID absorbs the
@@ -627,27 +778,33 @@ the directory layout only as metadata — on disk the path is always
 - **No attachment download.** Issue attachments are stored as URLs in
   `fields.attachment[]`. The binary files are not downloaded in V1.
 - **No changelog.** The history of status / assignee / field changes
-  (`/rest/api/3/issue/{key}?expand=changelog`) is not fetched. `jira`
-  CLI does not expose `expand=changelog` to callers. Adding it would
-  require either an upstream CLI change or a direct HTTP call, both
-  out of scope for V1.
+  (`/rest/api/3/issue/{key}?expand=changelog`) is not fetched.
+  `pkg/jira.GetIssueRaw` does not expose `expand=changelog`. Adding
+  it would require an upstream addition to `pkg/jira` or a direct
+  `Client.Get` call from pigeon — out of scope for V1.
 - **Custom fields land under opaque `customfield_XXXXX` keys.** The
   raw API response does not resolve custom field display names. This
-  is preserved verbatim on disk; readable names require the CLI's
-  `jira issue view` (non-raw) rendering or a separate `/field`
-  lookup.
-- **Sprints, epics, and boards are out of scope for V1.** The CLI
-  supports them (`jira sprint list`, `jira epic list`, `jira board
-  list`), but they have no natural incremental cursor and their
-  data model overlaps with regular issues (an epic *is* an issue of
-  type `Epic`). Epic membership is already visible via `fields.parent`
-  on child issues. Can be added later following the same raw-storage
-  pattern.
-- **Worklogs are out of scope for V1.** Same reasoning — `jira issue
-  worklog` is a separate endpoint, incremental via `since=<epoch-ms>`
-  on `/rest/api/3/worklog/updated`, and can be added later.
-- **429 rate-limit handling is coarse.** The CLI surfaces 429 as a
-  generic non-zero exit. Pigeon logs and retries on the next tick; no
-  exponential backoff or `Retry-After` honoring. If this becomes a
-  problem, a small wrapper around CLI invocations can parse stderr and
-  sleep appropriately.
+  is preserved verbatim on disk; readable names require a separate
+  `/field` lookup (which `jira init` does and writes to its YAML, but
+  pigeon does not currently consume the resolved mapping).
+- **Sprints, epics, and boards are out of scope for V1.** `pkg/jira`
+  exposes them (e.g. `Sprints()`, `Boards()`), but they have no
+  natural incremental cursor and their data model overlaps with
+  regular issues (an epic *is* an issue of type `Epic`). Epic
+  membership is already visible via `fields.parent` on child issues.
+  Can be added later following the same raw-storage pattern.
+- **Worklogs are out of scope for V1.** `/rest/api/3/worklog/updated`
+  is a separate endpoint with its own `since=<epoch-ms>` cursor. It
+  can be added later.
+- **429 rate-limit handling is coarse.** `pkg/jira` surfaces 429s
+  via `*ErrUnexpectedResponse`. Pigeon logs and retries on the next
+  tick; no exponential backoff or `Retry-After` honoring.
+- **Single token across multiple sites.** V1 sources `JIRA_API_TOKEN`
+  from a single env var. Users with multiple Atlassian sites that
+  require different tokens are not supported until a per-entry
+  `api_token_env` override is added.
+- **`.netrc` and keyring auth not honored.** `pkg/jira.Config.APIToken`
+  is a plain string. Pigeon populates it only from the
+  `JIRA_API_TOKEN` env var. Users who configured `jira-cli` to read
+  from `.netrc` or the OS keyring must export the env var separately
+  for pigeon.
