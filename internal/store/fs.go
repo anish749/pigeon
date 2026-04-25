@@ -607,37 +607,39 @@ func (s *FSStore) SaveSlackCursors(acct paths.AccountDir, c SlackCursors) error 
 
 // loadCursors reads a YAML cursor file into a typed struct. Returns a zero
 // value of T if the file does not exist yet (first-run case).
-func loadCursors[T any](path string) (*T, error) {
-	data, err := os.ReadFile(path)
+func loadCursors[T any](path paths.SyncCursorsFile) (*T, error) {
+	p := path.Path()
+	data, err := os.ReadFile(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return new(T), nil
 		}
-		return nil, fmt.Errorf("read cursors %s: %w", path, err)
+		return nil, fmt.Errorf("read cursors %s: %w", p, err)
 	}
 	var c T
 	if err := yaml.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("parse cursors %s: %w", path, err)
+		return nil, fmt.Errorf("parse cursors %s: %w", p, err)
 	}
 	return &c, nil
 }
 
 // saveCursors writes a YAML cursor file, creating parent directories and
 // serialising writes to the same path via the per-file mutex.
-func (s *FSStore) saveCursors(path string, c any) error {
-	mu := s.fileMu(path)
+func (s *FSStore) saveCursors(path paths.SyncCursorsFile, c any) error {
+	p := path.Path()
+	mu := s.fileMu(p)
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create parent dirs for %s: %w", path, err)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return fmt.Errorf("create parent dirs for %s: %w", p, err)
 	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal cursors: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write cursors %s: %w", path, err)
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return fmt.Errorf("write cursors %s: %w", p, err)
 	}
 	return nil
 }
@@ -681,7 +683,7 @@ func (s *FSStore) RemoveDriveFile(driveDir paths.DriveDir, fileID string) error 
 // The poller calls this when history.list reports a message was deleted.
 // The actual removal from date files happens during maintenance.
 func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) error {
-	path := gmailDir.PendingDeletesPath()
+	path := gmailDir.PendingDeletesPath().Path()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create gmail dir: %w", err)
 	}
@@ -699,7 +701,7 @@ func (s *FSStore) AppendPendingDelete(gmailDir paths.GmailDir, emailID string) e
 // applyPendingEmailDeletes reads the pending-email-deletes file, removes
 // matching email lines from gmail date files, and deletes the pending file.
 func (s *FSStore) applyPendingEmailDeletes(gmailDir paths.GmailDir) error {
-	pendingPath := gmailDir.PendingDeletesPath()
+	pendingPath := gmailDir.PendingDeletesPath().Path()
 	data, err := os.ReadFile(pendingPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -972,8 +974,8 @@ func fileExists(df paths.LogFile) bool {
 	return err == nil
 }
 
-func loadMaintenanceState(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+func loadMaintenanceState(path paths.MaintenanceFile) (map[string]string, error) {
+	data, err := os.ReadFile(path.Path())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return make(map[string]string), nil
@@ -987,10 +989,10 @@ func loadMaintenanceState(path string) (map[string]string, error) {
 	return state, nil
 }
 
-func saveMaintenanceState(path string, state map[string]string) error {
+func saveMaintenanceState(path paths.MaintenanceFile, state map[string]string) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal maintenance state: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path.Path(), data, 0644)
 }

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestAppendMetric_CreatesFileAndAppends(t *testing.T) {
@@ -20,7 +22,7 @@ func TestAppendMetric_CreatesFileAndAppends(t *testing.T) {
 		DurationMs: 142,
 		Changes:    3,
 	}
-	if err := appendMetric(path, m1); err != nil {
+	if err := appendMetric(paths.PollMetricsFile(path), m1); err != nil {
 		t.Fatalf("first appendMetric: %v", err)
 	}
 
@@ -31,7 +33,7 @@ func TestAppendMetric_CreatesFileAndAppends(t *testing.T) {
 		Changes:    0,
 		Err:        "rate limited",
 	}
-	if err := appendMetric(path, m2); err != nil {
+	if err := appendMetric(paths.PollMetricsFile(path), m2); err != nil {
 		t.Fatalf("second appendMetric: %v", err)
 	}
 
@@ -83,7 +85,7 @@ func TestAppendMetric_OmitsEmptyErr(t *testing.T) {
 		DurationMs: 10,
 		Changes:    0,
 	}
-	if err := appendMetric(path, m); err != nil {
+	if err := appendMetric(paths.PollMetricsFile(path), m); err != nil {
 		t.Fatalf("appendMetric: %v", err)
 	}
 

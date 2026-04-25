@@ -113,10 +113,10 @@ func newWorkstreamReplayCmd() *cobra.Command {
 
 			if clearState {
 				storeDir := paths.DefaultDataRoot().Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
-				if err := os.RemoveAll(storeDir); err != nil {
+				if err := os.RemoveAll(storeDir.Path()); err != nil {
 					return fmt.Errorf("clear state: %w", err)
 				}
-				logger.Info("cleared persisted state", "dir", storeDir)
+				logger.Info("cleared persisted state", "dir", storeDir.Path())
 			}
 
 			client, err := embedder.NewClient()

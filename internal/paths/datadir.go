@@ -88,8 +88,8 @@ func (w WorkspaceDir) Path() string {
 }
 
 // WorkstreamStore returns the path to the workstream store directory.
-func (w WorkspaceDir) WorkstreamStore() string {
-	return filepath.Join(w.Path(), "workstream")
+func (w WorkspaceDir) WorkstreamStore() WorkstreamStoreDir {
+	return WorkstreamStoreDir(filepath.Join(w.Path(), "workstream"))
 }
 
 // PlatformDir represents a platform directory: <base>/<platform>/
@@ -127,13 +127,13 @@ func (a AccountDir) Identity() IdentityDir {
 }
 
 // SyncCursorsPath returns the path to the sync cursors file for this account.
-func (a AccountDir) SyncCursorsPath() string {
-	return filepath.Join(a.Path(), ".sync-cursors.yaml")
+func (a AccountDir) SyncCursorsPath() SyncCursorsFile {
+	return SyncCursorsFile(filepath.Join(a.Path(), ".sync-cursors.yaml"))
 }
 
 // MaintenancePath returns the path to the maintenance state file for this account.
-func (a AccountDir) MaintenancePath() string {
-	return filepath.Join(a.Path(), ".maintenance.json")
+func (a AccountDir) MaintenancePath() MaintenanceFile {
+	return MaintenanceFile(filepath.Join(a.Path(), ".maintenance.json"))
 }
 
 // ConversationDir represents a conversation directory: <base>/<platform>/<account-slug>/<conversation>/
