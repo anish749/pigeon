@@ -84,7 +84,10 @@ func extractConversations(files []paths.DataFile, root string) ([]activeConv, er
 	seen := make(map[string]*activeConv)
 	var order []string
 	for _, f := range files {
-		conv, ok := listConvFor(f, root)
+		conv, ok, err := listConvFor(f, root)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			continue
 		}
@@ -123,27 +126,31 @@ type listConv struct {
 
 // listConvFor returns the conversation that owns f, dispatched on the
 // typed paths.DataFile so each kind groups at its own natural unit. The
-// boolean is false when f belongs to a kind that does not surface in
-// `list --since` output (sidecars, queues, identity files, attachments).
-func listConvFor(f paths.DataFile, root string) (listConv, bool) {
+// returned bool is false when f belongs to a kind that does not surface
+// in `list --since` output (sidecars, queues, identity files, attachments).
+// The error is non-nil when f is a DataFile kind this dispatch does not
+// know about — i.e. paths.go grew a new typed kind without an explicit
+// case here, so the caller can fail loud rather than silently drop the
+// file from the listing.
+func listConvFor(f paths.DataFile, root string) (listConv, bool, error) {
 	switch v := f.(type) {
 	case paths.MessagingDateFile:
 		// <plat>/<acct>/<conv>/YYYY-MM-DD.jsonl — parent dir is the conversation.
-		return relativeConv(filepath.Dir(v.Path()), root), true
+		return relativeConv(filepath.Dir(v.Path()), root), true, nil
 	case paths.ThreadFile:
 		// <plat>/<acct>/<conv>/threads/<ts>.jsonl — strip /threads/<ts>.jsonl.
-		return relativeConv(filepath.Dir(filepath.Dir(v.Path())), root), true
+		return relativeConv(filepath.Dir(filepath.Dir(v.Path())), root), true, nil
 	case paths.EmailDateFile:
 		// gws/<acct>/gmail/YYYY-MM-DD.jsonl — group at the gmail dir
 		// (one stream per account, no per-day split in the listing).
-		return relativeConv(filepath.Dir(v.Path()), root), true
+		return relativeConv(filepath.Dir(v.Path()), root), true, nil
 	case paths.CalendarDateFile:
 		// gws/<acct>/gcalendar/<calID>/YYYY-MM-DD.jsonl — per-calendar.
-		return relativeConv(filepath.Dir(v.Path()), root), true
+		return relativeConv(filepath.Dir(v.Path()), root), true, nil
 	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile, paths.DriveMetaFile:
 		// gws/<acct>/gdrive/<doc>/{Notes.md,Sheet.csv,comments.jsonl,drive-meta-*.json}
 		// — per-doc dir.
-		return relativeConv(filepath.Dir(f.Path()), root), true
+		return relativeConv(filepath.Dir(f.Path()), root), true, nil
 	case paths.IssueFile:
 		// linear-issues/<acct>/issues/<id>.jsonl — each issue is its own
 		// conversation. Dir is the file itself (no per-issue subdir);
@@ -153,12 +160,16 @@ func listConvFor(f paths.DataFile, root string) (listConv, bool) {
 			display = v.Path()
 		}
 		display = strings.Replace(display, string(filepath.Separator)+"issues"+string(filepath.Separator), string(filepath.Separator), 1)
-		return listConv{Dir: v.Path(), Display: display}, true
+		return listConv{Dir: v.Path(), Display: display}, true, nil
+	case paths.AttachmentFile, paths.ConvMetaFile, paths.PeopleFile,
+		paths.MaintenanceFile, paths.SyncCursorsFile, paths.PollMetricsFile,
+		paths.PendingDeletesFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile:
+		// Sidecars, queues, identity, bookkeeping — intentionally not
+		// surfaced in list --since output.
+		return listConv{}, false, nil
+	default:
+		return listConv{}, false, fmt.Errorf("listConvFor: unhandled DataFile kind %T (paths registry extended without updating dispatch)", f)
 	}
-	// AttachmentFile, ConvMetaFile, PeopleFile, MaintenanceFile,
-	// SyncCursorsFile, PollMetricsFile, PendingDeletesFile, WorkstreamsFile,
-	// WorkstreamProposalsFile — not surfaced in list --since.
-	return listConv{}, false
 }
 
 // relativeConv builds a listConv whose Dir is convDir and whose Display
@@ -175,36 +186,33 @@ func relativeConv(convDir, root string) listConv {
 // LatestTs returns the most recent activity timestamp recorded by the file,
 // dispatched on the typed paths.DataFile so each kind reads the right field
 // (or, for Drive content, the date encoded in the sibling drive-meta name).
-// Returns the zero time and no error for kinds whose values do not contribute
-// a meaningful "latest activity" — sidecars, queues, identity, etc.
+// Returns the zero time for kinds whose values do not contribute a
+// meaningful "latest activity" — sidecars, queues, identity, etc.
+//
+// Errors when f is a DataFile kind this dispatch does not know about — i.e.
+// paths.go grew a new typed kind without an explicit case here. The caller
+// surfaces the error rather than silently degrading to a stale timestamp.
 func LatestTs(f paths.DataFile) (time.Time, error) {
 	switch v := f.(type) {
-	case paths.MessagingDateFile:
-		return scanLatestTs(v.Path(), "ts")
-	case paths.EmailDateFile:
-		return scanLatestTs(v.Path(), "ts")
+	case paths.MessagingDateFile, paths.EmailDateFile, paths.ThreadFile, paths.CommentsFile:
+		return scanLatestTs(f.Path(), "ts")
 	case paths.CalendarDateFile:
 		return scanLatestTs(v.Path(), "updated", "created")
-	case paths.ThreadFile:
-		return scanLatestTs(v.Path(), "ts")
-	case paths.CommentsFile:
-		return scanLatestTs(v.Path(), "ts")
 	case paths.IssueFile:
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
-	case paths.TabFile:
-		return latestDriveMetaDate(filepath.Dir(v.Path()))
-	case paths.SheetFile:
-		return latestDriveMetaDate(filepath.Dir(v.Path()))
-	case paths.FormulaFile:
-		return latestDriveMetaDate(filepath.Dir(v.Path()))
+	case paths.TabFile, paths.SheetFile, paths.FormulaFile:
+		return latestDriveMetaDate(filepath.Dir(f.Path()))
 	case paths.DriveMetaFile:
 		return v.Date()
+	case paths.AttachmentFile, paths.ConvMetaFile, paths.PeopleFile,
+		paths.MaintenanceFile, paths.SyncCursorsFile, paths.PollMetricsFile,
+		paths.PendingDeletesFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile:
+		// Sidecars, queues, identity, bookkeeping — no meaningful "latest
+		// activity" timestamp for the list --since use case.
+		return time.Time{}, nil
+	default:
+		return time.Time{}, fmt.Errorf("LatestTs: unhandled DataFile kind %T (paths registry extended without updating dispatch)", f)
 	}
-	// AttachmentFile, ConvMetaFile, PeopleFile, MaintenanceFile,
-	// SyncCursorsFile, PollMetricsFile, PendingDeletesFile,
-	// WorkstreamsFile, WorkstreamProposalsFile — no meaningful "latest
-	// activity" timestamp for the list --since use case.
-	return time.Time{}, nil
 }
 
 // scanLatestTs walks a JSONL file line by line and returns the latest

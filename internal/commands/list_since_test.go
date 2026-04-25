@@ -307,22 +307,31 @@ func TestLatestTs_DriveMarkdown_DoesNotParseAsJSONL(t *testing.T) {
 func TestLatestTs_StandaloneKindsReturnZero(t *testing.T) {
 	// Sidecars and bookkeeping files don't carry a "latest activity"
 	// timestamp for the list --since use case — they should return zero
-	// without error.
-	cases := []paths.DataFile{
-		paths.MaintenanceFile("/dev/null/.maintenance.json"),
-		paths.SyncCursorsFile("/dev/null/.sync-cursors.yaml"),
-		paths.PeopleFile("/dev/null/identity/people.jsonl"),
-		paths.AttachmentFile("/dev/null/attachments/img.png"),
-		paths.ConvMetaFile("/dev/null/.meta.json"),
+	// without error. Mirror the explicit-skip case in LatestTs's switch.
+	cases := []struct {
+		name string
+		file paths.DataFile
+	}{
+		{"MaintenanceFile", paths.MaintenanceFile("/dev/null/.maintenance.json")},
+		{"SyncCursorsFile", paths.SyncCursorsFile("/dev/null/.sync-cursors.yaml")},
+		{"PollMetricsFile", paths.PollMetricsFile("/dev/null/.poll-metrics.jsonl")},
+		{"PendingDeletesFile", paths.PendingDeletesFile("/dev/null/.pending-email-deletes")},
+		{"PeopleFile", paths.PeopleFile("/dev/null/identity/people.jsonl")},
+		{"AttachmentFile", paths.AttachmentFile("/dev/null/attachments/img.png")},
+		{"ConvMetaFile", paths.ConvMetaFile("/dev/null/.meta.json")},
+		{"WorkstreamsFile", paths.WorkstreamsFile("/dev/null/.workspaces/x/workstream/workstreams.json")},
+		{"WorkstreamProposalsFile", paths.WorkstreamProposalsFile("/dev/null/.workspaces/x/workstream/proposals.json")},
 	}
-	for _, f := range cases {
-		got, err := LatestTs(f)
-		if err != nil {
-			t.Errorf("LatestTs(%T) errored: %v", f, err)
-		}
-		if !got.IsZero() {
-			t.Errorf("LatestTs(%T) = %v, want zero", f, got)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := LatestTs(tc.file)
+			if err != nil {
+				t.Errorf("LatestTs errored: %v", err)
+			}
+			if !got.IsZero() {
+				t.Errorf("LatestTs = %v, want zero", got)
+			}
+		})
 	}
 }
 
@@ -420,6 +429,36 @@ func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
 		if !(c.Display == "linear-issues/acme/PROJ-123.jsonl" || c.Display == "linear-issues/acme/PROJ-124.jsonl") {
 			t.Errorf("unexpected display: %q", c.Display)
 		}
+	}
+}
+
+// TestDispatch_UnknownKindErrors verifies that both type-switch dispatchers
+// fail loud when handed a DataFile they do not enumerate. nil is the only
+// value that satisfies paths.DataFile but matches no concrete case (every
+// real implementor is enumerated in the switch), so it exercises the
+// default branch — the regression guard against silently dropping a future
+// typed kind that someone forgets to wire into the dispatch.
+func TestDispatch_UnknownKindErrors(t *testing.T) {
+	var nilFile paths.DataFile
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "LatestTs",
+			call: func() error { _, err := LatestTs(nilFile); return err },
+		},
+		{
+			name: "listConvFor",
+			call: func() error { _, _, err := listConvFor(nilFile, "/data"); return err },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Error("expected error for unhandled DataFile kind")
+			}
+		})
 	}
 }
 
