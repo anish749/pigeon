@@ -62,7 +62,9 @@ func Grep(dir string, opts GrepOpts) ([]byte, error) {
 	}
 
 	args = append(args, opts.Query)
-	args = append(args, files...)
+	for _, f := range files {
+		args = append(args, f.Path())
+	}
 	return runGrep(args)
 }
 

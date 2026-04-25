@@ -66,7 +66,7 @@ Output is one file path per line, suitable for piping to other tools.`,
 					return err
 				}
 				for _, f := range files {
-					fmt.Println(f)
+					fmt.Println(f.Path())
 				}
 			}
 			return nil
