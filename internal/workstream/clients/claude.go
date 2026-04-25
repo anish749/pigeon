@@ -15,13 +15,26 @@ import (
 // Client wraps the claude CLI for non-interactive LLM calls.
 type Client struct {
 	model   string
-	timeout time.Duration
+	timeout *time.Duration
 	logger  *slog.Logger
 }
 
+// Option configures a Client.
+type Option func(*Client)
+
+// WithTimeout bounds each CLI invocation. When unset, the call is bounded only
+// by the caller's context.
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = &d }
+}
+
 // New creates a Claude CLI client.
-func New(model string, timeout time.Duration, logger *slog.Logger) *Client {
-	return &Client{model: model, timeout: timeout, logger: logger}
+func New(model string, logger *slog.Logger, opts ...Option) *Client {
+	c := &Client{model: model, logger: logger}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // cliEnvelope is the outer JSON wrapper returned by claude --output-format json.
@@ -58,8 +71,11 @@ func (c *Client) JSON(ctx context.Context, systemPrompt, prompt string, out any)
 
 // run executes the claude CLI and returns the result text from the response envelope.
 func (c *Client) run(ctx context.Context, systemPrompt, prompt string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+	if c.timeout != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *c.timeout)
+		defer cancel()
+	}
 
 	args := []string{
 		"-p",
@@ -80,9 +96,6 @@ func (c *Client) run(ctx context.Context, systemPrompt, prompt string) (string, 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("timed out after %s", c.timeout)
-		}
 		return "", fmt.Errorf("claude CLI: %w: %s", err, stderr.String())
 	}
 
