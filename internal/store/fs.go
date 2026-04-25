@@ -177,6 +177,11 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 	}
 
 	var errs []error
+	// Keyed by threadTS (filename), not tf.Parent.ID. They are normally equal,
+	// but a thread file can be orphaned (parent line never written, e.g. when
+	// the listener's parent fetch failed) — in which case Parent.ID is empty
+	// but the filename still holds the parent's slack TS. Keying by filename
+	// keeps orphan replies routable.
 	threads := make(map[string]*modelv1.ResolvedThreadFile)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), paths.FileExt) {
@@ -191,7 +196,12 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		if tf == nil {
 			continue
 		}
-		threads[tf.Parent.ID] = tf
+		if tf.Parent.ID == "" {
+			slog.Warn("thread file missing parent line, surfacing replies as orphans",
+				"account", acct, "conversation", conversation, "thread_ts", threadTS,
+				"replies", len(tf.Replies))
+		}
+		threads[threadTS] = tf
 	}
 
 	if len(threads) == 0 {
@@ -215,13 +225,16 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 	// files (e.g. the parent is older than the --since cutoff). Without this,
 	// real-time thread replies to old messages are silently dropped from the
 	// output because there is no parent to attach them to.
-	for parentID, tf := range threads {
-		if matched[parentID] || parentID == "" {
+	for threadTS, tf := range threads {
+		if matched[threadTS] {
 			continue
 		}
 		// Include the parent so the reader knows which message the replies
-		// belong to, then append all replies.
-		result = append(result, tf.Parent)
+		// belong to — but only if the parent line was actually written. For
+		// orphan thread files we surface the replies alone.
+		if tf.Parent.ID != "" {
+			result = append(result, tf.Parent)
+		}
 		for _, r := range tf.Replies {
 			r.Reply = true
 			result = append(result, r)
