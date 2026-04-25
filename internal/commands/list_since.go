@@ -194,13 +194,19 @@ func relativeConv(convDir, root string) listConv {
 // surfaces the error rather than silently degrading to a stale timestamp.
 func LatestTs(f paths.DataFile) (time.Time, error) {
 	switch v := f.(type) {
-	case paths.MessagingDateFile, paths.EmailDateFile, paths.ThreadFile, paths.CommentsFile:
+	case paths.MessagingDateFile, paths.EmailDateFile, paths.ThreadFile:
 		return scanLatestTs(f.Path(), "ts")
 	case paths.CalendarDateFile:
 		return scanLatestTs(v.Path(), "updated", "created")
 	case paths.IssueFile:
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
-	case paths.TabFile, paths.SheetFile, paths.FormulaFile:
+	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile:
+		// All Drive content shares the per-doc drive-meta-YYYY-MM-DD.json
+		// sidecar as its "when did this doc change" anchor. The Drive
+		// poller rewrites the meta in the same change handler that
+		// rewrites comments.jsonl (gws/poller/drive.go), so the meta is
+		// the canonical date for any doc state including its comments.
+		// CommentsFile lines carry createdTime/modifiedTime, never "ts".
 		return latestDriveMetaDate(filepath.Dir(f.Path()))
 	case paths.DriveMetaFile:
 		return v.Date()
