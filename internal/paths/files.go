@@ -17,11 +17,11 @@ type ContentFile interface {
 
 // Compile-time interface guards.
 var (
-	_ LogFile = MessagingDateFile("")
-	_ LogFile = EmailDateFile("")
-	_ LogFile = CalendarDateFile("")
-	_ LogFile = ThreadFile("")
-	_ LogFile = CommentsFile("")
+	_ LogFile     = MessagingDateFile("")
+	_ LogFile     = EmailDateFile("")
+	_ LogFile     = CalendarDateFile("")
+	_ LogFile     = ThreadFile("")
+	_ LogFile     = CommentsFile("")
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
 	_ ContentFile = FormulaFile("")
@@ -60,14 +60,14 @@ type ThreadFile string
 
 // Path returns the file path as a string.
 func (t ThreadFile) Path() string { return string(t) }
-func (ThreadFile) logFile()      {}
+func (ThreadFile) logFile()       {}
 
 // CommentsFile is a path to a Drive file's comments JSONL.
 type CommentsFile string
 
 // Path returns the file path as a string.
 func (c CommentsFile) Path() string { return string(c) }
-func (CommentsFile) logFile()      {}
+func (CommentsFile) logFile()       {}
 
 // ConvMetaFile is a path to a conversation's .meta.json sidecar (messaging data).
 // Drive file metadata uses DriveMetaFile (see paths/gws.go) which carries the
