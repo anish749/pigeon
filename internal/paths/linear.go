@@ -40,8 +40,5 @@ func (f IssueFile) Path() string { return string(f) }
 func (IssueFile) logFile()       {}
 func (IssueFile) dataFile()      {}
 
-// Compile-time interface guards.
-var (
-	_ LogFile  = IssueFile("")
-	_ DataFile = IssueFile("")
-)
+// Compile-time interface guard. LogFile transitively implies DataFile.
+var _ LogFile = IssueFile("")

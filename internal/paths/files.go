@@ -31,25 +31,10 @@ type ContentFile interface {
 }
 
 // Compile-time interface guards. Every typed file path must implement
-// DataFile; the LogFile / ContentFile assertions cover the sub-categories.
+// DataFile; LogFile and ContentFile transitively imply DataFile, so the
+// JSONL/content kinds only need their sub-category assertion. The remaining
+// standalone kinds (no sub-category) are asserted directly against DataFile.
 var (
-	_ DataFile = MessagingDateFile("")
-	_ DataFile = EmailDateFile("")
-	_ DataFile = CalendarDateFile("")
-	_ DataFile = ThreadFile("")
-	_ DataFile = CommentsFile("")
-	_ DataFile = TabFile("")
-	_ DataFile = SheetFile("")
-	_ DataFile = FormulaFile("")
-	_ DataFile = AttachmentFile("")
-	_ DataFile = ConvMetaFile("")
-	_ DataFile = PeopleFile("")
-	_ DataFile = MaintenanceFile("")
-	_ DataFile = SyncCursorsFile("")
-	_ DataFile = PollMetricsFile("")
-	_ DataFile = PendingDeletesFile("")
-	_ DataFile = DriveMetaFile{}
-
 	_ LogFile     = MessagingDateFile("")
 	_ LogFile     = EmailDateFile("")
 	_ LogFile     = CalendarDateFile("")
@@ -58,6 +43,15 @@ var (
 	_ ContentFile = TabFile("")
 	_ ContentFile = SheetFile("")
 	_ ContentFile = FormulaFile("")
+
+	_ DataFile = AttachmentFile("")
+	_ DataFile = ConvMetaFile("")
+	_ DataFile = PeopleFile("")
+	_ DataFile = MaintenanceFile("")
+	_ DataFile = SyncCursorsFile("")
+	_ DataFile = PollMetricsFile("")
+	_ DataFile = PendingDeletesFile("")
+	_ DataFile = DriveMetaFile{}
 )
 
 // MessagingDateFile is a path to a daily JSONL file in a messaging
