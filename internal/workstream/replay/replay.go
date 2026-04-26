@@ -77,14 +77,13 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
 	}
 
-	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
-
-	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
-		return nil, fmt.Errorf("ensure default workstream: %w", err)
-	}
+	logger.Info("workspace signals loaded", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 
 	// Discovery or load persisted workstreams.
 	if skipDiscovery {
+		if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
+			return nil, fmt.Errorf("ensure default workstream: %w", err)
+		}
 		active, err := st.ActiveWorkstreams()
 		if err != nil {
 			return nil, fmt.Errorf("load persisted workstreams: %w", err)
