@@ -11,7 +11,6 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/workstream/clients"
-	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
@@ -112,16 +111,8 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 		}
 		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
 	} else {
-		disc := discovery.NewLLMDiscovery(claude, logger)
-		discovered, err := disc.Discover(ctx, signals)
-		if err != nil {
+		if _, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts); err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
-		}
-		for _, dws := range discovered {
-			_, err := mgr.ProposeNew(ctx, dws.Name, dws.Focus, wsName, signals[0].Ts)
-			if err != nil {
-				return nil, fmt.Errorf("create discovered workstream %q: %w", dws.Name, err)
-			}
 		}
 	}
 

@@ -14,11 +14,14 @@ import (
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
+	"github.com/anish749/pigeon/internal/workstream/manager"
+	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
+	wsstore "github.com/anish749/pigeon/internal/workstream/store"
 )
 
 // RunWorkstreamDiscover discovers workstreams for one or all workspaces by
-// reading signals and running LLM-based batch analysis.
+// reading signals and running LLM-based batch analysis through the manager.
 func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFlag string, since, until time.Time, model string, logger *slog.Logger, w io.Writer) error {
 	var workspaces []*workspace.Workspace
 	if workspaceFlag != "" {
@@ -39,21 +42,18 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 	}
 
 	claude := clients.New(model, logger)
-	disc := discovery.NewLLMDiscovery(claude, logger)
-
 	root := paths.DefaultDataRoot()
-	fsStore := store.NewFSStore(root)
-	r := reader.New(fsStore, root)
+	r := reader.New(store.NewFSStore(root), root)
 
 	for _, ws := range workspaces {
-		if err := discoverWorkspace(ctx, r, disc, ws, since, until, w); err != nil {
+		if err := discoverWorkspace(ctx, claude, r, ws, since, until, logger, w); err != nil {
 			return fmt.Errorf("discover workspace %q: %w", ws.Name, err)
 		}
 	}
 	return nil
 }
 
-func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LLMDiscovery, ws *workspace.Workspace, since, until time.Time, w io.Writer) error {
+func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Reader, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
 	signals, err := r.ReadAccounts(ws.Accounts, since, until)
 	if err != nil {
 		return fmt.Errorf("read signals: %w", err)
@@ -67,12 +67,26 @@ func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LL
 		return nil
 	}
 
-	discovered, err := disc.Discover(ctx, signals)
+	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+	st := wsstore.NewFS(storeDir.Path())
+	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace:    *ws,
+	}, st, logger)
+
+	if err := mgr.EnsureDefaultWorkstream(ws.Name, signals[0].Ts); err != nil {
+		return fmt.Errorf("ensure default workstream: %w", err)
+	}
+
+	discovered, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts)
 	if err != nil {
-		return fmt.Errorf("discovery: %w", err)
+		return err
 	}
 
 	printDiscovered(w, discovered)
+	if len(discovered) > 0 {
+		fmt.Fprintf(w, "  Persisted to %s.\n", storeDir.Path())
+	}
 	return nil
 }
 

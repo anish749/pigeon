@@ -136,3 +136,72 @@ delivery work generically across both worlds. The V1 ADR explicitly
 deferred this as "the read layer needs to be unified across all
 platforms." This is the prerequisite for most of the other items above
 being done cleanly rather than as per-platform branches.
+
+## Workstream TUI: in-app discovery
+
+The workstream TUI (`pigeon workstream tui`, #313) lists and edits
+workstreams in the active workspace. It assumes the store is already
+populated — there is no way to trigger discovery from inside the UI. An
+empty workspace shows "no workstreams; press n to create one manually,"
+which doesn't match how the system is meant to be used.
+
+The persistence prerequisite is this PR — once `pigeon workstream
+discover` writes its results to the per-workspace store, the TUI needs:
+
+- An empty-state prompt: "no workstreams in this workspace — D to
+  discover from your messaging history, n to create manually."
+- A `D` key (also available from the populated list) that runs discovery
+  in the background and shows a spinner. Discovery is an LLM call that
+  can take 30–90 seconds.
+- On completion, the list reloads from the store and a status flash
+  reports how many were found (or that none were).
+- Cancellation via ctrl+c during discovery should leave the store
+  untouched.
+
+Open questions for the implementer:
+- Discovery uses a default 30-day window today. Should the TUI expose
+  since/until knobs, or stay zero-config?
+- Re-running discovery overwrites same-named workstreams. Should
+  user-edited focus/state survive a re-run, or is "the LLM is the source
+  of truth on re-run" the right policy?
+- What happens to workstreams the LLM no longer surfaces — leave,
+  dormant, or delete?
+
+A starting sketch exists in commits 568893d (TUI wiring + spinner) and
+869538b (CLI persistence) on branch `worktree-workstream-tui`. They
+were extracted out of #313 / #315 to keep both PRs scoped. They build
+but have no tests; treat them as a starting point, not a finished
+implementation. Tests should cover at minimum: discovery → persistence
+round trip, re-run idempotency, and the cancellation path.
+
+## Workstream proposals: ephemeral queue, not historical record
+
+`proposals.json` today keeps every proposal forever, transitioning state
+from `pending` → `approved` / `rejected` with a `ResolvedAt` timestamp.
+The intended model is simpler: proposals are a queue of pending decisions.
+Approve converts a proposal into a workstream and deletes the proposal.
+Reject deletes the proposal. The file then only ever contains pending
+items.
+
+Scope of the change:
+
+- `store.Store` gets `DeleteProposal(id) error`; FS implementation
+  rewrites `proposals.json` without the deleted entry.
+- `manager.ApproveProposal` flow becomes `PutWorkstream` + `DeleteProposal`.
+  Decide an order and a failure story — if PutWorkstream succeeds and
+  DeleteProposal fails you'd have both the workstream and a stale Pending
+  proposal. Either delete first (proposal lost on workstream-write fail)
+  or accept that the conflict-error in ApproveProposal will surface the
+  stale entry on the next attempt.
+- `manager.RejectProposal` flow becomes a single `DeleteProposal`.
+- `models.ProposalApproved`, `models.ProposalRejected`, and
+  `models.Proposal.ResolvedAt` become unused — drop them in the same PR.
+- `replay.Report.ProposalsApproved` / `ProposalsRejected` currently
+  derive counts by scanning `proposals.json` (replay.go:159-171). After
+  deletion those counts must come from the StatCollector during the run,
+  or the fields drop from the report.
+
+Audit trail: deletion loses the "what was rejected and why" record that
+proposals.json provides today. If that history matters for replay or
+debugging, log Approve/Reject at info level on slog so the trail lives in
+the daemon log instead.

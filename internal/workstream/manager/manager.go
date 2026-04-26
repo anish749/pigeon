@@ -16,6 +16,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
@@ -25,6 +26,7 @@ import (
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
 	client *clients.Client
+	disc   discovery.WorkspaceDiscovery
 	sc     *StatCollector
 	store  store.Store
 	cfg    models.Config
@@ -46,12 +48,45 @@ type Manager struct {
 func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
+		disc:               discovery.NewLLMDiscovery(client, logger),
 		sc:                 sc,
 		store:              st,
 		cfg:                cfg,
 		logger:             logger,
 		signalsSinceUpdate: make(map[string]int),
 	}
+}
+
+// DiscoverAndPropose runs LLM-based batch discovery on the given signals
+// and routes each result through ProposeNew, so the same lifecycle
+// invariants (idempotent existence check, proposal record, ID generation)
+// apply. Under AutoApprove the proposals become workstreams immediately;
+// otherwise they land in proposals.json for review.
+//
+// Reading signals is the caller's responsibility — discovery operates on
+// inputs, not files. proposedAt is recorded on each created workstream;
+// pass the timestamp of the first signal so created dates align with the
+// data window.
+//
+// Returns the raw LLM output so callers can display rich metadata
+// (conversations, participants) that isn't kept on the persisted model.
+// Existing same-named workstreams are left untouched, so re-runs preserve
+// user edits to focus and state.
+func (m *Manager) DiscoverAndPropose(ctx context.Context, signals []models.Signal, proposedAt time.Time) ([]discovery.DiscoveredWorkstream, error) {
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	discovered, err := m.disc.Discover(ctx, signals)
+	if err != nil {
+		return nil, fmt.Errorf("discover: %w", err)
+	}
+	wsName := m.cfg.Workspace.Name
+	for _, d := range discovered {
+		if _, err := m.ProposeNew(ctx, d.Name, d.Focus, wsName, proposedAt); err != nil {
+			return nil, fmt.Errorf("propose %q: %w", d.Name, err)
+		}
+	}
+	return discovered, nil
 }
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
@@ -132,6 +167,84 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 		"name", name,
 	)
 	return "", nil
+}
+
+// ApproveProposal applies a pending proposal (creating the workstream
+// for ProposalCreate) and marks the proposal approved. Returns the
+// resulting workstream ID. Errors if the proposal is missing, already
+// resolved, of a type the manager does not yet apply, or if it would
+// collide with an existing workstream (same slug ID).
+//
+// On collision the proposal is left Pending and nothing is written —
+// the user must reject the proposal or rename one side. Approval must
+// never overwrite a workstream that may carry user edits.
+func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) {
+	p, ok, err := m.store.GetProposal(id)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("proposal %q not found", id)
+	}
+	if p.State != models.ProposalPending {
+		return "", fmt.Errorf("proposal %q already %s", id, p.State)
+	}
+
+	var wsID string
+	switch p.Type {
+	case models.ProposalCreate:
+		w := models.Workstream{
+			ID:        generateWorkstreamID(p.SuggestedName),
+			Name:      p.SuggestedName,
+			Workspace: p.Workspace,
+			State:     models.StateActive,
+			Focus:     p.SuggestedFocus,
+			Created:   p.ProposedAt,
+		}
+		_, exists, err := m.store.GetWorkstream(w.ID)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
+		}
+		if err := m.store.PutWorkstream(w); err != nil {
+			return "", err
+		}
+		wsID = w.ID
+	default:
+		return "", fmt.Errorf("proposal %q has unsupported type %q", id, p.Type)
+	}
+
+	p.State = models.ProposalApproved
+	p.ResolvedAt = time.Now().UTC()
+	if err := m.store.PutProposal(p); err != nil {
+		return "", err
+	}
+	m.logger.Info("proposal approved", "id", id, "workstream", wsID)
+	return wsID, nil
+}
+
+// RejectProposal marks a pending proposal as rejected without applying it.
+// Errors if the proposal is missing or already resolved.
+func (m *Manager) RejectProposal(_ context.Context, id string) error {
+	p, ok, err := m.store.GetProposal(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("proposal %q not found", id)
+	}
+	if p.State != models.ProposalPending {
+		return fmt.Errorf("proposal %q already %s", id, p.State)
+	}
+	p.State = models.ProposalRejected
+	p.ResolvedAt = time.Now().UTC()
+	if err := m.store.PutProposal(p); err != nil {
+		return err
+	}
+	m.logger.Info("proposal rejected", "id", id)
+	return nil
 }
 
 // ObserveRouting records the routing decision in the stat collector and triggers
