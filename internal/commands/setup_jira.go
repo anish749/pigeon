@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
@@ -10,6 +12,11 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	jirapkg "github.com/anish749/pigeon/internal/jira"
 )
+
+// atlassianAPITokenURL is the user-facing URL where Atlassian Cloud
+// users generate API tokens. Surfaced in error messages because it is
+// the single piece of guidance every first-time setup user needs.
+const atlassianAPITokenURL = "https://id.atlassian.com/manage-profile/security/api-tokens"
 
 // RunSetupJira binds a jira-cli configuration to pigeon. The optional
 // positional argument is a path to the jira-cli YAML; with no arg, the
@@ -50,12 +57,12 @@ func RunSetupJira(args []string) error {
 
 	pjc, err := jirapkg.LoadPigeonJiraConfig(resolvedPath)
 	if err != nil {
-		return fmt.Errorf("%w\n\nIf you haven't set up jira-cli yet, run `jira init` first.\nSee docs/jira-protocol.md for the full setup walkthrough", err)
+		return fmt.Errorf("%w\n\nIf you haven't set up jira-cli yet, run `jira init` first to create the YAML", err)
 	}
 
 	token := os.Getenv("JIRA_API_TOKEN")
 	if token == "" {
-		return fmt.Errorf("JIRA_API_TOKEN env var is unset (export an Atlassian API token before running setup-jira; see docs/jira-protocol.md)")
+		return fmt.Errorf("JIRA_API_TOKEN is unset.\n\nGenerate an Atlassian API token at:\n  %s\nthen run:\n  export JIRA_API_TOKEN=<token>\n  pigeon setup-jira", atlassianAPITokenURL)
 	}
 
 	jcfg, err := pjc.JiraConfig(token)
@@ -66,7 +73,7 @@ func RunSetupJira(args []string) error {
 	client := jira.NewClient(jcfg)
 	me, err := client.Me()
 	if err != nil {
-		return fmt.Errorf("verify auth via GET %s/rest/api/2/myself: %w\n\nIf this is a 401, see the SSO + API token guidance in docs/jira-protocol.md", pjc.Server, err)
+		return explainMeError(pjc.Server, pjc.Login, err)
 	}
 
 	acct, err := pjc.Account()
@@ -103,6 +110,44 @@ func RunSetupJira(args []string) error {
 		fmt.Println("Saved. Run `pigeon daemon start` to begin polling.")
 	}
 	return nil
+}
+
+// explainMeError formats a Me() failure with concrete remediation when
+// the status code identifies a known cause. The frequent first-time
+// failure is 401 from Atlassian Cloud sites that use SSO — the user's
+// SSO password is rejected because Cloud's REST API needs an API token
+// instead. We special-case that one and pass everything else through.
+func explainMeError(server, login string, err error) error {
+	var unexpected *jira.ErrUnexpectedResponse
+	if errors.As(err, &unexpected) {
+		switch unexpected.StatusCode {
+		case http.StatusUnauthorized:
+			return fmt.Errorf(
+				"401 Unauthorized: %s rejected the API token for %s.\n\n"+
+					"If your Atlassian site uses SSO (Okta, Google, SAML, etc.), the\n"+
+					"SSO password is NOT the API token. Generate a real API token at:\n"+
+					"  %s\n"+
+					"then run:\n"+
+					"  export JIRA_API_TOKEN=<token>\n"+
+					"  pigeon setup-jira",
+				server, login, atlassianAPITokenURL)
+		case http.StatusForbidden:
+			return fmt.Errorf(
+				"403 Forbidden: %s authenticated %s but refused access to /rest/api/2/myself.\n"+
+					"Confirm the user has at least 'Browse projects' permission on the bound project.",
+				server, login)
+		case http.StatusNotFound:
+			return fmt.Errorf(
+				"404 Not Found: %s does not respond to /rest/api/2/myself.\n"+
+					"Confirm the `server` URL in the jira-cli config is correct.",
+				server)
+		}
+		return fmt.Errorf("%s returned %s on /rest/api/2/myself: %s",
+			server, unexpected.Status, unexpected.Body)
+	}
+	// Network / DNS / TLS / context errors fall through with the
+	// underlying message — they already name the failure mode.
+	return fmt.Errorf("%s /rest/api/2/myself: %w", server, err)
 }
 
 // upsertJiraByResolvedPath inserts entry into cfg.Jira, replacing any

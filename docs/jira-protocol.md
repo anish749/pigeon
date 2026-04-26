@@ -806,22 +806,17 @@ affect read-only ingest.
 The API token is read once at `pigeon setup-jira` time from the
 `JIRA_API_TOKEN` environment variable, verified end-to-end via
 `client.Me()`, and persisted to pigeon's `config.yaml` as the
-per-entry `api_token` field. After setup, the daemon does NOT consult
-any environment variable — it works the same way under launchd,
-systemd, or a fresh non-login shell.
-
-This matches how Slack tokens are stored in `config.yaml` today, and
-implies the same trust model: the file holds secrets and should be
-chmod 600 or stricter.
+per-entry `api_token` field. After setup, the daemon reads the token
+from the config and does not consult the environment.
 
 For hand-edited configs that omit `api_token`, the daemon falls back
 to `JIRA_API_TOKEN` env at startup. Re-running `setup-jira` upserts
 the entry by resolved path and refills both fields from the verified
 state.
 
-Users who currently rely on `.netrc` or keyring with `jira-cli` will
-need to `export JIRA_API_TOKEN` once before running `setup-jira` so
-the value can be lifted into pigeon's config.
+Users who rely on `.netrc` or keyring with `jira-cli` need to
+`export JIRA_API_TOKEN` once before running `setup-jira` so the value
+can be lifted into pigeon's config.
 
 ## Known Limitations
 
