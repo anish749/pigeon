@@ -58,14 +58,12 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
-// FormatMsgNotification renders a single message for Claude Code channel
-// notifications. Sender and text lead (visible in truncated UI); metadata
-// follows on an indented line.
+// FormatMsgNotification renders a single message as channel-notification
+// lines: sender and text on the first line (visible when truncated),
+// bracketed metadata on the second.
 //
-// Operates on MsgLine only — reactions ride their own notification path
-// (FormatReactionNotification). Callers with a typed live event call this
-// directly; the catchup/drain path goes via FormatDateFileNotification,
-// which loops here.
+// Operates on MsgLine only — reactions are rendered separately by
+// FormatReactionNotification.
 func FormatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
