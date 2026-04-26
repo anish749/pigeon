@@ -10,12 +10,8 @@ import (
 // writeReactions writes LineReaction events for all reactions on a Slack message.
 // Slack groups reactions by emoji with a user list; this expands them into
 // one LineReaction per user per emoji. Deduplication is handled by compaction.
-//
-// Reactions on a thread reply are routed to the thread file (with
-// ThreadTS / ThreadID stamped) so CompactThread reconciles them onto the
-// reply on read. msg.ThreadTimestamp == msg.Timestamp identifies the
-// thread parent itself; reactions on it stay in the date file.
 func writeReactions(ctx context.Context, ms *MessageStore, resolver *Resolver, channelName string, msg goslack.Message) error {
+	// ThreadTimestamp == Timestamp means msg is the thread parent itself.
 	threadTS := ""
 	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
 		threadTS = msg.ThreadTimestamp

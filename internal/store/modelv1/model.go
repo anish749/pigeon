@@ -94,11 +94,6 @@ type Attachment struct {
 }
 
 // ReactLine represents a reaction or unreaction event.
-//
-// ThreadTS / ThreadID identify the thread the reaction's target lives in
-// when the target is a thread reply; both omitempty. Same grep-friendly
-// pattern as MsgLine — see that comment for the rationale on having both
-// keys instead of one.
 type ReactLine struct {
 	Ts       time.Time `json:"ts"`            // when the reaction happened
 	MsgID    string    `json:"msg"`           // target message ID

@@ -158,16 +158,10 @@ func TestReadThread_NotFound(t *testing.T) {
 	}
 }
 
-// TestFindThreadForReply covers the four cases the lookup distinguishes:
-// the target msgTS is a reply inside a thread file (returns parent's TS),
-// is itself a thread parent (returns ""), is a top-level message
-// (returns ""), or no threads dir exists (returns "").
 func TestFindThreadForReply(t *testing.T) {
 	s, acct := setup(t)
 	conv := "#general"
 
-	// Set up: parent P1 with one reply R1 in its thread file. A second
-	// thread file P2 exists but has no replies.
 	parentLine := func(id string, t time.Time, sender, senderID, text string) modelv1.Line {
 		return msgLine(id, t, sender, senderID, text)
 	}
@@ -217,8 +211,6 @@ func TestFindThreadForReply(t *testing.T) {
 	}
 }
 
-// TestFindThreadForReply_NoThreadsDir guards the early return when the
-// conversation has no threads/ subdirectory at all.
 func TestFindThreadForReply_NoThreadsDir(t *testing.T) {
 	s, acct := setup(t)
 	if err := s.Append(acct, "#general",

@@ -146,15 +146,8 @@ func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS stri
 	return fileExists(s.convDir(acct, conversation).ThreadFile(threadTS))
 }
 
-// FindThreadForReply returns the parent thread's TS when msgTS appears as
-// a reply in some thread file under the conversation; "" when msgTS is a
-// top-level message, a thread parent, or simply unknown.
-//
-// The lookup is used by event paths that arrive with only (channel, msgTS)
-// — reactions, edits, deletes — so they can route the resulting line to
-// the same thread file as its target. Skips the file whose name is msgTS
-// itself: that case means msgTS is a thread parent (lives in the date
-// file as the originating message), not a reply.
+// FindThreadForReply returns the parent thread's TS when msgTS is a reply
+// inside a thread file; "" otherwise.
 func (s *FSStore) FindThreadForReply(acct account.Account, conversation, msgTS string) string {
 	threadsDir := s.convDir(acct, conversation).ThreadsDir()
 	entries, err := os.ReadDir(threadsDir)

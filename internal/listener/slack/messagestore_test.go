@@ -278,18 +278,6 @@ func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
 	})
 }
 
-// TestAppendReaction_ThreadRouting verifies that AppendReaction lands in
-// the thread file (and stamps the line with thread tags) when threadTS is
-// non-empty, and in the date file otherwise. Asserts the user-visible
-// behaviour through resolved reads:
-//
-//   - Reaction on a thread reply attaches to the resolved reply.
-//   - Reaction on a top-level message attaches to the resolved message.
-//   - The thread-targeted line carries ThreadTS and ThreadID; the
-//     top-level line carries neither.
-//
-// Pre-fix, all reactions landed in the date file and CompactThread
-// dropped reactions on thread replies because it never saw them.
 func TestAppendReaction_ThreadRouting(t *testing.T) {
 	rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
 	raw := slackraw.NewSlackRawContent(goslack.Msg{})

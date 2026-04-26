@@ -74,16 +74,9 @@ func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text str
 	return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
 }
 
-// AppendReaction stores a reaction or unreaction event and returns the
-// ReactLine that was written so the caller can forward it downstream
-// (e.g. to the hub).
-//
-// When threadTS is non-empty, the reaction targets a thread reply: the
-// line is appended to the thread file so ParseThreadFile + CompactThread
-// reconcile it onto the reply on read, and ThreadTS / ThreadID are
-// stamped on the line. Otherwise the line lands in the date file with
-// no thread tags — matching the routing for top-level messages and
-// thread parents.
+// AppendReaction stores a reaction event and returns the line. threadTS
+// routes the line to the thread file (and stamps ThreadTS/ThreadID) when
+// non-empty; otherwise the line lands in the date file.
 func (ms *MessageStore) AppendReaction(channelName, msgTS, threadTS, sender, senderID, emoji string, remove bool) (modelv1.ReactLine, error) {
 	lineType := modelv1.LineReaction
 	if remove {
