@@ -125,9 +125,9 @@ func TestLoadPigeonJiraConfigRefusesLocalhost(t *testing.T) {
 	}
 }
 
-func TestAccountSlug(t *testing.T) {
+func TestAccount(t *testing.T) {
 	cases := []struct {
-		server, want string
+		server, wantSlug string
 	}{
 		{"https://acme.atlassian.net", "acme"},
 		{"https://Acme.atlassian.net/", "acme"},
@@ -138,8 +138,12 @@ func TestAccountSlug(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.server, func(t *testing.T) {
 			cfg := &PigeonJiraConfig{Server: c.server}
-			if got := cfg.AccountSlug(); got != c.want {
-				t.Errorf("AccountSlug(%q) = %q, want %q", c.server, got, c.want)
+			acct := cfg.Account()
+			if acct.Platform != "jira-issues" {
+				t.Errorf("Platform = %q, want jira-issues", acct.Platform)
+			}
+			if acct.NameSlug() != c.wantSlug {
+				t.Errorf("NameSlug() = %q, want %q", acct.NameSlug(), c.wantSlug)
 			}
 		})
 	}

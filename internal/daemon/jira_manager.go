@@ -9,7 +9,6 @@ import (
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
 
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	jirapkg "github.com/anish749/pigeon/internal/jira"
 	jirapoller "github.com/anish749/pigeon/internal/jira/poller"
@@ -102,13 +101,13 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 		}
 
 		client := jira.NewClient(cli.JiraConfig(token), jira.WithTimeout(30*time.Second))
-		acct := account.New(paths.JiraPlatform, cli.AccountSlug())
+		acct := cli.Account()
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cli.Project.Key)
 
 		p := jirapoller.New(jiraPollInterval, client, cli.APIVersion(), acct, cli.Project.Key, projDir, m.store, m.syncTracker)
 		slog.Info("jira poller started",
 			"path", path,
-			"account", cli.AccountSlug(),
+			"account", acct.Display(),
 			"project", cli.Project.Key,
 			"project_dir", projDir.Path())
 		return p.Run(ctx)

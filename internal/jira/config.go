@@ -9,7 +9,9 @@ import (
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"gopkg.in/yaml.v3"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/jira/poller"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // PigeonJiraConfig is the subset of a jira-cli YAML pigeon parses. The
@@ -78,12 +80,21 @@ func LoadPigeonJiraConfig(path string) (*PigeonJiraConfig, error) {
 	return &c, nil
 }
 
-// AccountSlug returns the first DNS label of Server, lowercased. This is
-// the on-disk slug under jira-issues/ — e.g. https://acme.atlassian.net
-// produces "acme". The slug is derived rather than user-supplied because
-// jira-cli has no slug concept of its own and pigeon should not ask the
-// user to invent one.
-func (c *PigeonJiraConfig) AccountSlug() string {
+// Account returns the pigeon account.Account this jira-cli config maps
+// to. The platform is fixed as paths.JiraPlatform and the account name
+// is the lowercased first DNS label of Server. Slug derivation is owned
+// by this method — callers ask for an account, not a string they have
+// to feed into account.New themselves.
+func (c *PigeonJiraConfig) Account() account.Account {
+	return account.New(paths.JiraPlatform, c.accountSlug())
+}
+
+// accountSlug returns the lowercased first DNS label of Server, used as
+// the on-disk slug under jira-issues/. Internal — exposed only via
+// Account(). Slug derivation is here (rather than user-supplied) because
+// jira-cli has no slug concept and pigeon should not ask the user to
+// invent one.
+func (c *PigeonJiraConfig) accountSlug() string {
 	host := hostname(c.Server)
 	if i := strings.IndexByte(host, '.'); i >= 0 {
 		return strings.ToLower(host[:i])
