@@ -91,7 +91,7 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 		// Load PigeonJiraConfig + token at every restart so YAML edits or
 		// token rotation pick up automatically. runWithRestart's backoff
 		// throttles the retry on persistent failures.
-		cli, err := jirapkg.LoadPigeonJiraConfig(path)
+		cfg, err := jirapkg.LoadPigeonJiraConfig(path)
 		if err != nil {
 			return fmt.Errorf("load jira-cli config: %w", err)
 		}
@@ -100,15 +100,15 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 			return fmt.Errorf("JIRA_API_TOKEN env var is unset (see docs/jira-protocol.md)")
 		}
 
-		client := jira.NewClient(cli.JiraConfig(token), jira.WithTimeout(30*time.Second))
-		acct := cli.Account()
-		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cli.Project.Key)
+		client := jira.NewClient(cfg.JiraConfig(token), jira.WithTimeout(30*time.Second))
+		acct := cfg.Account()
+		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 
-		p := jirapoller.New(jiraPollInterval, client, cli.APIVersion(), acct, cli.Project.Key, projDir, m.store, m.syncTracker)
+		p := jirapoller.New(jiraPollInterval, client, cfg.APIVersion(), acct, cfg.Project.Key, projDir, m.store, m.syncTracker)
 		slog.Info("jira poller started",
 			"path", path,
 			"account", acct.Display(),
-			"project", cli.Project.Key,
+			"project", cfg.Project.Key,
 			"project_dir", projDir.Path())
 		return p.Run(ctx)
 	})

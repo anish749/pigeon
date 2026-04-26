@@ -37,24 +37,24 @@ func TestLoadPigeonJiraConfigCloud(t *testing.T) {
 	if err := os.WriteFile(path, []byte(sampleCloudYAMLPigeon), 0600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadPigeonJiraConfig(path)
+	cfg, err := LoadPigeonJiraConfig(path)
 	if err != nil {
 		t.Fatalf("LoadPigeonJiraConfig: %v", err)
 	}
-	if c.Server != "https://acme.atlassian.net" {
-		t.Errorf("Server = %q", c.Server)
+	if cfg.Server != "https://acme.atlassian.net" {
+		t.Errorf("Server = %q", cfg.Server)
 	}
-	if c.Login != "alice@acme.com" {
-		t.Errorf("Login = %q", c.Login)
+	if cfg.Login != "alice@acme.com" {
+		t.Errorf("Login = %q", cfg.Login)
 	}
-	if c.Project.Key != "ENG" {
-		t.Errorf("Project.Key = %q", c.Project.Key)
+	if cfg.Project.Key != "ENG" {
+		t.Errorf("Project.Key = %q", cfg.Project.Key)
 	}
-	if c.Installation != "Cloud" {
-		t.Errorf("Installation = %q", c.Installation)
+	if cfg.Installation != "Cloud" {
+		t.Errorf("Installation = %q", cfg.Installation)
 	}
-	if c.AuthType != "basic" {
-		t.Errorf("AuthType = %q", c.AuthType)
+	if cfg.AuthType != "basic" {
+		t.Errorf("AuthType = %q", cfg.AuthType)
 	}
 }
 
@@ -71,12 +71,12 @@ project:
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadPigeonJiraConfig(path)
+	cfg, err := LoadPigeonJiraConfig(path)
 	if err != nil {
 		t.Fatalf("LoadPigeonJiraConfig: %v", err)
 	}
-	if c.APIVersion() != poller.APIVersionV2 {
-		t.Errorf("APIVersion = %v, want APIVersionV2", c.APIVersion())
+	if cfg.APIVersion() != poller.APIVersionV2 {
+		t.Errorf("APIVersion = %v, want APIVersionV2", cfg.APIVersion())
 	}
 }
 
@@ -156,18 +156,18 @@ func TestJiraConfigBuilds(t *testing.T) {
 		AuthType: "basic",
 		Insecure: false,
 	}
-	jc := cfg.JiraConfig("token-xyz")
-	if jc.Server != cfg.Server {
-		t.Errorf("Server = %q", jc.Server)
+	jcfg := cfg.JiraConfig("token-xyz")
+	if jcfg.Server != cfg.Server {
+		t.Errorf("Server = %q", jcfg.Server)
 	}
-	if jc.Login != cfg.Login {
-		t.Errorf("Login = %q", jc.Login)
+	if jcfg.Login != cfg.Login {
+		t.Errorf("Login = %q", jcfg.Login)
 	}
-	if jc.APIToken != "token-xyz" {
-		t.Errorf("APIToken = %q", jc.APIToken)
+	if jcfg.APIToken != "token-xyz" {
+		t.Errorf("APIToken = %q", jcfg.APIToken)
 	}
-	if jc.AuthType == nil || string(*jc.AuthType) != "basic" {
-		t.Errorf("AuthType = %v", jc.AuthType)
+	if jcfg.AuthType == nil || string(*jcfg.AuthType) != "basic" {
+		t.Errorf("AuthType = %v", jcfg.AuthType)
 	}
 }
 
@@ -182,9 +182,9 @@ func TestJiraConfigMTLS(t *testing.T) {
 			ClientKey:  "/etc/ssl/client.key",
 		},
 	}
-	jc := cfg.JiraConfig("tok")
-	if jc.MTLSConfig.CaCert != "/etc/ssl/ca.pem" {
-		t.Errorf("CaCert not propagated: %q", jc.MTLSConfig.CaCert)
+	jcfg := cfg.JiraConfig("tok")
+	if jcfg.MTLSConfig.CaCert != "/etc/ssl/ca.pem" {
+		t.Errorf("CaCert not propagated: %q", jcfg.MTLSConfig.CaCert)
 	}
 }
 
