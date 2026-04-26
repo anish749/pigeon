@@ -24,9 +24,8 @@ import (
 //   - workstream router state (parent dir == WorkstreamSubdir)
 //   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
-//   - Linear issue file (parent dir == issues, under linear-issues platform)
 //   - thread file (parent dir == ThreadsSubdir, filename != date)
-//   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Messaging by location
+//   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Linear/Messaging by location
 //
 // A drive-meta filename whose date portion is malformed returns nil rather
 // than an error — Classify is a pure dispatcher; callers needing the
@@ -89,28 +88,22 @@ func Classify(path string) DataFile {
 		}
 	}
 
-	// 6. Linear issue file: <root>/linear-issues/<acct>/issues/<id>.jsonl.
-	// Issue identifiers are platform-specific strings (PROJ-123 etc.), so the
-	// match is by parent-dir name + the linear-issues platform segment, not
-	// by filename pattern.
-	if filepath.Ext(base) == FileExt && parent == linearIssuesSubdir && pathHasSegment(path, linearPlatform) {
-		return IssueFile(path)
-	}
-
-	// 7. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
+	// 6. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
 	// excludes YYYY-MM-DD.jsonl so a conversation literally named "threads"
 	// keeps its date children classified as messaging-date below.
 	if IsThreadFile(path) {
 		return ThreadFile(path)
 	}
 
-	// 8. Date-named JSONL — disambiguate by location segment.
+	// 7. Date-named JSONL — disambiguate by location segment.
 	if IsDateFile(base) {
 		switch {
 		case pathHasSegment(path, GmailSubdir):
 			return EmailDateFile(path)
 		case pathHasSegment(path, GcalendarSubdir):
 			return CalendarDateFile(path)
+		case pathHasSegment(path, linearPlatform):
+			return LinearDateFile(path)
 		default:
 			return MessagingDateFile(path)
 		}

@@ -87,10 +87,11 @@ Each poll cycle:
 1. Load cursor (last `updatedAt` timestamp) from `.sync-cursors.yaml`.
 2. Run `linear issue query -j --all-teams --all-states --updated-after=<cursor> --limit=0`.
 3. For each returned issue:
-   a. Append the issue snapshot to `issues/{IDENTIFIER}.jsonl`.
-   b. Run `linear issue view <identifier> -j --no-download` to get the
+   a. Compute `<date>` from the issue's `updatedAt` (UTC).
+   b. Append the issue snapshot to `issues/{IDENTIFIER}/<date>.jsonl`.
+   c. Run `linear issue view <identifier> -j --no-download` to get the
       full issue with comments.
-   c. Append any new comments to the same file.
+   d. Append all current comments to the same date file.
 4. Update the cursor to the maximum `updatedAt` from the batch.
 5. Save the cursor.
 
@@ -154,32 +155,35 @@ disk.
     └── {workspace-slug}/                   # e.g. my-team
         ├── .sync-cursors.yaml              # cursor state
         └── issues/
-            ├── ENG-101.jsonl               # all activity for ENG-101
-            ├── ENG-142.jsonl               # all activity for ENG-142
-            └── ENG-205.jsonl
+            ├── ENG-101/                    # one directory per issue
+            │   ├── 2026-04-06.jsonl        # ENG-101 activity on Apr 6
+            │   └── 2026-04-07.jsonl
+            ├── ENG-142/
+            │   └── 2026-04-07.jsonl
+            └── ENG-205/
+                └── 2026-04-05.jsonl
 ```
 
-### Why Per-Issue Files, Not Date Files
+### Why Per-Issue Date-Sharded Files
 
-Messaging data (Slack, WhatsApp) uses date files because messages are
-immutable events on a timeline — a message sent on April 11 belongs in
-`2026-04-11.txt` forever.
+Each issue is its own append-only event stream — issue snapshots and
+comments accumulate over time. Sharding that stream by UTC date matches
+the messaging convention so the same date-based discovery selectors
+(`*YYYY-MM-DD.jsonl` globs) find recently-updated issues by filename
+without scanning content.
 
-Linear issues are mutable entities. An issue created on March 1 gets
-reassigned April 5, state changes April 8, and receives comments
-April 10. Filing by `createdAt` produces stale snapshots. Filing by
-`updatedAt` moves the issue between date files on every change. Neither
-is natural.
+The date used for sharding is the date portion of the issue's
+`updatedAt`. A poll cycle writes the issue snapshot plus all current
+comments into a single file representing "issue state observed at this
+updatedAt". Comments fetched alongside an updated issue land in the
+same date file as the snapshot, even if they were originally created on
+earlier days — the grouping is "what the poller observed" rather than
+"when each line was authored".
 
-Issues are more like Google Drive documents than messages — they have a
-stable identity and evolve over time. The natural organization is **one
-file per issue**, identified by the human-readable identifier (e.g.
-`ENG-101`), just as Drive uses one directory per document identified by
-the slugified title.
-
-This makes `pigeon read linear ENG-101` a direct file read, and
-`pigeon grep "deploy" --source=linear` a recursive grep across all
-issue files.
+This makes `pigeon list --since=Nd` and `pigeon glob --since=Nd`
+discover Linear issues by date filename like every other source, and
+`pigeon read linear ENG-101` a directory walk over the issue's date
+files.
 
 ### Multiple Workspaces
 
@@ -364,7 +368,7 @@ Default when no filter: issues updated in the last 7 days.
 
 **Single issue** (`pigeon read linear ENG-101`):
 
-1. Read `issues/ENG-101.jsonl`.
+1. Read every `issues/ENG-101/*.jsonl` date file.
 2. Deduplicate by `id` (keep last) — reduces to latest issue snapshot +
    all unique comments.
 3. Display: issue metadata (title, state, assignee, project, labels),
@@ -374,8 +378,10 @@ Default when no filter: issues updated in the last 7 days.
 
 **All issues** (`pigeon read linear --since=7d`):
 
-1. For each `issues/*.jsonl` file, read the last issue line.
-2. Filter by `updatedAt` within the requested time window.
+1. Use the date-glob discovery (same selector messaging uses) to find
+   `issues/*/YYYY-MM-DD.jsonl` files within the window.
+2. Group by per-issue directory; for each issue, take the latest issue
+   line across all date files in the window.
 3. Sort by `updatedAt` descending (most recently active first).
 4. Display as a list: identifier, title, state, assignee, last update.
 
@@ -409,7 +415,9 @@ rg '"name":"In Progress"' ~/.local/share/pigeon/linear-issues/my-team/issues/
 rg '"name":"Bob' ~/.local/share/pigeon/linear-issues/my-team/issues/
 
 # Count lines per issue (proxy for activity)
-wc -l ~/.local/share/pigeon/linear-issues/my-team/issues/*.jsonl
+for d in ~/.local/share/pigeon/linear-issues/my-team/issues/*/; do
+    wc -l "$d"/*.jsonl
+done
 ```
 
 Because issues and comments are stored as raw CLI JSON, any field the
@@ -426,17 +434,20 @@ pigeon grep "deploy" --source=linear --since=7d
 
 ## Maintenance
 
-Issue files accumulate duplicate issue snapshots over time (one per poll
-cycle where the issue changed). Maintenance compacts each file:
+A per-issue date file accumulates duplicate snapshots when an issue
+changes more than once on the same day (one snapshot per poll cycle that
+saw the change). Maintenance compacts within a date file, and compaction
+extends across the per-issue directory at read time:
 
 1. Deduplicate issue lines by `id` (keep last) — removes stale
    snapshots, keeping only the latest.
 2. Deduplicate comment lines by `id` (keep last) — removes duplicates
    from re-fetches.
-3. Rewrite the file with the deduplicated lines in chronological order.
+3. Rewrite each date file with the deduplicated lines in chronological
+   order; cross-file dedup happens at read time.
 
-Maintenance is lightweight because individual issue files are small
-(tens to low hundreds of lines). It can run opportunistically without
+Maintenance is lightweight because individual date files are small
+(tens of lines per active day). It can run opportunistically without
 blocking reads or writes.
 
 ## Configuration

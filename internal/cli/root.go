@@ -108,12 +108,15 @@ DATA LAYOUT
     ├── linear-issues/
     │   ├── my-team/                       # workspace
     │   │   └── issues/
-    │   │       ├── ENG-101.jsonl         # all activity for ENG-101
-    │   │       └── ENG-142.jsonl
+    │   │       ├── ENG-101/
+    │   │       │   ├── 2026-04-06.jsonl  # ENG-101 activity on Apr 6
+    │   │       │   └── 2026-04-07.jsonl
+    │   │       └── ENG-142/
+    │   │           └── 2026-04-07.jsonl
 
   Messaging: platform / account / conversation / YYYY-MM-DD.jsonl
   GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
-  Linear:    linear-issues / workspace / issues / IDENTIFIER.jsonl
+  Linear:    linear-issues / workspace / issues / IDENTIFIER / YYYY-MM-DD.jsonl
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
   All JSONL lines have a "type" field — use it with jq to filter:

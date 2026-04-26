@@ -344,9 +344,12 @@ func (r *Reader) readDriveComments(acct account.Account, since, until time.Time)
 }
 
 // readLinear reads all Linear issue and comment files for an account.
+//
+// Layout: <issues>/<identifier>/<YYYY-MM-DD>.jsonl. The reader walks each
+// per-issue subdirectory and reads every date file under it.
 func (r *Reader) readLinear(acct account.Account, since, until time.Time) ([]models.Signal, error) {
 	linearDir := r.root.AccountFor(acct).Linear()
-	issueFiles, err := listJSONLFiles(linearDir.IssuesDir())
+	entries, err := os.ReadDir(linearDir.IssuesDir())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -357,45 +360,55 @@ func (r *Reader) readLinear(acct account.Account, since, until time.Time) ([]mod
 	var signals []models.Signal
 	var errs []error
 
-	for _, issueFile := range issueFiles {
-		identifier := strings.TrimSuffix(filepath.Base(issueFile), paths.FileExt)
-		lines, err := readLines(issueFile)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("read linear issue %s: %w", identifier, err))
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		for _, line := range lines {
-			switch {
-			case line.Type == modelv1.LineLinearIssue && line.Issue != nil:
-				ts, _ := time.Parse(time.RFC3339, line.Issue.Runtime.UpdatedAt)
-				if ts.IsZero() || !inRange(ts, since, until) {
-					continue
-				}
-				title, _ := line.Issue.Serialized["title"].(string)
-				signals = append(signals, models.Signal{
-					ID:           line.Issue.Runtime.ID,
-					Type:         models.SignalLinearIssue,
-					Account:      acct,
-					Conversation: identifier,
-					Ts:           ts,
-					Sender:       "", // Linear issues don't have a single sender
-					Text:         line.Issue.Runtime.Identifier + " " + title,
-				})
+		identifier := entry.Name()
+		dateFiles, err := listJSONLFiles(filepath.Join(linearDir.IssuesDir(), identifier))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("list linear issue %s: %w", identifier, err))
+			continue
+		}
+		for _, dateFile := range dateFiles {
+			lines, err := readLines(dateFile)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("read linear issue %s: %w", identifier, err))
+				continue
+			}
+			for _, line := range lines {
+				switch {
+				case line.Type == modelv1.LineLinearIssue && line.Issue != nil:
+					ts, _ := time.Parse(time.RFC3339, line.Issue.Runtime.UpdatedAt)
+					if ts.IsZero() || !inRange(ts, since, until) {
+						continue
+					}
+					title, _ := line.Issue.Serialized["title"].(string)
+					signals = append(signals, models.Signal{
+						ID:           line.Issue.Runtime.ID,
+						Type:         models.SignalLinearIssue,
+						Account:      acct,
+						Conversation: identifier,
+						Ts:           ts,
+						Sender:       "", // Linear issues don't have a single sender
+						Text:         line.Issue.Runtime.Identifier + " " + title,
+					})
 
-			case line.Type == modelv1.LineLinearComment && line.LinearComment != nil:
-				ts, _ := time.Parse(time.RFC3339, line.LinearComment.Runtime.CreatedAt)
-				if ts.IsZero() || !inRange(ts, since, until) {
-					continue
+				case line.Type == modelv1.LineLinearComment && line.LinearComment != nil:
+					ts, _ := time.Parse(time.RFC3339, line.LinearComment.Runtime.CreatedAt)
+					if ts.IsZero() || !inRange(ts, since, until) {
+						continue
+					}
+					body, _ := line.LinearComment.Serialized["body"].(string)
+					signals = append(signals, models.Signal{
+						ID:           line.LinearComment.Runtime.ID,
+						Type:         models.SignalLinearComment,
+						Account:      acct,
+						Conversation: identifier,
+						Ts:           ts,
+						Text:         body,
+					})
 				}
-				body, _ := line.LinearComment.Serialized["body"].(string)
-				signals = append(signals, models.Signal{
-					ID:           line.LinearComment.Runtime.ID,
-					Type:         models.SignalLinearComment,
-					Account:      acct,
-					Conversation: identifier,
-					Ts:           ts,
-					Text:         body,
-				})
 			}
 		}
 	}

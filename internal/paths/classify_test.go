@@ -122,9 +122,9 @@ func TestClassify(t *testing.T) {
 
 		// Linear.
 		{
-			name: "linear issue file",
-			path: "/data/linear-issues/acme/issues/PROJ-123.jsonl",
-			want: IssueFile("/data/linear-issues/acme/issues/PROJ-123.jsonl"),
+			name: "linear date file",
+			path: "/data/linear-issues/acme/issues/PROJ-123/2026-04-07.jsonl",
+			want: LinearDateFile("/data/linear-issues/acme/issues/PROJ-123/2026-04-07.jsonl"),
 		},
 
 		// Workstream router state.
@@ -156,7 +156,7 @@ func TestClassify(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "issues subdir under non-linear platform is not a Linear issue",
+			name: "non-date jsonl under non-linear platform is not classified",
 			path: "/data/slack/acme/issues/PROJ-123.jsonl",
 			want: nil,
 		},
@@ -200,7 +200,7 @@ func TestClassify_RoundTripsConstructors(t *testing.T) {
 		{"EmailDateFile", gwsAcct.Gmail().DateFile("2026-04-07")},
 		{"PendingDeletesFile", gwsAcct.Gmail().PendingDeletesFile()},
 		{"CalendarDateFile", gwsAcct.Calendar("primary").DateFile("2026-04-07")},
-		{"IssueFile", root.AccountFor(account.New("linear-issues", "acme")).Linear().IssueFile("PROJ-123")},
+		{"LinearDateFile", root.AccountFor(account.New("linear-issues", "acme")).Linear().Issue("PROJ-123").DateFile("2026-04-07")},
 		{"WorkstreamsFile", root.Workspace("acme").WorkstreamStore().WorkstreamsFile()},
 		{"WorkstreamProposalsFile", root.Workspace("acme").WorkstreamStore().ProposalsFile()},
 	}

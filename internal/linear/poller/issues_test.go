@@ -1,7 +1,6 @@
 package poller
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,34 +97,25 @@ func TestWriteIssuesCreateFiles(t *testing.T) {
 		},
 	}
 
-	// writeIssues will call fetchComments which shells out to the CLI.
-	// We can't mock that easily, so test with a cancelled context that
-	// still allows the first iteration but we'll use a different approach:
-	// just verify the issue lines are written correctly by checking
-	// what writeIssues does before fetching comments.
-
-	// For this test, use a context that's already cancelled after writing
-	// to prevent CLI calls. We accept the comment fetch errors.
-	ctx := context.Background()
-
-	// Temporarily override fetchComments by testing writeIssues indirectly.
-	// Since we can't mock runLinear, let's just test the file output
-	// by writing issue lines directly and verifying the file.
 	for _, issue := range issues {
 		line, err := issueToLine(issue)
 		if err != nil {
 			t.Fatalf("issueToLine: %v", err)
 		}
 		identifier := issue["identifier"].(string)
-		if err := s.AppendLine(linearDir.IssueFile(identifier), line); err != nil {
+		date, err := dateOf(issue["updatedAt"].(string))
+		if err != nil {
+			t.Fatalf("dateOf: %v", err)
+		}
+		if err := s.AppendLine(linearDir.Issue(identifier).DateFile(date), line); err != nil {
 			t.Fatalf("AppendLine: %v", err)
 		}
 	}
 
-	// Verify files exist with correct content.
 	for _, issue := range issues {
 		identifier := issue["identifier"].(string)
-		path := linearDir.IssueFile(identifier).Path()
+		date, _ := dateOf(issue["updatedAt"].(string))
+		path := linearDir.Issue(identifier).DateFile(date).Path()
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", identifier, err)
@@ -147,8 +137,6 @@ func TestWriteIssuesCreateFiles(t *testing.T) {
 			t.Errorf("Identifier = %q, want %q", parsed.Issue.Runtime.Identifier, identifier)
 		}
 	}
-
-	_ = ctx // used conceptually above
 }
 
 func TestWriteIssuesDirectoryLayout(t *testing.T) {
@@ -167,12 +155,13 @@ func TestWriteIssuesDirectoryLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AppendLine(linearDir.IssueFile("ENG-99"), line); err != nil {
+	if err := s.AppendLine(linearDir.Issue("ENG-99").DateFile("2026-04-01"), line); err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify the directory structure: linear-issues/my-team/issues/ENG-99.jsonl
-	wantPath := filepath.Join(tmpDir, "linear-issues", "my-team", "issues", "ENG-99.jsonl")
+	// Verify the directory structure:
+	// linear-issues/my-team/issues/ENG-99/2026-04-01.jsonl
+	wantPath := filepath.Join(tmpDir, "linear-issues", "my-team", "issues", "ENG-99", "2026-04-01.jsonl")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Errorf("expected file at %s: %v", wantPath, err)
 	}
@@ -185,7 +174,9 @@ func TestWriteIssuesDedup(t *testing.T) {
 	s := store.NewFSStore(root)
 	linearDir := acctDir.Linear()
 
-	// Write the same issue twice (simulating two poll cycles).
+	// Two snapshots for the same issue land in two different date files
+	// because each snapshot is keyed by its own updatedAt date. Read-time
+	// dedup spans all date files for the issue.
 	for i, updatedAt := range []string{"2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z"} {
 		issue := map[string]any{
 			"id":         "uuid-1",
@@ -197,32 +188,55 @@ func TestWriteIssuesDedup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.AppendLine(linearDir.IssueFile("ENG-50"), line); err != nil {
+		date, err := dateOf(updatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AppendLine(linearDir.Issue("ENG-50").DateFile(date), line); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// File should have 2 lines (both snapshots appended).
-	data, err := os.ReadFile(linearDir.IssueFile("ENG-50").Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := splitNonEmpty(string(data))
-	if len(lines) != 2 {
-		t.Errorf("got %d lines, want 2 (dedup happens at read time)", len(lines))
-	}
-
-	// Both should parse successfully with the same ID.
-	for i, line := range lines {
-		parsed, err := modelv1.Parse(line)
+	for _, date := range []string{"2026-04-01", "2026-04-02"} {
+		data, err := os.ReadFile(linearDir.Issue("ENG-50").DateFile(date).Path())
 		if err != nil {
-			t.Errorf("line %d: %v", i, err)
-			continue
+			t.Fatalf("read %s: %v", date, err)
+		}
+		lines := splitNonEmpty(string(data))
+		if len(lines) != 1 {
+			t.Errorf("%s: got %d lines, want 1", date, len(lines))
+		}
+		parsed, err := modelv1.Parse(lines[0])
+		if err != nil {
+			t.Fatalf("Parse %s: %v", date, err)
 		}
 		id, ok := parsed.ID()
 		if !ok || id != "uuid-1" {
-			t.Errorf("line %d: ID = %q, ok = %v", i, id, ok)
+			t.Errorf("%s: ID = %q, ok = %v", date, id, ok)
 		}
+	}
+}
+
+func TestDateOf(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"2026-04-07T10:00:00Z", "2026-04-07"},
+		{"2026-04-07T23:59:59-08:00", "2026-04-08"}, // crosses midnight UTC forward
+		{"2026-04-07T00:30:00+05:30", "2026-04-06"}, // crosses midnight UTC backward
+	}
+	for _, c := range cases {
+		got, err := dateOf(c.in)
+		if err != nil {
+			t.Errorf("dateOf(%q): %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("dateOf(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if _, err := dateOf("not a date"); err == nil {
+		t.Error("dateOf with invalid input should error")
 	}
 }
 

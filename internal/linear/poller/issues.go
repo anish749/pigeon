@@ -78,6 +78,11 @@ func backfillIssues(ctx context.Context, workspace string) ([]map[string]any, er
 
 // writeIssues writes a batch of issues and their comments to disk. Returns
 // the count of issues processed, the maximum updatedAt seen, and any error.
+//
+// Each issue snapshot and its comments land in a per-issue directory sharded
+// by UTC date (the date portion of the issue's updatedAt). This matches the
+// messaging convention so read.Glob's date-glob discovery finds recently
+// updated issues by filename without scanning content.
 func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDir, workspace string, issues []map[string]any) (int, string, error) {
 	var errs []error
 	var maxUpdatedAt string
@@ -94,18 +99,27 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 			continue
 		}
 
+		date, err := dateOf(updatedAt)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("date for issue %s: %w", identifier, err))
+			continue
+		}
+		dateFile := linearDir.Issue(identifier).DateFile(date)
+
 		// Write the issue snapshot.
 		issueLine, err := issueToLine(issue)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("marshal issue %s: %w", identifier, err))
 			continue
 		}
-		if err := s.AppendLine(linearDir.IssueFile(identifier), issueLine); err != nil {
+		if err := s.AppendLine(dateFile, issueLine); err != nil {
 			errs = append(errs, fmt.Errorf("write issue %s: %w", identifier, err))
 			continue
 		}
 
-		// Fetch the full issue view (includes comments).
+		// Fetch the full issue view (includes comments). All comments for
+		// this snapshot land in the same date file — the file represents
+		// "issue state observed at this updatedAt".
 		comments, err := fetchComments(ctx, workspace, identifier)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fetch comments for %s: %w", identifier, err))
@@ -116,7 +130,7 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 				errs = append(errs, fmt.Errorf("marshal comment for %s: %w", identifier, err))
 				continue
 			}
-			if err := s.AppendLine(linearDir.IssueFile(identifier), commentLine); err != nil {
+			if err := s.AppendLine(dateFile, commentLine); err != nil {
 				errs = append(errs, fmt.Errorf("write comment for %s: %w", identifier, err))
 			}
 		}
@@ -127,6 +141,15 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 	}
 
 	return len(issues), maxUpdatedAt, errors.Join(errs...)
+}
+
+// dateOf returns the YYYY-MM-DD UTC date portion of an RFC 3339 timestamp.
+func dateOf(ts string) (string, error) {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "", fmt.Errorf("parse %q: %w", ts, err)
+	}
+	return t.UTC().Format("2006-01-02"), nil
 }
 
 // queryIssues runs `linear issue query` with the given extra args and returns
