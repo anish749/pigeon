@@ -42,7 +42,7 @@ type Listener struct {
 // onMessage is called when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction, onEdit, and onDelete are called when the corresponding events
-// arrive. onMessage and onReaction must be non-nil; onEdit and onDelete may be nil.
+// arrive. All four callbacks must be non-nil.
 func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onEdit hub.EditNotifyFunc, onDelete hub.DeleteNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
@@ -367,10 +367,8 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		"msg_id", edit.MsgID, "thread_ts", edit.ThreadTS,
 		"channel", rs.ChannelName, "account", l.acct)
 
-	if l.onEdit != nil {
-		res := l.onEdit(l.acct, rs.ChannelName, edit)
-		slog.InfoContext(ctx, "slack edit routed", "result", res, "account", l.acct)
-	}
+	res := l.onEdit(l.acct, rs.ChannelName, edit)
+	slog.InfoContext(ctx, "slack edit routed", "result", res, "account", l.acct)
 }
 
 // handleDelete stores a message delete event and forwards it to the hub.
@@ -419,8 +417,6 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		"msg_id", del.MsgID, "thread_ts", del.ThreadTS,
 		"channel", rs.ChannelName, "account", l.acct)
 
-	if l.onDelete != nil {
-		res := l.onDelete(l.acct, rs.ChannelName, del)
-		slog.InfoContext(ctx, "slack delete routed", "result", res, "account", l.acct)
-	}
+	res := l.onDelete(l.acct, rs.ChannelName, del)
+	slog.InfoContext(ctx, "slack delete routed", "result", res, "account", l.acct)
 }

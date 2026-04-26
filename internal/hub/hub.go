@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/claude"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/search"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -631,48 +630,41 @@ func (h *Hub) formatReactionLines(acct account.Account, conversation string, rea
 	return modelv1.FormatReactionFallbackNotification(react, threadTS, time.Local)
 }
 
-// lookupMessage searches for a message by ID in a conversation using grep.
-// Returns the message and, when the message lives in a thread file, the
-// thread's TS (the thread file's basename). Returns (nil, "") if not found.
+// lookupMessage searches for a message by ID in a conversation. Returns the
+// message and, when the message lives in a thread file, the thread's TS.
+// Returns (nil, "") if not found.
+//
+// Uses rg's --json output via read.Grep + search.ParseGrepOutput so the
+// caller consumes structured matches (already-parsed modelv1.Line values
+// and thread-vs-date file classification) instead of re-parsing rg's text
+// output here.
 func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (*modelv1.MsgLine, string) {
-	dir := h.dataRoot.AccountFor(acct).Conversation(conversation).Path()
-	out, err := read.Grep(dir, read.GrepOpts{
+	convDir := h.dataRoot.AccountFor(acct).Conversation(conversation).Path()
+	out, err := read.Grep(convDir, read.GrepOpts{
 		Query:        msgID,
 		FixedStrings: true,
+		JSON:         true,
 	})
 	if err != nil || len(out) == 0 {
 		return nil, ""
 	}
 
-	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if raw == "" {
+	// Parse paths relative to the account dir so search.ParseFilePath can
+	// recover the conversation segment; the grep itself is already scoped
+	// to convDir so cross-conversation matches aren't possible.
+	acctDir := h.dataRoot.AccountFor(acct).Path()
+	matches, _ := search.ParseGrepOutput(out, acctDir)
+	for _, m := range matches {
+		if m.Line.Type != modelv1.LineMessage || m.Line.Msg == nil || m.Line.Msg.ID != msgID {
 			continue
 		}
-		// rg output with filenames is "path:line" — split on the first colon.
-		path, line, ok := strings.Cut(raw, ":")
-		if !ok {
-			continue
+		threadTS := ""
+		if m.Thread {
+			threadTS = m.Date
 		}
-		parsed, err := modelv1.Parse(line)
-		if err != nil {
-			continue
-		}
-		if parsed.Type == modelv1.LineMessage && parsed.Msg != nil && parsed.Msg.ID == msgID {
-			return parsed.Msg, threadTSFromPath(path)
-		}
+		return m.Line.Msg, threadTS
 	}
 	return nil, ""
-}
-
-// threadTSFromPath returns the thread TS encoded in a thread file path —
-// "<conv>/threads/<ts>.jsonl" yields "<ts>". Returns empty when the file
-// is not a thread file.
-func threadTSFromPath(path string) string {
-	dir, base := filepath.Split(path)
-	if !strings.HasSuffix(filepath.Clean(dir), string(filepath.Separator)+"threads") {
-		return ""
-	}
-	return strings.TrimSuffix(base, paths.FileExt)
 }
 
 // RegistrationError is returned when session registration fails.
