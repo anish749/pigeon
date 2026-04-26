@@ -5,76 +5,9 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/store/modelv1"
 )
-
-// EventKind distinguishes event types on the broadcast bus and /api/tail stream.
-type EventKind string
-
-const (
-	EventMessage  EventKind = "message"
-	EventReaction EventKind = "reaction" // reaction added
-	EventUnreact  EventKind = "unreact"  // reaction removed
-	// EventSystem is used by the tail handler for out-of-band signals
-	// (connection ready, replay errors). Not published through the bus —
-	// the handler writes it directly to the response.
-	EventSystem EventKind = "system"
-)
-
-// The Envelope, NotifMsg, NotifReact, and NotifSystem types below define
-// the wire shape of every JSON frame emitted by /api/tail. The schema
-// documentation in internal/cli/monitor.go (Long help text) and
-// docs/monitor-fanout-sketch.md mirrors these struct definitions.
-// When you add, remove, or rename a field here — or change a json tag
-// on an embedded type such as modelv1.MsgLine or modelv1.ReactLine —
-// update both those documents to match. Agents rely on the help text
-// for the field list; drift will silently produce wrong filters.
-
-// Envelope carries the routing metadata common to message and reaction
-// notifications. It embeds account.Account so that Platform and Name are
-// promoted as top-level JSON fields.
-type Envelope struct {
-	Kind            EventKind `json:"kind"`
-	account.Account           // adds "platform" and "name" to the JSON output
-	Conversation    string    `json:"conversation,omitempty"`
-}
-
-// Notification is a type that can be published to the broadcast bus and
-// serialized to the /api/tail stream.
-type Notification interface {
-	envelope() Envelope
-}
-
-// NotifMsg is a message notification. The payload is the MsgLine exactly
-// as written to disk; fields are flattened at the JSON level via embedding.
-type NotifMsg struct {
-	Envelope
-	modelv1.MsgLine
-}
-
-func (n NotifMsg) envelope() Envelope { return n.Envelope }
-
-// NotifReact is a reaction notification. The payload is the ReactLine
-// exactly as written to disk; fields are flattened via embedding.
-type NotifReact struct {
-	Envelope
-	modelv1.ReactLine
-}
-
-func (n NotifReact) envelope() Envelope { return n.Envelope }
-
-// NotifSystem is a system-level notification written by the tail handler.
-// It carries no account/conversation routing — it's a signal to the
-// connected client, not a data event. Kept as a separate type so its
-// JSON output doesn't emit empty platform/name fields.
-type NotifSystem struct {
-	Kind    EventKind `json:"kind"`
-	Ts      time.Time `json:"ts"`
-	Content string    `json:"content"`
-}
 
 // Filter selects which notifications a subscriber receives. An empty
 // Accounts slice means "any account"; a non-empty slice is an allowlist.

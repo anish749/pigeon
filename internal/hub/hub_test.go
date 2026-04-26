@@ -188,12 +188,12 @@ func TestDrainConversation_IncludesThreadReplies(t *testing.T) {
 	}
 }
 
-// TestDeliverLiveMessage_DirectPushNoDiskRead verifies the live path does
-// not read disk: the typed MsgLine handed to deliverLiveMessage is
-// formatted and pushed to the session in one shot. The on-disk store is
+// TestDeliverEvent_MsgDirectPushNoDiskRead verifies the live path does
+// not read disk for the event payload: the typed MsgLine handed to
+// deliverEvent is formatted and pushed in one shot. The on-disk store is
 // intentionally empty — if the implementation regressed to a drain-style
 // disk read, the session would receive nothing.
-func TestDeliverLiveMessage_DirectPushNoDiskRead(t *testing.T) {
+func TestDeliverEvent_MsgDirectPushNoDiskRead(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PIGEON_DATA_DIR", tmp)
 	root := paths.NewDataRoot(tmp)
@@ -227,14 +227,17 @@ func TestDeliverLiveMessage_DirectPushNoDiskRead(t *testing.T) {
 	ch := &channel{acct: acct, sessionID: "sess-1"}
 
 	now := time.Now()
-	msg := modelv1.MsgLine{
-		ID: "M1", Ts: now, Sender: "Alice", SenderID: "U001",
-		Text: "live arrival",
+	evt := NotifMsg{
+		Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: "#general"},
+		MsgLine: modelv1.MsgLine{
+			ID: "M1", Ts: now, Sender: "Alice", SenderID: "U001",
+			Text: "live arrival",
+		},
 	}
-	got, ok := h.deliverLiveMessage(ch, "#general", msg)
+	got, ok := h.deliverEvent(ch, evt)
 
 	if !ok {
-		t.Fatal("deliverLiveMessage returned ok=false on a healthy push")
+		t.Fatal("deliverEvent returned ok=false on a healthy message push")
 	}
 	if got.Before(now) {
 		t.Errorf("returned cursor %v should not predate the message ts %v", got, now)
@@ -251,11 +254,11 @@ func TestDeliverLiveMessage_DirectPushNoDiskRead(t *testing.T) {
 	}
 }
 
-// TestDeliverLiveMessage_NoSessionDefersCursor verifies that when no
-// session is connected, the live push reports failure (ok=false) so the
-// caller leaves lastDelivered untouched. The next signalConnected drain
-// will re-deliver from disk.
-func TestDeliverLiveMessage_NoSessionDefersCursor(t *testing.T) {
+// TestDeliverEvent_NoSessionDefersCursor verifies that when no session is
+// connected, the live push reports failure (ok=false) so the caller
+// leaves lastDelivered untouched. The next signalConnected drain will
+// re-deliver from disk.
+func TestDeliverEvent_NoSessionDefersCursor(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PIGEON_DATA_DIR", tmp)
 	root := paths.NewDataRoot(tmp)
@@ -276,9 +279,13 @@ func TestDeliverLiveMessage_NoSessionDefersCursor(t *testing.T) {
 	// Channel exists but no session is registered for it.
 	ch := &channel{acct: acct, sessionID: "missing-sess"}
 
-	got, ok := h.deliverLiveMessage(ch, "#general", modelv1.MsgLine{
-		ID: "M1", Ts: time.Now(), Sender: "Alice", SenderID: "U001", Text: "x",
-	})
+	evt := NotifMsg{
+		Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: "#general"},
+		MsgLine: modelv1.MsgLine{
+			ID: "M1", Ts: time.Now(), Sender: "Alice", SenderID: "U001", Text: "x",
+		},
+	}
+	got, ok := h.deliverEvent(ch, evt)
 	if ok {
 		t.Errorf("expected ok=false when session is not connected, got cursor %v", got)
 	}
@@ -287,10 +294,9 @@ func TestDeliverLiveMessage_NoSessionDefersCursor(t *testing.T) {
 	}
 }
 
-// TestRoute_FiresLiveMessageSignal verifies Route enqueues a typed
-// signalLiveMessage carrying the MsgLine, not a stale signalNewMessage
-// kind that would route through the drain path.
-func TestRoute_FiresLiveMessageSignal(t *testing.T) {
+// TestRoute_FiresEventSignal verifies Route wraps the MsgLine in a
+// NotifMsg event and enqueues a signalEvent carrying it.
+func TestRoute_FiresEventSignal(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PIGEON_DATA_DIR", tmp)
 	root := paths.NewDataRoot(tmp)
@@ -325,17 +331,148 @@ func TestRoute_FiresLiveMessageSignal(t *testing.T) {
 
 	select {
 	case sig := <-ch.signal:
-		if sig.kind != signalLiveMessage {
-			t.Errorf("signal.kind = %v, want signalLiveMessage", sig.kind)
+		if sig.kind != signalEvent {
+			t.Errorf("signal.kind = %v, want signalEvent", sig.kind)
 		}
-		if sig.conversation != "#general" {
-			t.Errorf("signal.conversation = %q, want #general", sig.conversation)
+		nm, ok := sig.event.(NotifMsg)
+		if !ok {
+			t.Fatalf("signal.event = %T, want NotifMsg", sig.event)
 		}
-		if sig.msg.ID != "M1" || sig.msg.Text != "hi" {
-			t.Errorf("signal.msg = %+v, want M1/hi round-trip", sig.msg)
+		if nm.Conversation != "#general" {
+			t.Errorf("envelope.Conversation = %q, want #general", nm.Conversation)
+		}
+		if nm.MsgLine.ID != "M1" || nm.MsgLine.Text != "hi" {
+			t.Errorf("MsgLine = %+v, want M1/hi round-trip", nm.MsgLine)
 		}
 	default:
 		t.Fatal("Route did not enqueue any signal")
+	}
+}
+
+// TestRouteReaction_FiresEventSignal verifies RouteReaction wraps the
+// ReactLine in a NotifReact event with the right kind (reaction vs
+// unreact) and enqueues a signalEvent.
+func TestRouteReaction_FiresEventSignal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+	root := paths.NewDataRoot(tmp)
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions:  make(map[string]*Session),
+		channels:  make(map[string]*channel),
+		store:     s,
+		dataRoot:  root,
+		broadcast: NewBroadcast(),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+	ch := &channel{
+		acct:      acct,
+		sessionID: "sess-1",
+		signal:    make(chan deliverySignal, signalBufferSize),
+	}
+	h.channels[acct.String()] = ch
+
+	tests := []struct {
+		name     string
+		react    modelv1.ReactLine
+		wantKind EventKind
+	}{
+		{"add", modelv1.ReactLine{MsgID: "M1", Sender: "B", SenderID: "U2", Emoji: "x"}, EventReaction},
+		{"remove", modelv1.ReactLine{MsgID: "M1", Sender: "B", SenderID: "U2", Emoji: "x", Remove: true}, EventUnreact},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if res := h.RouteReaction(acct, "#general", tt.react); res.State != RouteOK {
+				t.Fatalf("RouteReaction state = %v, want RouteOK", res.State)
+			}
+			select {
+			case sig := <-ch.signal:
+				if sig.kind != signalEvent {
+					t.Errorf("signal.kind = %v, want signalEvent", sig.kind)
+				}
+				nr, ok := sig.event.(NotifReact)
+				if !ok {
+					t.Fatalf("signal.event = %T, want NotifReact", sig.event)
+				}
+				if nr.Kind != tt.wantKind {
+					t.Errorf("envelope.Kind = %q, want %q", nr.Kind, tt.wantKind)
+				}
+			default:
+				t.Fatal("RouteReaction did not enqueue any signal")
+			}
+		})
+	}
+}
+
+// TestDeliverEvent_AdvancesCursor confirms the cursor return contract:
+// messages advance, reactions don't.
+func TestDeliverEvent_AdvancesCursor(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+	root := paths.NewDataRoot(tmp)
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+	sess := &Session{
+		SessionID: "sess-1",
+		CWD:       "/tmp",
+		Send:      func(_ context.Context, _ NotificationMsg) error { return nil },
+		Ready:     make(chan struct{}),
+	}
+	close(sess.Ready)
+	h.sessions["sess-1"] = sess
+	ch := &channel{acct: acct, sessionID: "sess-1"}
+
+	tests := []struct {
+		name        string
+		event       Notification
+		wantAdvance bool
+	}{
+		{
+			name: "message advances cursor",
+			event: NotifMsg{
+				Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: "#general"},
+				MsgLine:  modelv1.MsgLine{ID: "M1", Ts: time.Now(), Sender: "A", SenderID: "U1", Text: "hi"},
+			},
+			wantAdvance: true,
+		},
+		{
+			name: "reaction does not advance cursor",
+			event: NotifReact{
+				Envelope:  Envelope{Kind: EventReaction, Account: acct, Conversation: "#general"},
+				ReactLine: modelv1.ReactLine{MsgID: "M1", Sender: "B", SenderID: "U2", Emoji: "thumbsup"},
+			},
+			wantAdvance: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := h.deliverEvent(ch, tt.event)
+			if ok != tt.wantAdvance {
+				t.Errorf("deliverEvent ok = %v, want %v (cursor=%v)", ok, tt.wantAdvance, got)
+			}
+			if !tt.wantAdvance && !got.IsZero() {
+				t.Errorf("expected zero cursor when advance=false, got %v", got)
+			}
+		})
 	}
 }
 
@@ -426,60 +563,5 @@ func TestLookupMessage_NoConversation(t *testing.T) {
 	got := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
 	if got != nil {
 		t.Errorf("expected nil, got %+v", got)
-	}
-}
-
-func TestFormatReactionLines_MessageFound(t *testing.T) {
-	h, s, acct := setupLookup(t)
-
-	if err := s.Append(acct, "#general", modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
-			Sender: "Alice", SenderID: "U001", Text: "hello world",
-		},
-	}); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	react := modelv1.ReactLine{
-		MsgID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
-		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
-	}
-	lines := h.formatReactionLines(acct, "#general", react, nil)
-
-	if len(lines) == 0 {
-		t.Fatal("expected non-empty lines")
-	}
-	// Full notification includes the original message text.
-	if !strings.Contains(lines[0], "hello world") {
-		t.Errorf("first line %q should contain original message text", lines[0])
-	}
-	if !strings.Contains(lines[0], "Bob") {
-		t.Errorf("first line %q should contain reactor name", lines[0])
-	}
-}
-
-func TestFormatReactionLines_MessageNotFound(t *testing.T) {
-	h, _, acct := setupLookup(t)
-
-	react := modelv1.ReactLine{
-		MsgID: "9999999999.999999", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
-		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
-	}
-	lines := h.formatReactionLines(acct, "#general", react, nil)
-
-	if len(lines) == 0 {
-		t.Fatal("expected non-empty lines")
-	}
-	// Fallback notification omits original message text.
-	if strings.Contains(lines[0], "hello world") {
-		t.Errorf("fallback line %q should not contain original message text", lines[0])
-	}
-	if !strings.Contains(lines[0], "Bob") {
-		t.Errorf("fallback line %q should contain reactor name", lines[0])
-	}
-	if !strings.Contains(lines[0], "thumbsup") {
-		t.Errorf("fallback line %q should contain emoji", lines[0])
 	}
 }

@@ -73,18 +73,15 @@ type channel struct {
 }
 
 type deliverySignal struct {
-	kind         signalKind
-	conversation string            // set for signalLiveMessage and signalReaction
-	msg          modelv1.MsgLine   // set for signalLiveMessage — the typed event from the listener
-	react        modelv1.ReactLine // set for signalReaction — the typed event from the listener
+	kind  signalKind
+	event Notification // set for signalEvent — the typed event from the listener
 }
 
 type signalKind int
 
 const (
-	signalLiveMessage signalKind = iota // a new message arrived; carries the typed MsgLine
-	signalConnected                     // session just connected — send hello and drain all
-	signalReaction                      // a reaction event on a specific conversation
+	signalConnected signalKind = iota // session just connected — send hello and drain all
+	signalEvent                       // a typed event (message, reaction, edit, delete) arrived
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -263,84 +260,61 @@ func (h *Hub) Unregister(sessionID string) {
 	}
 }
 
-// Route signals that a new message has arrived for the given account and
-// conversation. Non-blocking — returns immediately.
+// RouteEvent publishes a typed event to the broadcast bus and signals the
+// per-account session channel for delivery. Non-blocking — returns
+// immediately. Broadcast publish happens regardless of session state so
+// monitor subscribers see every event.
 //
-// The message is also published to the broadcast bus for monitor
-// subscribers, independent of session state.
-func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
-	// Publish to broadcast first — independent of session existence.
-	h.broadcast.Publish(NotifMsg{
-		Envelope: Envelope{
-			Kind:         EventMessage,
-			Account:      acct,
-			Conversation: conversation,
-		},
-		MsgLine: msg,
-	})
-
-	key := acct.String()
+// Listeners normally call the typed wrappers (Route, RouteReaction) which
+// build the right concrete Notification and delegate here. Adding a new
+// event type means adding a new Notification implementation and a thin
+// wrapper — the hub plumbing below is identical for every kind.
+func (h *Hub) RouteEvent(evt Notification) RouteResult {
+	env := evt.envelope()
+	h.broadcast.Publish(evt)
 
 	h.mu.RLock()
-	ch, exists := h.channels[key]
+	ch, exists := h.channels[env.Account.String()]
 	h.mu.RUnlock()
 
 	if !exists {
-		slog.Warn("no session configured, message not routed",
-			"account", acct, "conversation", conversation)
+		slog.Warn("no session configured, event not routed",
+			"kind", env.Kind, "account", env.Account, "conversation", env.Conversation)
 		return RouteResult{State: RouteNoSession}
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalLiveMessage, conversation: conversation, msg: msg}:
+	case ch.signal <- deliverySignal{kind: signalEvent, event: evt}:
 	default:
-		slog.Error("delivery signal buffer full, message delivery may be delayed",
-			"account", acct, "conversation", conversation,
+		slog.Error("delivery signal buffer full, event delivery may be delayed",
+			"kind", env.Kind, "account", env.Account, "conversation", env.Conversation,
 			"buffer_size", signalBufferSize)
 	}
 	return RouteResult{State: RouteOK}
 }
 
-// RouteReaction signals that a reaction (or unreaction) event has arrived for
-// the given account and conversation. Non-blocking — returns immediately.
-//
-// The reaction is also published to the broadcast bus for monitor
-// subscribers, independent of session state. The ReactLine is forwarded
-// as-is — no timestamp or field reconstruction.
+// Route signals that a new message has arrived for the given account and
+// conversation. Thin wrapper around RouteEvent — exists so listeners pass
+// MsgLine values without building Envelope structs themselves.
+func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
+	return h.RouteEvent(NotifMsg{
+		Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: conversation},
+		MsgLine:  msg,
+	})
+}
+
+// RouteReaction signals that a reaction (or unreaction) event has arrived
+// for the given account and conversation. Thin wrapper around RouteEvent.
+// The ReactLine is forwarded as-is — no timestamp or field reconstruction.
 func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
 	kind := EventReaction
 	if react.Remove {
 		kind = EventUnreact
 	}
-	h.broadcast.Publish(NotifReact{
-		Envelope: Envelope{
-			Kind:         kind,
-			Account:      acct,
-			Conversation: conversation,
-		},
+	return h.RouteEvent(NotifReact{
+		Envelope:  Envelope{Kind: kind, Account: acct, Conversation: conversation},
 		ReactLine: react,
 	})
-
-	key := acct.String()
-
-	h.mu.RLock()
-	ch, exists := h.channels[key]
-	h.mu.RUnlock()
-
-	if !exists {
-		slog.Warn("no session configured, reaction not routed",
-			"account", acct, "conversation", conversation)
-		return RouteResult{State: RouteNoSession}
-	}
-
-	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, react: react}:
-	default:
-		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
-			"account", acct, "conversation", conversation,
-			"buffer_size", signalBufferSize)
-	}
-	return RouteResult{State: RouteOK}
 }
 
 // Sessions returns the number of active (connected) sessions.
@@ -431,12 +405,10 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalConnected:
 				h.sendHello(ch)
 				lastDelivered = h.drainAllConversations(ch, lastDelivered)
-			case signalLiveMessage:
-				if t, ok := h.deliverLiveMessage(ch, sig.conversation, sig.msg); ok {
+			case signalEvent:
+				if t, ok := h.deliverEvent(ch, sig.event); ok {
 					lastDelivered = t
 				}
-			case signalReaction:
-				h.deliverReaction(ch, sig.conversation, sig.react)
 			}
 		}
 	}
@@ -538,32 +510,46 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	return now
 }
 
-// deliverLiveMessage formats and pushes a single MsgLine to the connected
-// session, advancing the last-delivered cursor on success. The MsgLine is
-// the typed event the listener already produced — no disk re-read for the
-// live path. Returns (cursorTs, true) on a successful push so the caller
-// can update lastDelivered; (zero, false) on any error or when no session
-// is attached, leaving the cursor unchanged so the next signalConnected
-// drain will catch up from disk.
-func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.MsgLine) (time.Time, bool) {
+// deliverEvent formats and pushes a single typed event to the connected
+// session, formatting via the event's own renderer and advancing
+// last_delivered when the event opts in via AdvancesCursor. One handler
+// covers every event type (messages, reactions, edits, deletes, ...) —
+// per-type concerns live in the Notification implementation, not here.
+//
+// Returns (cursorTs, true) when the cursor should advance; (zero, false)
+// otherwise (no session, send failed, or the event opts out of cursor
+// advancement). The cursor is left unchanged on (zero, false) so the next
+// signalConnected drain catches up from disk.
+func (h *Hub) deliverEvent(ch *channel, evt Notification) (time.Time, bool) {
+	env := evt.envelope()
+	conversation := env.Conversation
+
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
 
 	if session == nil {
-		slog.Warn("session not connected, message delivery deferred",
-			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
-			"message_id", msg.ID)
+		slog.Warn("session not connected, event delivery deferred",
+			"session_id", ch.sessionID, "kind", env.Kind,
+			"account", ch.acct, "conversation", conversation)
 		return time.Time{}, false
 	}
 
 	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
 	if err != nil {
-		slog.Warn("read conv meta for live delivery, dropping meta tags",
-			"account", ch.acct, "conversation", conversation, "error", err)
+		slog.Warn("read conv meta for event delivery, dropping meta tags",
+			"kind", env.Kind, "account", ch.acct, "conversation", conversation, "error", err)
 		convMeta = nil
 	}
-	lines := modelv1.FormatMsgNotification(msg, time.Local, convMeta)
+
+	formatEnv := FormatEnv{
+		Loc:      time.Local,
+		ConvMeta: convMeta,
+		LookupParent: func(msgID string) *modelv1.MsgLine {
+			return h.lookupMessage(ch.acct, conversation, msgID)
+		},
+	}
+	lines := evt.FormatNotification(formatEnv)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
@@ -572,9 +558,13 @@ func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.M
 		MsgLines:     lines,
 	}
 	if err := session.Send(h.ctx, notification); err != nil {
-		slog.Error("failed to deliver live message",
-			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
-			"message_id", msg.ID, "error", err)
+		slog.Error("failed to deliver event",
+			"session_id", ch.sessionID, "kind", env.Kind,
+			"account", ch.acct, "conversation", conversation, "error", err)
+		return time.Time{}, false
+	}
+
+	if !evt.AdvancesCursor() {
 		return time.Time{}, false
 	}
 
@@ -584,58 +574,6 @@ func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.M
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
 	return now, true
-}
-
-// deliverReaction sends a reaction (or unreaction) event to the connected
-// session. Reactions are delivered out-of-band: they are not gated by the
-// last_delivered cursor since reactions often target older messages.
-//
-// Formatting (and the parent-message + conv-meta lookups it depends on)
-// happen here at delivery time, not at route time — symmetric with
-// deliverLiveMessage. If no session is attached the reaction is dropped
-// without doing the lookups.
-func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
-	h.mu.RLock()
-	session := h.sessions[ch.sessionID]
-	h.mu.RUnlock()
-
-	if session == nil {
-		slog.Warn("session not connected, reaction dropped",
-			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
-		return
-	}
-
-	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
-	if err != nil {
-		slog.Warn("read conv meta for reaction delivery, dropping meta tags",
-			"account", ch.acct, "conversation", conversation, "error", err)
-		convMeta = nil
-	}
-
-	lines := h.formatReactionLines(ch.acct, conversation, react, convMeta)
-
-	notification := &IncomingMsg{
-		Platform:     ch.acct.Platform,
-		Account:      ch.acct.Name,
-		Conversation: conversation,
-		MsgLines:     lines,
-	}
-	if err := session.Send(h.ctx, notification); err != nil {
-		slog.Error("failed to deliver reaction",
-			"session_id", ch.sessionID, "account", ch.acct, "error", err)
-	}
-}
-
-// formatReactionLines renders a reaction with parent context when the
-// parent message can be found on disk, falling back to a context-less
-// rendering otherwise. convMeta tags (type, channel ID, etc.) are appended
-// in both branches when non-nil. Called from deliverReaction so the disk
-// lookups stay off the listener's hot path.
-func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine, convMeta *modelv1.ConvMeta) []string {
-	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
-		return modelv1.FormatReactionNotification(*msg, react, time.Local, convMeta)
-	}
-	return modelv1.FormatReactionFallbackNotification(react, time.Local, convMeta)
 }
 
 // lookupMessage searches for a message by ID in a conversation using grep.
