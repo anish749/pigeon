@@ -34,7 +34,7 @@ func newSetupSlackCmd() *cobra.Command {
 to Slack's authorization page — pick a workspace and approve.
 
 To create a Slack app:
-  1. Run: pigeon generate-manifest --username=You --workspace=acme-corp
+  1. Run: pigeon generate-manifest --username=You --slack-workspace=acme-corp
   2. Go to https://api.slack.com/apps → "Create New App" → "From a manifest"
   3. Paste the manifest from your clipboard
   4. Under "Basic Information", copy client ID and client secret

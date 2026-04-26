@@ -164,7 +164,7 @@ WORKFLOW — FIRST-TIME SETUP
 
   Slack:
 
-    1. pigeon generate-manifest --username=You --workspace=acme-corp
+    1. pigeon generate-manifest --username=You --slack-workspace=acme-corp
     2. Go to https://api.slack.com/apps → "Create New App" → "From a manifest"
     3. Paste the manifest from your clipboard
     4. Under "Basic Information", copy client ID and client secret
