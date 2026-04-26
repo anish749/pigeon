@@ -103,11 +103,6 @@ const spinnerInterval = 120 * time.Millisecond
 // mgr.DiscoverAndPropose(since, until) and posts a discoverDoneMsg
 // when it returns. The ticker posts spinTickMsg while modeDiscovering
 // is the model's mode (the model gates the next tick).
-//
-// No TUI-level timeout: the LLM call's own timeout is configured on
-// clients.Client by the constructing caller (see cfg.LLMCallTimeout).
-// Inventing a separate ceiling here would either silently truncate a
-// real run or be redundant.
 func discoverCmd(mgr Manager, since, until time.Time) tea.Cmd {
 	if mgr == nil {
 		return nil
