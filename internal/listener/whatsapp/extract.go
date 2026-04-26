@@ -37,12 +37,12 @@ func SanitizeFilename(name string) string {
 	return replacer.Replace(name)
 }
 
-// EditedMessage extracts the original message ID and the new message contents
-// from a live edit event. WhatsApp delivers edits as a Message wrapped in
-// EditedMessage; whatsmeow's UnwrapRaw peels off the wrapper and sets
-// Message.IsEdit, but leaves the inner ProtocolMessage intact. The original
-// (target) message ID lives in ProtocolMessage.Key.ID, and the replacement
-// content lives in ProtocolMessage.EditedMessage.
+// EditedMessage extracts the original message ID and the new contents from
+// an edit event. WhatsApp delivers edits as a ProtocolMessage with type
+// MESSAGE_EDIT — sometimes wrapped in an EditedMessage envelope (which sets
+// events.Message.IsEdit), sometimes not. Either way the inner ProtocolMessage
+// holds the target ID in Key.ID and the replacement content in EditedMessage,
+// so detecting via the ProtocolMessage type covers both delivery shapes.
 //
 // Returns ("", nil) when msg is not a MESSAGE_EDIT protocol message.
 func EditedMessage(msg *waE2E.Message) (origID string, edited *waE2E.Message) {

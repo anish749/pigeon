@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -124,12 +125,12 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		return
 	}
 
-	// Edits and deletes (revokes) ride the same *events.Message channel.
-	// IsEdit is set by whatsmeow's UnwrapRaw when the wire payload was a
-	// Message wrapped in EditedMessage; revokes arrive as plain protocol
-	// messages with type REVOKE.
-	if evt.IsEdit {
-		l.handleEdit(ctx, evt)
+	// Edits and deletes (revokes) both ride the same *events.Message channel
+	// as inner ProtocolMessages. Live edits are NOT consistently wrapped in
+	// an EditedMessage envelope (which is what would set evt.IsEdit), so we
+	// detect both kinds the same way: by peeking at ProtocolMessage.Type.
+	if origID, edited := EditedMessage(evt.Message); origID != "" {
+		l.handleEdit(ctx, evt, origID, edited)
 		return
 	}
 	if id := RevokedMessageID(evt.Message); id != "" {
@@ -183,13 +184,9 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 }
 
 // handleEdit stores a WhatsApp message edit and routes it to the connected
-// session. Called from handleMessage after broadcast/self filters and after
-// IsEdit is detected.
-func (l *Listener) handleEdit(ctx context.Context, evt *events.Message) {
-	origID, edited := EditedMessage(evt.Message)
-	if origID == "" {
-		return
-	}
+// session. origID and edited are extracted from the inner ProtocolMessage
+// by the caller.
+func (l *Listener) handleEdit(ctx context.Context, evt *events.Message, origID string, edited *waE2E.Message) {
 	text := ExtractText(edited)
 	if text == "" {
 		// Media-only edits don't carry text; nothing meaningful to write.
