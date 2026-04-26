@@ -4,9 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/workspace"
+	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
@@ -148,5 +152,124 @@ func TestRejectProposalDeletes(t *testing.T) {
 	// Re-rejecting surfaces as not-found.
 	if err := mgr.RejectProposal(context.Background(), "p-1"); err == nil {
 		t.Error("expected error when rejecting already-deleted proposal")
+	}
+}
+
+type fakeSignalReader struct {
+	gotAccounts []account.Account
+	gotSince    time.Time
+	gotUntil    time.Time
+	signals     []models.Signal
+	err         error
+}
+
+func (f *fakeSignalReader) ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
+	f.gotAccounts = append([]account.Account(nil), accounts...)
+	f.gotSince = since
+	f.gotUntil = until
+	return append([]models.Signal(nil), f.signals...), f.err
+}
+
+type fakeDiscovery struct {
+	gotSignals []models.Signal
+	discovered []discovery.DiscoveredWorkstream
+	err        error
+}
+
+func (f *fakeDiscovery) Discover(_ context.Context, signals []models.Signal) ([]discovery.DiscoveredWorkstream, error) {
+	f.gotSignals = append([]models.Signal(nil), signals...)
+	return append([]discovery.DiscoveredWorkstream(nil), f.discovered...), f.err
+}
+
+func TestDiscoverAndProposeReadsWorkspaceSignals(t *testing.T) {
+	st := store.NewFS(t.TempDir())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	since := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+	firstSignal := since.Add(2 * time.Hour)
+	accounts := []account.Account{
+		account.NewFromSlug("slack", "acme"),
+		account.NewFromSlug("gws", "anish"),
+	}
+	reader := &fakeSignalReader{signals: []models.Signal{
+		{ID: "s1", Account: accounts[0], Ts: firstSignal, Text: "auth migration"},
+		{ID: "s2", Account: accounts[1], Ts: firstSignal.Add(time.Hour), Text: "session token review"},
+	}}
+	disc := &fakeDiscovery{discovered: []discovery.DiscoveredWorkstream{{
+		Name:  "Auth Refactor",
+		Focus: "Migrate auth sessions.",
+	}}}
+	mgr := New(nil, NewStatCollector(), models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace: workspace.Workspace{
+			Name:     "acme",
+			Accounts: accounts,
+		},
+	}, st, logger, WithSignalReader(reader))
+	mgr.disc = disc
+
+	discovered, err := mgr.DiscoverAndPropose(context.Background(), since, until)
+	if err != nil {
+		t.Fatalf("DiscoverAndPropose: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Name != "Auth Refactor" {
+		t.Fatalf("discovered = %+v", discovered)
+	}
+	if !reflect.DeepEqual(reader.gotAccounts, accounts) {
+		t.Errorf("reader accounts = %+v, want %+v", reader.gotAccounts, accounts)
+	}
+	if !reader.gotSince.Equal(since) || !reader.gotUntil.Equal(until) {
+		t.Errorf("reader range = %s to %s, want %s to %s", reader.gotSince, reader.gotUntil, since, until)
+	}
+	if !reflect.DeepEqual(disc.gotSignals, reader.signals) {
+		t.Errorf("discovery signals = %+v, want %+v", disc.gotSignals, reader.signals)
+	}
+
+	defaultWS, ok, err := st.GetWorkstream(models.DefaultWorkstreamID("acme"))
+	if err != nil || !ok {
+		t.Fatalf("default workstream not created: ok=%v err=%v", ok, err)
+	}
+	if !defaultWS.Created.Equal(firstSignal) {
+		t.Errorf("default created = %s, want %s", defaultWS.Created, firstSignal)
+	}
+	got, ok, err := st.GetWorkstream("ws-auth-refactor")
+	if err != nil || !ok {
+		t.Fatalf("discovered workstream not created: ok=%v err=%v", ok, err)
+	}
+	if got.Focus != "Migrate auth sessions." || !got.Created.Equal(firstSignal) {
+		t.Errorf("workstream = %+v", got)
+	}
+}
+
+func TestDiscoverAndProposeNoSignals(t *testing.T) {
+	st := store.NewFS(t.TempDir())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reader := &fakeSignalReader{}
+	disc := &fakeDiscovery{discovered: []discovery.DiscoveredWorkstream{{
+		Name:  "Should Not Run",
+		Focus: "No signals.",
+	}}}
+	mgr := New(nil, NewStatCollector(), models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace:    workspace.Workspace{Name: "acme"},
+	}, st, logger, WithSignalReader(reader))
+	mgr.disc = disc
+
+	discovered, err := mgr.DiscoverAndPropose(context.Background(), time.Now().Add(-time.Hour), time.Now())
+	if err != nil {
+		t.Fatalf("DiscoverAndPropose: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered = %+v, want none", discovered)
+	}
+	if len(disc.gotSignals) != 0 {
+		t.Fatalf("discovery ran with signals = %+v", disc.gotSignals)
+	}
+	all, err := st.ListWorkstreams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("workstreams created = %+v, want none", all)
 	}
 }
