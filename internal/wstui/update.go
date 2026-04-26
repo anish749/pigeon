@@ -150,10 +150,6 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeEditFocus
 			m.input = w.Focus
 		}
-	case "s":
-		if w, ok := m.current(); ok && !w.IsDefault() {
-			return m, cycleStateCmd(m, w)
-		}
 	case "m":
 		if w, ok := m.current(); ok && !w.IsDefault() {
 			target := firstMergeTarget(m.cursor, m.items)
