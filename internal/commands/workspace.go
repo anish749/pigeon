@@ -40,6 +40,12 @@ func RunWorkspaceList(cfg *config.Config) error {
 		for _, slug := range ws.WhatsApp {
 			fmt.Printf("  whatsapp/%s\n", slug)
 		}
+		for _, slug := range ws.Linear {
+			fmt.Printf("  linear/%s\n", slug)
+		}
+		for _, slug := range ws.Jira {
+			fmt.Printf("  jira/%s\n", slug)
+		}
 	}
 	return nil
 }
@@ -73,8 +79,18 @@ func RunWorkspaceAdd(cfg *config.Config, workspace, platform, account string) er
 			return fmt.Errorf("whatsapp/%s already in workspace %q", account, workspace)
 		}
 		ws.WhatsApp = append(ws.WhatsApp, account)
+	case "linear":
+		if slices.Contains(ws.Linear, account) {
+			return fmt.Errorf("linear/%s already in workspace %q", account, workspace)
+		}
+		ws.Linear = append(ws.Linear, account)
+	case "jira":
+		if slices.Contains(ws.Jira, account) {
+			return fmt.Errorf("jira/%s already in workspace %q", account, workspace)
+		}
+		ws.Jira = append(ws.Jira, account)
 	default:
-		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp)", platform)
+		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp, linear, jira)", platform)
 	}
 
 	cfg.Workspaces[config.WorkspaceName(workspace)] = ws
@@ -93,7 +109,10 @@ func RunWorkspaceRemove(cfg *config.Config, workspace, platform, account string)
 		return fmt.Errorf("workspace %q not found", workspace)
 	}
 
-	lenBefore := len(ws.Slack) + len(ws.GWS) + len(ws.WhatsApp)
+	total := func(w config.WorkspaceConfig) int {
+		return len(w.Slack) + len(w.GWS) + len(w.WhatsApp) + len(w.Linear) + len(w.Jira)
+	}
+	lenBefore := total(ws)
 	match := func(v string) bool { return v == account }
 	switch platform {
 	case "slack":
@@ -102,14 +121,18 @@ func RunWorkspaceRemove(cfg *config.Config, workspace, platform, account string)
 		ws.GWS = slices.DeleteFunc(ws.GWS, match)
 	case "whatsapp":
 		ws.WhatsApp = slices.DeleteFunc(ws.WhatsApp, match)
+	case "linear":
+		ws.Linear = slices.DeleteFunc(ws.Linear, match)
+	case "jira":
+		ws.Jira = slices.DeleteFunc(ws.Jira, match)
 	default:
-		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp)", platform)
+		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp, linear, jira)", platform)
 	}
-	if len(ws.Slack)+len(ws.GWS)+len(ws.WhatsApp) == lenBefore {
+	if total(ws) == lenBefore {
 		return fmt.Errorf("%s/%s not in workspace %q", platform, account, workspace)
 	}
 
-	if len(ws.Slack)+len(ws.GWS)+len(ws.WhatsApp) == 0 {
+	if total(ws) == 0 {
 		delete(cfg.Workspaces, config.WorkspaceName(workspace))
 		if cfg.DefaultWorkspace == config.WorkspaceName(workspace) {
 			cfg.DefaultWorkspace = ""
@@ -189,8 +212,22 @@ func validateAccountExists(cfg *config.Config, platform, account string) error {
 			}
 			configured = append(configured, w.Account)
 		}
+	case "linear":
+		for _, l := range cfg.Linear {
+			if l.Workspace == account {
+				return nil
+			}
+			configured = append(configured, l.Workspace)
+		}
+	case "jira":
+		for _, j := range cfg.Jira {
+			if j.AccountName == account {
+				return nil
+			}
+			configured = append(configured, j.AccountName)
+		}
 	default:
-		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp)", platform)
+		return fmt.Errorf("unsupported platform %q (supported: slack, gws, whatsapp, linear, jira)", platform)
 	}
 	if len(configured) == 0 {
 		return fmt.Errorf("no %s accounts configured", platform)
