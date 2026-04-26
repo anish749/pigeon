@@ -86,12 +86,11 @@ func (m Model) renderList() string {
 		} else {
 			name = dimStyle.Render(name)
 		}
-		state := renderState(w.State)
 		def := ""
 		if w.IsDefault() {
 			def = dimStyle.Render(" (default)")
 		}
-		fmt.Fprintf(&b, "%s%s  %s%s\n", marker, state, name, def)
+		fmt.Fprintf(&b, "%s%s%s\n", marker, name, def)
 	}
 	return b.String()
 }
@@ -168,25 +167,11 @@ func (m Model) renderMergePicker() string {
 		} else {
 			name = dimStyle.Render(name)
 		}
-		fmt.Fprintf(&b, "%s%s  %s\n", marker, renderState(w.State), name)
+		fmt.Fprintf(&b, "%s%s\n", marker, name)
 	}
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("  enter confirm  j/k pick  esc cancel"))
 	return b.String()
-}
-
-// renderState returns the colored state badge used in the list and the
-// merge picker.
-func renderState(s models.WorkstreamState) string {
-	switch s {
-	case models.StateActive:
-		return activeStyle.Render("●active  ")
-	case models.StateDormant:
-		return dormantStyle.Render("◌dormant ")
-	case models.StateResolved:
-		return resolvedStyle.Render("✓resolved")
-	}
-	return dimStyle.Render("?        ")
 }
 
 func emptyOr(s, fallback string) string {
