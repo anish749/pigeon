@@ -4,6 +4,11 @@ package modelv1
 type ResolvedMsg struct {
 	MsgLine
 	Reactions []ReactLine
+	// ThreadTS is the parent message's TS when this message is a thread
+	// reply (or the parent itself coming through interleaveThreads).
+	// In-memory only; not serialized to disk. Set by the read path so
+	// formatters can include thread context in agent notifications.
+	ThreadTS string `json:"-"`
 }
 
 // ResolvedDateFile is a compacted, resolved conversation ready for reading.

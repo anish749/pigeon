@@ -88,13 +88,14 @@ type ReactLine struct {
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts          time.Time    `json:"ts"`               // when the edit happened
-	MsgID       string       `json:"msg"`              // target message ID
-	Sender      string       `json:"sender"`           // who edited (display name)
-	SenderID    string       `json:"from"`             // who edited (platform ID)
-	Via         Via          `json:"via,omitempty"`    // message pathway
-	Text        string       `json:"text,omitempty"`   // new message text
-	Attachments []Attachment `json:"attach,omitempty"` // complete attachment set after edit
+	Ts          time.Time    `json:"ts"`                  // when the edit happened
+	MsgID       string       `json:"msg"`                 // target message ID
+	ThreadTS    string       `json:"thread_ts,omitempty"` // thread root TS when target is a thread reply
+	Sender      string       `json:"sender"`              // who edited (display name)
+	SenderID    string       `json:"from"`                // who edited (platform ID)
+	Via         Via          `json:"via,omitempty"`       // message pathway
+	Text        string       `json:"text,omitempty"`      // new message text
+	Attachments []Attachment `json:"attach,omitempty"`    // complete attachment set after edit
 
 	// Platform specific raw fields.
 	RawType RawType        `json:"rawType,omitempty"` // type of the raw fields
@@ -103,11 +104,12 @@ type EditLine struct {
 
 // DeleteLine represents a message delete event.
 type DeleteLine struct {
-	Ts       time.Time `json:"ts"`            // when the delete happened
-	MsgID    string    `json:"msg"`           // target message ID
-	Sender   string    `json:"sender"`        // who deleted (display name)
-	SenderID string    `json:"from"`          // who deleted (platform ID)
-	Via      Via       `json:"via,omitempty"` // message pathway
+	Ts       time.Time `json:"ts"`                  // when the delete happened
+	MsgID    string    `json:"msg"`                 // target message ID
+	ThreadTS string    `json:"thread_ts,omitempty"` // thread root TS when target is a thread reply
+	Sender   string    `json:"sender"`              // who deleted (display name)
+	SenderID string    `json:"from"`                // who deleted (platform ID)
+	Via      Via       `json:"via,omitempty"`       // message pathway
 }
 
 // Line is a parsed protocol line. Exactly one of the payload pointers is

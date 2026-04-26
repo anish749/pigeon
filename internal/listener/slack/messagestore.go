@@ -91,34 +91,45 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 }
 
 // AppendEdit stores a message edit event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineEdit,
-		Edit: &modelv1.EditLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
+// to the target message's timestamp. threadTS is the thread root TS when
+// the edited message is a thread reply, or empty for top-level messages.
+// Returns the EditLine that was written so callers can forward it.
+//
+// (See issues/bugs.md: when threadTS is non-empty, the line still goes to
+// the date file rather than the thread file — that's a separate compaction
+// bug. Persisting threadTS here is the prerequisite for that fix.)
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text string, ts time.Time, raw slackraw.SlackRawContent) (modelv1.EditLine, error) {
+	edit := modelv1.EditLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		ThreadTS: threadTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
+		Text:     text,
+		RawType:  modelv1.RawTypeSlack,
+		Raw:      raw.AsSerializable(),
 	}
-	return ms.store.Append(ms.acct, rs.ChannelName, line)
+	line := modelv1.Line{Type: modelv1.LineEdit, Edit: &edit}
+	if err := ms.store.Append(ms.acct, rs.ChannelName, line); err != nil {
+		return modelv1.EditLine{}, err
+	}
+	return edit, nil
 }
 
 // AppendDelete stores a message delete event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS string, ts time.Time) error {
-	line := modelv1.Line{
-		Type: modelv1.LineDelete,
-		Delete: &modelv1.DeleteLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-		},
+// to the target message's timestamp. threadTS is set when the deleted
+// message lived in a thread.
+func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, ts time.Time) (modelv1.DeleteLine, error) {
+	del := modelv1.DeleteLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		ThreadTS: threadTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
 	}
-	return ms.store.Append(ms.acct, rs.ChannelName, line)
+	line := modelv1.Line{Type: modelv1.LineDelete, Delete: &del}
+	if err := ms.store.Append(ms.acct, rs.ChannelName, line); err != nil {
+		return modelv1.DeleteLine{}, err
+	}
+	return del, nil
 }

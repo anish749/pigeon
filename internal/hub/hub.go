@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,14 @@ type MessageNotifyFunc func(acct account.Account, conversation string, msg model
 // constructing new timestamps or regenerating fields.
 type ReactionNotifyFunc func(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult
 
+// EditNotifyFunc is called by listeners when an edit event arrives. The edit
+// payload (including ThreadTS when the target lives in a thread) is what the
+// hub formats for session delivery.
+type EditNotifyFunc func(acct account.Account, conversation string, edit modelv1.EditLine) RouteResult
+
+// DeleteNotifyFunc is called by listeners when a delete event arrives.
+type DeleteNotifyFunc func(acct account.Account, conversation string, del modelv1.DeleteLine) RouteResult
+
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
 // next drain since it reads all messages since last_delivered.
@@ -72,12 +81,16 @@ type channel struct {
 	signal    chan deliverySignal
 }
 
-type formattedReactionLines []string
+type formattedLines []string
+
+// Backwards-compat alias retained for tests and callers that reference the
+// reaction-specific name.
+type formattedReactionLines = formattedLines
 
 type deliverySignal struct {
-	kind          signalKind
-	conversation  string                 // only set for signalNewMessage and signalReaction
-	reactionLines formattedReactionLines // only set for signalReaction
+	kind         signalKind
+	conversation string         // only set for signalNewMessage / Reaction / Edit / Delete
+	eventLines   formattedLines // formatted notification lines for Reaction / Edit / Delete
 }
 
 type signalKind int
@@ -86,6 +99,8 @@ const (
 	signalNewMessage signalKind = iota // a specific conversation has a new message
 	signalConnected                    // session just connected — send hello and drain all
 	signalReaction                     // a reaction event on a specific conversation
+	signalEdit                         // an edit event on a specific conversation
+	signalDelete                       // a delete event on a specific conversation
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -336,10 +351,55 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reactionLines: lines}:
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, eventLines: lines}:
 	default:
 		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
 			"account", acct, "conversation", conversation,
+			"buffer_size", signalBufferSize)
+	}
+	return RouteResult{State: RouteOK}
+}
+
+// RouteEdit signals that a message edit event has arrived for the given
+// account and conversation. Non-blocking — returns immediately. The edit
+// is formatted into notification lines (including thread_ts when set on
+// the EditLine) and pushed to the connected session.
+//
+// Note: not yet published on the broadcast bus (no consumers); add when a
+// /api/tail subscriber needs edit events.
+func (h *Hub) RouteEdit(acct account.Account, conversation string, edit modelv1.EditLine) RouteResult {
+	lines := modelv1.FormatEditNotification(edit, time.Local)
+	return h.routeEventLines(acct, conversation, signalEdit, "edit", lines)
+}
+
+// RouteDelete signals that a message delete event has arrived. Like RouteEdit
+// it is non-blocking and pushes formatted lines to the connected session.
+func (h *Hub) RouteDelete(acct account.Account, conversation string, del modelv1.DeleteLine) RouteResult {
+	lines := modelv1.FormatDeleteNotification(del, time.Local)
+	return h.routeEventLines(acct, conversation, signalDelete, "delete", lines)
+}
+
+// routeEventLines is shared plumbing for RouteEdit and RouteDelete. It looks
+// up the per-account channel and sends a delivery signal carrying the
+// pre-formatted lines.
+func (h *Hub) routeEventLines(acct account.Account, conversation string, kind signalKind, label string, lines formattedLines) RouteResult {
+	key := acct.String()
+
+	h.mu.RLock()
+	ch, exists := h.channels[key]
+	h.mu.RUnlock()
+
+	if !exists {
+		slog.Warn("no session configured, event not routed",
+			"kind", label, "account", acct, "conversation", conversation)
+		return RouteResult{State: RouteNoSession}
+	}
+
+	select {
+	case ch.signal <- deliverySignal{kind: kind, conversation: conversation, eventLines: lines}:
+	default:
+		slog.Error("delivery signal buffer full, event delivery may be delayed",
+			"kind", label, "account", acct, "conversation", conversation,
 			"buffer_size", signalBufferSize)
 	}
 	return RouteResult{State: RouteOK}
@@ -436,7 +496,11 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalNewMessage:
 				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
 			case signalReaction:
-				h.deliverReaction(ch, sig.conversation, sig.reactionLines)
+				h.deliverEventLines(ch, sig.conversation, sig.eventLines, "reaction")
+			case signalEdit:
+				h.deliverEventLines(ch, sig.conversation, sig.eventLines, "edit")
+			case signalDelete:
+				h.deliverEventLines(ch, sig.conversation, sig.eventLines, "delete")
 			}
 		}
 	}
@@ -532,17 +596,18 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	return now
 }
 
-// deliverReaction sends a reaction (or unreaction) event to the connected
-// session. Reactions are delivered out-of-band: they are not gated by the
-// last_delivered cursor since reactions often target older messages.
-func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedReactionLines) {
+// deliverEventLines sends already-formatted event lines (reaction, edit,
+// delete) to the connected session. These events are delivered out-of-band:
+// not gated by the last_delivered cursor, since the target may be older
+// than the cursor.
+func (h *Hub) deliverEventLines(ch *channel, conversation string, lines formattedLines, kind string) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
 
 	if session == nil {
-		slog.Warn("session not connected, reaction dropped",
-			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
+		slog.Warn("session not connected, event dropped",
+			"kind", kind, "session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
 		return
 	}
 
@@ -553,33 +618,39 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedR
 		MsgLines:     lines,
 	}
 	if err := session.Send(h.ctx, notification); err != nil {
-		slog.Error("failed to deliver reaction",
-			"session_id", ch.sessionID, "account", ch.acct, "error", err)
+		slog.Error("failed to deliver event",
+			"kind", kind, "session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
 }
 
 func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) formattedReactionLines {
-	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
-		return modelv1.FormatReactionNotification(*msg, react, time.Local)
+	msg, threadTS := h.lookupMessage(acct, conversation, react.MsgID)
+	if msg != nil {
+		return modelv1.FormatReactionNotification(*msg, react, threadTS, time.Local)
 	}
-	return modelv1.FormatReactionFallbackNotification(react, time.Local)
+	return modelv1.FormatReactionFallbackNotification(react, threadTS, time.Local)
 }
 
 // lookupMessage searches for a message by ID in a conversation using grep.
-// Returns nil if not found or on error.
-func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) *modelv1.MsgLine {
+// Returns the message and, when the message lives in a thread file, the
+// thread's TS (the thread file's basename). Returns (nil, "") if not found.
+func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) (*modelv1.MsgLine, string) {
 	dir := h.dataRoot.AccountFor(acct).Conversation(conversation).Path()
 	out, err := read.Grep(dir, read.GrepOpts{
 		Query:        msgID,
 		FixedStrings: true,
-		NoFilename:   true,
 	})
 	if err != nil || len(out) == 0 {
-		return nil
+		return nil, ""
 	}
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if raw == "" {
+			continue
+		}
+		// rg output with filenames is "path:line" — split on the first colon.
+		path, line, ok := strings.Cut(raw, ":")
+		if !ok {
 			continue
 		}
 		parsed, err := modelv1.Parse(line)
@@ -587,10 +658,21 @@ func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) *m
 			continue
 		}
 		if parsed.Type == modelv1.LineMessage && parsed.Msg != nil && parsed.Msg.ID == msgID {
-			return parsed.Msg
+			return parsed.Msg, threadTSFromPath(path)
 		}
 	}
-	return nil
+	return nil, ""
+}
+
+// threadTSFromPath returns the thread TS encoded in a thread file path —
+// "<conv>/threads/<ts>.jsonl" yields "<ts>". Returns empty when the file
+// is not a thread file.
+func threadTSFromPath(path string) string {
+	dir, base := filepath.Split(path)
+	if !strings.HasSuffix(filepath.Clean(dir), string(filepath.Separator)+"threads") {
+		return ""
+	}
+	return strings.TrimSuffix(base, paths.FileExt)
 }
 
 // RegistrationError is returned when session registration fails.

@@ -211,13 +211,17 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 	matched := make(map[string]bool, len(threads))
 	var result []modelv1.ResolvedMsg
 	for _, m := range resolved.Messages {
-		result = append(result, m)
 		if tf, ok := threads[m.ID]; ok {
+			m.ThreadTS = m.ID
 			matched[m.ID] = true
+			result = append(result, m)
 			for _, r := range tf.Replies {
 				r.Reply = true
+				r.ThreadTS = m.ID
 				result = append(result, r)
 			}
+		} else {
+			result = append(result, m)
 		}
 	}
 
@@ -233,10 +237,13 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		// belong to — but only if the parent line was actually written. For
 		// orphan thread files we surface the replies alone.
 		if tf.Parent.ID != "" {
-			result = append(result, tf.Parent)
+			parent := tf.Parent
+			parent.ThreadTS = threadTS
+			result = append(result, parent)
 		}
 		for _, r := range tf.Replies {
 			r.Reply = true
+			r.ThreadTS = threadTS
 			result = append(result, r)
 		}
 	}

@@ -32,6 +32,8 @@ type Listener struct {
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
 	onMessage    hub.MessageNotifyFunc
 	onReaction   hub.ReactionNotifyFunc
+	onEdit       hub.EditNotifyFunc
+	onDelete     hub.DeleteNotifyFunc
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -39,9 +41,9 @@ type Listener struct {
 // pigeonBotUID is the Slack user ID of the Pigeon bot (used to detect @mentions and self-messages).
 // onMessage is called when a routable message arrives:
 // DMs, multi-party DMs, private channel posts, or bot mentions.
-// onReaction is called when a reaction or unreaction event arrives.
-// Both callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+// onReaction, onEdit, and onDelete are called when the corresponding events
+// arrive. onMessage and onReaction must be non-nil; onEdit and onDelete may be nil.
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onEdit hub.EditNotifyFunc, onDelete hub.DeleteNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
@@ -53,6 +55,8 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		pigeonBotUID: pigeonBotUID,
 		onMessage:    onMessage,
 		onReaction:   onReaction,
+		onEdit:       onEdit,
+		onDelete:     onDelete,
 		syncTracker:  syncTracker,
 	}
 }
@@ -331,7 +335,7 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 	slog.InfoContext(ctx, "slack reaction routed", "result", res, "account", l.acct)
 }
 
-// handleEdit stores a message edit event.
+// handleEdit stores a message edit event and forwards it to the hub.
 func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent) {
 	if msg.Message == nil {
 		return
@@ -353,15 +357,23 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	}
 	ts := time.Now().UTC()
 
-	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+	edit, err := l.messages.AppendEdit(rs, msg.Message.Timestamp, msg.Message.ThreadTimestamp, text, ts, slackraw.NewSlackRawContent(*msg.Message))
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
+		return
 	}
 
 	slog.InfoContext(ctx, "slack edit saved",
-		"msg_id", msg.Message.Timestamp, "channel", rs.ChannelName, "account", l.acct)
+		"msg_id", edit.MsgID, "thread_ts", edit.ThreadTS,
+		"channel", rs.ChannelName, "account", l.acct)
+
+	if l.onEdit != nil {
+		res := l.onEdit(l.acct, rs.ChannelName, edit)
+		slog.InfoContext(ctx, "slack edit routed", "result", res, "account", l.acct)
+	}
 }
 
-// handleDelete stores a message delete event.
+// handleDelete stores a message delete event and forwards it to the hub.
 func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEvent) {
 	channelName, err := l.resolver.ChannelName(ctx, msg.Channel)
 	if err != nil {
@@ -382,8 +394,10 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		return
 	}
 
+	var threadTS string
 	rs := ResolvedSender{ChannelName: channelName}
 	if msg.PreviousMessage != nil {
+		threadTS = msg.PreviousMessage.ThreadTimestamp
 		name, id, err := l.resolver.SenderName(ctx, *msg.PreviousMessage)
 		if err != nil {
 			slog.WarnContext(ctx, "slack: skipping delete, cannot resolve sender",
@@ -395,10 +409,18 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		rs.SenderID = id
 	}
 
-	if err := l.messages.AppendDelete(rs, deletedTS, ts); err != nil {
+	del, err := l.messages.AppendDelete(rs, deletedTS, threadTS, ts)
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
+		return
 	}
 
 	slog.InfoContext(ctx, "slack delete saved",
-		"msg_id", deletedTS, "channel", rs.ChannelName, "account", l.acct)
+		"msg_id", del.MsgID, "thread_ts", del.ThreadTS,
+		"channel", rs.ChannelName, "account", l.acct)
+
+	if l.onDelete != nil {
+		res := l.onDelete(l.acct, rs.ChannelName, del)
+		slog.InfoContext(ctx, "slack delete routed", "result", res, "account", l.acct)
+	}
 }

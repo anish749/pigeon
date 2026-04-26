@@ -64,7 +64,7 @@ func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(m, "", time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender in display line, got %q", lines[0])
 	}
@@ -308,7 +308,7 @@ func TestNotificationFormat_Basic(t *testing.T) {
 		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
 		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(m, "", time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -326,7 +326,7 @@ func TestNotificationFormat_Via(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(m, "", time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -341,7 +341,7 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(m, "", time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
@@ -353,7 +353,7 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(m, "", time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -368,7 +368,7 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := formatMsgNotification(m, "", time.UTC, meta)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -384,7 +384,7 @@ func TestNotificationFormat_WithChannelMeta(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := formatMsgNotification(m, "", time.UTC, meta)
 	want := "  [09:00:00] [message_id:M1] [sender_id:U1] [type:channel] [channel_id:C06U]"
 	if lines[1] != want {
 		t.Errorf("got  %q\nwant %q", lines[1], want)
@@ -509,7 +509,7 @@ func TestFormatReactionNotification(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, "", time.UTC)
 	if len(lines) < 2 {
 		t.Fatalf("got %d lines, want at least 2", len(lines))
 	}
@@ -535,7 +535,7 @@ func TestFormatReactionNotification_Remove(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, "", time.UTC)
 	if !strings.Contains(lines[0], "removed reaction") {
 		t.Errorf("header = %q, want 'removed reaction'", lines[0])
 	}
@@ -552,7 +552,7 @@ func TestFormatReactionNotification_WithRaw(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "eyes",
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, "", time.UTC)
 	if len(lines) < 3 {
 		t.Fatalf("got %d lines, want at least 3 (header + raw + meta)", len(lines))
 	}
@@ -567,7 +567,7 @@ func TestFormatReactionFallbackNotification(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
 	}
 
-	lines := FormatReactionFallbackNotification(react, time.UTC)
+	lines := FormatReactionFallbackNotification(react, "", time.UTC)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2", len(lines))
 	}
@@ -588,8 +588,76 @@ func TestFormatReactionFallbackNotification_Remove(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
 	}
 
-	lines := FormatReactionFallbackNotification(react, time.UTC)
+	lines := FormatReactionFallbackNotification(react, "", time.UTC)
 	if !strings.Contains(lines[0], "removed reaction") {
 		t.Errorf("header = %q, want 'removed reaction'", lines[0])
+	}
+}
+
+func TestFormatMsgNotification_IncludesThreadTS(t *testing.T) {
+	m := MsgLine{
+		ID: "X1", Ts: time.Date(2026, 4, 26, 14, 29, 33, 0, time.UTC),
+		Sender: "Alice", SenderID: "U001", Text: "in thread", Reply: true,
+	}
+	lines := formatMsgNotification(m, "P1", time.UTC, nil)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "[thread_ts:P1]") {
+		t.Errorf("expected [thread_ts:P1] in output, got:\n%s", joined)
+	}
+}
+
+func TestFormatMsgNotification_OmitsThreadTSWhenEmpty(t *testing.T) {
+	m := MsgLine{
+		ID: "X1", Ts: time.Date(2026, 4, 26, 14, 29, 33, 0, time.UTC),
+		Sender: "Alice", SenderID: "U001", Text: "top-level",
+	}
+	lines := formatMsgNotification(m, "", time.UTC, nil)
+	if strings.Contains(strings.Join(lines, "\n"), "thread_ts") {
+		t.Errorf("did not expect thread_ts in output for top-level msg, got:\n%s",
+			strings.Join(lines, "\n"))
+	}
+}
+
+func TestFormatEditNotification(t *testing.T) {
+	e := EditLine{
+		Ts:    time.Date(2026, 4, 26, 14, 31, 15, 0, time.UTC),
+		MsgID: "1777206573.566889", ThreadTS: "1777189890.343859",
+		Sender: "Anish", SenderID: "U03AEE763CP",
+		Text: "I am editing the previous message now.",
+	}
+	joined := strings.Join(FormatEditNotification(e, time.UTC), "\n")
+	for _, want := range []string{"[edit]", "[message_id:1777206573.566889]", "[thread_ts:1777189890.343859]", "I am editing the previous message now."} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+}
+
+func TestFormatDeleteNotification(t *testing.T) {
+	d := DeleteLine{
+		Ts:    time.Date(2026, 4, 26, 14, 32, 0, 0, time.UTC),
+		MsgID: "1777206709.414629", ThreadTS: "1777189890.343859",
+		Sender: "Anish", SenderID: "U03AEE763CP",
+	}
+	joined := strings.Join(FormatDeleteNotification(d, time.UTC), "\n")
+	for _, want := range []string{"[delete]", "[message_id:1777206709.414629]", "[thread_ts:1777189890.343859]"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+}
+
+func TestFormatReactionNotification_IncludesThreadTS(t *testing.T) {
+	msg := MsgLine{
+		ID: "P1", Ts: time.Date(2026, 4, 26, 9, 51, 30, 0, time.UTC),
+		Sender: "Bot", SenderID: "U0BOT", Text: "parent",
+	}
+	react := ReactLine{
+		Ts:    time.Date(2026, 4, 26, 14, 30, 0, 0, time.UTC),
+		MsgID: "P1", Sender: "Anish", SenderID: "U001", Emoji: "+1",
+	}
+	joined := strings.Join(FormatReactionNotification(msg, react, "P1", time.UTC), "\n")
+	if !strings.Contains(joined, "[thread_ts:P1]") {
+		t.Errorf("expected [thread_ts:P1], got:\n%s", joined)
 	}
 }

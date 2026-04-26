@@ -211,7 +211,7 @@ func TestLookupMessage_DateFile(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	got := h.lookupMessage(acct, "#general", "1700000001.000001")
+	got, threadTS := h.lookupMessage(acct, "#general", "1700000001.000001")
 	if got == nil {
 		t.Fatal("lookupMessage returned nil, want match")
 	}
@@ -220,6 +220,9 @@ func TestLookupMessage_DateFile(t *testing.T) {
 	}
 	if got.Text != "hello world" {
 		t.Errorf("Text = %q, want %q", got.Text, "hello world")
+	}
+	if threadTS != "" {
+		t.Errorf("threadTS = %q, want empty for top-level message", threadTS)
 	}
 }
 
@@ -237,7 +240,7 @@ func TestLookupMessage_ThreadFile(t *testing.T) {
 		t.Fatalf("AppendThread: %v", err)
 	}
 
-	got := h.lookupMessage(acct, "#general", "1700000002.000002")
+	got, threadTS := h.lookupMessage(acct, "#general", "1700000002.000002")
 	if got == nil {
 		t.Fatal("lookupMessage returned nil, want match")
 	}
@@ -246,6 +249,9 @@ func TestLookupMessage_ThreadFile(t *testing.T) {
 	}
 	if got.Text != "thread reply" {
 		t.Errorf("Text = %q, want %q", got.Text, "thread reply")
+	}
+	if threadTS != "1700000001.000001" {
+		t.Errorf("threadTS = %q, want %q", threadTS, "1700000001.000001")
 	}
 }
 
@@ -263,7 +269,7 @@ func TestLookupMessage_NotFound(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	got := h.lookupMessage(acct, "#general", "9999999999.999999")
+	got, _ := h.lookupMessage(acct, "#general", "9999999999.999999")
 	if got != nil {
 		t.Errorf("expected nil, got %+v", got)
 	}
@@ -272,7 +278,7 @@ func TestLookupMessage_NotFound(t *testing.T) {
 func TestLookupMessage_NoConversation(t *testing.T) {
 	h, _, acct := setupLookup(t)
 
-	got := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
+	got, _ := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
 	if got != nil {
 		t.Errorf("expected nil, got %+v", got)
 	}
@@ -330,5 +336,160 @@ func TestFormatReactionLines_MessageNotFound(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "thumbsup") {
 		t.Errorf("fallback line %q should contain emoji", lines[0])
+	}
+}
+
+// TestRouteEdit_DeliversToSession verifies that RouteEdit pushes a formatted
+// edit notification to the connected session.
+func TestRouteEdit_DeliversToSession(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	var delivered []NotificationMsg
+	sess := &Session{
+		SessionID: "sess-edit",
+		CWD:       "/tmp",
+		Send: func(_ context.Context, msg NotificationMsg) error {
+			delivered = append(delivered, msg)
+			return nil
+		},
+		Ready: make(chan struct{}),
+	}
+	close(sess.Ready)
+	h.sessions["sess-edit"] = sess
+
+	ch := &channel{
+		acct:      acct,
+		sessionID: "sess-edit",
+		signal:    make(chan deliverySignal, signalBufferSize),
+	}
+	h.channels[acct.String()] = ch
+	go h.deliveryLoop(ch, time.Time{})
+
+	edit := modelv1.EditLine{
+		Ts: time.Now(), MsgID: "M1", ThreadTS: "P1",
+		Sender: "Alice", SenderID: "U001", Text: "edited text",
+	}
+	if res := h.RouteEdit(acct, "#general", edit); res.State != RouteOK {
+		t.Fatalf("RouteEdit state = %v, want RouteOK", res.State)
+	}
+
+	// Wait for the delivery loop to drain the signal.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(delivered) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("RouteEdit did not deliver within 2s")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	content := delivered[0].Content()
+	for _, want := range []string{"[edit]", "[message_id:M1]", "[thread_ts:P1]", "edited text"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("delivered content missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestRouteDelete_DeliversToSession(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	var delivered []NotificationMsg
+	sess := &Session{
+		SessionID: "sess-del",
+		CWD:       "/tmp",
+		Send: func(_ context.Context, msg NotificationMsg) error {
+			delivered = append(delivered, msg)
+			return nil
+		},
+		Ready: make(chan struct{}),
+	}
+	close(sess.Ready)
+	h.sessions["sess-del"] = sess
+
+	ch := &channel{
+		acct:      acct,
+		sessionID: "sess-del",
+		signal:    make(chan deliverySignal, signalBufferSize),
+	}
+	h.channels[acct.String()] = ch
+	go h.deliveryLoop(ch, time.Time{})
+
+	del := modelv1.DeleteLine{
+		Ts: time.Now(), MsgID: "M2", ThreadTS: "P1",
+		Sender: "Alice", SenderID: "U001",
+	}
+	if res := h.RouteDelete(acct, "#general", del); res.State != RouteOK {
+		t.Fatalf("RouteDelete state = %v, want RouteOK", res.State)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(delivered) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("RouteDelete did not deliver within 2s")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	content := delivered[0].Content()
+	for _, want := range []string{"[delete]", "[message_id:M2]", "[thread_ts:P1]"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("delivered content missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestRouteEdit_NoSessionRegistered(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+	res := h.RouteEdit(acct, "#general", modelv1.EditLine{MsgID: "M1"})
+	if res.State != RouteNoSession {
+		t.Errorf("State = %v, want RouteNoSession", res.State)
 	}
 }

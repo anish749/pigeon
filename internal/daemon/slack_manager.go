@@ -27,6 +27,8 @@ type SlackManager struct {
 	apiServer   *api.Server
 	onMessage   hub.MessageNotifyFunc
 	onReaction  hub.ReactionNotifyFunc
+	onEdit      hub.EditNotifyFunc
+	onDelete    hub.DeleteNotifyFunc
 	store       *store.FSStore
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -39,17 +41,20 @@ type runningWorkspace struct {
 }
 
 // NewSlackManager creates a manager that registers Slack senders with the
-// given API server. onMessage is called when a routable message arrives
-// (DMs, MPDMs, private channels, bot mentions). onReaction is called when
-// a reaction or unreaction event arrives. Both must be non-nil.
+// given API server. onMessage / onReaction / onEdit / onDelete forward the
+// corresponding events to the hub. onMessage and onReaction must be non-nil;
+// onEdit and onDelete may be nil (events are then stored on disk but not
+// pushed to the connected agent in real-time).
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onEdit hub.EditNotifyFunc, onDelete hub.DeleteNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
 	return &SlackManager{
 		apiServer:   apiServer,
 		onMessage:   onMessage,
 		onReaction:  onReaction,
+		onEdit:      onEdit,
+		onDelete:    onDelete,
 		store:       s,
 		idStore:     idStore,
 		dataRoot:    dataRoot,
@@ -161,7 +166,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 	if err != nil {
 		return fmt.Errorf("create message store for %s: %w", acct, err)
 	}
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.syncTracker)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, m.onMessage, m.onReaction, m.onEdit, m.onDelete, m.syncTracker)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:    botAPI,

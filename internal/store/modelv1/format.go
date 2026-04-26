@@ -58,11 +58,25 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
+// formatThreadTSMeta returns the rendered " [thread_ts:<ts>]" segment, or
+// an empty string when ts is empty. Centralized so all notification
+// formatters emit the same shape.
+func formatThreadTSMeta(ts string) string {
+	if ts == "" {
+		return ""
+	}
+	return fmt.Sprintf(" [thread_ts:%s]", ts)
+}
+
 // formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
+// threadTS is the parent message's TS when m is a thread reply (or the parent
+// itself surfaced by interleaveThreads); empty otherwise. It's included in the
+// metadata line so the agent can identify which thread an event belongs to.
+//
 // This function does not format reactions — it operates on MsgLine only.
-func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
+func formatMsgNotification(m MsgLine, threadTS string, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -70,6 +84,7 @@ func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 	lines = append(lines, formatRaw(m.Raw, "  ")...)
 
 	meta := fmt.Sprintf("  [%s] [message_id:%s] [sender_id:%s]", tsStr, m.ID, m.SenderID)
+	meta += formatThreadTSMeta(threadTS)
 	if m.Via != "" {
 		meta += fmt.Sprintf(" [via:%s]", m.Via)
 	}
@@ -89,7 +104,11 @@ func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 // FormatReactionNotification formats a message with a single reaction for
 // Claude Code channel notifications. This does not include all reactions
 // associated with the message — only the specific reaction event being delivered.
-func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []string {
+//
+// threadTS is the parent thread TS when the target message lives in a thread;
+// empty when the target is a top-level channel message or thread context is
+// unknown.
+func FormatReactionNotification(m MsgLine, r ReactLine, threadTS string, loc *time.Location) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
@@ -102,6 +121,7 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 
 	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
 		m.Ts.In(loc).Format("15:04:05"), m.ID, r.SenderID, r.Emoji)
+	meta += formatThreadTSMeta(threadTS)
 	if r.Via != "" {
 		meta += fmt.Sprintf(" [via:%s]", r.Via)
 	}
@@ -113,15 +133,49 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 // FormatReactionFallbackNotification formats a reaction notification for
 // Claude Code when the original message could not be found. This happens
 // when the reacted-to message is not on disk (e.g. older than synced history).
-func FormatReactionFallbackNotification(r ReactLine, loc *time.Location) []string {
+func FormatReactionFallbackNotification(r ReactLine, threadTS string, loc *time.Location) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
 	}
+	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+		r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji) + formatThreadTSMeta(threadTS)
 	return []string{
 		fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji),
-		fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
-			r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji),
+		meta,
+	}
+}
+
+// FormatEditNotification renders an edit event for Claude Code channel
+// notifications.
+func FormatEditNotification(e EditLine, loc *time.Location) []string {
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s edited message: %s",
+		displaySender(e.Sender, e.Via), e.Text))
+	lines = append(lines, formatRaw(e.Raw, "  ")...)
+
+	meta := fmt.Sprintf("  [edit] [%s] [message_id:%s] [sender_id:%s]",
+		e.Ts.In(loc).Format("15:04:05"), e.MsgID, e.SenderID)
+	meta += formatThreadTSMeta(e.ThreadTS)
+	if e.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", e.Via)
+	}
+	lines = append(lines, meta)
+	return lines
+}
+
+// FormatDeleteNotification renders a delete event for Claude Code channel
+// notifications.
+func FormatDeleteNotification(d DeleteLine, loc *time.Location) []string {
+	meta := fmt.Sprintf("  [delete] [%s] [message_id:%s] [sender_id:%s]",
+		d.Ts.In(loc).Format("15:04:05"), d.MsgID, d.SenderID)
+	meta += formatThreadTSMeta(d.ThreadTS)
+	if d.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", d.Via)
+	}
+	return []string{
+		fmt.Sprintf("%s deleted message %s", displaySender(d.Sender, d.Via), d.MsgID),
+		meta,
 	}
 }
 
@@ -134,7 +188,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMet
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, formatMsgNotification(m.MsgLine, loc, convMeta)...)
+		lines = append(lines, formatMsgNotification(m.MsgLine, m.ThreadTS, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)
