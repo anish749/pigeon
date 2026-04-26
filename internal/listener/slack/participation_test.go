@@ -39,6 +39,13 @@ func msg(id, senderID, text string, raw map[string]any) modelv1.Line {
 	}
 }
 
+func reply(id, senderID, text string, raw map[string]any) modelv1.Line {
+	l := msg(id, senderID, text, raw)
+	l.Msg.Reply = true
+	l.Msg.Ts = time.Unix(1700000010, 0)
+	return l
+}
+
 // mentionRaw is the on-disk shape of a Slack rich_text mention block,
 // reproducing what the listener actually stores after JSON round-trip.
 func mentionRaw(uid string) map[string]any {
@@ -60,104 +67,89 @@ func mentionRaw(uid string) map[string]any {
 	}
 }
 
-func TestBotParticipatesInThread_BotIsParent(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", botUID, "hello", nil)
-	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
-		t.Fatalf("AppendThread: %v", err)
-	}
-	if !ms.BotParticipatesInThread("#general", "P1", botUID) {
-		t.Error("expected participation when bot is parent sender")
-	}
-}
+func TestBotParticipatesInThread(t *testing.T) {
+	const threadTS = "P1"
 
-func TestBotParticipatesInThread_BotIsReplyAuthor(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", userUID, "hello", nil)
-	reply := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "R1", Ts: time.Unix(1700000010, 0), Sender: "bot",
-			SenderID: botUID, Text: "thanks", Reply: true,
+	tests := []struct {
+		name  string
+		lines []modelv1.Line // empty => don't create thread file
+		query string         // botUID passed to BotParticipatesInThread
+		want  bool
+	}{
+		{
+			name:  "bot is parent sender",
+			lines: []modelv1.Line{msg("P1", botUID, "hello", nil)},
+			query: botUID,
+			want:  true,
+		},
+		{
+			name: "bot is reply author",
+			lines: []modelv1.Line{
+				msg("P1", userUID, "hello", nil),
+				reply("R1", botUID, "thanks", nil),
+			},
+			query: botUID,
+			want:  true,
+		},
+		{
+			name:  "bot mentioned in parent raw blocks",
+			lines: []modelv1.Line{msg("P1", userUID, "@Bot hi", mentionRaw(botUID))},
+			query: botUID,
+			want:  true,
+		},
+		{
+			name: "bot mentioned in reply raw blocks",
+			lines: []modelv1.Line{
+				msg("P1", userUID, "talking about something", nil),
+				reply("R1", userUID, "@Bot ping", mentionRaw(botUID)),
+			},
+			query: botUID,
+			want:  true,
+		},
+		{
+			name: "no participation",
+			lines: []modelv1.Line{
+				msg("P1", userUID, "hello", nil),
+				reply("R1", "U0OTHER01", "ack", nil),
+			},
+			query: botUID,
+			want:  false,
+		},
+		{
+			name:  "thread file missing",
+			lines: nil,
+			query: botUID,
+			want:  false,
+		},
+		{
+			name:  "empty botUID does not match anyone",
+			lines: []modelv1.Line{msg("P1", "U0SOMEONE", "hi", mentionRaw("U0SOMEONE"))},
+			query: "",
+			want:  false,
+		},
+		{
+			name: "UID prefix collision is not a hit",
+			// Stored mention is for "U0BOT0001XX"; querying for "U0BOT0001"
+			// must not match — the JSON substring check has to anchor on the
+			// closing quote of the value.
+			lines: []modelv1.Line{msg("P1", userUID, "hi", mentionRaw("U0BOT0001XX"))},
+			query: "U0BOT0001",
+			want:  false,
 		},
 	}
-	s.AppendThread(acct, "#general", "P1", parent)
-	s.AppendThread(acct, "#general", "P1", reply)
-	if !ms.BotParticipatesInThread("#general", "P1", botUID) {
-		t.Error("expected participation when bot is reply author")
-	}
-}
 
-func TestBotParticipatesInThread_BotMentionedInParentRaw(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	// Parent text is the resolved form (no <@UID>); the raw blocks carry
-	// the user_id of the mention. This is the on-disk reality.
-	parent := msg("P1", userUID, "@Bot hi", mentionRaw(botUID))
-	s.AppendThread(acct, "#general", "P1", parent)
-	if !ms.BotParticipatesInThread("#general", "P1", botUID) {
-		t.Error("expected participation when bot mentioned in parent raw blocks")
-	}
-}
-
-func TestBotParticipatesInThread_BotMentionedInReplyRaw(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", userUID, "talking about something", nil)
-	reply := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "R1", Ts: time.Unix(1700000010, 0), Sender: "human",
-			SenderID: userUID, Text: "@Bot ping", Reply: true,
-			RawType: modelv1.RawTypeSlack, Raw: mentionRaw(botUID),
-		},
-	}
-	s.AppendThread(acct, "#general", "P1", parent)
-	s.AppendThread(acct, "#general", "P1", reply)
-	if !ms.BotParticipatesInThread("#general", "P1", botUID) {
-		t.Error("expected participation when bot mentioned in reply raw blocks")
-	}
-}
-
-func TestBotParticipatesInThread_NoParticipation(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", userUID, "hello", nil)
-	reply := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "R1", Ts: time.Unix(1700000010, 0), Sender: "other",
-			SenderID: "U0OTHER01", Text: "ack", Reply: true,
-		},
-	}
-	s.AppendThread(acct, "#general", "P1", parent)
-	s.AppendThread(acct, "#general", "P1", reply)
-	if ms.BotParticipatesInThread("#general", "P1", botUID) {
-		t.Error("expected no participation when bot is absent")
-	}
-}
-
-func TestBotParticipatesInThread_ThreadFileMissing(t *testing.T) {
-	ms, _, _ := newTestMessageStore(t)
-	if ms.BotParticipatesInThread("#general", "missing-ts", botUID) {
-		t.Error("expected false when thread file does not exist")
-	}
-}
-
-func TestBotParticipatesInThread_EmptyBotUID(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", "U0SOMEONE", "hi", mentionRaw("U0SOMEONE"))
-	s.AppendThread(acct, "#general", "P1", parent)
-	if ms.BotParticipatesInThread("#general", "P1", "") {
-		t.Error("expected false when botUID is empty (would otherwise match U0SOMEONE)")
-	}
-}
-
-// TestBotParticipatesInThread_DistinguishesUIDPrefix guards against the JSON
-// substring match accidentally treating a UID prefix as a hit (e.g. botUID
-// "U0BOT" matching a stored "user_id":"U0BOT0001").
-func TestBotParticipatesInThread_DistinguishesUIDPrefix(t *testing.T) {
-	ms, s, acct := newTestMessageStore(t)
-	parent := msg("P1", userUID, "hi", mentionRaw("U0BOT0001XX"))
-	s.AppendThread(acct, "#general", "P1", parent)
-	if ms.BotParticipatesInThread("#general", "P1", "U0BOT0001") {
-		t.Error("UID prefix collision: expected no participation")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, s, acct := newTestMessageStore(t)
+			for _, line := range tt.lines {
+				if err := s.AppendThread(acct, "#general", threadTS, line); err != nil {
+					t.Fatalf("AppendThread: %v", err)
+				}
+			}
+			got := ms.BotParticipatesInThread("#general", threadTS, tt.query)
+			if got != tt.want {
+				t.Errorf("BotParticipatesInThread = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
