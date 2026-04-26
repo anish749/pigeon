@@ -22,7 +22,7 @@ func loadCmd(m Model) tea.Cmd {
 		if err != nil {
 			return loadedMsg{err: err}
 		}
-		return loadedMsg{items: filterAndSort(all, m.workspace)}
+		return loadedMsg{items: filterAndSort(all, m.cfg.Workspace.Name)}
 	}
 }
 
@@ -99,24 +99,24 @@ func setStatus(s string) tea.Cmd {
 const spinnerInterval = 120 * time.Millisecond
 
 // discoverCmd starts the in-flight discovery goroutine and the
-// spinner-advance ticker. The goroutine calls fn and posts a
-// discoverDoneMsg when it returns. The ticker posts spinTickMsg while
-// modeDiscovering is the model's mode (the model gates the next
-// tick).
+// spinner-advance ticker. The goroutine calls
+// mgr.DiscoverAndPropose(since, until) and posts a discoverDoneMsg
+// when it returns. The ticker posts spinTickMsg while modeDiscovering
+// is the model's mode (the model gates the next tick).
 //
 // No TUI-level timeout: the LLM call's own timeout is configured on
 // clients.Client by the constructing caller (see cfg.LLMCallTimeout).
 // Inventing a separate ceiling here would either silently truncate a
 // real run or be redundant.
-func discoverCmd(fn DiscoverFunc) tea.Cmd {
-	if fn == nil {
+func discoverCmd(mgr Manager, since, until time.Time) tea.Cmd {
+	if mgr == nil {
 		return nil
 	}
 	return tea.Batch(
 		spinTick(),
 		func() tea.Msg {
-			n, err := fn(context.Background())
-			return discoverDoneMsg{count: n, err: err}
+			ds, err := mgr.DiscoverAndPropose(context.Background(), since, until)
+			return discoverDoneMsg{count: len(ds), err: err}
 		},
 	)
 }

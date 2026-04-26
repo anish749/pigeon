@@ -6,28 +6,45 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
-// stubDiscover returns a DiscoverFunc that records call count and
-// returns the configured (count, err). Tests use it to drive the
-// discovery flow without a real LLM.
-func stubDiscover(count int, err error) (DiscoverFunc, *atomic.Int32) {
-	calls := &atomic.Int32{}
-	fn := func(ctx context.Context) (int, error) {
-		calls.Add(1)
-		return count, err
-	}
-	return fn, calls
+// fakeManager satisfies the wstui.Manager interface with a configurable
+// canned response. It records call count and the (since, until) it was
+// invoked with so tests can assert the model passes the cfg window
+// through unchanged.
+type fakeManager struct {
+	calls    atomic.Int32
+	gotSince time.Time
+	gotUntil time.Time
+
+	count int
+	err   error
 }
 
-func TestPressD_StartsDiscovery(t *testing.T) {
-	fn, calls := stubDiscover(3, nil)
+func (f *fakeManager) DiscoverAndPropose(_ context.Context, since, until time.Time) ([]discovery.DiscoveredWorkstream, error) {
+	f.calls.Add(1)
+	f.gotSince = since
+	f.gotUntil = until
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]discovery.DiscoveredWorkstream, f.count)
+	return out, nil
+}
+
+func TestPressD_StartsDiscoveryWithConfigWindow(t *testing.T) {
+	mgr := &fakeManager{count: 3}
+	cfg := testCfg("personal")
+	cfg.Since = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	cfg.Until = time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", fn)
+	m := NewModel(st, cfg, mgr)
 	m.items = filterAndSort(seedItems(), "personal")
 
 	got, cmd := m.Update(keyRune('D'))
@@ -39,30 +56,33 @@ func TestPressD_StartsDiscovery(t *testing.T) {
 		t.Fatal("expected discover cmd")
 	}
 
-	// Discovery cmd is a tea.Batch of (spinTick, async fn). Drain it
-	// and feed the resulting messages back into Update so the model
-	// applies them.
 	for _, msg := range fanOut(cmd) {
 		got, _ = m.Update(msg)
 		m = asModel(t, got)
 	}
-	if calls.Load() != 1 {
-		t.Errorf("DiscoverFunc called %d times, want 1", calls.Load())
+	if mgr.calls.Load() != 1 {
+		t.Errorf("DiscoverAndPropose called %d times, want 1", mgr.calls.Load())
+	}
+	if !mgr.gotSince.Equal(cfg.Since) {
+		t.Errorf("since = %v, want cfg.Since %v", mgr.gotSince, cfg.Since)
+	}
+	if !mgr.gotUntil.Equal(cfg.Until) {
+		t.Errorf("until = %v, want cfg.Until %v", mgr.gotUntil, cfg.Until)
 	}
 	if m.mode != modeList {
 		t.Errorf("after completion, mode = %v, want modeList", m.mode)
 	}
 }
 
-func TestPressD_NoopWhenDiscoverFnNil(t *testing.T) {
+func TestPressD_NoopWhenManagerNil(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 
 	got, cmd := m.Update(keyRune('D'))
 	m = asModel(t, got)
 	if m.mode != modeList {
-		t.Errorf("D with nil fn changed mode to %v", m.mode)
+		t.Errorf("D with nil manager changed mode to %v", m.mode)
 	}
 	if cmd != nil {
 		t.Errorf("expected no cmd, got %T", cmd())
@@ -70,9 +90,9 @@ func TestPressD_NoopWhenDiscoverFnNil(t *testing.T) {
 }
 
 func TestPressD_FromEmptyWorkspace(t *testing.T) {
-	fn, calls := stubDiscover(2, nil)
+	mgr := &fakeManager{count: 2}
 	st := newFakeStore() // no seeds — empty workspace
-	m := NewModel(st, "personal", fn)
+	m := NewModel(st, testCfg("personal"), mgr)
 
 	got, cmd := m.Update(keyRune('D'))
 	m = asModel(t, got)
@@ -83,14 +103,14 @@ func TestPressD_FromEmptyWorkspace(t *testing.T) {
 		got, _ = m.Update(msg)
 		m = asModel(t, got)
 	}
-	if calls.Load() != 1 {
-		t.Errorf("DiscoverFunc not called from empty state")
+	if mgr.calls.Load() != 1 {
+		t.Errorf("DiscoverAndPropose not called from empty state")
 	}
 }
 
 func TestSpinTickAdvancesFrameOnlyWhileDiscovering(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeDiscovering
 
@@ -103,7 +123,6 @@ func TestSpinTickAdvancesFrameOnlyWhileDiscovering(t *testing.T) {
 		t.Error("expected next-tick cmd")
 	}
 
-	// Once mode flips back to list, ticks should be ignored.
 	m.mode = modeList
 	got, cmd = m.Update(spinTickMsg{})
 	m = asModel(t, got)
@@ -117,7 +136,7 @@ func TestSpinTickAdvancesFrameOnlyWhileDiscovering(t *testing.T) {
 
 func TestApplyDiscoverDone_SuccessFlashesAndReloads(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.mode = modeDiscovering
 	m.spinnerFrame = 7
 
@@ -147,7 +166,7 @@ func TestApplyDiscoverDone_SuccessFlashesAndReloads(t *testing.T) {
 
 func TestApplyDiscoverDone_ZeroCountSaysNoneFound(t *testing.T) {
 	st := newFakeStore()
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.mode = modeDiscovering
 
 	_, cmd := m.applyDiscoverDone(discoverDoneMsg{count: 0})
@@ -162,7 +181,7 @@ func TestApplyDiscoverDone_ZeroCountSaysNoneFound(t *testing.T) {
 
 func TestApplyDiscoverDone_ErrorSurfacedNoStatus(t *testing.T) {
 	st := newFakeStore()
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.mode = modeDiscovering
 
 	got, cmd := m.applyDiscoverDone(discoverDoneMsg{err: errors.New("LLM exploded")})
@@ -180,24 +199,23 @@ func TestApplyDiscoverDone_ErrorSurfacedNoStatus(t *testing.T) {
 }
 
 func TestKeyDuringDiscovery_NotForwardedExceptCtrlC(t *testing.T) {
-	fn, calls := stubDiscover(1, nil)
+	mgr := &fakeManager{count: 1}
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", fn)
+	m := NewModel(st, testCfg("personal"), mgr)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeDiscovering
 
 	// Pressing D again must not re-fire discovery.
 	got, _ := m.Update(keyRune('D'))
 	m = asModel(t, got)
-	if calls.Load() != 0 {
-		t.Errorf("D during discovery re-fired DiscoverFunc")
+	if mgr.calls.Load() != 0 {
+		t.Errorf("D during discovery re-fired DiscoverAndPropose")
 	}
 	if m.mode != modeDiscovering {
 		t.Errorf("mode changed during discovery: %v", m.mode)
 	}
 
-	// Ctrl+C must still quit (locked in by Update_test's
-	// TestCtrlC_QuitsFromAnyMode, but verify it survives the new mode).
+	// Ctrl+C must still quit.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("ctrl+c during discovery should quit")
@@ -211,7 +229,7 @@ func TestKeyDuringDiscovery_NotForwardedExceptCtrlC(t *testing.T) {
 // in update_test.go to cover the new mode without modifying that test.
 func TestModeDiscovering_InCtrlCSurvey(t *testing.T) {
 	st := newFakeStore()
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.mode = modeDiscovering
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})

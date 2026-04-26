@@ -143,11 +143,11 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			_ = w
 		}
 	case "D":
-		if m.discoverFn != nil {
+		if m.manager != nil {
 			m.mode = modeDiscovering
 			m.spinnerFrame = 0
 			m.err = nil
-			return m, discoverCmd(m.discoverFn)
+			return m, discoverCmd(m.manager, m.cfg.Since, m.cfg.Until)
 		}
 	}
 	return m, nil
@@ -244,7 +244,7 @@ func (m Model) commitNewFocus() (tea.Model, tea.Cmd) {
 	if name == "" {
 		return m, nil
 	}
-	w := models.NewWorkstream(name, m.workspace, focus, time.Now().UTC())
+	w := models.NewWorkstream(name, m.cfg.Workspace.Name, focus, time.Now().UTC())
 	return m, putCmd(m, w, "created")
 }
 

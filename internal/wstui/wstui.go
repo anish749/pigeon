@@ -1,15 +1,15 @@
 // Package wstui implements the workstream management terminal UI used
 // by `pigeon workstream tui`. It is a thin presentation layer on top of
 // the workstream FS store: lifecycle operations live in
-// internal/workstream/models, persistence in internal/workstream/store,
+// internal/workstream/manager, persistence in internal/workstream/store,
 // and the package only owns rendering, keybindings, and dispatch.
 //
 // Files:
 //   - wstui.go    — Run entry point.
-//   - model.go    — Model struct, modes, message types.
+//   - model.go    — Model struct, Manager interface, modes, message types.
 //   - update.go   — Init/Update + per-mode key handlers.
 //   - view.go     — View + render helpers.
-//   - actions.go  — store mutations expressed as tea.Cmds.
+//   - actions.go  — store mutations and discovery expressed as tea.Cmds.
 //   - filter.go   — workspace-scope filtering and sorting.
 //   - styles.go   — lipgloss style values.
 package wstui
@@ -17,15 +17,20 @@ package wstui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
 
-// Run starts the workstream-management TUI for ws, backed by st.
-// Blocks until the user quits. discover may be nil; when set, the 'D'
-// key and the empty-state prompt expose in-app discovery.
-func Run(st store.Store, ws config.WorkspaceName, discover DiscoverFunc) error {
-	p := tea.NewProgram(NewModel(st, ws, discover), tea.WithAltScreen())
+// Run starts the workstream-management TUI backed by st, configured by
+// cfg, and (optionally) wired to mgr for in-app discovery and other
+// lifecycle operations. Blocks until the user quits.
+//
+// cfg supplies the workspace scope (cfg.Workspace.Name) and the
+// discovery window (cfg.Since/cfg.Until) the manager is invoked with.
+// mgr may be nil; when nil the 'D' key and the empty-state prompt
+// hide in-app discovery.
+func Run(st store.Store, cfg models.Config, mgr Manager) error {
+	p := tea.NewProgram(NewModel(st, cfg, mgr), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

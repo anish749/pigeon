@@ -47,14 +47,14 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	header := fmt.Sprintf("  Pigeon Workstreams  %s", dimStyle.Render(string(m.workspace)))
+	header := fmt.Sprintf("  Pigeon Workstreams  %s", dimStyle.Render(string(m.cfg.Workspace.Name)))
 	return titleStyle.Render(header)
 }
 
 func (m Model) renderEmpty() string {
 	var b strings.Builder
 	b.WriteString(dimStyle.Render("  No workstreams in this workspace.\n\n"))
-	if m.discoverFn != nil {
+	if m.manager != nil {
 		b.WriteString("  " + hintStyle.Render("Press D to discover workstreams from your messaging history,") + "\n")
 		b.WriteString("  " + hintStyle.Render("or n to create one manually.") + "\n\n")
 		b.WriteString(helpStyle.Render("  D discover   n new   q quit"))
@@ -73,8 +73,8 @@ func (m Model) renderDiscovering() string {
 	frame := frames[m.spinnerFrame%len(frames)]
 	var b strings.Builder
 	fmt.Fprintf(&b, "  %s  %s\n", hintStyle.Render(frame), titleStyle.Render("Discovering workstreams…"))
-	b.WriteString(dimStyle.Render("  Reading the last 30 days of signals and asking the LLM to identify ongoing efforts.\n"))
-	b.WriteString(dimStyle.Render("  This usually takes 30–90 seconds. ctrl+c to abort.\n"))
+	b.WriteString(dimStyle.Render("  Reading signals and asking the LLM to identify ongoing efforts.\n"))
+	b.WriteString(dimStyle.Render("  ctrl+c to abort.\n"))
 	return b.String()
 }
 
@@ -139,13 +139,13 @@ func (m Model) renderFooter() string {
 func listHelp(m Model) string {
 	if w, ok := m.current(); ok && w.IsDefault() {
 		help := "  e edit focus  n new  j/k nav  q quit"
-		if m.discoverFn != nil {
+		if m.manager != nil {
 			help = "  e edit focus  n new  D discover  j/k nav  q quit"
 		}
 		return help + "  " + dimStyle.Render("(default — limited actions)")
 	}
 	help := "  r rename  e edit focus  s state  m merge  n new  d delete  j/k nav  q quit"
-	if m.discoverFn != nil {
+	if m.manager != nil {
 		help = "  r rename  e edit focus  s state  m merge  n new  d delete  D discover  j/k nav  q quit"
 	}
 	return help

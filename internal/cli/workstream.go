@@ -61,10 +61,10 @@ the current workspace.`,
 			storeDir := root.Workspace(string(ws.Name)).WorkstreamStore()
 			st := wsstore.NewFS(storeDir.Path())
 
-			// Build the manager once, with the same dependencies and
-			// configured defaults that `pigeon workstream discover` uses.
-			// The TUI's D-key delegates to mgr.DiscoverAndPropose; signal
-			// reading lives inside the manager.
+			// Build the manager once with the same dependencies and
+			// configured defaults the workstream CLI uses. The TUI
+			// receives both the manager (for in-app lifecycle ops) and
+			// the cfg (for workspace scope and discovery window).
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 			cfg := models.DefaultConfig()
 			cfg.Workspace = *ws
@@ -73,11 +73,7 @@ the current workspace.`,
 			signalReader := reader.New(store.NewFSStore(root), root)
 			mgr := manager.New(claude, signalReader, manager.NewStatCollector(), cfg, st, logger)
 
-			discover := func(ctx context.Context) (int, error) {
-				ds, err := mgr.DiscoverAndPropose(ctx, cfg.Since, cfg.Until)
-				return len(ds), err
-			}
-			return wstui.Run(st, ws.Name, discover)
+			return wstui.Run(st, cfg, mgr)
 		},
 	}
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name (default: from config/env)")

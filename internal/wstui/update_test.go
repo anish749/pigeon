@@ -28,7 +28,7 @@ func seedItems() []models.Workstream {
 
 func newSeededModel() Model {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	return m
 }
@@ -128,7 +128,7 @@ func TestCtrlC_QuitsFromAnyMode(t *testing.T) {
 
 func TestHandleInputKey_TypeAndCommit(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeEditName
 	m.input = "Alpha"
@@ -216,7 +216,7 @@ func TestCommitNewName_EmptyAborts(t *testing.T) {
 
 func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeNewFocus
 	m.scratchName = "Recommendations"
@@ -255,7 +255,7 @@ func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 
 func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 
 	_, cmd := m.Update(keyRune('s'))
@@ -271,7 +271,7 @@ func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
 
 func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeConfirmDelete
 
@@ -285,7 +285,7 @@ func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
 
 func TestConfirmDelete_NoCancels(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeConfirmDelete
 
@@ -301,7 +301,7 @@ func TestConfirmDelete_NoCancels(t *testing.T) {
 
 func TestMergePicker_EnterMerges(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeMergePick
 	m.cursor = 0      // Alpha is source
@@ -332,7 +332,7 @@ func TestMergePicker_EnterMerges(t *testing.T) {
 
 func TestMergePicker_EscCancels(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeMergePick
 
@@ -366,7 +366,7 @@ func TestApplyLoaded_SurfacesError(t *testing.T) {
 func TestPutCmd_StoreErrorSurfacesAsLoadedMsgErr(t *testing.T) {
 	st := newFakeStore()
 	st.putErr = errOnPut
-	m := NewModel(st, "personal", nil)
+	m := NewModel(st, testCfg("personal"), nil)
 
 	cmd := putCmd(m, models.Workstream{ID: "x", Name: "X", Workspace: "personal"}, "saved")
 	gotErr := false
