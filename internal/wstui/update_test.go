@@ -2,6 +2,7 @@ package wstui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -381,11 +382,83 @@ func TestPutCmd_StoreErrorSurfacesAsLoadedMsgErr(t *testing.T) {
 }
 
 func TestFirstMergeTarget(t *testing.T) {
-	if firstMergeTarget(0, 3) != 1 {
-		t.Errorf("cursor 0, n 3: want 1, got %d", firstMergeTarget(0, 3))
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal"}
+	b := models.Workstream{ID: "ws-b", Name: "Beta", Workspace: "personal"}
+	c := models.Workstream{ID: "ws-c", Name: "Gamma", Workspace: "personal"}
+
+	if got := firstMergeTarget(0, []models.Workstream{a, b, c}); got != 1 {
+		t.Errorf("cursor 0 in [a,b,c]: want 1, got %d", got)
 	}
-	if firstMergeTarget(2, 3) != 0 {
-		t.Errorf("cursor 2, n 3: want 0, got %d", firstMergeTarget(2, 3))
+	if got := firstMergeTarget(2, []models.Workstream{a, b, c}); got != 0 {
+		t.Errorf("cursor 2 in [a,b,c]: want 0, got %d", got)
+	}
+}
+
+func TestFirstMergeTarget_SkipsDefault(t *testing.T) {
+	def := models.NewDefaultWorkstream("personal", time.Time{})
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal"}
+	b := models.Workstream{ID: "ws-b", Name: "Beta", Workspace: "personal"}
+
+	if got := firstMergeTarget(0, []models.Workstream{a, def, b}); got != 2 {
+		t.Errorf("default at index 1 should be skipped: got %d, want 2", got)
+	}
+	if got := firstMergeTarget(0, []models.Workstream{a, def}); got != -1 {
+		t.Errorf("only source+default should yield no target: got %d, want -1", got)
+	}
+}
+
+func TestEnterMergeMode_NoTargetWhenOnlyDefaultRemains(t *testing.T) {
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive}
+	def := models.NewDefaultWorkstream("personal", time.Time{})
+	st := newFakeStore(a, def)
+	m := NewModel(st, testCfg("personal"), nil)
+	m.items = filterAndSort([]models.Workstream{a, def}, "personal")
+	for i, w := range m.items {
+		if w.ID == a.ID {
+			m.cursor = i
+			break
+		}
+	}
+
+	got, _ := m.Update(keyRune('m'))
+	if asModel(t, got).mode == modeMergePick {
+		t.Errorf("merge mode should not open when no valid target exists")
+	}
+}
+
+func TestMergePicker_DefaultNotRendered(t *testing.T) {
+	m := newSeededModel()
+	m.mode = modeMergePick
+	m.mergeCursor = 1
+	out := stripAnsi(m.renderMergePicker())
+	if strings.Contains(out, "General") {
+		t.Errorf("merge picker should not list the default workstream:\n%s", out)
+	}
+}
+
+func TestMergePicker_NavigationSkipsDefault(t *testing.T) {
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive}
+	b := models.Workstream{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateActive}
+	c := models.Workstream{ID: "ws-c", Name: "Gamma", Workspace: "personal", State: models.StateActive}
+	def := models.NewDefaultWorkstream("personal", time.Time{})
+	st := newFakeStore(a, def, b, c)
+	m := NewModel(st, testCfg("personal"), nil)
+	m.items = []models.Workstream{a, def, b, c}
+	m.cursor = 0
+	m.mode = modeMergePick
+	m.mergeCursor = 2 // Beta
+
+	got, _ := m.Update(keyRune('k'))
+	mm := asModel(t, got)
+	if mm.mergeCursor == 1 {
+		t.Errorf("k should skip past default at index 1, landed on %d", mm.mergeCursor)
+	}
+
+	mm.mergeCursor = 2
+	got, _ = mm.Update(keyRune('j'))
+	mm = asModel(t, got)
+	if mm.mergeCursor == 1 {
+		t.Errorf("j should not land on default")
 	}
 }
 

@@ -346,7 +346,7 @@ func (m Model) renderMergePicker() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "  %s\n", titleStyle.Render(fmt.Sprintf("Merge %q into:", src.Name)))
 	for i, w := range m.items {
-		if i == m.cursor {
+		if i == m.cursor || w.IsDefault() {
 			continue
 		}
 		marker := "    "
