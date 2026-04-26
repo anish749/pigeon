@@ -53,7 +53,7 @@ func RunSetupJira(args []string) error {
 	client := jira.NewClient(jcfg)
 	me, err := client.Me()
 	if err != nil {
-		return fmt.Errorf("verify auth via /myself: %w\n\nIf this is a 401, see the SSO + API token guidance in docs/jira-protocol.md", err)
+		return fmt.Errorf("verify auth via GET %s/rest/api/2/myself: %w\n\nIf this is a 401, see the SSO + API token guidance in docs/jira-protocol.md", pjc.Server, err)
 	}
 
 	acct, err := pjc.Account()

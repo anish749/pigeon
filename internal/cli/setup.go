@@ -93,9 +93,9 @@ Then:
   pigeon setup-jira              # use $JIRA_CONFIG_FILE or jira-cli's default path
   pigeon setup-jira /path/to/jira.yml
 
-The command verifies auth end-to-end via /myself before saving — a 401
-here is the same diagnostic as 'jira me' returning 401, but caught at
-setup time rather than from a daemon log later.`,
+The command verifies auth end-to-end via GET /rest/api/2/myself before
+saving — a 401 here is the same diagnostic as 'jira me' returning 401,
+but caught at setup time rather than from a daemon log later.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return commands.RunSetupJira(args)
