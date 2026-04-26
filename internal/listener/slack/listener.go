@@ -204,7 +204,9 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	// Notify the hub for messages the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
-	//   - Public channels — only when the bot is @mentioned
+	//   - Public channels — when the bot is @mentioned, OR the message is a
+	//     reply in a thread the bot already participates in (mentioned or
+	//     posted there earlier)
 	var result hub.RouteResult
 	switch msg.ChannelType {
 	case "im", "mpim":
@@ -212,7 +214,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	case "group":
 		result = l.onMessage(l.acct, rs.ChannelName, payload)
 	case "channel":
-		if l.pigeonBotUID != "" && strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
+		if l.shouldRouteChannelMessage(msg, isThreadReply, rs.ChannelName) {
 			result = l.onMessage(l.acct, rs.ChannelName, payload)
 		}
 	default:
@@ -230,6 +232,28 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 			slog.ErrorContext(ctx, "failed to send auto-reply", "error", err, "account", l.acct)
 		}
 	}
+}
+
+// shouldRouteChannelMessage decides whether a public-channel message should
+// be forwarded to the hub. The bot is forwarded:
+//   - any message whose raw event text @-mentions the bot, or
+//   - any thread reply in a thread the bot already participates in
+//     (mentioned earlier or has posted there).
+//
+// The mention check uses msg.Text directly because the Slack event payload
+// carries the unresolved <@UID> markup; the resolved-text form on disk is
+// used by BotParticipatesInThread for the historical view.
+func (l *Listener) shouldRouteChannelMessage(msg *slackevents.MessageEvent, isThreadReply bool, channelName string) bool {
+	if l.pigeonBotUID == "" {
+		return false
+	}
+	if strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
+		return true
+	}
+	if isThreadReply && l.messages.BotParticipatesInThread(channelName, msg.ThreadTimeStamp, l.pigeonBotUID) {
+		return true
+	}
+	return false
 }
 
 // ensureThreadParent fetches the parent message of a thread and writes it to the

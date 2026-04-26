@@ -2,8 +2,10 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	gosync "sync"
 	"time"
 
@@ -58,6 +60,57 @@ func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS strin
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
+}
+
+// BotParticipatesInThread reports whether the bot has been mentioned in or
+// has posted in this thread — the criterion for routing non-mention thread
+// replies in public channels. Source of truth is the thread file: any line
+// (parent or reply) where the bot is the sender, or where the bot's UID
+// appears as a user mention inside the raw blocks payload, counts as
+// participation.
+//
+// Stored MsgLine.Text is the resolved form (e.g. "@DisplayName ..."), so the
+// raw "<@UID>" markup is only available via the persisted raw blocks JSON.
+func (ms *MessageStore) BotParticipatesInThread(channelName, threadTS, botUID string) bool {
+	if botUID == "" {
+		return false
+	}
+	tf, err := ms.store.ReadThread(ms.acct, channelName, threadTS)
+	if err != nil {
+		slog.Warn("read thread for participation check", "channel", channelName,
+			"thread_ts", threadTS, "error", err)
+		return false
+	}
+	if tf == nil {
+		return false
+	}
+	if msgInvolvesBot(tf.Parent.MsgLine, botUID) {
+		return true
+	}
+	for _, r := range tf.Replies {
+		if msgInvolvesBot(r.MsgLine, botUID) {
+			return true
+		}
+	}
+	return false
+}
+
+// msgInvolvesBot is true when the bot is the sender of m, or the bot's UID
+// appears as a user mention in m's raw blocks payload.
+func msgInvolvesBot(m modelv1.MsgLine, botUID string) bool {
+	if m.SenderID == botUID {
+		return true
+	}
+	if len(m.Raw) == 0 {
+		return false
+	}
+	rawJSON, err := json.Marshal(m.Raw)
+	if err != nil {
+		return false
+	}
+	// User mentions in Slack rich_text serialize as {"type":"user","user_id":"U..."}.
+	// Matching the key-value pair is robust against block nesting and ordering.
+	return strings.Contains(string(rawJSON), `"user_id":"`+botUID+`"`)
 }
 
 // EnsureMeta writes .meta.json for a conversation if it doesn't already exist.
