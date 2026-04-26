@@ -102,10 +102,6 @@ func (c *PigeonJiraConfig) accountSlug() string {
 	return strings.ToLower(host)
 }
 
-// jiraAPITokenEnv is the env var pigeon (and jira-cli) reads the API
-// token from. The token is never stored on disk.
-const jiraAPITokenEnv = "JIRA_API_TOKEN"
-
 // JiraConfig builds a pkg/jira.Config ready to pass to jira.NewClient.
 // It owns the entire transformation: parsed YAML → token from env →
 // validated MTLS paths → jira.Config. Callers don't touch env vars or

@@ -23,6 +23,10 @@ const (
 	jiraXDGSubdir    = ".config"
 	jiraConfigSubdir = ".jira"
 	jiraConfigName   = ".config.yml"
+
+	// jiraAPITokenEnv is the env var pigeon (and jira-cli) reads the API
+	// token from. The token is never stored on disk.
+	jiraAPITokenEnv = "JIRA_API_TOKEN"
 )
 
 // ResolveConfigPath returns the path pigeon should read for the given
