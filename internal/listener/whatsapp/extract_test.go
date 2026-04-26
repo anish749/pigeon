@@ -10,45 +10,76 @@ import (
 
 func TestEditedMessage(t *testing.T) {
 	const origID = "3EB0ABC123"
-	newText := "edited body"
+	const newText = "edited body"
 
-	t.Run("MESSAGE_EDIT returns id and new content", func(t *testing.T) {
-		msg := &waE2E.Message{
-			ProtocolMessage: &waE2E.ProtocolMessage{
-				Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
-				Key:  &waCommon.MessageKey{ID: proto.String(origID)},
-				EditedMessage: &waE2E.Message{
-					Conversation: proto.String(newText),
+	tests := []struct {
+		name     string
+		msg      *waE2E.Message
+		wantID   string
+		wantText string // text expected from ExtractText(edited); "" when edited is nil
+	}{
+		{
+			name: "MESSAGE_EDIT returns id and new content",
+			msg: &waE2E.Message{
+				ProtocolMessage: &waE2E.ProtocolMessage{
+					Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+					Key:           &waCommon.MessageKey{ID: proto.String(origID)},
+					EditedMessage: &waE2E.Message{Conversation: proto.String(newText)},
 				},
 			},
-		}
-		gotID, edited := EditedMessage(msg)
-		if gotID != origID {
-			t.Errorf("origID = %q, want %q", gotID, origID)
-		}
-		if got := ExtractText(edited); got != newText {
-			t.Errorf("edited text = %q, want %q", got, newText)
-		}
-	})
-
-	t.Run("REVOKE returns empty", func(t *testing.T) {
-		msg := &waE2E.Message{
-			ProtocolMessage: &waE2E.ProtocolMessage{
-				Type: waE2E.ProtocolMessage_REVOKE.Enum(),
-				Key:  &waCommon.MessageKey{ID: proto.String(origID)},
+			wantID:   origID,
+			wantText: newText,
+		},
+		{
+			name: "MESSAGE_EDIT with caption-only image edit",
+			msg: &waE2E.Message{
+				ProtocolMessage: &waE2E.ProtocolMessage{
+					Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+					Key:  &waCommon.MessageKey{ID: proto.String(origID)},
+					EditedMessage: &waE2E.Message{
+						ImageMessage: &waE2E.ImageMessage{Caption: proto.String("new caption")},
+					},
+				},
 			},
-		}
-		if id, edited := EditedMessage(msg); id != "" || edited != nil {
-			t.Errorf("EditedMessage on REVOKE = (%q, %v), want ('', nil)", id, edited)
-		}
-	})
+			wantID:   origID,
+			wantText: "new caption",
+		},
+		{
+			name: "REVOKE returns empty",
+			msg: &waE2E.Message{
+				ProtocolMessage: &waE2E.ProtocolMessage{
+					Type: waE2E.ProtocolMessage_REVOKE.Enum(),
+					Key:  &waCommon.MessageKey{ID: proto.String(origID)},
+				},
+			},
+		},
+		{
+			name: "plain text message returns empty",
+			msg:  &waE2E.Message{Conversation: proto.String("hi")},
+		},
+		{
+			name: "nil message returns empty",
+			msg:  nil,
+		},
+	}
 
-	t.Run("plain message returns empty", func(t *testing.T) {
-		msg := &waE2E.Message{Conversation: proto.String("hi")}
-		if id, edited := EditedMessage(msg); id != "" || edited != nil {
-			t.Errorf("EditedMessage on plain text = (%q, %v), want ('', nil)", id, edited)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, edited := EditedMessage(tt.msg)
+			if gotID != tt.wantID {
+				t.Errorf("origID = %q, want %q", gotID, tt.wantID)
+			}
+			if tt.wantText == "" {
+				if edited != nil {
+					t.Errorf("edited = %v, want nil", edited)
+				}
+				return
+			}
+			if got := ExtractText(edited); got != tt.wantText {
+				t.Errorf("edited text = %q, want %q", got, tt.wantText)
+			}
+		})
+	}
 }
 
 func TestRevokedMessageID(t *testing.T) {
