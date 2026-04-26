@@ -150,13 +150,17 @@ func TestAccount(t *testing.T) {
 }
 
 func TestJiraConfigBuilds(t *testing.T) {
+	t.Setenv(jiraAPITokenEnv, "token-xyz")
 	cfg := &PigeonJiraConfig{
 		Server:   "https://acme.atlassian.net",
 		Login:    "alice@acme.com",
 		AuthType: "basic",
 		Insecure: false,
 	}
-	jcfg := cfg.JiraConfig("token-xyz")
+	jcfg, err := cfg.JiraConfig()
+	if err != nil {
+		t.Fatalf("JiraConfig: %v", err)
+	}
 	if jcfg.Server != cfg.Server {
 		t.Errorf("Server = %q", jcfg.Server)
 	}
@@ -171,7 +175,22 @@ func TestJiraConfigBuilds(t *testing.T) {
 	}
 }
 
+func TestJiraConfigMissingToken(t *testing.T) {
+	t.Setenv(jiraAPITokenEnv, "")
+	cfg := &PigeonJiraConfig{
+		Server:   "https://acme.atlassian.net",
+		Login:    "alice@acme.com",
+		AuthType: "basic",
+	}
+	if _, err := cfg.JiraConfig(); err == nil {
+		t.Error("expected error when JIRA_API_TOKEN is unset")
+	}
+}
+
 func TestJiraConfigMTLS(t *testing.T) {
+	// mTLS authenticates via cert files, not the env token, so JIRA_API_TOKEN
+	// is not required.
+	t.Setenv(jiraAPITokenEnv, "")
 	cfg := &PigeonJiraConfig{
 		Server:   "https://jira.internal",
 		Login:    "alice",
@@ -182,9 +201,28 @@ func TestJiraConfigMTLS(t *testing.T) {
 			ClientKey:  "/etc/ssl/client.key",
 		},
 	}
-	jcfg := cfg.JiraConfig("tok")
+	jcfg, err := cfg.JiraConfig()
+	if err != nil {
+		t.Fatalf("JiraConfig: %v", err)
+	}
 	if jcfg.MTLSConfig.CaCert != "/etc/ssl/ca.pem" {
 		t.Errorf("CaCert not propagated: %q", jcfg.MTLSConfig.CaCert)
+	}
+}
+
+func TestJiraConfigMTLSIncomplete(t *testing.T) {
+	t.Setenv(jiraAPITokenEnv, "")
+	cfg := &PigeonJiraConfig{
+		Server:   "https://jira.internal",
+		Login:    "alice",
+		AuthType: "mtls",
+		MTLS: PigeonJiraMTLSConfig{
+			CACert: "/etc/ssl/ca.pem",
+			// ClientCert and ClientKey missing
+		},
+	}
+	if _, err := cfg.JiraConfig(); err == nil {
+		t.Error("expected error when mtls.client_cert and mtls.client_key are missing")
 	}
 }
 

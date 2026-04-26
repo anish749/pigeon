@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
@@ -95,12 +94,12 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 		if err != nil {
 			return fmt.Errorf("load jira-cli config: %w", err)
 		}
-		token := os.Getenv("JIRA_API_TOKEN")
-		if token == "" {
-			return fmt.Errorf("JIRA_API_TOKEN env var is unset (see docs/jira-protocol.md)")
+		jcfg, err := cfg.JiraConfig()
+		if err != nil {
+			return fmt.Errorf("build jira client config: %w", err)
 		}
 
-		client := jira.NewClient(cfg.JiraConfig(token), jira.WithTimeout(30*time.Second))
+		client := jira.NewClient(jcfg, jira.WithTimeout(30*time.Second))
 		acct := cfg.Account()
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 

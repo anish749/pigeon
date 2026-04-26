@@ -102,27 +102,49 @@ func (c *PigeonJiraConfig) accountSlug() string {
 	return strings.ToLower(host)
 }
 
-// JiraConfig builds a pkg/jira.Config using the given API token. The
-// token is sourced from JIRA_API_TOKEN at the call site, never stored
-// on the PigeonJiraConfig itself.
-func (c *PigeonJiraConfig) JiraConfig(token string) jira.Config {
+// jiraAPITokenEnv is the env var pigeon (and jira-cli) reads the API
+// token from. The token is never stored on disk.
+const jiraAPITokenEnv = "JIRA_API_TOKEN"
+
+// JiraConfig builds a pkg/jira.Config ready to pass to jira.NewClient.
+// It owns the entire transformation: parsed YAML → token from env →
+// validated MTLS paths → jira.Config. Callers don't touch env vars or
+// validate auth-mode invariants themselves.
+//
+// Returns an error when:
+//   - AuthType is not "mtls" and JIRA_API_TOKEN is unset (token-based
+//     authentication needs the env var)
+//   - AuthType is "mtls" and any of MTLS.{CACert, ClientCert, ClientKey}
+//     is missing (mTLS authenticates via cert files, not a token, but
+//     all three paths are required)
+func (c *PigeonJiraConfig) JiraConfig() (jira.Config, error) {
 	authType := jira.AuthType(strings.ToLower(c.AuthType))
 	insecure := c.Insecure
 	cfg := jira.Config{
 		Server:   c.Server,
 		Login:    c.Login,
-		APIToken: token,
 		AuthType: &authType,
 		Insecure: &insecure,
 	}
-	if c.MTLS.CACert != "" {
+
+	if authType == jira.AuthTypeMTLS {
+		if c.MTLS.CACert == "" || c.MTLS.ClientCert == "" || c.MTLS.ClientKey == "" {
+			return jira.Config{}, fmt.Errorf("auth_type is mtls but mtls.{ca_cert, client_cert, client_key} are not all set in jira-cli config")
+		}
 		cfg.MTLSConfig = jira.MTLSConfig{
 			CaCert:     expandHome(c.MTLS.CACert),
 			ClientCert: expandHome(c.MTLS.ClientCert),
 			ClientKey:  expandHome(c.MTLS.ClientKey),
 		}
+		return cfg, nil
 	}
-	return cfg
+
+	token := os.Getenv(jiraAPITokenEnv)
+	if token == "" {
+		return jira.Config{}, fmt.Errorf("%s env var is unset (set it to an Atlassian API token; see docs/jira-protocol.md)", jiraAPITokenEnv)
+	}
+	cfg.APIToken = token
+	return cfg, nil
 }
 
 // APIVersion derives v3 (Cloud) vs v2 (Local / on-prem) from Installation.
