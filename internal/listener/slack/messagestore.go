@@ -97,35 +97,56 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 	return react, nil
 }
 
-// AppendEdit stores a message edit event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineEdit,
-		Edit: &modelv1.EditLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
+// AppendEdit stores a message edit event for an in-conversation message.
+// When threadTS is non-empty (i.e. the edited message lives in a thread),
+// the edit line is appended to the thread file so ParseThreadFile +
+// CompactThread can reconcile it onto the reply on read. Top-level edits
+// keep the historical behaviour and land in the date file.
+//
+// The line itself stamps both ThreadTS and ThreadID with the same value —
+// the file location and the line content carry redundant thread context
+// so each surface (filename-based read, JSON-grep, notification format)
+// can find the parent independently. See modelv1.MsgLine for the full
+// grep-friendly rationale.
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
+	edit := modelv1.EditLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
+		Text:     text,
+		RawType:  modelv1.RawTypeSlack,
+		Raw:      raw.AsSerializable(),
+	}
+	if threadTS != "" {
+		edit.ThreadTS = threadTS
+		edit.ThreadID = threadTS
+	}
+	line := modelv1.Line{Type: modelv1.LineEdit, Edit: &edit}
+	if threadTS != "" {
+		return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
 	}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
 
-// AppendDelete stores a message delete event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS string, ts time.Time) error {
-	line := modelv1.Line{
-		Type: modelv1.LineDelete,
-		Delete: &modelv1.DeleteLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-		},
+// AppendDelete stores a message delete event for an in-conversation
+// message. Routing mirrors AppendEdit: thread targets land in the thread
+// file (where CompactThread will drop the matching reply on read);
+// top-level deletes go to the date file.
+func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, ts time.Time) error {
+	del := modelv1.DeleteLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
+	}
+	if threadTS != "" {
+		del.ThreadTS = threadTS
+		del.ThreadID = threadTS
+	}
+	line := modelv1.Line{Type: modelv1.LineDelete, Delete: &del}
+	if threadTS != "" {
+		return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
 	}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }

@@ -87,6 +87,82 @@ func TestWriteThreadMessage_StampsThreadFields(t *testing.T) {
 	}
 }
 
+// TestAppendEditDelete_ThreadRouting verifies that edits/deletes targeting
+// a thread reply land in the thread file (so CompactThread can reconcile
+// them on read) and that top-level edits/deletes still land in the date
+// file. The line itself carries thread_ts/thread_id when populated;
+// top-level lines emit neither key.
+func TestAppendEditDelete_ThreadRouting(t *testing.T) {
+	const threadTS = "1700000001.000001"
+
+	tests := []struct {
+		name     string
+		kind     string // "edit" | "delete"
+		threadTS string
+		wantFile string // "thread" | "date"
+		wantKeys bool
+	}{
+		{name: "thread reply edit lands in thread file", kind: "edit", threadTS: threadTS, wantFile: "thread", wantKeys: true},
+		{name: "top-level edit lands in date file", kind: "edit", threadTS: "", wantFile: "date", wantKeys: false},
+		{name: "thread reply delete lands in thread file", kind: "delete", threadTS: threadTS, wantFile: "thread", wantKeys: true},
+		{name: "top-level delete lands in date file", kind: "delete", threadTS: "", wantFile: "date", wantKeys: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, _, acct := newTestMessageStore(t)
+			rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
+			when := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+			switch tt.kind {
+			case "edit":
+				if err := ms.AppendEdit(rs, "1700000010.000010", tt.threadTS,
+					"new text", when, slackraw.NewSlackRawContent(goslack.Msg{})); err != nil {
+					t.Fatalf("AppendEdit: %v", err)
+				}
+			case "delete":
+				if err := ms.AppendDelete(rs, "1700000010.000010", tt.threadTS, when); err != nil {
+					t.Fatalf("AppendDelete: %v", err)
+				}
+			}
+
+			conv := paths.DefaultDataRoot().AccountFor(acct).Conversation("#general")
+			var wantPath, oppositePath string
+			switch tt.wantFile {
+			case "thread":
+				wantPath = conv.ThreadFile(threadTS).Path()
+				oppositePath = conv.DateFile("2026-04-26").Path()
+			case "date":
+				wantPath = conv.DateFile("2026-04-26").Path()
+				oppositePath = conv.ThreadFile(threadTS).Path()
+			}
+
+			data, err := os.ReadFile(wantPath)
+			if err != nil {
+				t.Fatalf("read expected file %s: %v", wantPath, err)
+			}
+			line := strings.TrimRight(string(data), "\n")
+
+			if _, err := os.Stat(oppositePath); err == nil {
+				t.Errorf("event also leaked into %s", oppositePath)
+			}
+
+			if tt.wantKeys {
+				if !strings.Contains(line, `"thread_ts":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_ts on line; got: %s", line)
+				}
+				if !strings.Contains(line, `"thread_id":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_id on line; got: %s", line)
+				}
+			} else {
+				if strings.Contains(line, "thread_ts") || strings.Contains(line, "thread_id") {
+					t.Errorf("non-thread line must omit thread_ts/thread_id; got: %s", line)
+				}
+			}
+		})
+	}
+}
+
 // TestWriteThreadMessage_OmitemptyOnDisk verifies parent records emit
 // neither thread_ts nor thread_id (omitempty), and reply records emit
 // both keys with the parent's TS as their value — the on-disk shape that
@@ -126,4 +202,77 @@ func TestWriteThreadMessage_OmitemptyOnDisk(t *testing.T) {
 	if !strings.Contains(lines[1], `"thread_id":"P1"`) {
 		t.Errorf("reply line should contain thread_id; got:\n%s", lines[1])
 	}
+}
+
+// TestThreadEditDelete_RoundTripThroughCompactThread is the end-to-end
+// regression for the original bug: an edit on a thread reply must reach
+// the thread compaction and rewrite the reply's text on read; a delete
+// must remove the reply. AppendEdit/AppendDelete now route the line into
+// the thread file, ParseThreadFile slots it into f.Edits/f.Deletes, and
+// CompactThread reconciles it onto the matching reply.
+func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
+	const (
+		channel    = "#general"
+		threadTS   = "1700000001.000001"
+		replyMsgID = "1700000010.000010"
+	)
+
+	t.Run("edit on thread reply rewrites text on read", func(t *testing.T) {
+		ms, s, acct := newTestMessageStore(t)
+		rs := ResolvedSender{ChannelName: channel, SenderName: "Alice", SenderID: "U001"}
+		raw := slackraw.NewSlackRawContent(goslack.Msg{})
+
+		if _, err := ms.WriteThreadMessage(rs, threadTS, "thread root",
+			time.Unix(1700000001, 0), threadTS, false, modelv1.ViaOrganic, raw); err != nil {
+			t.Fatalf("WriteThreadMessage parent: %v", err)
+		}
+		if _, err := ms.WriteThreadMessage(rs, threadTS, "original text",
+			time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
+			t.Fatalf("WriteThreadMessage reply: %v", err)
+		}
+		if err := ms.AppendEdit(rs, replyMsgID, threadTS, "edited text",
+			time.Unix(1700000020, 0), raw); err != nil {
+			t.Fatalf("AppendEdit: %v", err)
+		}
+
+		tf, err := s.ReadThread(acct, channel, threadTS)
+		if err != nil {
+			t.Fatalf("ReadThread: %v", err)
+		}
+		if tf == nil || len(tf.Replies) != 1 {
+			t.Fatalf("replies = %v, want 1 reply", tf)
+		}
+		if got := tf.Replies[0].Text; got != "edited text" {
+			t.Errorf("reply text = %q, want %q (edit lost in compaction)", got, "edited text")
+		}
+	})
+
+	t.Run("delete on thread reply removes the reply on read", func(t *testing.T) {
+		ms, s, acct := newTestMessageStore(t)
+		rs := ResolvedSender{ChannelName: channel, SenderName: "Alice", SenderID: "U001"}
+		raw := slackraw.NewSlackRawContent(goslack.Msg{})
+
+		if _, err := ms.WriteThreadMessage(rs, threadTS, "thread root",
+			time.Unix(1700000001, 0), threadTS, false, modelv1.ViaOrganic, raw); err != nil {
+			t.Fatalf("WriteThreadMessage parent: %v", err)
+		}
+		if _, err := ms.WriteThreadMessage(rs, threadTS, "doomed reply",
+			time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
+			t.Fatalf("WriteThreadMessage reply: %v", err)
+		}
+		if err := ms.AppendDelete(rs, replyMsgID, threadTS, time.Unix(1700000020, 0)); err != nil {
+			t.Fatalf("AppendDelete: %v", err)
+		}
+
+		tf, err := s.ReadThread(acct, channel, threadTS)
+		if err != nil {
+			t.Fatalf("ReadThread: %v", err)
+		}
+		if tf == nil {
+			t.Fatal("ReadThread returned nil")
+		}
+		if len(tf.Replies) != 0 {
+			t.Errorf("replies = %d, want 0 (delete should remove the reply)", len(tf.Replies))
+		}
+	})
 }

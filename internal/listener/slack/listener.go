@@ -353,7 +353,7 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	}
 	ts := time.Now().UTC()
 
-	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, text, ts, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
+	if err := l.messages.AppendEdit(rs, msg.Message.Timestamp, msg.Message.ThreadTimestamp, text, ts, slackraw.NewSlackRawContent(*msg.Message)); err != nil {
 		slog.ErrorContext(ctx, "failed to store edit", "error", err, "account", l.acct)
 	}
 
@@ -395,7 +395,11 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		rs.SenderID = id
 	}
 
-	if err := l.messages.AppendDelete(rs, deletedTS, ts); err != nil {
+	var threadTS string
+	if msg.PreviousMessage != nil {
+		threadTS = msg.PreviousMessage.ThreadTimestamp
+	}
+	if err := l.messages.AppendDelete(rs, deletedTS, threadTS, ts); err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
 	}
 
