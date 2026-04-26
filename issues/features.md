@@ -120,6 +120,30 @@ Quality-of-life rather than critical — the query layer via `pigeon read`
 is sufficient for now. Becomes more valuable as the volume of
 bot-initiated DM outreach grows.
 
+## Read before send
+
+The agent cannot send a message to anyone without reading the chat history with that person first.
+
+- If there is no chat history, it is an opening conversation and should sound like an introduction.
+- If there is existing chat history, the agent should use it to infer the tone and voice for approaching the person and match their energy.
+
+This change spans two places:
+
+- **Skill**: mention that the agent always knows how to talk to a new person versus an existing person — a new person gets an introduction and then the ask; an existing person gets a response that matches the prior tone.
+- **Daemon**: within a session, the daemon tracks whether the agent has previously sent a message to a given person. If the agent has not yet sent to that person in this session, prompt the agent to read the message history first to understand tone, energy, and audience before responding.
+
+## Tail: scope monitor to a workstream
+
+The tail feature introduced in PR #291 (`pigeon monitor` / `/api/tail`) does not yet support scoping. When someone is working on a workstream, they should be able to scope the monitor to that workstream so the stream only carries events relevant to that effort.
+
+## Platform enum
+
+Introduce a platform enum so platform identifiers stop being bare strings scattered across the codebase. This is a breaking change to the on-disk layout and stored data — that is acceptable; existing stored data can be deleted as part of the migration.
+
+## Poll metrics for Linear and Jira
+
+The poll metrics system currently tracks how GWS polling is doing. Extend the same poll metrics to Linear and Jira so their pollers report the same kind of health/status signal as GWS. Jira itself is not yet introduced — this should land alongside or after Jira support.
+
 ## Unified read abstraction across messaging and GWS
 
 The read layer (`store.Store`, `modelv1.Line`, `internal/read`,

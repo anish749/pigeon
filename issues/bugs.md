@@ -66,4 +66,14 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
+## Platform names: rename `linear-issues` / `jira-issues` to `linear` / `jira`
+
+The platform names `linear-issues` and `jira-issues` are confusing — the "-issues" suffix reads like a sub-resource of the platform rather than the platform itself. They should be `linear` and `jira`, matching how the other platforms (`slack`, `whatsapp`) are named.
+
+## Slack write phase: blocks stored even when identical to text fallback
+
+In the Slack write phase, blocks are stored raw even when the text fallback is the exact same representation of what is in the blocks. When the text and blocks carry the same content, writing the blocks adds no additional value.
+
+Deduplication should happen during write, since at write time we already know whether the blocks add anything beyond the text. Doing this merge during read does not make sense — if there is no additional value, there is no reason to store it in the first place.
+
 
