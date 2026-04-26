@@ -14,12 +14,28 @@ import (
 
 	"github.com/gosimple/slug"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
+
+// Reader reads signals from the data store. The manager uses it for
+// signal-driven operations (Discover today; potentially more later).
+//
+// Defined here, not in internal/workstream/reader, so callers wire a
+// reader into the manager via New() rather than constructing one
+// inline. This is what lets non-CLI consumers — the workstream TUI,
+// future hub integration — drive discovery through a single
+// manager.Discover entry point instead of each gluing reader, store,
+// and DiscoverAndPropose together.
+//
+// The concrete *reader.Reader satisfies this interface as-is.
+type Reader interface {
+	ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error)
+}
 
 // Manager owns the lifecycle of all workstreams. It is the only component
 // that creates or modifies workstreams. Its single entry point is
@@ -29,6 +45,7 @@ type Manager struct {
 	disc   discovery.WorkspaceDiscovery
 	sc     *StatCollector
 	store  store.Store
+	reader Reader // nil for callers that don't use signal-driven methods
 	cfg    models.Config
 	logger *slog.Logger
 
@@ -44,17 +61,47 @@ type Manager struct {
 	dormancyChanges int
 }
 
-// New creates a workstream manager.
-func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, logger *slog.Logger) *Manager {
+// New creates a workstream manager. r may be nil when the caller does
+// not need signal-reading methods (Discover); methods that depend on
+// it return an error in that case.
+func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, r Reader, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
 		disc:               discovery.NewLLMDiscovery(client, logger),
 		sc:                 sc,
 		store:              st,
+		reader:             r,
 		cfg:                cfg,
 		logger:             logger,
 		signalsSinceUpdate: make(map[string]int),
 	}
+}
+
+// Discover reads signals for the configured workspace in [since,
+// until], ensures the workspace's default workstream exists if any
+// signals were read, and runs LLM-based batch discovery, persisting
+// each result via ProposeNew.
+//
+// Returns nil, nil when the window contains no signals — that is
+// "empty workspace, nothing to discover", not an error.
+//
+// The caller passes since/until on every invocation; defaults are not
+// derived from cfg.Since/cfg.Until (those are replay-specific).
+func (m *Manager) Discover(ctx context.Context, since, until time.Time) ([]discovery.DiscoveredWorkstream, error) {
+	if m.reader == nil {
+		return nil, fmt.Errorf("manager.Discover: reader not configured")
+	}
+	signals, err := m.reader.ReadAccounts(m.cfg.Workspace.Accounts, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("read signals: %w", err)
+	}
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	if err := m.EnsureDefaultWorkstream(m.cfg.Workspace.Name, signals[0].Ts); err != nil {
+		return nil, fmt.Errorf("ensure default workstream: %w", err)
+	}
+	return m.DiscoverAndPropose(ctx, signals, signals[0].Ts)
 }
 
 // DiscoverAndPropose runs LLM-based batch discovery on the given signals

@@ -86,12 +86,15 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	signals = filtered
 	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 
-	// Set up persistence and manager.
+	// Set up persistence and manager. Replay reads signals up front for
+	// the routing loop and feeds them to mgr.DiscoverAndPropose
+	// directly, so the manager's reader is unused here — passing nil is
+	// correct.
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir.Path())
 	claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
 	sc := manager.NewStatCollector()
-	mgr := manager.New(claude, sc, cfg, st, logger)
+	mgr := manager.New(claude, sc, cfg, st, nil, logger)
 	wsName := cfg.Workspace.Name
 
 	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {

@@ -2,11 +2,14 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
@@ -15,7 +18,7 @@ func newTestManager(t *testing.T) (*Manager, store.Store) {
 	t.Helper()
 	st := store.NewFS(t.TempDir())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mgr := New(nil, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, logger)
+	mgr := New(nil, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, nil, logger)
 	return mgr, st
 }
 
@@ -148,5 +151,100 @@ func TestRejectProposalDeletes(t *testing.T) {
 	// Re-rejecting surfaces as not-found.
 	if err := mgr.RejectProposal(context.Background(), "p-1"); err == nil {
 		t.Error("expected error when rejecting already-deleted proposal")
+	}
+}
+
+// fakeReader is a Reader stub. Records the most recent ReadAccounts
+// call and returns the configured signals/err.
+type fakeReader struct {
+	signals []models.Signal
+	err     error
+
+	gotAccounts []account.Account
+	gotSince    time.Time
+	gotUntil    time.Time
+}
+
+func (r *fakeReader) ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
+	r.gotAccounts = accounts
+	r.gotSince = since
+	r.gotUntil = until
+	return r.signals, r.err
+}
+
+func newDiscoverManager(t *testing.T, reader Reader) (*Manager, store.Store) {
+	t.Helper()
+	st := store.NewFS(t.TempDir())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace: workspace.Workspace{
+			Name:     "acme",
+			Accounts: []account.Account{account.New("slack", "acme")},
+		},
+	}
+	mgr := New(nil, NewStatCollector(), cfg, st, reader, logger)
+	return mgr, st
+}
+
+func TestDiscoverEmptyWorkspaceReturnsNilNoError(t *testing.T) {
+	r := &fakeReader{} // no signals, no err
+	mgr, st := newDiscoverManager(t, r)
+
+	got, err := mgr.Discover(context.Background(), time.Time{}, time.Now())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil discovered, got %+v", got)
+	}
+
+	// Reader was called with the workspace's accounts.
+	if len(r.gotAccounts) != 1 || r.gotAccounts[0].Platform != "slack" {
+		t.Errorf("reader saw accounts %+v, want slack/acme", r.gotAccounts)
+	}
+
+	// No default workstream should have been created when there are no signals —
+	// EnsureDefaultWorkstream uses signals[0].Ts and is therefore skipped.
+	def, ok, _ := st.GetWorkstream(models.DefaultWorkstreamID("acme"))
+	if ok {
+		t.Errorf("default workstream created on empty discover: %+v", def)
+	}
+}
+
+func TestDiscoverReaderErrorPropagates(t *testing.T) {
+	want := errors.New("disk on fire")
+	r := &fakeReader{err: want}
+	mgr, _ := newDiscoverManager(t, r)
+
+	_, err := mgr.Discover(context.Background(), time.Time{}, time.Now())
+	if err == nil {
+		t.Fatal("expected reader error to propagate")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want chain to include %v", err, want)
+	}
+}
+
+func TestDiscoverWithoutReaderConfigured(t *testing.T) {
+	mgr, _ := newDiscoverManager(t, nil)
+	_, err := mgr.Discover(context.Background(), time.Time{}, time.Now())
+	if err == nil {
+		t.Fatal("expected error when reader is nil")
+	}
+}
+
+func TestDiscoverPassesWindowThrough(t *testing.T) {
+	r := &fakeReader{} // empty signals — reader gets called and we exit cleanly
+	mgr, _ := newDiscoverManager(t, r)
+
+	since := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := mgr.Discover(context.Background(), since, until); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !r.gotSince.Equal(since) || !r.gotUntil.Equal(until) {
+		t.Errorf("reader saw window [%s, %s], want [%s, %s]",
+			r.gotSince, r.gotUntil, since, until)
 	}
 }
