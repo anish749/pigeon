@@ -114,6 +114,7 @@ DATA LAYOUT
   Messaging: platform / account / conversation / YYYY-MM-DD.jsonl
   GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
   Linear:    linear-issues / workspace / issues / IDENTIFIER.jsonl
+  All dates (filenames, --since, --date) are in UTC.
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
   All JSONL lines have a "type" field — use it with jq to filter:
