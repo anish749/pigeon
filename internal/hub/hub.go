@@ -82,10 +82,6 @@ type channel struct {
 
 type formattedLines []string
 
-// Backwards-compat alias retained for tests and callers that reference the
-// reaction-specific name.
-type formattedReactionLines = formattedLines
-
 type deliverySignal struct {
 	kind         signalKind
 	conversation string         // only set for signalNewMessage / Reaction / Edit / Delete
@@ -622,7 +618,7 @@ func (h *Hub) deliverEventLines(ch *channel, conversation string, lines formatte
 	}
 }
 
-func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) formattedReactionLines {
+func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) formattedLines {
 	msg, threadTS := h.lookupMessage(acct, conversation, react.MsgID)
 	if msg != nil {
 		return modelv1.FormatReactionNotification(*msg, react, threadTS, time.Local)
