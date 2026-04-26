@@ -59,10 +59,12 @@ func RunSetupSlack(args []string) error {
 	input = strings.TrimSpace(input)
 	fmt.Println()
 
-	// Save raw (empty preserves the per-method defaults); render needs resolved.
-	appDisplayName, displayName := input, input
-	if appDisplayName == "" {
-		appDisplayName = existing.AppDisplayName
+	// rawName is what we save (empty preserves the per-method defaults at
+	// AppDisplay/AppAttribution call sites). displayName is what the manifest
+	// needs (always non-empty).
+	rawName, displayName := input, input
+	if rawName == "" {
+		rawName = existing.AppDisplayName
 		displayName = existing.AppDisplay()
 	}
 
@@ -129,7 +131,7 @@ func RunSetupSlack(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, appDisplayName)
+	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, rawName)
 
 	go func() {
 		if err := srv.Start(ctx); err != nil {
