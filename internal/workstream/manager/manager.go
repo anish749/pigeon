@@ -169,6 +169,84 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	return "", nil
 }
 
+// ApproveProposal applies a pending proposal (creating the workstream
+// for ProposalCreate) and marks the proposal approved. Returns the
+// resulting workstream ID. Errors if the proposal is missing, already
+// resolved, or of a type the manager does not yet apply.
+//
+// Idempotent on the workstream side: if a same-named workstream already
+// exists (same slug ID), no new workstream is written and the existing
+// one's edits are preserved — only the proposal is marked approved.
+func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) {
+	p, ok, err := m.store.GetProposal(id)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("proposal %q not found", id)
+	}
+	if p.State != models.ProposalPending {
+		return "", fmt.Errorf("proposal %q already %s", id, p.State)
+	}
+
+	var wsID string
+	switch p.Type {
+	case models.ProposalCreate:
+		w := models.Workstream{
+			ID:        generateWorkstreamID(p.SuggestedName),
+			Name:      p.SuggestedName,
+			Workspace: p.Workspace,
+			State:     models.StateActive,
+			Focus:     p.SuggestedFocus,
+			Created:   p.ProposedAt,
+		}
+		existing, exists, err := m.store.GetWorkstream(w.ID)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			wsID = existing.ID
+		} else {
+			if err := m.store.PutWorkstream(w); err != nil {
+				return "", err
+			}
+			wsID = w.ID
+		}
+	default:
+		return "", fmt.Errorf("proposal %q has unsupported type %q", id, p.Type)
+	}
+
+	p.State = models.ProposalApproved
+	p.ResolvedAt = time.Now().UTC()
+	if err := m.store.PutProposal(p); err != nil {
+		return "", err
+	}
+	m.logger.Info("proposal approved", "id", id, "workstream", wsID)
+	return wsID, nil
+}
+
+// RejectProposal marks a pending proposal as rejected without applying it.
+// Errors if the proposal is missing or already resolved.
+func (m *Manager) RejectProposal(_ context.Context, id string) error {
+	p, ok, err := m.store.GetProposal(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("proposal %q not found", id)
+	}
+	if p.State != models.ProposalPending {
+		return fmt.Errorf("proposal %q already %s", id, p.State)
+	}
+	p.State = models.ProposalRejected
+	p.ResolvedAt = time.Now().UTC()
+	if err := m.store.PutProposal(p); err != nil {
+		return err
+	}
+	m.logger.Info("proposal rejected", "id", id)
+	return nil
+}
+
 // ObserveRouting records the routing decision in the stat collector and triggers
 // lifecycle operations (focus updates, dormancy). This is the single entry
 // point — the manager owns the stat collector, so recording happens here.

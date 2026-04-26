@@ -104,6 +104,21 @@ type proposalFile struct {
 	Proposals []*models.Proposal `json:"proposals"`
 }
 
+func (s *FS) GetProposal(id string) (*models.Proposal, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pf, err := s.loadProposalFile()
+	if err != nil {
+		return nil, false, err
+	}
+	for _, p := range pf.Proposals {
+		if p.ID == id {
+			return p, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
 func (s *FS) ListProposals() ([]*models.Proposal, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

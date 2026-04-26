@@ -86,6 +86,22 @@ func TestFSRoundTrip(t *testing.T) {
 		if all[0].State != models.ProposalRejected {
 			t.Error("state not updated")
 		}
+
+		// Lookup by ID.
+		got, ok, err := s.GetProposal("p-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok || got.SuggestedName != "Alpha" {
+			t.Errorf("GetProposal: ok=%v got=%+v", ok, got)
+		}
+		_, ok, err = s.GetProposal("p-missing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Error("expected not found")
+		}
 	})
 
 	t.Run("empty_store", func(t *testing.T) {

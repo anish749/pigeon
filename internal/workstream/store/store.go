@@ -17,6 +17,8 @@ type Store interface {
 	// PutWorkstream creates or updates a workstream.
 	PutWorkstream(models.Workstream) error
 
+	// GetProposal returns a proposal by ID. Returns nil and false if not found.
+	GetProposal(id string) (*models.Proposal, bool, error)
 	// ListProposals returns all proposals.
 	ListProposals() ([]*models.Proposal, error)
 	// PutProposal creates or updates a proposal.
