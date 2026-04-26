@@ -88,11 +88,11 @@ func TestRenderListColumn_CursorMarker(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), lines)
 	}
-	if !strings.HasPrefix(lines[0], "  Alpha") {
-		t.Errorf("non-cursor line lacks blank marker: %q", lines[0])
+	if !strings.HasPrefix(lines[0], "○ Alpha") {
+		t.Errorf("non-cursor line lacks hollow marker: %q", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], "● Beta") {
-		t.Errorf("cursor line lacks bullet marker: %q", lines[1])
+		t.Errorf("cursor line lacks filled marker: %q", lines[1])
 	}
 }
 
@@ -110,8 +110,8 @@ func TestRenderListColumn_WrapsLongNameWithContinuationIndent(t *testing.T) {
 		t.Fatalf("expected anchor + wrapped name spanning multiple lines, got %q", lines)
 	}
 	wrapped := lines[1:]
-	if !strings.HasPrefix(wrapped[0], "  Alpha") {
-		t.Errorf("non-cursor first line lacks blank marker: %q", wrapped[0])
+	if !strings.HasPrefix(wrapped[0], "○ Alpha") {
+		t.Errorf("non-cursor first line lacks hollow marker: %q", wrapped[0])
 	}
 	for i, line := range wrapped[1:] {
 		if !strings.HasPrefix(line, "    ") {
@@ -209,6 +209,85 @@ func TestRenderDetailBox_ReservesTrailingSpace(t *testing.T) {
 	beforeBottom := lines[len(lines)-2]
 	if strings.Contains(beforeBottom, "Focus") || strings.Contains(beforeBottom, "Alpha") {
 		t.Errorf("expected blank reserved row above bottom border, got %q", beforeBottom)
+	}
+}
+
+func TestVisibleRange_ScrollsCursorIntoView(t *testing.T) {
+	items := make([]models.Workstream, 30)
+	for i := range items {
+		items[i] = models.Workstream{ID: "ws", Name: "Item"}
+	}
+	m := Model{
+		items:      items,
+		cursor:     20,
+		listOffset: 0,
+		height:     12, // tight budget
+		width:      100,
+	}
+	m = m.scrollIntoView()
+	start, end := m.visibleRange(20)
+	if m.cursor < start || m.cursor >= end {
+		t.Fatalf("cursor %d not in visible range [%d,%d)", m.cursor, start, end)
+	}
+}
+
+func TestVisibleRange_StablyAnchorsAtTop(t *testing.T) {
+	items := make([]models.Workstream, 30)
+	for i := range items {
+		items[i] = models.Workstream{ID: "ws", Name: "Item"}
+	}
+	m := Model{
+		items:      items,
+		cursor:     2,
+		listOffset: 0,
+		height:     12,
+		width:      100,
+	}
+	m = m.scrollIntoView()
+	start, _ := m.visibleRange(20)
+	if start != 0 {
+		t.Errorf("cursor near top should keep start=0, got %d", start)
+	}
+}
+
+func TestVisibleRange_ScrollsBackUpWhenCursorMovesUp(t *testing.T) {
+	items := make([]models.Workstream, 30)
+	for i := range items {
+		items[i] = models.Workstream{ID: "ws", Name: "Item"}
+	}
+	m := Model{
+		items:      items,
+		cursor:     20,
+		listOffset: 12,
+		height:     12,
+		width:      100,
+	}
+	m.cursor = 5
+	m = m.scrollIntoView()
+	start, end := m.visibleRange(20)
+	if start > 5 || end <= 5 {
+		t.Errorf("cursor at 5 not in [%d,%d)", start, end)
+	}
+}
+
+func TestRenderListColumn_TruncatesToBudget(t *testing.T) {
+	items := make([]models.Workstream, 30)
+	for i := range items {
+		items[i] = models.Workstream{ID: "ws", Name: "Item"}
+	}
+	m := Model{
+		items:  items,
+		cursor: 0,
+		height: 10,
+		width:  100,
+	}
+	out := stripAnsi(m.renderListColumn(20))
+	rendered := strings.Count(out, "\n") + 1
+	if rendered >= 30 {
+		t.Errorf("expected truncated render, got %d lines for 30 items", rendered)
+	}
+	if rendered < 1 {
+		t.Errorf("expected at least the cursor row, got %d lines", rendered)
 	}
 }
 

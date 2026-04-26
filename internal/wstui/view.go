@@ -113,9 +113,11 @@ func (m Model) columnWidths() (left, right int) {
 }
 
 // renderListColumn renders the workstream list constrained to width.
-// Each row consumes a 2-col marker zone (cursor bullet or blank) plus
-// the wrapped name. Names that don't fit on one line wrap with a 2-col
-// indent on continuations so the visual hierarchy stays clear.
+// Each row consumes a 2-col marker zone (filled bullet for the cursor,
+// hollow bullet otherwise) plus the wrapped name. Names that don't fit
+// on one line wrap with a 2-col indent on continuations so the visual
+// hierarchy stays clear. When the list is taller than the available
+// height, only the slice that includes the cursor is rendered.
 func (m Model) renderListColumn(width int) string {
 	if width < minListWidth {
 		width = minListWidth
@@ -127,15 +129,18 @@ func (m Model) renderListColumn(width int) string {
 		nameWidth = 4
 	}
 
+	start, end := m.visibleRange(nameWidth)
+
 	var b strings.Builder
-	for i, w := range m.items {
+	for i := start; i < end; i++ {
+		w := m.items[i]
 		var marker string
 		var nameStyle lipgloss.Style
 		if i == m.cursor {
 			marker = selectedStyle.Render("● ")
 			nameStyle = selectedStyle
 		} else {
-			marker = "  "
+			marker = dimStyle.Render("○ ")
 			nameStyle = dimStyle
 		}
 		lines := wrapName(w.Name, nameWidth, continuationIndent)
@@ -153,6 +158,78 @@ func (m Model) renderListColumn(width int) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// visibleRange returns the [start, end) item indices that fit within
+// listLineBudget given the current listOffset and cursor. listOffset is
+// treated as a hint; the range is shifted forward if the cursor would
+// otherwise be hidden, and clamped backward to keep the cursor in view
+// when it sits above the offset.
+func (m Model) visibleRange(nameWidth int) (start, end int) {
+	n := len(m.items)
+	if n == 0 {
+		return 0, 0
+	}
+	budget := m.listLineBudget()
+	if budget <= 0 {
+		return 0, n
+	}
+	if nameWidth < 4 {
+		nameWidth = 4
+	}
+
+	itemHeight := func(i int) int {
+		return len(wrapName(m.items[i].Name, nameWidth, "  "))
+	}
+
+	start = m.listOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > m.cursor {
+		start = m.cursor
+	}
+	if start >= n {
+		start = n - 1
+	}
+
+	for {
+		used := 0
+		end = start
+		for end < n {
+			h := itemHeight(end)
+			if used+h > budget && used > 0 {
+				break
+			}
+			used += h
+			end++
+		}
+		if m.cursor < end || start >= n-1 {
+			return start, end
+		}
+		start++
+	}
+}
+
+// listLineBudget is how many vertical lines the list column has to
+// work with. Returns a large sentinel before the first WindowSizeMsg
+// arrives (m.height == 0) so non-resizing tests render every item.
+func (m Model) listLineBudget() int {
+	if m.height <= 0 {
+		return 1 << 30
+	}
+	reserved := 4 // title (1) + blank (1) + body trailing blank (1) + footer (1)
+	if m.status != "" {
+		reserved += 2
+	}
+	if m.err != nil {
+		reserved++
+	}
+	budget := m.height - reserved
+	if budget < 1 {
+		return 1
+	}
+	return budget
 }
 
 // renderDetailBox renders the right-hand panel showing the selected
