@@ -1,0 +1,410 @@
+package wstui
+
+import (
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/anish749/pigeon/internal/workstream/models"
+)
+
+func keyRune(r rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+}
+
+func keyType(t tea.KeyType) tea.KeyMsg {
+	return tea.KeyMsg{Type: t}
+}
+
+func seedItems() []models.Workstream {
+	return []models.Workstream{
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha"},
+		{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateActive, Focus: "beta"},
+		models.NewDefaultWorkstream("personal", time.Time{}),
+	}
+}
+
+func newSeededModel() Model {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	return m
+}
+
+// asModel unwraps tea.Model back to our concrete type for state assertions.
+func asModel(t *testing.T, m tea.Model) Model {
+	t.Helper()
+	mm, ok := m.(Model)
+	if !ok {
+		t.Fatalf("expected wstui.Model, got %T", m)
+	}
+	return mm
+}
+
+func TestHandleListKey_NavigatesWithJK(t *testing.T) {
+	m := newSeededModel()
+	if m.cursor != 0 {
+		t.Fatalf("cursor not zero at start: %d", m.cursor)
+	}
+
+	got, _ := m.Update(keyRune('j'))
+	m = asModel(t, got)
+	if m.cursor != 1 {
+		t.Errorf("after j, cursor = %d, want 1", m.cursor)
+	}
+
+	got, _ = m.Update(keyRune('k'))
+	m = asModel(t, got)
+	if m.cursor != 0 {
+		t.Errorf("after k, cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestHandleListKey_RenameEntersEditMode(t *testing.T) {
+	m := newSeededModel()
+	got, _ := m.Update(keyRune('r'))
+	m = asModel(t, got)
+	if m.mode != modeEditName {
+		t.Errorf("mode = %v, want modeEditName", m.mode)
+	}
+	if m.input != "Alpha" {
+		t.Errorf("input = %q, want preloaded Alpha", m.input)
+	}
+}
+
+func TestHandleListKey_RenameOnDefaultIsNoop(t *testing.T) {
+	m := newSeededModel()
+	m.cursor = len(m.items) - 1 // default is last after sort
+	got, _ := m.Update(keyRune('r'))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("rename on default changed mode to %v", m.mode)
+	}
+}
+
+func TestHandleListKey_DeleteOnDefaultIsNoop(t *testing.T) {
+	m := newSeededModel()
+	m.cursor = len(m.items) - 1
+	got, _ := m.Update(keyRune('d'))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("delete on default changed mode to %v", m.mode)
+	}
+}
+
+func TestHandleListKey_QuitsOnQ(t *testing.T) {
+	m := newSeededModel()
+	_, cmd := m.Update(keyRune('q'))
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("expected QuitMsg, got %T", cmd())
+	}
+}
+
+func TestHandleInputKey_TypeAndCommit(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeEditName
+	m.input = "Alpha"
+
+	// Backspace removes the last char.
+	got, _ := m.Update(keyType(tea.KeyBackspace))
+	m = asModel(t, got)
+	if m.input != "Alph" {
+		t.Errorf("after backspace, input = %q", m.input)
+	}
+
+	// Type two characters.
+	got, _ = m.Update(keyRune('!'))
+	m = asModel(t, got)
+	got, _ = m.Update(keyRune('!'))
+	m = asModel(t, got)
+	if m.input != "Alph!!" {
+		t.Errorf("after typing, input = %q", m.input)
+	}
+
+	// Enter commits via putCmd.
+	got, cmd := m.Update(keyType(tea.KeyEnter))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("after enter, mode = %v, want modeList", m.mode)
+	}
+	if cmd == nil {
+		t.Fatal("expected put cmd")
+	}
+	// Drain the batch to fire the put.
+	drainBatch(cmd)
+
+	if len(st.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(st.puts))
+	}
+	if st.puts[0].Name != "Alph!!" {
+		t.Errorf("persisted name = %q, want Alph!!", st.puts[0].Name)
+	}
+	if st.puts[0].ID != "ws-a" {
+		t.Errorf("persisted ID changed: %q", st.puts[0].ID)
+	}
+}
+
+func TestHandleInputKey_EscCancels(t *testing.T) {
+	m := newSeededModel()
+	m.mode = modeEditFocus
+	m.input = "draft"
+	got, _ := m.Update(keyType(tea.KeyEscape))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("mode = %v, want modeList", m.mode)
+	}
+	if m.input != "" {
+		t.Errorf("input not cleared: %q", m.input)
+	}
+}
+
+func TestCommitNewName_TransitionsToFocus(t *testing.T) {
+	m := newSeededModel()
+	m.mode = modeNewName
+	m.input = "New Stream"
+	got, _ := m.Update(keyType(tea.KeyEnter))
+	m = asModel(t, got)
+	if m.mode != modeNewFocus {
+		t.Errorf("mode = %v, want modeNewFocus", m.mode)
+	}
+	if m.scratchName != "New Stream" {
+		t.Errorf("scratchName = %q", m.scratchName)
+	}
+	if m.input != "" {
+		t.Errorf("input not cleared: %q", m.input)
+	}
+}
+
+func TestCommitNewName_EmptyAborts(t *testing.T) {
+	m := newSeededModel()
+	m.mode = modeNewName
+	m.input = "   "
+	got, _ := m.Update(keyType(tea.KeyEnter))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("mode = %v, want modeList", m.mode)
+	}
+}
+
+func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeNewFocus
+	m.scratchName = "Recommendations"
+	m.input = "ranking"
+
+	got, cmd := m.Update(keyType(tea.KeyEnter))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("mode = %v, want modeList", m.mode)
+	}
+	if m.scratchName != "" {
+		t.Errorf("scratchName not cleared: %q", m.scratchName)
+	}
+	drainBatch(cmd)
+
+	if len(st.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(st.puts))
+	}
+	w := st.puts[0]
+	if w.Name != "Recommendations" {
+		t.Errorf("name = %q", w.Name)
+	}
+	if w.ID != "ws-recommendations" {
+		t.Errorf("id = %q", w.ID)
+	}
+	if w.Workspace != "personal" {
+		t.Errorf("workspace = %q", w.Workspace)
+	}
+	if w.State != models.StateActive {
+		t.Errorf("state = %q", w.State)
+	}
+	if w.Focus != "ranking" {
+		t.Errorf("focus = %q", w.Focus)
+	}
+}
+
+func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+
+	_, cmd := m.Update(keyRune('s'))
+	drainBatch(cmd)
+
+	if len(st.puts) != 1 {
+		t.Fatalf("expected 1 put, got %d", len(st.puts))
+	}
+	if st.puts[0].State != models.StateDormant {
+		t.Errorf("state after 1 cycle = %q, want dormant", st.puts[0].State)
+	}
+}
+
+func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeConfirmDelete
+
+	_, cmd := m.Update(keyRune('y'))
+	drainBatch(cmd)
+
+	if len(st.deletes) != 1 || st.deletes[0] != "ws-a" {
+		t.Errorf("deletes = %v, want [ws-a]", st.deletes)
+	}
+}
+
+func TestConfirmDelete_NoCancels(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeConfirmDelete
+
+	got, _ := m.Update(keyRune('n'))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("mode = %v, want modeList", m.mode)
+	}
+	if len(st.deletes) != 0 {
+		t.Errorf("delete fired on cancel: %v", st.deletes)
+	}
+}
+
+func TestMergePicker_EnterMerges(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeMergePick
+	m.cursor = 0      // Alpha is source
+	m.mergeCursor = 1 // Beta is target
+
+	_, cmd := m.Update(keyType(tea.KeyEnter))
+	drainBatch(cmd)
+
+	if len(st.puts) != 2 {
+		t.Fatalf("expected 2 puts (target + retired source), got %d", len(st.puts))
+	}
+	// Target (Beta) put first per actions.go ordering.
+	target := st.puts[0]
+	if target.ID != "ws-b" {
+		t.Errorf("first put should be target ws-b, got %q", target.ID)
+	}
+	if !contains(target.Focus, "merged from Alpha") {
+		t.Errorf("target focus missing merge annotation: %q", target.Focus)
+	}
+	src := st.puts[1]
+	if src.ID != "ws-a" {
+		t.Errorf("second put should be source ws-a, got %q", src.ID)
+	}
+	if src.State != models.StateResolved {
+		t.Errorf("source state = %q, want resolved", src.State)
+	}
+}
+
+func TestMergePicker_EscCancels(t *testing.T) {
+	st := newFakeStore(seedItems()...)
+	m := NewModel(st, "personal")
+	m.items = filterAndSort(seedItems(), "personal")
+	m.mode = modeMergePick
+
+	got, _ := m.Update(keyType(tea.KeyEscape))
+	m = asModel(t, got)
+	if m.mode != modeList {
+		t.Errorf("mode = %v, want modeList", m.mode)
+	}
+	if len(st.puts) != 0 {
+		t.Errorf("merge fired on cancel: %v", st.puts)
+	}
+}
+
+func TestApplyLoaded_ClampsCursor(t *testing.T) {
+	m := newSeededModel()
+	m.cursor = 99
+	out := m.applyLoaded(loadedMsg{items: []models.Workstream{m.items[0]}})
+	if out.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", out.cursor)
+	}
+}
+
+func TestApplyLoaded_SurfacesError(t *testing.T) {
+	m := newSeededModel()
+	out := m.applyLoaded(loadedMsg{err: errOnPut})
+	if out.err == nil {
+		t.Fatal("expected error to be set")
+	}
+}
+
+func TestPutCmd_StoreErrorSurfacesAsLoadedMsgErr(t *testing.T) {
+	st := newFakeStore()
+	st.putErr = errOnPut
+	m := NewModel(st, "personal")
+
+	cmd := putCmd(m, models.Workstream{ID: "x", Name: "X", Workspace: "personal"}, "saved")
+	gotErr := false
+	for _, msg := range fanOut(cmd) {
+		if lm, ok := msg.(loadedMsg); ok && lm.err != nil {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Error("expected loadedMsg with err from put failure")
+	}
+}
+
+func TestFirstMergeTarget(t *testing.T) {
+	if firstMergeTarget(0, 3) != 1 {
+		t.Errorf("cursor 0, n 3: want 1, got %d", firstMergeTarget(0, 3))
+	}
+	if firstMergeTarget(2, 3) != 0 {
+		t.Errorf("cursor 2, n 3: want 0, got %d", firstMergeTarget(2, 3))
+	}
+}
+
+// drainBatch executes a tea.BatchMsg-producing cmd and any sub-cmds it
+// returns synchronously, so store side-effects land before assertions.
+func drainBatch(cmd tea.Cmd) {
+	for _, msg := range fanOut(cmd) {
+		_ = msg
+	}
+}
+
+// fanOut returns every message produced by cmd, recursively expanding
+// tea.BatchMsg into its component cmds. tea.Sequence is reduced to its
+// first message only — that's enough for tests that care about the
+// initial side-effect (the put/delete) without driving the timer.
+func fanOut(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	switch m := msg.(type) {
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, sub := range m {
+			out = append(out, fanOut(sub)...)
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return []tea.Msg{msg}
+	}
+}
+
+// contains is a tiny strings.Contains shim so the test file doesn't
+// need a strings import for one usage.
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}

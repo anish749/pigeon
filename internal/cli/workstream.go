@@ -17,6 +17,8 @@ import (
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
+	wsstore "github.com/anish749/pigeon/internal/workstream/store"
+	"github.com/anish749/pigeon/internal/wstui"
 )
 
 func newWorkstreamCmd() *cobra.Command {
@@ -27,6 +29,36 @@ func newWorkstreamCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newWorkstreamDiscoverCmd())
 	cmd.AddCommand(newWorkstreamReplayCmd())
+	cmd.AddCommand(newWorkstreamTUICmd())
+	return cmd
+}
+
+func newWorkstreamTUICmd() *cobra.Command {
+	var workspaceFlag string
+	cmd := &cobra.Command{
+		Use:   "tui",
+		Short: "Manage workstreams in a terminal UI",
+		Long: `Open the workstream management TUI — list, rename, edit focus, change
+state (active/dormant/resolved), merge, split, and delete workstreams in
+the current workspace.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			appCfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			ws, err := workspace.GetCurrentWorkspace(appCfg, workspaceFlag)
+			if err != nil {
+				return err
+			}
+			if ws.Name == "" {
+				return fmt.Errorf("no workspace selected — pass --workspace or set a default")
+			}
+			storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+			st := wsstore.NewFS(storeDir.Path())
+			return wstui.Run(st, ws.Name)
+		},
+	}
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name (default: from config/env)")
 	return cmd
 }
 
