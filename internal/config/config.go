@@ -89,6 +89,16 @@ type WhatsAppConfig struct {
 
 // SlackConfig holds all credentials for a single workspace.
 // Each workspace has its own internal Slack app for full rate limits.
+//
+// AppDisplayName feeds two distinct copy styles, resolved through different methods:
+//   - AppDisplay() — proper-noun form, used as the manifest app/bot name and
+//     in the listener's auto-reply text. Defaults to "Pigeon".
+//   - AppAttribution() — sentence-case form, used in the "sent via X" footer
+//     of user-token sends. Defaults to lowercase "pigeon" so it reads
+//     naturally mid-sentence.
+//
+// Storing the raw configured value (possibly empty) instead of a pre-resolved
+// string is what lets the two defaults differ.
 type SlackConfig struct {
 	Workspace      string `yaml:"workspace"`
 	AppDisplayName string `yaml:"app_display_name,omitempty"`
@@ -100,7 +110,9 @@ type SlackConfig struct {
 	TeamID         string `yaml:"team_id"`
 }
 
-// AppDisplay returns the Slack app/bot display name used in public Slack text.
+// AppDisplay returns the proper-noun form of the app name, used in the
+// manifest (display_information.name, bot_user.display_name) and the
+// listener's auto-reply text. Defaults to "Pigeon".
 func (s SlackConfig) AppDisplay() string {
 	if s.AppDisplayName != "" {
 		return s.AppDisplayName
@@ -108,8 +120,9 @@ func (s SlackConfig) AppDisplay() string {
 	return "Pigeon"
 }
 
-// AppAttribution returns the name used in "sent via ..." footer copy.
-// Defaults to lowercase "pigeon"; user-configured names pass through unchanged.
+// AppAttribution returns the sentence-case form of the app name, used in
+// the "sent via X" footer attached to user-token sends. Defaults to
+// lowercase "pigeon"; user-configured names pass through verbatim.
 func (s SlackConfig) AppAttribution() string {
 	if s.AppDisplayName != "" {
 		return s.AppDisplayName

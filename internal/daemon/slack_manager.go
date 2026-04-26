@@ -164,16 +164,16 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, sl.AppDisplay(), m.onMessage, m.onReaction, m.syncTracker)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{
-		BotAPI:    botAPI,
-		UserAPI:   userAPI,
-		Resolver:  resolver,
-		Messages:  messages,
-		Acct:      acct,
-		BotName:   botName,
-		BotUserID: botUserID,
-		UserName:  userName,
-		UserID:    userID,
-		AppName:   sl.AppAttribution(),
+		BotAPI:         botAPI,
+		UserAPI:        userAPI,
+		Resolver:       resolver,
+		Messages:       messages,
+		Acct:           acct,
+		BotName:        botName,
+		BotUserID:      botUserID,
+		UserName:       userName,
+		UserID:         userID,
+		AppDisplayName: sl.AppDisplayName,
 	})
 
 	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)

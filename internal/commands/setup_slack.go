@@ -55,15 +55,20 @@ func RunSetupSlack(args []string) error {
 	}
 	existing := lookupSlackConfig(cfg, workspace)
 	fmt.Printf("  Slack app display name [%s]: ", existing.AppDisplay())
-	appDisplayName, _ := reader.ReadString('\n')
-	appDisplayName = strings.TrimSpace(appDisplayName)
-	if appDisplayName == "" {
-		appDisplayName = existing.AppDisplay()
-	}
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
 	fmt.Println()
 
-	// Render manifest with user's values and copy to clipboard
-	rendered, err := renderManifest(username, workspace, appDisplayName)
+	// Save the raw value (possibly empty) so the lowercase "pigeon"
+	// attribution default still applies when the user accepts the default.
+	// The manifest needs the resolved name.
+	appDisplayName, displayName := input, input
+	if appDisplayName == "" {
+		appDisplayName = existing.AppDisplayName
+		displayName = existing.AppDisplay()
+	}
+
+	rendered, err := renderManifest(username, workspace, displayName)
 	if err != nil {
 		fmt.Printf("  (Could not render manifest: %v)\n", err)
 		fmt.Println("  Run `pigeon generate-manifest` manually to create the manifest.")
