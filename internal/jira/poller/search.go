@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -93,7 +94,7 @@ func nextPageV3(ctx context.Context, c *jira.Client, jql, token string) (*jira.S
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("v3 nextPage: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("v3 nextPage: HTTP %d: %s", resp.StatusCode, readBodyForError(resp.Body))
 	}
 	var out jira.SearchResult
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -117,4 +118,20 @@ func getIssueRaw(c *jira.Client, key string, ver APIVersion) (string, error) {
 func jqlEscape(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return `"` + r.Replace(s) + `"`
+}
+
+// errorBodyLimit caps how much of an HTTP response body we embed in
+// error messages. Jira's error bodies are typically a few hundred bytes
+// of JSON; the cap prevents a hostile or accidentally-huge body from
+// blowing up the log.
+const errorBodyLimit = 4096
+
+// readBodyForError reads up to errorBodyLimit bytes of body and returns
+// them as a trimmed string suitable for embedding in an error message.
+// Read failures are themselves swallowed because the caller already has
+// a more relevant error (the non-200 status); we just want whatever
+// body bytes we can get for debugging.
+func readBodyForError(body io.Reader) string {
+	b, _ := io.ReadAll(io.LimitReader(body, errorBodyLimit))
+	return strings.TrimSpace(string(b))
 }
