@@ -95,8 +95,9 @@ func RunSetupJira(args []string) error {
 	}
 
 	entry := config.JiraConfig{
-		JiraConfig: resolvedPath,
-		APIToken:   token,
+		JiraConfig:  resolvedPath,
+		APIToken:    token,
+		AccountName: acct.Name,
 	}
 	upsertJiraByResolvedPath(cfg, entry, resolvedPath)
 
