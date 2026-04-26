@@ -643,3 +643,25 @@ func TestNotifReact_FormatNotification_MessageNotFound(t *testing.T) {
 		t.Errorf("fallback line %q should contain emoji", lines[0])
 	}
 }
+
+// TestNotifReact_FormatNotification_NopLookup verifies NopLookup honors
+// the FormatEnv contract: callers that don't have a real lookup pass
+// NopLookup, and the renderer falls through to the parent-missing path
+// without panicking on a nil function.
+func TestNotifReact_FormatNotification_NopLookup(t *testing.T) {
+	evt := NotifReact{
+		Envelope: Envelope{Kind: EventReaction, Conversation: "#general"},
+		ReactLine: modelv1.ReactLine{
+			MsgID: "M1", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
+			Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
+		},
+	}
+	env := FormatEnv{Loc: time.UTC, LookupParent: NopLookup}
+	lines := evt.FormatNotification(env)
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty lines")
+	}
+	if strings.Contains(lines[0], "to ") && !strings.Contains(lines[0], ":thumbsup:") {
+		t.Errorf("expected fallback rendering with NopLookup, got %q", lines[0])
+	}
+}

@@ -15,14 +15,24 @@ import (
 // render itself for session delivery. Built once per delivery by the hub
 // and passed to Notification.FormatNotification.
 //
-// LookupParent is provided so reaction notifications can fetch the
-// reacted-to message's display fields without the format code reaching
-// into hub internals. Other event types may ignore it.
+// LookupParent is the disk lookup reactions use to fetch the reacted-to
+// message's display fields without reaching into hub internals. The
+// contract is that LookupParent is always non-nil — callers pass
+// NopLookup when no real lookup is meaningful (e.g. unit tests of events
+// that don't read the field). The function may still return nil to
+// indicate the parent could not be found, which is a meaningful signal
+// for the reaction fallback path.
 type FormatEnv struct {
 	Loc          *time.Location
 	ConvMeta     *modelv1.ConvMeta
 	LookupParent func(msgID string) *modelv1.MsgLine
 }
+
+// NopLookup is a no-op LookupParent: it always returns nil. Callers that
+// build a FormatEnv for an event type that doesn't need parent context
+// pass this so the FormatEnv non-nil contract is honored without forcing
+// each call site to write its own empty closure.
+func NopLookup(string) *modelv1.MsgLine { return nil }
 
 // EventKind distinguishes event types on the broadcast bus and /api/tail stream.
 type EventKind string
@@ -98,10 +108,8 @@ type NotifReact struct {
 func (n NotifReact) envelope() Envelope { return n.Envelope }
 
 func (n NotifReact) FormatNotification(env FormatEnv) []string {
-	if env.LookupParent != nil {
-		if parent := env.LookupParent(n.MsgID); parent != nil {
-			return modelv1.FormatReactionNotification(*parent, n.ReactLine, env.Loc, env.ConvMeta)
-		}
+	if parent := env.LookupParent(n.MsgID); parent != nil {
+		return modelv1.FormatReactionNotification(*parent, n.ReactLine, env.Loc, env.ConvMeta)
 	}
 	return modelv1.FormatReactionFallbackNotification(n.ReactLine, env.Loc, env.ConvMeta)
 }
