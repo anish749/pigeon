@@ -164,10 +164,24 @@ func (c *Config) AddLinear(entry LinearConfig) {
 	c.Linear = append(c.Linear, entry)
 }
 
-// AddJira upserts a Jira configuration entry by jira-cli config path.
-// The path is the unique key because each jira-cli YAML maps to exactly
-// one (server, login, project) tuple; two entries with the same path
-// would manage the same on-disk location.
+// AddJira upserts a Jira configuration entry by the JiraConfig field as
+// the user typed it — a literal string compare, NOT a resolved-path
+// compare. An empty string and an explicit path that happen to resolve
+// to the same file are treated as distinct entries on purpose: the
+// empty sentinel means "follow the JIRA_CONFIG_FILE env / default
+// chain at runtime" and an explicit path is a pinned override; collapsing
+// them would erase that intent.
+//
+// At runtime, JiraManager.reconcile resolves each entry via
+// ResolveConfigPath and dedupes the resulting paths via a map, so two
+// entries that resolve to the same file produce only one poller — the
+// hand-edited config can carry redundant-looking entries without
+// corrupting ingest.
+//
+// Resolved-path conflict detection ("you already have an entry pointing
+// at this file") belongs in `pigeon setup jira` rather than here: only
+// the setup command has the user's attention and an interactive prompt
+// to decide what to keep.
 func (c *Config) AddJira(entry JiraConfig) {
 	for i, existing := range c.Jira {
 		if existing.JiraConfig == entry.JiraConfig {
