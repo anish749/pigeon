@@ -1,0 +1,28 @@
+{
+  "_comment": "Example schema for experiments/workstreams.json. Copy to workstreams.json and fill in real workspace data. The harnesses load this file at runtime; the real workstreams.json is gitignored to keep workspace-specific data out of the repo.",
+  "example-workspace-a": {
+    "slack_dir": "ExampleWorkspaceA",
+    "_slack_dir_comment": "Directory name under ~/.local/share/pigeon/slack/ for this workspace.",
+    "merges": {
+      "_comment": "Optional. Maps old workstream IDs to a surviving ID after a discover round identified semantic duplicates. Applied to labels at evaluator load time so existing labels don't need re-labelling.",
+      "ws-old-id": "ws-surviving-id"
+    },
+    "workstreams": [
+      {
+        "id": "ws-feature-x",
+        "name": "Feature X Development",
+        "focus": "Natural-language description of what this workstream is about. Typically taken from `pigeon workstream discover`'s output. Should describe the work, the artifacts (PRs, channels, partners), and the current state. The filter embeds this prose; embedding similarity to incoming messages is the routing signal."
+      },
+      {
+        "id": "ws-incident-y",
+        "name": "Incident Y Investigation",
+        "focus": "Another workstream's focus. Keep these distinct from each other — pairs whose focus prose embeds at cosine > ~0.7 cannot be reliably distinguished by the embedding-only filter and produce double-routing."
+      }
+    ]
+  },
+  "example-workspace-b": {
+    "slack_dir": "ExampleWorkspaceB",
+    "merges": {},
+    "workstreams": []
+  }
+}
