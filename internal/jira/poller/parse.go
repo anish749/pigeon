@@ -3,6 +3,7 @@ package poller
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
 
@@ -35,7 +36,7 @@ func splitIssueRaw(key string, raw []byte) (modelv1.Line, []modelv1.Line, string
 		return modelv1.Line{}, nil, "", fmt.Errorf("unmarshal issue runtime: %w", err)
 	}
 
-	commentMaps := liftComments(serialized)
+	commentMaps := liftComments(key, serialized)
 
 	issueLine := modelv1.Line{
 		Type: modelv1.LineJiraIssue,
@@ -79,23 +80,65 @@ func splitIssueRaw(key string, raw []byte) (modelv1.Line, []modelv1.Line, string
 // fields.comment (total, maxResults, startAt) are preserved on the issue
 // line so callers can detect comment truncation. Returns nil if no
 // comments are present.
-func liftComments(serialized map[string]any) []map[string]any {
-	fields, _ := serialized["fields"].(map[string]any)
-	if fields == nil {
+//
+// Logs a warning when a key exists but holds the wrong shape — that is
+// the failure mode where we'd otherwise silently drop comment data
+// returned by a future Jira API change. Absent keys are not logged
+// (a brand-new issue may have no fields.comment at all).
+func liftComments(key string, serialized map[string]any) []map[string]any {
+	fields, ok := requireMap(serialized, "fields", key)
+	if !ok {
+		// "fields" should always be present on a real Jira issue body.
+		// If it's absent, log loudly because the issue line will go to
+		// disk but we couldn't extract any comments.
+		slog.Warn("jira issue body missing top-level fields object", "issue", key)
 		return nil
 	}
-	cmt, _ := fields["comment"].(map[string]any)
-	if cmt == nil {
+	cmt, ok := requireMap(fields, "comment", key)
+	if !ok {
+		// comment block legitimately absent on some queries / older
+		// installations. Don't warn; just return.
 		return nil
 	}
-	rawList, _ := cmt["comments"].([]any)
+	rawList, present := cmt["comments"]
+	if !present {
+		return nil
+	}
 	delete(cmt, "comments")
+	list, ok := rawList.([]any)
+	if !ok {
+		slog.Warn("jira issue fields.comment.comments has unexpected shape, dropping",
+			"issue", key, "got_type", fmt.Sprintf("%T", rawList))
+		return nil
+	}
 
-	out := make([]map[string]any, 0, len(rawList))
-	for _, c := range rawList {
-		if m, ok := c.(map[string]any); ok {
-			out = append(out, m)
+	out := make([]map[string]any, 0, len(list))
+	for i, c := range list {
+		m, ok := c.(map[string]any)
+		if !ok {
+			slog.Warn("jira comment entry has unexpected shape, dropping",
+				"issue", key, "index", i, "got_type", fmt.Sprintf("%T", c))
+			continue
 		}
+		out = append(out, m)
 	}
 	return out
+}
+
+// requireMap fetches a nested map from m by key. Returns (nil, false) if
+// the key is absent, and logs+returns (nil, false) if the key is present
+// but the value is not a map[string]any (i.e. real schema drift, not
+// just an empty issue).
+func requireMap(m map[string]any, mapKey, issueKey string) (map[string]any, bool) {
+	raw, present := m[mapKey]
+	if !present {
+		return nil, false
+	}
+	out, ok := raw.(map[string]any)
+	if !ok {
+		slog.Warn("jira issue field has unexpected shape, dropping",
+			"issue", issueKey, "field", mapKey, "got_type", fmt.Sprintf("%T", raw))
+		return nil, false
+	}
+	return out, true
 }

@@ -194,6 +194,64 @@ func TestSplitIssueRawMalformed(t *testing.T) {
 	}
 }
 
+// TestLiftCommentsWrongType exercises liftComments directly against
+// schema-drift inputs that the strict pkg/jira.Issue unmarshal would
+// reject upstream. The defensive type checks inside liftComments are
+// the second line of defence: if the strict parse is ever loosened
+// (or pkg/jira changes how it models fields.comment), we still want
+// type mismatches to log + drop rather than crash + corrupt.
+func TestLiftCommentsWrongType(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     map[string]any
+		wantCount int
+	}{
+		{
+			"fields absent",
+			map[string]any{"id": "1", "key": "ENG-1"},
+			0,
+		},
+		{
+			"fields.comment absent",
+			map[string]any{"fields": map[string]any{"updated": "x"}},
+			0,
+		},
+		{
+			"fields.comment.comments absent",
+			map[string]any{"fields": map[string]any{"comment": map[string]any{"total": 0}}},
+			0,
+		},
+		{
+			"fields.comment is a string",
+			map[string]any{"fields": map[string]any{"comment": "surprise"}},
+			0,
+		},
+		{
+			"fields.comment.comments is a string",
+			map[string]any{"fields": map[string]any{"comment": map[string]any{"comments": "oops"}}},
+			0,
+		},
+		{
+			"individual comment is a string",
+			map[string]any{"fields": map[string]any{"comment": map[string]any{
+				"comments": []any{
+					"oops",
+					map[string]any{"id": "c2"},
+				},
+			}}},
+			1, // only the well-formed map survives
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := liftComments("ENG-1", c.input)
+			if len(got) != c.wantCount {
+				t.Errorf("liftComments returned %d, want %d", len(got), c.wantCount)
+			}
+		})
+	}
+}
+
 func TestSplitIssueRawIssueLineMarshalSurvivesRoundTrip(t *testing.T) {
 	// End-to-end: run splitIssueRaw, marshal each line, parse it back.
 	// Catches any Type/Serialized routing bugs that wouldn't show up in
