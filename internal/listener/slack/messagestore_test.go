@@ -13,27 +13,28 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
 
-// TestWriteThreadMessage_StampsThreadTS round-trips through the store and
-// asserts the persisted JSONL line carries thread_ts only for thread
-// replies, never for the parent record.
-func TestWriteThreadMessage_StampsThreadTS(t *testing.T) {
+// TestWriteThreadMessage_StampsThreadFields round-trips through the store
+// and asserts the persisted JSONL line carries both thread_ts and
+// thread_id (set to the same parent value for Slack) on replies, and
+// neither on parent records.
+func TestWriteThreadMessage_StampsThreadFields(t *testing.T) {
 	tests := []struct {
 		name     string
 		isReply  bool
 		threadTS string
-		wantTS   string // expected MsgLine.ThreadTS after read-back
+		want     string // expected value of both ThreadTS and ThreadID after read-back ("" = unset)
 	}{
 		{
-			name:     "reply gets thread_ts",
+			name:     "reply gets thread_ts and thread_id",
 			isReply:  true,
 			threadTS: "1700000001.000001",
-			wantTS:   "1700000001.000001",
+			want:     "1700000001.000001",
 		},
 		{
-			name:     "parent record (isReply=false) does not get thread_ts",
+			name:     "parent record (isReply=false) gets neither",
 			isReply:  false,
 			threadTS: "1700000001.000001",
-			wantTS:   "",
+			want:     "",
 		},
 	}
 
@@ -51,8 +52,11 @@ func TestWriteThreadMessage_StampsThreadTS(t *testing.T) {
 			if err != nil {
 				t.Fatalf("WriteThreadMessage: %v", err)
 			}
-			if written.ThreadTS != tt.wantTS {
-				t.Errorf("returned MsgLine.ThreadTS = %q, want %q", written.ThreadTS, tt.wantTS)
+			if written.ThreadTS != tt.want {
+				t.Errorf("returned MsgLine.ThreadTS = %q, want %q", written.ThreadTS, tt.want)
+			}
+			if written.ThreadID != tt.want {
+				t.Errorf("returned MsgLine.ThreadID = %q, want %q", written.ThreadID, tt.want)
 			}
 
 			tf, err := s.ReadThread(acct, "#general", tt.threadTS)
@@ -73,16 +77,20 @@ func TestWriteThreadMessage_StampsThreadTS(t *testing.T) {
 			} else {
 				got = tf.Parent.MsgLine
 			}
-			if got.ThreadTS != tt.wantTS {
-				t.Errorf("read-back MsgLine.ThreadTS = %q, want %q", got.ThreadTS, tt.wantTS)
+			if got.ThreadTS != tt.want {
+				t.Errorf("read-back MsgLine.ThreadTS = %q, want %q", got.ThreadTS, tt.want)
+			}
+			if got.ThreadID != tt.want {
+				t.Errorf("read-back MsgLine.ThreadID = %q, want %q", got.ThreadID, tt.want)
 			}
 		})
 	}
 }
 
-// TestWriteThreadMessage_OmitemptyOnDisk verifies parent records do not
-// emit a thread_ts JSON field at all (omitempty), keeping the on-disk
-// schema clean for non-reply lines.
+// TestWriteThreadMessage_OmitemptyOnDisk verifies parent records emit
+// neither thread_ts nor thread_id (omitempty), and reply records emit
+// both keys with the parent's TS as their value — the on-disk shape that
+// makes lines greppable from either vocabulary.
 func TestWriteThreadMessage_OmitemptyOnDisk(t *testing.T) {
 	ms, _, acct := newTestMessageStore(t)
 	rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
@@ -109,10 +117,13 @@ func TestWriteThreadMessage_OmitemptyOnDisk(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("thread file has %d lines, want 2:\n%s", len(lines), data)
 	}
-	if strings.Contains(lines[0], "thread_ts") {
-		t.Errorf("parent line should omit thread_ts; got:\n%s", lines[0])
+	if strings.Contains(lines[0], "thread_ts") || strings.Contains(lines[0], "thread_id") {
+		t.Errorf("parent line should omit thread_ts/thread_id; got:\n%s", lines[0])
 	}
 	if !strings.Contains(lines[1], `"thread_ts":"P1"`) {
 		t.Errorf("reply line should contain thread_ts; got:\n%s", lines[1])
+	}
+	if !strings.Contains(lines[1], `"thread_id":"P1"`) {
+		t.Errorf("reply line should contain thread_id; got:\n%s", lines[1])
 	}
 }

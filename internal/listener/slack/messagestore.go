@@ -30,9 +30,10 @@ func (ms *MessageStore) Write(rs ResolvedSender, text string, ts time.Time, slac
 }
 
 // WriteThreadMessage writes a message to a thread file and returns the
-// MsgLine that was written. ThreadTS is stamped on replies so the stored
-// JSONL is self-describing — downstream readers (notifications, monitor,
-// search) don't need to derive thread context from the filename.
+// MsgLine that was written. ThreadTS and ThreadID are both stamped on
+// replies (with the same value, since Slack's parent identifier is a TS
+// that also serves as its message ID) so the stored JSONL is
+// self-describing and greppable from either vocabulary.
 func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text string, ts time.Time, slackTS string, isReply bool, via modelv1.Via, raw slackraw.SlackRawContent) (modelv1.MsgLine, error) {
 	msg := modelv1.MsgLine{
 		ID:       slackTS,
@@ -47,6 +48,7 @@ func (ms *MessageStore) WriteThreadMessage(rs ResolvedSender, threadTS, text str
 	}
 	if isReply {
 		msg.ThreadTS = threadTS
+		msg.ThreadID = threadTS
 	}
 	line := modelv1.Line{Type: modelv1.LineMessage, Msg: &msg}
 	if err := ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line); err != nil {
