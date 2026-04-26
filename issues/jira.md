@@ -8,3 +8,4 @@ Things to do for Jira support.
 4. **Identity service integration for Jira.**
 5. **Read protocol integration for Jira.**
 6. **`pigeon setup` command for Jira** — setup validation and integration.
+7. **Replicate issue comments into a date-sharded comments log.** Comments currently live only inside the per-issue file. They are a linear log of activity and should also be replicated into a separate comments file organized by date.
