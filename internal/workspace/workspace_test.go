@@ -148,12 +148,44 @@ func TestGetCurrentWorkspace_IncludesLinear(t *testing.T) {
 	}
 }
 
+func TestGetCurrentWorkspace_IncludesJira(t *testing.T) {
+	// resolve() takes user-supplied slugs in WorkspaceConfig.Jira at face
+	// value — same semantics as Slack/Linear. No YAML is read here; the
+	// slug is what `pigeon setup-jira` printed and the user copied into
+	// the workspace config.
+	cfg := &config.Config{
+		Workspaces: map[config.WorkspaceName]config.WorkspaceConfig{
+			"work": {Slack: []string{"acme-corp"}, Jira: []string{"acme"}},
+		},
+	}
+
+	ws, err := GetCurrentWorkspace(cfg, "work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []account.Account{
+		account.New("slack", "acme-corp"),
+		account.New("jira-issues", "acme"),
+	}
+	if len(ws.Accounts) != len(want) {
+		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
+	}
+	for i, got := range ws.Accounts {
+		if got != want[i] {
+			t.Errorf("Accounts[%d] = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
 func TestGetCurrentWorkspace_NoWorkspaceReturnsAll(t *testing.T) {
 	cfg := &config.Config{
 		Slack:    []config.SlackConfig{{Workspace: "acme-corp"}},
 		GWS:      []config.GWSConfig{{Email: "work@co.com"}},
 		WhatsApp: []config.WhatsAppConfig{{Account: "phone1"}},
 		Linear:   []config.LinearConfig{{Workspace: "eng"}},
+		Jira: []config.JiraConfig{
+			{JiraConfig: "/some/path.yml", APIToken: "tok", AccountName: "acme"},
+		},
 	}
 
 	ws, err := GetCurrentWorkspace(cfg, "")
@@ -163,8 +195,14 @@ func TestGetCurrentWorkspace_NoWorkspaceReturnsAll(t *testing.T) {
 	if ws.Name != "" {
 		t.Errorf("Name = %q, want empty", ws.Name)
 	}
-	if len(ws.Accounts) != 4 {
-		t.Fatalf("got %d accounts, want 4: %v", len(ws.Accounts), ws.Accounts)
+	if len(ws.Accounts) != 5 {
+		t.Fatalf("got %d accounts, want 5: %v", len(ws.Accounts), ws.Accounts)
+	}
+	// Jira account is constructed from JiraConfig.Account() so it carries
+	// the persisted AccountName, not derived at runtime from any YAML.
+	want := account.New("jira-issues", "acme")
+	if ws.Accounts[4] != want {
+		t.Errorf("jira account = %v, want %v", ws.Accounts[4], want)
 	}
 }
 
