@@ -108,7 +108,7 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 // so each surface (filename-based read, JSON-grep, notification format)
 // can find the parent independently. See modelv1.MsgLine for the full
 // grep-friendly rationale.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text string, ts time.Time, raw slackraw.SlackRawContent) (modelv1.EditLine, error) {
 	edit := modelv1.EditLine{
 		Ts:       ts,
 		MsgID:    msgTS,
@@ -123,17 +123,23 @@ func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text stri
 		edit.ThreadID = threadTS
 	}
 	line := modelv1.Line{Type: modelv1.LineEdit, Edit: &edit}
+	var err error
 	if threadTS != "" {
-		return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
+		err = ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
+	} else {
+		err = ms.store.Append(ms.acct, rs.ChannelName, line)
 	}
-	return ms.store.Append(ms.acct, rs.ChannelName, line)
+	if err != nil {
+		return modelv1.EditLine{}, err
+	}
+	return edit, nil
 }
 
 // AppendDelete stores a message delete event for an in-conversation
 // message. Routing mirrors AppendEdit: thread targets land in the thread
 // file (where CompactThread will drop the matching reply on read);
 // top-level deletes go to the date file.
-func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, ts time.Time) error {
+func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, ts time.Time) (modelv1.DeleteLine, error) {
 	del := modelv1.DeleteLine{
 		Ts:       ts,
 		MsgID:    msgTS,
@@ -145,8 +151,14 @@ func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, 
 		del.ThreadID = threadTS
 	}
 	line := modelv1.Line{Type: modelv1.LineDelete, Delete: &del}
+	var err error
 	if threadTS != "" {
-		return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
+		err = ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
+	} else {
+		err = ms.store.Append(ms.acct, rs.ChannelName, line)
 	}
-	return ms.store.Append(ms.acct, rs.ChannelName, line)
+	if err != nil {
+		return modelv1.DeleteLine{}, err
+	}
+	return del, nil
 }

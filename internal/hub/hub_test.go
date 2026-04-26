@@ -325,8 +325,8 @@ func TestRoute_FiresEventSignal(t *testing.T) {
 	msg := modelv1.MsgLine{
 		ID: "M1", Ts: time.Now(), Sender: "Alice", SenderID: "U001", Text: "hi",
 	}
-	if res := h.Route(acct, "#general", msg); res.State != RouteOK {
-		t.Fatalf("Route state = %v, want RouteOK", res.State)
+	if res := h.RouteEvent(NewMsg(acct, "#general", msg)); res.State != RouteOK {
+		t.Fatalf("RouteEvent state = %v, want RouteOK", res.State)
 	}
 
 	select {
@@ -345,14 +345,14 @@ func TestRoute_FiresEventSignal(t *testing.T) {
 			t.Errorf("MsgLine = %+v, want M1/hi round-trip", nm.MsgLine)
 		}
 	default:
-		t.Fatal("Route did not enqueue any signal")
+		t.Fatal("RouteEvent did not enqueue any signal")
 	}
 }
 
-// TestRouteReaction_FiresEventSignal verifies RouteReaction wraps the
-// ReactLine in a NotifReact event with the right kind (reaction vs
-// unreact) and enqueues a signalEvent.
-func TestRouteReaction_FiresEventSignal(t *testing.T) {
+// TestNewReact_FiresEventSignal verifies the NewReact constructor picks
+// EventReaction or EventUnreact based on ReactLine.Remove and that
+// RouteEvent enqueues the resulting NotifReact via signalEvent.
+func TestNewReact_FiresEventSignal(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PIGEON_DATA_DIR", tmp)
 	root := paths.NewDataRoot(tmp)
@@ -388,8 +388,8 @@ func TestRouteReaction_FiresEventSignal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if res := h.RouteReaction(acct, "#general", tt.react); res.State != RouteOK {
-				t.Fatalf("RouteReaction state = %v, want RouteOK", res.State)
+			if res := h.RouteEvent(NewReact(acct, "#general", tt.react)); res.State != RouteOK {
+				t.Fatalf("RouteEvent state = %v, want RouteOK", res.State)
 			}
 			select {
 			case sig := <-ch.signal:

@@ -28,7 +28,7 @@ import (
 // starts/stops accounts as they are added or removed.
 type WhatsAppManager struct {
 	apiServer   *api.Server
-	onMessage   hub.MessageNotifyFunc
+	onEvent     hub.NotifyFunc
 	store       store.Store
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -42,14 +42,15 @@ type runningWAAccount struct {
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
-// the given API server. onMessage is called when a message is received (may be nil).
+// the given API server. onEvent is called when a routable platform event
+// has been written to disk (may be nil).
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
 // whatsapp/<account-slug>/identity/people.jsonl.
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer:   apiServer,
-		onMessage:   onMessage,
+		onEvent:     onEvent,
 		store:       s,
 		idStore:     idStore,
 		dataRoot:    dataRoot,
@@ -142,7 +143,7 @@ func (m *WhatsAppManager) runWhatsAppAccount(ctx context.Context, wa config.What
 			config.Save(cfg)
 		}
 	}
-	listener := walistener.New(client, acct, m.store, onLogout, m.onMessage, m.syncTracker)
+	listener := walistener.New(client, acct, m.store, onLogout, m.onEvent, m.syncTracker)
 	client.AddEventHandler(listener.EventHandler(ctx))
 
 	if err := client.Connect(); err != nil {

@@ -168,6 +168,59 @@ func FormatReactionFallbackNotification(r ReactLine, loc *time.Location, convMet
 	}
 }
 
+// FormatEditNotification formats a single edit event for Claude Code
+// channel notifications. The header reports the new text; the meta line
+// carries [edit] plus the same identifying tags every event type emits
+// (message_id, sender_id, optional via/thread_ts/thread_id, conv meta).
+//
+// The edit's own timestamp is the rendered HH:MM:SS — it identifies when
+// the edit happened, not the original message's send time. The edited
+// message's ID is in [message_id:...] so the agent can correlate.
+func FormatEditNotification(e EditLine, loc *time.Location, convMeta *ConvMeta) []string {
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s edited message: %s",
+		displaySender(e.Sender, e.Via), e.Text))
+	lines = append(lines, formatRaw(e.Raw, "  ")...)
+
+	meta := fmt.Sprintf("  [edit] [%s] [message_id:%s] [sender_id:%s]",
+		e.Ts.In(loc).Format("15:04:05"), e.MsgID, e.SenderID)
+	if e.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", e.Via)
+	}
+	meta += formatThreadTSMeta(e.ThreadTS)
+	meta += formatThreadIDMeta(e.ThreadID)
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
+	lines = append(lines, meta)
+	return lines
+}
+
+// FormatDeleteNotification formats a single delete event for Claude Code
+// channel notifications. The header reports who deleted which message;
+// the meta line carries [delete] plus the same identifying tags as other
+// event notifications (message_id, sender_id, optional via/thread).
+func FormatDeleteNotification(d DeleteLine, loc *time.Location, convMeta *ConvMeta) []string {
+	header := fmt.Sprintf("%s deleted message %s",
+		displaySender(d.Sender, d.Via), d.MsgID)
+
+	meta := fmt.Sprintf("  [delete] [%s] [message_id:%s] [sender_id:%s]",
+		d.Ts.In(loc).Format("15:04:05"), d.MsgID, d.SenderID)
+	if d.Via != "" {
+		meta += fmt.Sprintf(" [via:%s]", d.Via)
+	}
+	meta += formatThreadTSMeta(d.ThreadTS)
+	meta += formatThreadIDMeta(d.ThreadID)
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
+	return []string{header, meta}
+}
+
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
 // channel notifications. See FormatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.

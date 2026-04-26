@@ -27,8 +27,8 @@ messages that arrive after the cutoff.
 
 Each line is a flat JSON object. Fields depend on kind.
 
-Envelope (present on message, reaction, unreact):
-  kind          "message", "reaction", "unreact", or "system"
+Envelope (present on message, reaction, unreact, edit, delete):
+  kind          "message", "reaction", "unreact", "edit", "delete", or "system"
   platform      platform slug, e.g. "slack", "whatsapp"
   name          account name (e.g. "acme-corp")
   conversation  channel or DM name (e.g. "#engineering", "@alice")
@@ -42,6 +42,8 @@ Message (kind=message):
   via           message pathway (omitted if empty)
   reply         true if this is a thread reply
   replyTo       quoted message ID (omitted if empty)
+  thread_ts     parent thread's TS for Slack replies (omitted if empty)
+  thread_id     parent thread's platform-neutral ID for replies (omitted if empty)
   attach        attachments (omitted if none)
   rawType       platform raw-content type (omitted if empty)
   raw           platform-specific raw payload (omitted if empty)
@@ -53,6 +55,28 @@ Reaction (kind=reaction for adds, kind=unreact for removes):
   from          platform user ID of the reactor
   emoji         emoji name (e.g. "thumbsup")
   via           message pathway (omitted if empty)
+
+Edit (kind=edit):
+  ts            edit timestamp (RFC3339) — when the edit happened
+  msg           target message ID
+  sender        display name of the editor
+  from          platform user ID of the editor
+  text          new message text (omitted if empty)
+  via           message pathway (omitted if empty)
+  thread_ts     parent thread's TS when target lives in a thread (omitted if empty)
+  thread_id     parent thread's platform-neutral ID when target lives in a thread (omitted if empty)
+  attach        complete attachment set after edit (omitted if none)
+  rawType       platform raw-content type (omitted if empty)
+  raw           updated platform-specific raw payload (omitted if empty)
+
+Delete (kind=delete):
+  ts            delete timestamp (RFC3339) — when the delete happened
+  msg           target message ID
+  sender        display name of who deleted
+  from          platform user ID of who deleted
+  via           message pathway (omitted if empty)
+  thread_ts     parent thread's TS when target lived in a thread (omitted if empty)
+  thread_id     parent thread's platform-neutral ID when target lived in a thread (omitted if empty)
 
 System (kind=system):
   ts            RFC3339 timestamp
