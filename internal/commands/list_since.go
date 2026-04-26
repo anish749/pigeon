@@ -14,6 +14,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/workspace"
 )
@@ -161,6 +162,18 @@ func listConvFor(f paths.DataFile, root string) (listConv, bool, error) {
 		}
 		display = strings.Replace(display, string(filepath.Separator)+"issues"+string(filepath.Separator), string(filepath.Separator), 1)
 		return listConv{Dir: v.Path(), Display: display}, true, nil
+	case paths.JiraIssueFile:
+		// jira-issues/<acct>/<project>/issues/<KEY>.jsonl — like Linear, each
+		// issue is its own conversation. Display drops both /<project>/ and
+		// /issues/ segments to match the flat key UX (`tubular/ENG-101`),
+		// keeping output stable whether or not the project key contains
+		// dashes.
+		display, err := filepath.Rel(root, v.Path())
+		if err != nil {
+			display = v.Path()
+		}
+		display = trimJiraDisplaySegments(display)
+		return listConv{Dir: v.Path(), Display: display}, true, nil
 	case paths.AttachmentFile, paths.ConvMetaFile, paths.PeopleFile,
 		paths.MaintenanceFile, paths.SyncCursorsFile, paths.PollMetricsFile,
 		paths.PendingDeletesFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile:
@@ -200,6 +213,14 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 		return scanLatestTs(v.Path(), "updated", "created")
 	case paths.IssueFile:
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
+	case paths.JiraIssueFile:
+		// Cannot use scanLatestTs: (1) Jira's "updated" timestamp on the
+		// issue line lives at fields.updated, not the top-level fields the
+		// helper inspects, and (2) Jira's API returns timestamps with a
+		// numeric "+0000" offset that json.Unmarshal into time.Time
+		// rejects. modelv1.Line.Ts() handles both — it knows the per-type
+		// timestamp location and uses jira.RFC3339MilliLayout for parsing.
+		return scanLatestModelTs(v.Path())
 	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile:
 		// All Drive content shares the per-doc drive-meta-YYYY-MM-DD.json
 		// sidecar as its "when did this doc change" anchor. The Drive
@@ -275,6 +296,79 @@ func scanLatestTs(path string, fields ...string) (time.Time, error) {
 			return time.Time{}, fmt.Errorf("read %s: %w", path, readErr)
 		}
 	}
+}
+
+// scanLatestModelTs walks a JSONL file line by line, parses each line via
+// modelv1.Parse, and returns the latest timestamp reported by Line.Ts().
+// Used by kinds whose timestamps live in nested or non-RFC3339 fields
+// (currently Jira issues/comments) — see the LatestTs JiraIssueFile case.
+//
+// Lines that fail to parse surface as errors with line-number context, the
+// same fail-loud contract scanLatestTs uses. Lines whose Ts() returns the
+// zero time are tolerated; not every line type reports a meaningful "when",
+// and we only care about the maximum.
+//
+// Uses bufio.Reader.ReadBytes('\n') rather than bufio.Scanner so there is
+// no per-line size cap. Same idiom scanLatestTs uses.
+func scanLatestModelTs(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	var latest time.Time
+	lineNum := 0
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lineNum++
+			trimmed := bytes.TrimRight(line, "\r\n")
+			if len(trimmed) > 0 {
+				l, err := modelv1.Parse(string(trimmed))
+				if err != nil {
+					return time.Time{}, fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
+				}
+				if t := l.Ts(); t.After(latest) {
+					latest = t
+				}
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return latest, nil
+			}
+			return time.Time{}, fmt.Errorf("read %s: %w", path, readErr)
+		}
+	}
+}
+
+// trimJiraDisplaySegments turns
+//
+//	jira-issues/tubular/ENG/issues/ENG-101.jsonl
+//
+// into
+//
+//	jira-issues/tubular/ENG-101.jsonl
+//
+// by stripping the project segment and the redundant "issues" subdir. The
+// project-segment strip cannot use a literal /<project>/ replacement (the
+// project key is opaque) — instead the function locates the "/issues/"
+// marker and removes both it and the segment immediately preceding it.
+func trimJiraDisplaySegments(display string) string {
+	sep := string(filepath.Separator)
+	marker := sep + "issues" + sep
+	idx := strings.LastIndex(display, marker)
+	if idx < 0 {
+		return display
+	}
+	// Walk backward to find the start of the project segment.
+	projStart := strings.LastIndex(display[:idx], sep)
+	if projStart < 0 {
+		return display
+	}
+	return display[:projStart] + display[idx+len("/issues"):]
 }
 
 // latestDriveMetaDate returns the newest drive-meta-YYYY-MM-DD.json date

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestMain(m *testing.M) {
@@ -126,6 +129,31 @@ func TestGlob_SinceIncludesRecentThread(t *testing.T) {
 	}
 	if !hasThread {
 		t.Errorf("Glob did not return recent thread file, got: %v", files)
+	}
+}
+
+// TestGlob_NoSinceClassifiesJiraIssues verifies the Glob → Classify pipeline
+// types Jira issue files correctly when no --since window is in play. The
+// --since-window discovery for issue files (Linear and Jira both) is
+// tracked as a separate bug; this test only locks in the no-window case so
+// `pigeon glob` and `pigeon grep` (without --since) surface Jira issues
+// with the right typed kind, ready for the dispatcher in list_since.
+func TestGlob_NoSinceClassifiesJiraIssues(t *testing.T) {
+	dir := t.TempDir()
+	root := paths.NewDataRoot(dir)
+	acct := account.New(paths.JiraPlatform, "tubular")
+	issue := root.AccountFor(acct).Jira().Project("ENG").IssueFile("ENG-101")
+	writeFile(t, issue.Path(), `{"type":"jira-issue","key":"ENG-101"}`+"\n")
+
+	files, err := Glob(dir, 0)
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %v", len(files), files)
+	}
+	if _, ok := files[0].(paths.JiraIssueFile); !ok {
+		t.Errorf("file %q classified as %T, want paths.JiraIssueFile", files[0].Path(), files[0])
 	}
 }
 

@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ func RunRead(p ReadParams) error {
 		return fmt.Errorf("read is not supported for gws accounts (data is organized by service, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search gws data")
 	case "linear":
 		return fmt.Errorf("read is not supported for linear accounts (data is organized by issue, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search linear data")
+	case paths.JiraPlatform:
+		return runReadJira(p)
 	}
 
 	s := store.NewFSStore(paths.DefaultDataRoot())
@@ -92,6 +95,41 @@ func RunRead(p ReadParams) error {
 	return errors.Join(errs...)
 }
 
+// runReadJira streams an issue's JSONL file to stdout unchanged. Jira data
+// is organized as one issue file per Jira issue (one jira-issue line + N
+// jira-comment lines), and the agent consuming this output understands the
+// platform's native JSON shape directly — no resolution, formatting, or
+// per-line rendering is applied. The --date, --last and --since filters do
+// not apply to issue files; specifying any of them is a usage error rather
+// than a silent no-op.
+//
+// Contact resolves to the Jira issue key (e.g. ENG-101). Project subdir is
+// derived by scanning, so users never need to know which project owns the
+// key — see store.FindJiraIssue.
+func runReadJira(p ReadParams) error {
+	if p.Date != "" || p.Last != 0 || p.Since != "" {
+		return fmt.Errorf("read for jira-issues does not support --date, --last, or --since (each issue is one file; use 'pigeon grep' to search across issues)")
+	}
+
+	s := store.NewFSStore(paths.DefaultDataRoot())
+	acct := account.New(p.Platform, p.Account)
+
+	file, err := s.FindJiraIssue(acct, p.Contact)
+	if err != nil {
+		return err
+	}
+	data, err := s.ReadRaw(file)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("jira issue %s in %s is empty", p.Contact, acct.Display())
+	}
+	if _, err := os.Stdout.Write(data); err != nil {
+		return fmt.Errorf("write stdout: %w", err)
+	}
+	return nil
+}
 
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {
@@ -141,4 +179,3 @@ func parseDisplayName(dirName string) string {
 	}
 	return dirName
 }
-

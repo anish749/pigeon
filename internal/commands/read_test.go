@@ -1,7 +1,11 @@
 package commands
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anish749/pigeon/internal/account"
@@ -135,4 +139,98 @@ func convNames(matches []*conversation) []string {
 		names[i] = m.dirName
 	}
 	return names
+}
+
+// TestRunRead_JiraIssueRawPassthrough drives RunRead end-to-end for a Jira
+// account: the issue file's bytes must reach stdout unchanged. The test
+// captures stdout by swapping os.Stdout for a pipe (the same approach
+// monitor_test.go uses).
+func TestRunRead_JiraIssueRawPassthrough(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", root)
+
+	acct := account.New(paths.JiraPlatform, "tubular")
+	dataRoot := paths.NewDataRoot(root)
+	issueFile := dataRoot.AccountFor(acct).Jira().Project("ENG").IssueFile("ENG-101")
+	if err := os.MkdirAll(filepath.Dir(issueFile.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"jira-issue","key":"ENG-101","fields":{"summary":"Fix login"}}` + "\n" +
+		`{"type":"jira-comment","id":"1","issueKey":"ENG-101","body":"shipped"}` + "\n"
+	if err := os.WriteFile(issueFile.Path(), []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := captureStdout(t, func() error {
+		return RunRead(ReadParams{
+			Platform: paths.JiraPlatform,
+			Account:  "tubular",
+			Contact:  "ENG-101",
+		})
+	})
+	if got != want {
+		t.Errorf("RunRead jira passthrough mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestRunRead_JiraRejectsTimeFilters(t *testing.T) {
+	t.Setenv("PIGEON_DATA_DIR", t.TempDir())
+	for _, p := range []ReadParams{
+		{Platform: paths.JiraPlatform, Account: "x", Contact: "ENG-1", Date: "2026-04-26"},
+		{Platform: paths.JiraPlatform, Account: "x", Contact: "ENG-1", Last: 10},
+		{Platform: paths.JiraPlatform, Account: "x", Contact: "ENG-1", Since: "1d"},
+	} {
+		err := RunRead(p)
+		if err == nil || !strings.Contains(err.Error(), "does not support") {
+			t.Errorf("RunRead with time filter should error, got %v (params=%+v)", err, p)
+		}
+	}
+}
+
+func TestRunRead_JiraIssueNotFound(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", root)
+	// Account dir exists but no projects.
+	acct := account.New(paths.JiraPlatform, "tubular")
+	if err := os.MkdirAll(paths.NewDataRoot(root).AccountFor(acct).Jira().Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := RunRead(ReadParams{Platform: paths.JiraPlatform, Account: "tubular", Contact: "ENG-101"})
+	if err == nil {
+		t.Fatal("RunRead should error for missing issue")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should say 'not found', got %v", err)
+	}
+}
+
+// captureStdout swaps os.Stdout for a pipe, runs fn, and returns whatever
+// fn wrote. Restores os.Stdout on cleanup.
+func captureStdout(t *testing.T, fn func() error) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	done := make(chan []byte, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.Bytes()
+	}()
+
+	if err := fn(); err != nil {
+		_ = w.Close()
+		<-done
+		t.Fatalf("fn: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	return string(<-done)
 }

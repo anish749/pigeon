@@ -127,6 +127,18 @@ func TestClassify(t *testing.T) {
 			want: IssueFile("/data/linear-issues/acme/issues/PROJ-123.jsonl"),
 		},
 
+		// Jira.
+		{
+			name: "jira issue file",
+			path: "/data/jira-issues/tubular/ENG/issues/ENG-142.jsonl",
+			want: JiraIssueFile("/data/jira-issues/tubular/ENG/issues/ENG-142.jsonl"),
+		},
+		{
+			name: "jira issue file under multi-segment project key",
+			path: "/data/jira-issues/acme/KD-1699/issues/KD-1699-42.jsonl",
+			want: JiraIssueFile("/data/jira-issues/acme/KD-1699/issues/KD-1699-42.jsonl"),
+		},
+
 		// Workstream router state.
 		{
 			name: "workstream list",
@@ -201,6 +213,7 @@ func TestClassify_RoundTripsConstructors(t *testing.T) {
 		{"PendingDeletesFile", gwsAcct.Gmail().PendingDeletesFile()},
 		{"CalendarDateFile", gwsAcct.Calendar("primary").DateFile("2026-04-07")},
 		{"IssueFile", root.AccountFor(account.New("linear-issues", "acme")).Linear().IssueFile("PROJ-123")},
+		{"JiraIssueFile", root.AccountFor(account.New("jira-issues", "tubular")).Jira().Project("ENG").IssueFile("ENG-142")},
 		{"WorkstreamsFile", root.Workspace("acme").WorkstreamStore().WorkstreamsFile()},
 		{"WorkstreamProposalsFile", root.Workspace("acme").WorkstreamStore().ProposalsFile()},
 	}
