@@ -38,10 +38,10 @@ type Listener struct {
 // NewListener creates a Slack listener for a single workspace.
 // pigeonBotUID is the Slack user ID of the Pigeon bot (used to detect
 // @mentions and self-messages). appName is the configured app display
-// name used in auto-replies and similar bot output. onEvent is the
-// single hub callback used for every routable platform event —
-// messages, reactions, edits, deletes — built via hub.NewMsg /
-// NewReact / NewEdit / NewDelete at the call sites. Must be non-nil.
+// name shown in the no-session auto-reply text. onEvent is the single
+// hub callback used for every routable platform event — messages,
+// reactions, edits, deletes — built via hub.NewMsg / NewReact /
+// NewEdit / NewDelete at the call sites. Must be non-nil.
 func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onEvent hub.NotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
