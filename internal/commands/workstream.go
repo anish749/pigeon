@@ -68,17 +68,7 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 	}
 
 	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
-	st := wsstore.NewFS(storeDir.Path())
-	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
-		ApprovalMode: models.AutoApprove,
-		Workspace:    *ws,
-	}, st, logger)
-
-	if err := mgr.EnsureDefaultWorkstream(ws.Name, signals[0].Ts); err != nil {
-		return fmt.Errorf("ensure default workstream: %w", err)
-	}
-
-	discovered, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts)
+	discovered, err := discoverAndPersist(ctx, claude, ws, signals, logger)
 	if err != nil {
 		return err
 	}
@@ -88,6 +78,56 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 		fmt.Fprintf(w, "  Persisted to %s.\n", storeDir.Path())
 	}
 	return nil
+}
+
+// DiscoverWorkspace runs the LLM discovery + persistence flow for a
+// single workspace and returns the number of workstreams produced. It is
+// the headless variant of `pigeon workstream discover` — same pipeline
+// (read signals, ensure default, run manager.DiscoverAndPropose), no
+// stdout output. Used by the workstream TUI's in-app discovery action,
+// which renders its own progress UI.
+//
+// Returns 0 when the workspace has no signals in the time window — that
+// is not an error, just an empty workspace.
+func DiscoverWorkspace(ctx context.Context, ws *workspace.Workspace, since, until time.Time, model string, logger *slog.Logger) (int, error) {
+	if ws == nil || ws.Name == "" {
+		return 0, fmt.Errorf("workspace required")
+	}
+
+	root := paths.DefaultDataRoot()
+	r := reader.New(store.NewFSStore(root), root)
+	signals, err := r.ReadAccounts(ws.Accounts, since, until)
+	if err != nil {
+		return 0, fmt.Errorf("read signals: %w", err)
+	}
+	if len(signals) == 0 {
+		return 0, nil
+	}
+
+	claude := clients.New(model, logger)
+	discovered, err := discoverAndPersist(ctx, claude, ws, signals, logger)
+	if err != nil {
+		return 0, err
+	}
+	return len(discovered), nil
+}
+
+// discoverAndPersist wires up the manager for a single discovery pass
+// and returns the discovered workstreams. Shared between the printing
+// CLI flow (discoverWorkspace) and the headless TUI flow
+// (DiscoverWorkspace).
+func discoverAndPersist(ctx context.Context, claude *clients.Client, ws *workspace.Workspace, signals []models.Signal, logger *slog.Logger) ([]discovery.DiscoveredWorkstream, error) {
+	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+	st := wsstore.NewFS(storeDir.Path())
+	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace:    *ws,
+	}, st, logger)
+
+	if err := mgr.EnsureDefaultWorkstream(ws.Name, signals[0].Ts); err != nil {
+		return nil, fmt.Errorf("ensure default workstream: %w", err)
+	}
+	return mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts)
 }
 
 func printDiscovered(w io.Writer, discovered []discovery.DiscoveredWorkstream) {

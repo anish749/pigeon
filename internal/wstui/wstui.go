@@ -22,9 +22,10 @@ import (
 )
 
 // Run starts the workstream-management TUI for ws, backed by st.
-// Blocks until the user quits.
-func Run(st store.Store, ws config.WorkspaceName) error {
-	p := tea.NewProgram(NewModel(st, ws), tea.WithAltScreen())
+// Blocks until the user quits. discover may be nil; when set, the 'D'
+// key and the empty-state prompt expose in-app discovery.
+func Run(st store.Store, ws config.WorkspaceName, discover DiscoverFunc) error {
+	p := tea.NewProgram(NewModel(st, ws, discover), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

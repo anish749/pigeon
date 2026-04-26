@@ -20,6 +20,11 @@ func (m Model) View() string {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 	}
 
+	if m.mode == modeDiscovering {
+		b.WriteString(m.renderDiscovering())
+		return b.String()
+	}
+
 	if len(m.items) == 0 {
 		b.WriteString(m.renderEmpty())
 		return b.String()
@@ -49,8 +54,27 @@ func (m Model) renderHeader() string {
 func (m Model) renderEmpty() string {
 	var b strings.Builder
 	b.WriteString(dimStyle.Render("  No workstreams in this workspace.\n\n"))
-	b.WriteString(dimStyle.Render("  Press n to create one.\n\n"))
-	b.WriteString(helpStyle.Render("  n new   q quit"))
+	if m.discoverFn != nil {
+		b.WriteString("  " + hintStyle.Render("Press D to discover workstreams from your messaging history,") + "\n")
+		b.WriteString("  " + hintStyle.Render("or n to create one manually.") + "\n\n")
+		b.WriteString(helpStyle.Render("  D discover   n new   q quit"))
+	} else {
+		b.WriteString(dimStyle.Render("  Press n to create one.\n\n"))
+		b.WriteString(helpStyle.Render("  n new   q quit"))
+	}
+	return b.String()
+}
+
+// renderDiscovering replaces the list while a discovery call is in
+// flight. The spinner is one of ten braille frames, advanced by
+// spinTickMsg every ~120ms.
+func (m Model) renderDiscovering() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frame := frames[m.spinnerFrame%len(frames)]
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s  %s\n", hintStyle.Render(frame), titleStyle.Render("Discovering workstreams…"))
+	b.WriteString(dimStyle.Render("  Reading the last 30 days of signals and asking the LLM to identify ongoing efforts.\n"))
+	b.WriteString(dimStyle.Render("  This usually takes 30–90 seconds. ctrl+c to abort.\n"))
 	return b.String()
 }
 
@@ -114,9 +138,17 @@ func (m Model) renderFooter() string {
 
 func listHelp(m Model) string {
 	if w, ok := m.current(); ok && w.IsDefault() {
-		return "  e edit focus  n new  j/k nav  q quit  " + dimStyle.Render("(default — limited actions)")
+		help := "  e edit focus  n new  j/k nav  q quit"
+		if m.discoverFn != nil {
+			help = "  e edit focus  n new  D discover  j/k nav  q quit"
+		}
+		return help + "  " + dimStyle.Render("(default — limited actions)")
 	}
-	return "  r rename  e edit focus  s state  m merge  n new  d delete  j/k nav  q quit"
+	help := "  r rename  e edit focus  s state  m merge  n new  d delete  j/k nav  q quit"
+	if m.discoverFn != nil {
+		help = "  r rename  e edit focus  s state  m merge  n new  d delete  D discover  j/k nav  q quit"
+	}
+	return help
 }
 
 // inputPrompt renders an inline editor with a help hint underneath.
