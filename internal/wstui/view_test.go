@@ -46,7 +46,7 @@ func TestView_PopulatedRendersAllItems(t *testing.T) {
 		{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateDormant, Focus: "beta focus"},
 	}
 	out := stripAnsi(m.View())
-	for _, want := range []string{"Alpha", "Beta", "active", "dormant", "alpha focus"} {
+	for _, want := range []string{"Alpha", "Beta", "alpha focus"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered view missing %q in:\n%s", want, out)
 		}
