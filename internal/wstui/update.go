@@ -23,6 +23,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m = m.scrollIntoView()
 	case loadedMsg:
 		return m.applyLoaded(msg), nil
 	case statusMsg:
@@ -73,6 +74,30 @@ func (m Model) applyLoaded(msg loadedMsg) Model {
 		m.cursor = max(0, len(m.items)-1)
 	}
 	m.err = nil
+	return m.scrollIntoView()
+}
+
+// scrollIntoView nudges listOffset so the cursor sits inside the
+// visible window. Up-moves shrink the offset to the cursor; down-moves
+// rely on visibleRange to push it forward when the cursor falls below
+// the line budget.
+func (m Model) scrollIntoView() Model {
+	if len(m.items) == 0 {
+		m.listOffset = 0
+		return m
+	}
+	if m.listOffset > m.cursor {
+		m.listOffset = m.cursor
+	}
+	if m.listOffset < 0 {
+		m.listOffset = 0
+	}
+	if m.listOffset >= len(m.items) {
+		m.listOffset = len(m.items) - 1
+	}
+	leftWidth, _ := m.columnWidths()
+	start, _ := m.visibleRange(leftWidth - 2)
+	m.listOffset = start
 	return m
 }
 
@@ -108,10 +133,12 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		if m.cursor < len(m.items)-1 {
 			m.cursor++
+			m = m.scrollIntoView()
 		}
 	case "k", "up":
 		if m.cursor > 0 {
 			m.cursor--
+			m = m.scrollIntoView()
 		}
 	case "r":
 		if w, ok := m.current(); ok && !w.IsDefault() {

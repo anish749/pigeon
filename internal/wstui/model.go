@@ -49,8 +49,9 @@ type Model struct {
 	cfg     models.Config
 	manager Manager // optional; nil disables in-app discovery
 
-	items  []models.Workstream
-	cursor int
+	items      []models.Workstream
+	cursor     int
+	listOffset int // index of the topmost visible row in the scrollable list
 
 	mode        mode
 	input       string
