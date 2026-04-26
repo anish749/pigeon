@@ -4,10 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
-const minDetailWidth = 40
+const (
+	minDetailWidth = 40
+	minListWidth   = 16
+	maxListWidth   = 36
+	bodyMargin     = 2 // spaces between terminal edge and content
+	bodyGap        = 2 // spaces between list and detail columns
+	defaultWidth   = 80
+)
 
 // View renders the current model state. It branches on mode and the
 // presence of items; helpers below cover each section.
@@ -30,13 +39,15 @@ func (m Model) View() string {
 		return m.renderFullScreen(b.String(), m.renderFooter())
 	}
 
-	b.WriteString(m.renderList())
-	b.WriteString("\n")
-
+	leftWidth, rightWidth := m.columnWidths()
+	listCol := m.renderListColumn(leftWidth)
+	var rightCol string
 	if w, ok := m.current(); ok {
-		b.WriteString(m.renderDetail(w))
-		b.WriteString("\n")
+		rightCol = m.renderDetailBox(w, rightWidth)
 	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, listCol, strings.Repeat(" ", bodyGap), rightCol)
+	b.WriteString(indentLines(body, strings.Repeat(" ", bodyMargin)))
+	b.WriteString("\n")
 
 	if m.status != "" {
 		fmt.Fprintf(&b, "  %s\n\n", hintStyle.Render(m.status))
@@ -75,41 +86,143 @@ func (m Model) renderDiscovering() string {
 	return b.String()
 }
 
-func (m Model) renderList() string {
-	var b strings.Builder
-	for i, w := range m.items {
-		marker := "  "
-		name := w.Name
-		if i == m.cursor {
-			marker = selectedStyle.Render("● ")
-			name = selectedStyle.Render(name)
-		} else {
-			name = dimStyle.Render(name)
-		}
-		def := ""
-		if w.IsDefault() {
-			def = dimStyle.Render(" (default)")
-		}
-		fmt.Fprintf(&b, "%s%s%s\n", marker, name, def)
+// columnWidths splits the body width between the list and the detail
+// box. Returns sensible defaults when the terminal width hasn't been
+// reported yet (initial render, tests).
+func (m Model) columnWidths() (left, right int) {
+	total := m.width
+	if total <= 0 {
+		total = defaultWidth
 	}
-	return b.String()
+	avail := total - 2*bodyMargin - bodyGap
+	if avail < minListWidth+minDetailWidth {
+		avail = minListWidth + minDetailWidth
+	}
+	left = avail / 3
+	if left < minListWidth {
+		left = minListWidth
+	}
+	if left > maxListWidth {
+		left = maxListWidth
+	}
+	right = avail - left
+	if right < minDetailWidth {
+		right = minDetailWidth
+	}
+	return left, right
 }
 
-func (m Model) renderDetail(w models.Workstream) string {
-	width := m.width - 6
+// renderListColumn renders the workstream list constrained to width.
+// Each row consumes a 2-col marker zone (cursor bullet or blank) plus
+// the wrapped name. Names that don't fit on one line wrap with a 2-col
+// indent on continuations so the visual hierarchy stays clear.
+func (m Model) renderListColumn(width int) string {
+	if width < minListWidth {
+		width = minListWidth
+	}
+	const markerWidth = 2
+	const continuationIndent = "  "
+	nameWidth := width - markerWidth
+	if nameWidth < 4 {
+		nameWidth = 4
+	}
+
+	var b strings.Builder
+	for i, w := range m.items {
+		var marker string
+		var nameStyle lipgloss.Style
+		if i == m.cursor {
+			marker = selectedStyle.Render("● ")
+			nameStyle = selectedStyle
+		} else {
+			marker = "  "
+			nameStyle = dimStyle
+		}
+		lines := wrapName(w.Name, nameWidth, continuationIndent)
+		for j, line := range lines {
+			if j == 0 {
+				b.WriteString(marker)
+			} else {
+				b.WriteString("  ")
+			}
+			b.WriteString(nameStyle.Render(line))
+			if j == len(lines)-1 && w.IsDefault() {
+				b.WriteString(dimStyle.Render(" (default)"))
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderDetailBox renders the right-hand panel showing the selected
+// workstream's name and focus, with reserved blank space at the bottom
+// for future fields.
+func (m Model) renderDetailBox(w models.Workstream, width int) string {
 	if width < minDetailWidth {
 		width = minDetailWidth
 	}
-	body := fmt.Sprintf("Workspace: %s\nFocus: %s",
-		w.Workspace,
-		emptyOr(w.Focus, "(no focus set)"))
-	box := boxStyle.Width(width).Render(body)
-
-	var b strings.Builder
-	for _, line := range strings.Split(box, "\n") {
-		b.WriteString("  " + line + "\n")
+	name := w.Name
+	if w.IsDefault() {
+		name += " (default)"
 	}
-	return b.String()
+	body := strings.Join([]string{
+		titleStyle.Render(name),
+		"",
+		"Focus: " + emptyOr(w.Focus, "(no focus set)"),
+		"",
+		"",
+	}, "\n")
+	return boxStyle.Width(width).Render(body)
+}
+
+// wrapName breaks name into lines that each fit in width, indenting
+// every line after the first by indent. A single word longer than
+// width is allowed to overflow on its own line rather than being split
+// mid-word.
+func wrapName(name string, width int, indent string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return []string{""}
+	}
+	if width <= 0 || lipgloss.Width(name) <= width {
+		return []string{name}
+	}
+	words := strings.Fields(name)
+	if len(words) == 0 {
+		return []string{name}
+	}
+	indentW := lipgloss.Width(indent)
+	var lines []string
+	cur := words[0]
+	curWidth := width
+	for _, w := range words[1:] {
+		candidate := cur + " " + w
+		if lipgloss.Width(candidate) <= curWidth {
+			cur = candidate
+			continue
+		}
+		lines = append(lines, cur)
+		cur = w
+		curWidth = width - indentW
+	}
+	lines = append(lines, cur)
+	for i := 1; i < len(lines); i++ {
+		lines[i] = indent + lines[i]
+	}
+	return lines
+}
+
+// indentLines prepends indent to every line of s.
+func indentLines(s, indent string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderFooter() string {
