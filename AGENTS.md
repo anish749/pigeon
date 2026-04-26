@@ -70,6 +70,8 @@ cmd/pigeon/main.go → cli.Execute()
 
 - **Paths** (`internal/paths`): XDG-compliant directory resolution. Env overrides: `PIGEON_CONFIG_DIR`, `PIGEON_DATA_DIR`, `PIGEON_STATE_DIR`. Defaults: `~/.config/pigeon/`, `~/.local/share/pigeon/`, `~/.local/state/pigeon/`.
 
+  Treat `internal/paths` as the typed registry for the data tree, not just a helper around `filepath.Join`. It models the directory hierarchy (`DataRoot` → platform → account → conversation/service) and seals known file kinds behind `DataFile`, `LogFile`, and `ContentFile` so callers preserve the difference between append-only JSONL logs, atomically written content, sidecars, queues, and workspace state. Use the typed constructors and `paths.Classify` when creating, reading, globbing, or routing data files; do not rebuild the same path grammar with ad hoc string parsing. When adding a new data shape, extend the paths registry and update the type-switch call sites so new kinds fail loud instead of being silently dropped.
+
 - **Workspace** (`internal/workspace`): Scopes CLI operations to a subset of accounts (--workspace flag → env → config → all).
 
 - **Identity** (`internal/identity`): Cross-source contact resolution. Listeners report signals via `Observer`; `Reader` provides lookup.
