@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 )
 
@@ -72,9 +71,7 @@ func Print(w io.Writer, r *replay.Report) {
 			if ws.IsDefault {
 				marker = "▸ "
 			}
-			stateEmoji := stateIcon(ws.State)
-
-			fmt.Fprintf(w, "%s%s %s [%s]\n", marker, stateEmoji, ws.Name, ws.ID)
+			fmt.Fprintf(w, "%s%s [%s]\n", marker, ws.Name, ws.ID)
 			fmt.Fprintf(w, "    Signals: %d", ws.SignalCount)
 			if !ws.Created.IsZero() && !ws.LastSignal.IsZero() {
 				fmt.Fprintf(w, "  |  %s → %s",
@@ -92,19 +89,6 @@ func Print(w io.Writer, r *replay.Report) {
 			}
 			fmt.Fprintln(w)
 		}
-	}
-}
-
-func stateIcon(state models.WorkstreamState) string {
-	switch state {
-	case models.StateActive:
-		return "●"
-	case models.StateDormant:
-		return "◌"
-	case models.StateResolved:
-		return "✓"
-	default:
-		return "?"
 	}
 }
 

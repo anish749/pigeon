@@ -57,14 +57,14 @@ func (s *fakeStore) ListWorkstreams() ([]models.Workstream, error) {
 	return out, nil
 }
 
-func (s *fakeStore) ActiveWorkstreams() ([]models.Workstream, error) {
-	var active []models.Workstream
+func (s *fakeStore) RoutableWorkstreams() ([]models.Workstream, error) {
+	var routable []models.Workstream
 	for _, w := range s.workstreams {
-		if w.State == models.StateActive && !w.IsDefault() {
-			active = append(active, w)
+		if !w.IsDefault() {
+			routable = append(routable, w)
 		}
 	}
-	return active, nil
+	return routable, nil
 }
 
 func (s *fakeStore) PutWorkstream(w models.Workstream) error {

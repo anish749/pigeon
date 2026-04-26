@@ -49,7 +49,7 @@ func TestApproveProposalCreatesWorkstreamAndDeletesProposal(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("workstream not found: ok=%v err=%v", ok, err)
 	}
-	if got.Name != "Auth Refactor" || got.State != models.StateActive || !got.Created.Equal(ts) {
+	if got.Name != "Auth Refactor" || !got.Created.Equal(ts) {
 		t.Errorf("workstream = %+v", got)
 	}
 
@@ -67,7 +67,6 @@ func TestApproveProposalConflictsWithExistingWorkstream(t *testing.T) {
 		ID:        "ws-auth-refactor",
 		Name:      "Auth Refactor",
 		Workspace: "acme",
-		State:     models.StateActive,
 		Focus:     "User-edited focus that must survive.",
 		Created:   ts,
 	}); err != nil {

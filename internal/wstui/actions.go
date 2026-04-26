@@ -58,17 +58,18 @@ func deleteCmd(m Model, w models.Workstream) tea.Cmd {
 	)
 }
 
-// mergeCmd merges src into dst, persisting both, then reloads.
+// mergeCmd folds src's focus into dst, persists dst, and deletes src.
+// The source goes away entirely — its work is now represented by dst.
 func mergeCmd(m Model, src, dst models.Workstream) tea.Cmd {
-	mergedDst, retiredSrc := src.MergeInto(dst)
+	mergedDst := src.MergeInto(dst)
 	st := m.store
 	return tea.Batch(
 		func() tea.Msg {
 			if err := st.PutWorkstream(mergedDst); err != nil {
 				return loadedMsg{err: fmt.Errorf("merge target %q: %w", mergedDst.Name, err)}
 			}
-			if err := st.PutWorkstream(retiredSrc); err != nil {
-				return loadedMsg{err: fmt.Errorf("merge source %q: %w", retiredSrc.Name, err)}
+			if err := st.DeleteWorkstream(src.ID); err != nil {
+				return loadedMsg{err: fmt.Errorf("delete merge source %q: %w", src.Name, err)}
 			}
 			return nil
 		},

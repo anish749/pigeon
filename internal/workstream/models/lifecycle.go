@@ -9,31 +9,29 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 )
 
-// NewWorkstream constructs an active workstream with an ID derived from
-// the slugified name. Used by the TUI's "create new" flow and by callers
+// NewWorkstream constructs a workstream with an ID derived from the
+// slugified name. Used by the TUI's "create new" flow and by callers
 // that materialize discovery output into the store.
 func NewWorkstream(name string, ws config.WorkspaceName, focus string, created time.Time) Workstream {
 	return Workstream{
 		ID:        "ws-" + slug.Make(name),
 		Name:      name,
 		Workspace: ws,
-		State:     StateActive,
 		Focus:     focus,
 		Created:   created,
 	}
 }
 
-// MergeInto returns the result of merging this workstream into target.
-// The returned target carries the combined focus (with a "[merged from
-// X]" annotation when the source focus is non-empty and not already
-// substring-contained); the returned source is marked Resolved.
-//
-// Callers should persist both returned values.
-func (w Workstream) MergeInto(target Workstream) (mergedTarget, retiredSource Workstream) {
+// MergeInto returns the target workstream with this workstream's focus
+// folded in. The returned target carries the combined focus (with a
+// "[merged from X]" annotation when the source focus is non-empty and
+// not already substring-contained). The source workstream itself is not
+// modified; callers persist the merged target and delete the source.
+func (w Workstream) MergeInto(target Workstream) Workstream {
 	combined := target.Focus
 	srcFocus := strings.TrimSpace(w.Focus)
 	if srcFocus != "" && !strings.Contains(combined, srcFocus) {
 		combined = strings.TrimSpace(combined + "\n\n[merged from " + w.Name + "] " + srcFocus)
 	}
-	return target.WithFocus(combined), w.WithState(StateResolved)
+	return target.WithFocus(combined)
 }

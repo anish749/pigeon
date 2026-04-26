@@ -14,9 +14,8 @@ type Config struct {
 	Until time.Time
 
 	// Manager — workstream lifecycle.
-	FocusUpdateInterval int           // update focus after this many signals per workstream
-	DormancyThreshold   time.Duration // mark workstream dormant after this long without signals
-	ApprovalMode        ApprovalMode  // auto-approve or interactive for workstream creation
+	FocusUpdateInterval int          // update focus after this many signals per workstream
+	ApprovalMode        ApprovalMode // auto-approve or interactive for workstream creation
 
 	// LLM — Claude CLI settings.
 	Model string // claude model name (e.g. "haiku", "sonnet")
@@ -31,7 +30,6 @@ func DefaultConfig() Config {
 		Since:               time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Until:               time.Now(),
 		FocusUpdateInterval: 25,
-		DormancyThreshold:   7 * 24 * time.Hour,
 		Model:               "sonnet",
 	}
 }

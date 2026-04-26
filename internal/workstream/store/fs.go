@@ -51,20 +51,20 @@ func (s *FS) ListWorkstreams() ([]models.Workstream, error) {
 	return s.loadWorkstreams()
 }
 
-func (s *FS) ActiveWorkstreams() ([]models.Workstream, error) {
+func (s *FS) RoutableWorkstreams() ([]models.Workstream, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	all, err := s.loadWorkstreams()
 	if err != nil {
 		return nil, err
 	}
-	var active []models.Workstream
+	var routable []models.Workstream
 	for _, ws := range all {
-		if ws.State == models.StateActive && !ws.IsDefault() {
-			active = append(active, ws)
+		if !ws.IsDefault() {
+			routable = append(routable, ws)
 		}
 	}
-	return active, nil
+	return routable, nil
 }
 
 func (s *FS) PutWorkstream(ws models.Workstream) error {
@@ -109,12 +109,40 @@ func (s *FS) DeleteWorkstream(id string) error {
 	return s.save(workstreamsFile, out)
 }
 
+// workstreamWithLegacyState is the on-disk shape used during the
+// state-removal migration: a Workstream plus a transitional `state`
+// field. New writes won't include it (the field is gone from the
+// canonical model), but existing files persisted before the migration
+// still carry it. When a stale "resolved" row is observed we drop it
+// (those were merge sources whose target absorbed the focus); other
+// values are ignored and the row keeps its other fields.
+type workstreamWithLegacyState struct {
+	models.Workstream
+	State string `json:"state,omitempty"`
+}
+
 func (s *FS) loadWorkstreams() ([]models.Workstream, error) {
-	var list []models.Workstream
-	if err := s.load(workstreamsFile, &list); err != nil {
+	var raw []workstreamWithLegacyState
+	if err := s.load(workstreamsFile, &raw); err != nil {
 		return nil, err
 	}
-	return list, nil
+	out := make([]models.Workstream, 0, len(raw))
+	rewrite := false
+	for _, e := range raw {
+		if e.State != "" {
+			rewrite = true
+		}
+		if e.State == "resolved" {
+			continue
+		}
+		out = append(out, e.Workstream)
+	}
+	if rewrite {
+		if err := s.save(workstreamsFile, out); err != nil {
+			return nil, fmt.Errorf("migrate workstreams: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // --- Proposals ---

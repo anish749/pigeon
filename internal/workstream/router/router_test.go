@@ -38,7 +38,7 @@ func TestRoute_MatchesSingleWorkstream(t *testing.T) {
 
 	r := New(embedder, 0.4, "_default", testLogger())
 	err := r.LoadWorkstreams(context.Background(), []models.Workstream{
-		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service", State: models.StateActive},
+		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestRoute_FallsBackToDefault(t *testing.T) {
 
 	r := New(embedder, 0.4, "_default_test", testLogger())
 	err := r.LoadWorkstreams(context.Background(), []models.Workstream{
-		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service", State: models.StateActive},
+		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +96,8 @@ func TestRoute_MultiRoutes(t *testing.T) {
 
 	r := New(embedder, 0.4, "_default", testLogger())
 	err := r.LoadWorkstreams(context.Background(), []models.Workstream{
-		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service", State: models.StateActive},
-		{ID: "ws-db", Name: "DB Migration", Focus: "Migrate the database schema", State: models.StateActive},
+		{ID: "ws-auth", Name: "Auth Deploy", Focus: "Deploy the auth service"},
+		{ID: "ws-db", Name: "DB Migration", Focus: "Migrate the database schema"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestRoute_SignalIDAndTimestamp(t *testing.T) {
 
 	r := New(embedder, 0.4, "_default", testLogger())
 	_ = r.LoadWorkstreams(context.Background(), []models.Workstream{
-		{ID: "ws-auth", Name: "Auth", Focus: "Deploy the auth service", State: models.StateActive},
+		{ID: "ws-auth", Name: "Auth", Focus: "Deploy the auth service"},
 	})
 
 	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
@@ -149,9 +149,9 @@ func TestLoadWorkstreams_SkipsDefaultAndEmptyFocus(t *testing.T) {
 
 	r := New(embedder, 0.4, "_default_ws", testLogger())
 	err := r.LoadWorkstreams(context.Background(), []models.Workstream{
-		{ID: "_default_ws", Name: "General", Workspace: "ws", Focus: "catch-all", State: models.StateActive},
-		{ID: "ws-empty", Name: "Empty", Focus: "", State: models.StateActive},
-		{ID: "ws-real", Name: "Real", Focus: "real focus", State: models.StateActive},
+		{ID: "_default_ws", Name: "General", Workspace: "ws", Focus: "catch-all"},
+		{ID: "ws-empty", Name: "Empty", Focus: ""},
+		{ID: "ws-real", Name: "Real", Focus: "real focus"},
 	})
 	if err != nil {
 		t.Fatal(err)

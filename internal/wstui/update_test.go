@@ -21,8 +21,8 @@ func keyType(t tea.KeyType) tea.KeyMsg {
 
 func seedItems() []models.Workstream {
 	return []models.Workstream{
-		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha"},
-		{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateActive, Focus: "beta"},
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal", Focus: "alpha"},
+		{ID: "ws-b", Name: "Beta", Workspace: "personal", Focus: "beta"},
 		models.NewDefaultWorkstream("personal", time.Time{}),
 	}
 }
@@ -246,9 +246,6 @@ func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 	if w.Workspace != "personal" {
 		t.Errorf("workspace = %q", w.Workspace)
 	}
-	if w.State != models.StateActive {
-		t.Errorf("state = %q", w.State)
-	}
 	if w.Focus != "ranking" {
 		t.Errorf("focus = %q", w.Focus)
 	}
@@ -295,23 +292,18 @@ func TestMergePicker_EnterMerges(t *testing.T) {
 	_, cmd := m.Update(keyType(tea.KeyEnter))
 	drainBatch(cmd)
 
-	if len(st.puts) != 2 {
-		t.Fatalf("expected 2 puts (target + retired source), got %d", len(st.puts))
+	if len(st.puts) != 1 {
+		t.Fatalf("expected 1 put (the merge target), got %d", len(st.puts))
 	}
-	// Target (Beta) put first per actions.go ordering.
 	target := st.puts[0]
 	if target.ID != "ws-b" {
-		t.Errorf("first put should be target ws-b, got %q", target.ID)
+		t.Errorf("put should be target ws-b, got %q", target.ID)
 	}
 	if !contains(target.Focus, "merged from Alpha") {
 		t.Errorf("target focus missing merge annotation: %q", target.Focus)
 	}
-	src := st.puts[1]
-	if src.ID != "ws-a" {
-		t.Errorf("second put should be source ws-a, got %q", src.ID)
-	}
-	if src.State != models.StateResolved {
-		t.Errorf("source state = %q, want resolved", src.State)
+	if len(st.deletes) != 1 || st.deletes[0] != "ws-a" {
+		t.Errorf("expected source ws-a deleted, got deletes=%v", st.deletes)
 	}
 }
 
@@ -392,7 +384,7 @@ func TestFirstMergeTarget_SkipsDefault(t *testing.T) {
 }
 
 func TestEnterMergeMode_NoTargetWhenOnlyDefaultRemains(t *testing.T) {
-	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive}
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal"}
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	st := newFakeStore(a, def)
 	m := NewModel(st, testCfg("personal"), nil)
@@ -421,9 +413,9 @@ func TestMergePicker_DefaultNotRendered(t *testing.T) {
 }
 
 func TestMergePicker_NavigationSkipsDefault(t *testing.T) {
-	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive}
-	b := models.Workstream{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateActive}
-	c := models.Workstream{ID: "ws-c", Name: "Gamma", Workspace: "personal", State: models.StateActive}
+	a := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "personal"}
+	b := models.Workstream{ID: "ws-b", Name: "Beta", Workspace: "personal"}
+	c := models.Workstream{ID: "ws-c", Name: "Gamma", Workspace: "personal"}
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	st := newFakeStore(a, def, b, c)
 	m := NewModel(st, testCfg("personal"), nil)
