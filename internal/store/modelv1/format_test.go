@@ -749,6 +749,26 @@ func TestFormatReactionNotification_ConvMeta(t *testing.T) {
 			},
 			wantMeta: "  [reaction] [10:20:00] [message_id:M1] [sender_id:U001] [emoji:thumbsup]",
 		},
+		{
+			name: "parent-found, react on thread reply emits thread tags",
+			render: func() []string {
+				r := baseReact
+				r.ThreadTS = "P1"
+				r.ThreadID = "P1"
+				return FormatReactionNotification(msg, r, time.UTC, nil)
+			},
+			wantMeta: "  [reaction] [10:15:02] [message_id:M1] [sender_id:U001] [emoji:thumbsup] [thread_ts:P1] [thread_id:P1]",
+		},
+		{
+			name: "fallback, react on thread reply emits thread tags",
+			render: func() []string {
+				r := baseReact
+				r.ThreadTS = "P1"
+				r.ThreadID = "P1"
+				return FormatReactionFallbackNotification(r, time.UTC, channelMeta)
+			},
+			wantMeta: "  [reaction] [10:20:00] [message_id:M1] [sender_id:U001] [emoji:thumbsup] [thread_ts:P1] [thread_id:P1] [type:channel] [channel_id:C0AS]",
+		},
 	}
 
 	for _, tt := range tests {

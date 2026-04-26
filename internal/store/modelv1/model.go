@@ -95,13 +95,15 @@ type Attachment struct {
 
 // ReactLine represents a reaction or unreaction event.
 type ReactLine struct {
-	Ts       time.Time `json:"ts"`            // when the reaction happened
-	MsgID    string    `json:"msg"`           // target message ID
-	Sender   string    `json:"sender"`        // who reacted (display name)
-	SenderID string    `json:"from"`          // who reacted (platform ID)
-	Via      Via       `json:"via,omitempty"` // message pathway
-	Emoji    string    `json:"emoji"`         // emoji name or Unicode character
-	Remove   bool      `json:"-"`             // true = unreact (derived from LineType, not serialized)
+	Ts       time.Time `json:"ts"`                  // when the reaction happened
+	MsgID    string    `json:"msg"`                 // target message ID
+	Sender   string    `json:"sender"`              // who reacted (display name)
+	SenderID string    `json:"from"`                // who reacted (platform ID)
+	Via      Via       `json:"via,omitempty"`       // message pathway
+	Emoji    string    `json:"emoji"`               // emoji name or Unicode character
+	ThreadTS string    `json:"thread_ts,omitempty"` // Slack parent TS when target is a thread reply
+	ThreadID string    `json:"thread_id,omitempty"` // platform-neutral parent ID when target is a thread reply
+	Remove   bool      `json:"-"`                   // true = unreact (derived from LineType, not serialized)
 }
 
 // EditLine represents a message edit event.

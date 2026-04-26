@@ -316,7 +316,13 @@ func (l *Listener) handleReaction(ctx context.Context, userID, emoji string, ite
 		return
 	}
 
-	react, err := l.messages.AppendReaction(channelName, item.Timestamp, userName, userID, emoji, remove)
+	// Route to the thread file when the target message is a thread reply.
+	threadTS := ""
+	if m := l.messages.LookupMessage(channelName, item.Timestamp); m != nil {
+		threadTS = m.ThreadTS
+	}
+
+	react, err := l.messages.AppendReaction(channelName, item.Timestamp, threadTS, userName, userID, emoji, remove)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to store reaction", "error", err, "account", l.acct)
 		return
