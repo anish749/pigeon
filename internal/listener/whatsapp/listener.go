@@ -33,7 +33,7 @@ type Listener struct {
 
 // New creates a WhatsApp listener for the given client and account.
 // onLogout is called when the device is unpaired from the phone (may be nil).
-// onMessage is called when a message is received and written to disk (may be nil).
+// onMessage is called when a message is received and written to disk; must be non-nil.
 func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.NotifyFunc[modelv1.MsgLine], syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:      client,
@@ -160,7 +160,5 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	slog.InfoContext(ctx, "message saved",
 		"from", senderName, "conv", convDir, "text_len", len(text))
 
-	if l.onMessage != nil {
-		l.onMessage(l.acct, convDir, *line.Msg)
-	}
+	l.onMessage(l.acct, convDir, *line.Msg)
 }

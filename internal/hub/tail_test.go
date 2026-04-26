@@ -118,7 +118,7 @@ func TestTailHandler_LiveEventsFlow(t *testing.T) {
 	onConnect := func() {
 		// Small delay so Subscribe has settled before we Publish.
 		time.Sleep(10 * time.Millisecond)
-		h.Route(acct, "#general", modelv1.MsgLine{
+		h.RouteMessage(acct, "#general", modelv1.MsgLine{
 			ID:     "abc.123",
 			Ts:     time.Now(),
 			Sender: "alice",
@@ -158,8 +158,8 @@ func TestTailHandler_FilterScopesToAccount(t *testing.T) {
 
 	onConnect := func() {
 		time.Sleep(10 * time.Millisecond)
-		h.Route(acme, "#a", modelv1.MsgLine{ID: "1", Ts: time.Now(), Text: "from acme"})
-		h.Route(other, "#b", modelv1.MsgLine{ID: "2", Ts: time.Now(), Text: "from other"})
+		h.RouteMessage(acme, "#a", modelv1.MsgLine{ID: "1", Ts: time.Now(), Text: "from acme"})
+		h.RouteMessage(other, "#b", modelv1.MsgLine{ID: "2", Ts: time.Now(), Text: "from other"})
 	}
 
 	frames := collectFrames(t, h, tailapi.Request{

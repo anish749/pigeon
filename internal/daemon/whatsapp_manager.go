@@ -43,7 +43,7 @@ type runningWAAccount struct {
 }
 
 // NewWhatsAppManager creates a manager that registers WhatsApp senders with
-// the given API server. onMessage is called when a message is received (may be nil).
+// the given API server. onMessage is called when a message is received; must be non-nil.
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
 // whatsapp/<account-slug>/identity/people.jsonl.

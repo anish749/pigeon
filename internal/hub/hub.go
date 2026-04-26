@@ -1,7 +1,8 @@
-// Package hub routes incoming messages from platform listeners to connected
-// MCP sessions. The daemon creates a single Hub at startup. Listeners call
-// Route() when a new message arrives, and the hub delivers it to the
-// appropriate Claude Code session via SSE.
+// Package hub routes incoming messaging events from platform listeners to
+// connected MCP sessions. The daemon creates a single Hub at startup;
+// listeners call RouteMessage / RouteReaction / RouteEdit / RouteDelete as
+// events arrive, and the hub delivers them to the appropriate Claude Code
+// session via SSE.
 package hub
 
 import (
@@ -261,12 +262,12 @@ func (h *Hub) Unregister(sessionID string) {
 	}
 }
 
-// Route signals that a new message has arrived for the given account and
+// RouteMessage signals that a new message has arrived for the given account and
 // conversation. Non-blocking — returns immediately.
 //
 // The message is also published to the broadcast bus for monitor
 // subscribers, independent of session state.
-func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
+func (h *Hub) RouteMessage(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
 	// Publish to broadcast first — independent of session existence.
 	h.broadcast.Publish(NotifMsg{
 		Envelope: Envelope{
