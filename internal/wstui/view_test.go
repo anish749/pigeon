@@ -68,7 +68,7 @@ func TestView_DefaultHelpIsLimited(t *testing.T) {
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	m.items = []models.Workstream{def}
 	out := stripAnsi(m.View())
-	if !strings.Contains(out, "limited actions") {
+	if !strings.Contains(out, "default workstream: limited actions") {
 		t.Errorf("default help should call out limited actions: %q", out)
 	}
 	if strings.Contains(out, "merge") || strings.Contains(out, "delete") {
@@ -85,6 +85,43 @@ func TestView_DeleteConfirmShowsName(t *testing.T) {
 	out := stripAnsi(m.View())
 	if !strings.Contains(out, `Delete "Alpha"?`) {
 		t.Errorf("missing confirm prompt: %q", out)
+	}
+}
+
+func TestView_FillsTerminalHeightWithFooterAtBottom(t *testing.T) {
+	m := NewModel(newFakeStore(), testCfg("personal"), nil)
+	m.height = 12
+	m.items = []models.Workstream{
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha focus"},
+	}
+
+	lines := strings.Split(stripAnsi(m.View()), "\n")
+	if got := len(lines); got != m.height {
+		t.Fatalf("rendered lines = %d, want %d:\n%s", got, m.height, strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
+		t.Fatalf("footer not pinned to bottom, last line = %q", lines[len(lines)-1])
+	}
+}
+
+func TestView_TrimsOverflowBeforeFooter(t *testing.T) {
+	m := NewModel(newFakeStore(), testCfg("personal"), nil)
+	m.height = 8
+	for i := 0; i < 20; i++ {
+		m.items = append(m.items, models.Workstream{
+			ID:        "ws",
+			Name:      "Workstream",
+			Workspace: "personal",
+			State:     models.StateActive,
+		})
+	}
+
+	lines := strings.Split(stripAnsi(m.View()), "\n")
+	if got := len(lines); got != m.height {
+		t.Fatalf("rendered lines = %d, want %d:\n%s", got, m.height, strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
+		t.Fatalf("footer should survive overflow, last line = %q", lines[len(lines)-1])
 	}
 }
 

@@ -22,12 +22,12 @@ func (m Model) View() string {
 
 	if m.mode == modeDiscovering {
 		b.WriteString(m.renderDiscovering())
-		return b.String()
+		return m.renderFullScreen(b.String(), m.renderFooter())
 	}
 
 	if len(m.items) == 0 {
 		b.WriteString(m.renderEmpty())
-		return b.String()
+		return m.renderFullScreen(b.String(), m.renderFooter())
 	}
 
 	b.WriteString(m.renderList())
@@ -42,8 +42,7 @@ func (m Model) View() string {
 		fmt.Fprintf(&b, "  %s\n\n", hintStyle.Render(m.status))
 	}
 
-	b.WriteString(m.renderFooter())
-	return b.String()
+	return m.renderFullScreen(b.String(), m.renderFooter())
 }
 
 func (m Model) renderHeader() string {
@@ -56,11 +55,9 @@ func (m Model) renderEmpty() string {
 	b.WriteString(dimStyle.Render("  No workstreams in this workspace.\n\n"))
 	if m.manager != nil {
 		b.WriteString("  " + hintStyle.Render("Press D to discover workstreams from your messaging history,") + "\n")
-		b.WriteString("  " + hintStyle.Render("or n to create one manually.") + "\n\n")
-		b.WriteString(helpStyle.Render("  D discover   n new   q quit"))
+		b.WriteString("  " + hintStyle.Render("or n to create one manually.") + "\n")
 	} else {
-		b.WriteString(dimStyle.Render("  Press n to create one.\n\n"))
-		b.WriteString(helpStyle.Render("  n new   q quit"))
+		b.WriteString(dimStyle.Render("  Press n to create one.\n"))
 	}
 	return b.String()
 }
@@ -142,7 +139,7 @@ func listHelp(m Model) string {
 		if m.manager != nil {
 			help = "  e edit focus  n new  D discover  j/k nav  q quit"
 		}
-		return help + "  " + dimStyle.Render("(default — limited actions)")
+		return help + "  " + dimStyle.Render("(default workstream: limited actions)")
 	}
 	help := "  r rename  e edit focus  s state  m merge  n new  d delete  j/k nav  q quit"
 	if m.manager != nil {
@@ -198,4 +195,56 @@ func emptyOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func (m Model) renderFullScreen(content, footer string) string {
+	content = strings.TrimRight(content, "\n")
+	footer = strings.TrimRight(footer, "\n")
+
+	if m.height <= 0 {
+		if footer == "" {
+			return content
+		}
+		return content + "\n" + footer
+	}
+
+	contentLines := splitLines(content)
+	footerLines := splitLines(footer)
+	if footer == "" {
+		footerLines = nil
+	}
+	if len(footerLines) > m.height {
+		footerLines = footerLines[len(footerLines)-m.height:]
+	}
+
+	contentHeight := m.height - len(footerLines)
+	if contentHeight < 0 {
+		contentHeight = 0
+	}
+	if len(contentLines) > contentHeight {
+		contentLines = contentLines[:contentHeight]
+	}
+
+	var b strings.Builder
+	for _, line := range contentLines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	for i := len(contentLines); i < contentHeight; i++ {
+		b.WriteByte('\n')
+	}
+	for i, line := range footerLines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
