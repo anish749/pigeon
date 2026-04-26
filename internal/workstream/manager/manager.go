@@ -106,17 +106,11 @@ func (m *Manager) EnsureDefaultWorkstream(ws config.WorkspaceName, ts time.Time)
 
 // --- Lifecycle operations ---
 
-// ProposeNew queues a proposal to create a new workstream. In AutoApprove
-// mode, creates immediately. Returns the new workstream ID if created.
+// ProposeNew creates a workstream (AutoApprove) or queues a pending
+// proposal for review (Interactive). In AutoApprove mode, returns the
+// new workstream ID; in Interactive mode, returns the empty string and
+// the proposal awaits ApproveProposal/RejectProposal.
 func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.WorkspaceName, proposedAt time.Time) (string, error) {
-	proposal := &models.Proposal{
-		Type:           models.ProposalCreate,
-		SuggestedName:  name,
-		SuggestedFocus: focus,
-		Workspace:      ws,
-		ProposedAt:     proposedAt,
-	}
-
 	if m.cfg.ApprovalMode == models.AutoApprove {
 		w := models.Workstream{
 			ID:        generateWorkstreamID(name),
@@ -138,11 +132,6 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 			return "", err
 		}
 
-		proposal.State = models.ProposalApproved
-		if err := m.store.PutProposal(proposal); err != nil {
-			return "", err
-		}
-
 		m.logger.Info("workstream created (auto-approved)",
 			"workspace", string(ws),
 			"name", name,
@@ -156,8 +145,13 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	if err != nil {
 		return "", err
 	}
-	proposal.ID = fmt.Sprintf("p-%d", seq)
-	proposal.State = models.ProposalPending
+	proposal := &models.Proposal{
+		ID:             fmt.Sprintf("p-%d", seq),
+		SuggestedName:  name,
+		SuggestedFocus: focus,
+		Workspace:      ws,
+		ProposedAt:     proposedAt,
+	}
 	if err := m.store.PutProposal(proposal); err != nil {
 		return "", err
 	}
@@ -165,19 +159,25 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	m.logger.Info("workstream proposed (pending confirmation)",
 		"workspace", string(ws),
 		"name", name,
+		"proposal", proposal.ID,
 	)
 	return "", nil
 }
 
-// ApproveProposal applies a pending proposal (creating the workstream
-// for ProposalCreate) and marks the proposal approved. Returns the
-// resulting workstream ID. Errors if the proposal is missing, already
-// resolved, of a type the manager does not yet apply, or if it would
-// collide with an existing workstream (same slug ID).
+// ApproveProposal creates the workstream for a pending proposal and
+// removes the proposal from the queue. Returns the resulting workstream
+// ID. Errors if the proposal is missing or would collide with an
+// existing workstream (same slug ID).
 //
-// On collision the proposal is left Pending and nothing is written —
+// On collision the proposal is left in place and nothing is written —
 // the user must reject the proposal or rename one side. Approval must
 // never overwrite a workstream that may carry user edits.
+//
+// The workstream is written before the proposal is deleted. If the
+// delete fails after a successful write, the workstream is the source
+// of truth; a retry of ApproveProposal will surface the orphaned
+// proposal as a slug conflict, which the user can clear with
+// RejectProposal.
 func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) {
 	p, ok, err := m.store.GetProposal(id)
 	if err != nil {
@@ -186,61 +186,44 @@ func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) 
 	if !ok {
 		return "", fmt.Errorf("proposal %q not found", id)
 	}
-	if p.State != models.ProposalPending {
-		return "", fmt.Errorf("proposal %q already %s", id, p.State)
-	}
 
-	var wsID string
-	switch p.Type {
-	case models.ProposalCreate:
-		w := models.Workstream{
-			ID:        generateWorkstreamID(p.SuggestedName),
-			Name:      p.SuggestedName,
-			Workspace: p.Workspace,
-			State:     models.StateActive,
-			Focus:     p.SuggestedFocus,
-			Created:   p.ProposedAt,
-		}
-		_, exists, err := m.store.GetWorkstream(w.ID)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
-		}
-		if err := m.store.PutWorkstream(w); err != nil {
-			return "", err
-		}
-		wsID = w.ID
-	default:
-		return "", fmt.Errorf("proposal %q has unsupported type %q", id, p.Type)
+	w := models.Workstream{
+		ID:        generateWorkstreamID(p.SuggestedName),
+		Name:      p.SuggestedName,
+		Workspace: p.Workspace,
+		State:     models.StateActive,
+		Focus:     p.SuggestedFocus,
+		Created:   p.ProposedAt,
 	}
-
-	p.State = models.ProposalApproved
-	p.ResolvedAt = time.Now().UTC()
-	if err := m.store.PutProposal(p); err != nil {
+	_, exists, err := m.store.GetWorkstream(w.ID)
+	if err != nil {
 		return "", err
 	}
-	m.logger.Info("proposal approved", "id", id, "workstream", wsID)
-	return wsID, nil
+	if exists {
+		return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
+	}
+	if err := m.store.PutWorkstream(w); err != nil {
+		return "", err
+	}
+
+	if err := m.store.DeleteProposal(id); err != nil {
+		return "", fmt.Errorf("delete proposal after creating workstream %q: %w", w.ID, err)
+	}
+	m.logger.Info("proposal approved", "id", id, "workstream", w.ID)
+	return w.ID, nil
 }
 
-// RejectProposal marks a pending proposal as rejected without applying it.
-// Errors if the proposal is missing or already resolved.
+// RejectProposal removes a pending proposal from the queue without
+// applying it. Errors if the proposal is missing.
 func (m *Manager) RejectProposal(_ context.Context, id string) error {
-	p, ok, err := m.store.GetProposal(id)
+	_, ok, err := m.store.GetProposal(id)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return fmt.Errorf("proposal %q not found", id)
 	}
-	if p.State != models.ProposalPending {
-		return fmt.Errorf("proposal %q already %s", id, p.State)
-	}
-	p.State = models.ProposalRejected
-	p.ResolvedAt = time.Now().UTC()
-	if err := m.store.PutProposal(p); err != nil {
+	if err := m.store.DeleteProposal(id); err != nil {
 		return err
 	}
 	m.logger.Info("proposal rejected", "id", id)

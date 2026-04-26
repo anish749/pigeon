@@ -65,7 +65,7 @@ func TestFSRoundTrip(t *testing.T) {
 			t.Errorf("got seq %d, want 1", seq)
 		}
 
-		p := &models.Proposal{ID: "p-1", Type: models.ProposalCreate, State: models.ProposalApproved, SuggestedName: "Alpha", ProposedAt: ts}
+		p := &models.Proposal{ID: "p-1", SuggestedName: "Alpha", ProposedAt: ts}
 		if err := s.PutProposal(p); err != nil {
 			t.Fatal(err)
 		}
@@ -78,13 +78,13 @@ func TestFSRoundTrip(t *testing.T) {
 		}
 
 		// Update existing.
-		p.State = models.ProposalRejected
+		p.SuggestedFocus = "updated focus"
 		if err := s.PutProposal(p); err != nil {
 			t.Fatal(err)
 		}
 		all, _ = s.ListProposals()
-		if all[0].State != models.ProposalRejected {
-			t.Error("state not updated")
+		if all[0].SuggestedFocus != "updated focus" {
+			t.Errorf("focus not updated: %q", all[0].SuggestedFocus)
 		}
 
 		// Lookup by ID.
@@ -101,6 +101,19 @@ func TestFSRoundTrip(t *testing.T) {
 		}
 		if ok {
 			t.Error("expected not found")
+		}
+
+		// Delete.
+		if err := s.DeleteProposal("p-1"); err != nil {
+			t.Fatal(err)
+		}
+		_, ok, _ = s.GetProposal("p-1")
+		if ok {
+			t.Error("expected proposal deleted")
+		}
+		// Idempotent: deleting again is a no-op.
+		if err := s.DeleteProposal("p-1"); err != nil {
+			t.Errorf("second delete should be no-op: %v", err)
 		}
 	})
 

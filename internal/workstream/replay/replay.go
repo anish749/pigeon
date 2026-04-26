@@ -10,14 +10,14 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
 	"github.com/anish749/pigeon/internal/workstream/router"
 	arstore "github.com/anish749/pigeon/internal/workstream/store"
-	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store"
 )
 
 // Config is an alias for the shared config.
@@ -34,11 +34,6 @@ type Report struct {
 	Workstreams []WorkstreamReport
 
 	ManagerStats manager.Stats
-
-	ProposalsTotal    int
-	ProposalsApproved int
-	ProposalsRejected int
-	ProposalsPending  int
 
 	Duration time.Duration
 }
@@ -153,22 +148,6 @@ func buildReport(cfg Config, signals []models.Signal, startTime time.Time, mgr *
 		ByType:       countByType(signals),
 		ManagerStats: mgr.Stats(),
 		Duration:     time.Since(startTime),
-	}
-
-	proposals, err := st.ListProposals()
-	if err != nil {
-		return nil, fmt.Errorf("list proposals: %w", err)
-	}
-	for _, p := range proposals {
-		report.ProposalsTotal++
-		switch p.State {
-		case models.ProposalApproved:
-			report.ProposalsApproved++
-		case models.ProposalRejected:
-			report.ProposalsRejected++
-		case models.ProposalPending:
-			report.ProposalsPending++
-		}
 	}
 
 	workstreams, err := st.ListWorkstreams()
