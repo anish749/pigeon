@@ -9,6 +9,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
@@ -104,23 +105,31 @@ func RunRead(p ReadParams) error {
 // than a silent no-op.
 //
 // Contact resolves to the Jira issue key (e.g. ENG-101). Project subdir is
-// derived by scanning, so users never need to know which project owns the
-// key — see store.FindJiraIssue.
+// not derivable from the key alone (project keys can be opaque, multi-segment
+// strings), so the file is located by a single rg --files glob across the
+// account directory — the same discovery primitive `pigeon glob` uses.
 func runReadJira(p ReadParams) error {
 	if p.Date != "" || p.Last != 0 || p.Since != "" {
 		return fmt.Errorf("read for jira-issues does not support --date, --last, or --since (each issue is one file; use 'pigeon grep' to search across issues)")
 	}
 
-	s := store.NewFSStore(paths.DefaultDataRoot())
 	acct := account.New(p.Platform, p.Account)
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
 
-	file, err := s.FindJiraIssue(acct, p.Contact)
+	matches, err := read.GlobFiles(jd.Path(), []string{p.Contact + paths.FileExt})
 	if err != nil {
-		return err
+		return fmt.Errorf("locate jira issue %s: %w", p.Contact, err)
 	}
-	data, err := s.ReadRaw(file)
+	if len(matches) == 0 {
+		return fmt.Errorf("jira issue %s not found in %s", p.Contact, acct.Display())
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("ambiguous jira issue %s in %s: %d files match", p.Contact, acct.Display(), len(matches))
+	}
+
+	data, err := os.ReadFile(matches[0])
 	if err != nil {
-		return err
+		return fmt.Errorf("read %s: %w", matches[0], err)
 	}
 	if len(data) == 0 {
 		return fmt.Errorf("jira issue %s in %s is empty", p.Contact, acct.Display())

@@ -10,6 +10,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -164,8 +165,14 @@ func listAccount(s *store.FSStore, acct account.Account) error {
 // issue key — so callers can pipe the output to `pigeon read`. Project
 // keys are not shown; users who care about project boundaries can grep
 // the output (`pigeon list -p jira-issues -a tubular | grep ENG-`).
-func listJiraAccount(s *store.FSStore, acct account.Account) error {
-	files, err := s.ListJiraIssues(acct)
+//
+// Discovery uses read.GlobFiles (one rg --files invocation across all
+// project subdirs) rather than a manual two-level os.ReadDir walk. This
+// matches the codebase principle: file discovery goes through ripgrep,
+// the store layer is reserved for structured parsing.
+func listJiraAccount(_ *store.FSStore, acct account.Account) error {
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
+	files, err := read.GlobFiles(jd.Path(), []string{"*" + paths.FileExt})
 	if err != nil {
 		return err
 	}
@@ -174,7 +181,7 @@ func listJiraAccount(s *store.FSStore, acct account.Account) error {
 		return nil
 	}
 	for _, f := range files {
-		base := filepath.Base(f.Path())
+		base := filepath.Base(f)
 		key := strings.TrimSuffix(base, paths.FileExt)
 		fmt.Printf("  %s\n", key)
 	}
