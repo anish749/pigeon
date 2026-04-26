@@ -1,0 +1,204 @@
+package jira
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/anish749/pigeon/internal/jira/poller"
+)
+
+const sampleCloudYAMLPigeon = `
+installation: Cloud
+server: https://acme.atlassian.net
+login: alice@acme.com
+auth_type: basic
+insecure: false
+project:
+  key: ENG
+  type: software
+board:
+  id: 12
+  name: ENG board
+epic:
+  name: customfield_10011
+issue:
+  types:
+    - name: Bug
+  fields:
+    custom:
+      - name: Story Points
+        key: customfield_10016
+`
+
+func TestLoadPigeonJiraConfigCloud(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".config.yml")
+	if err := os.WriteFile(path, []byte(sampleCloudYAMLPigeon), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadPigeonJiraConfig(path)
+	if err != nil {
+		t.Fatalf("LoadPigeonJiraConfig: %v", err)
+	}
+	if c.Server != "https://acme.atlassian.net" {
+		t.Errorf("Server = %q", c.Server)
+	}
+	if c.Login != "alice@acme.com" {
+		t.Errorf("Login = %q", c.Login)
+	}
+	if c.Project.Key != "ENG" {
+		t.Errorf("Project.Key = %q", c.Project.Key)
+	}
+	if c.Installation != "Cloud" {
+		t.Errorf("Installation = %q", c.Installation)
+	}
+	if c.AuthType != "basic" {
+		t.Errorf("AuthType = %q", c.AuthType)
+	}
+}
+
+func TestLoadPigeonJiraConfigLocal(t *testing.T) {
+	body := `installation: Local
+server: https://jira.internal.example.com
+login: alice
+auth_type: bearer
+project:
+  key: SUPPORT
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".config.yml")
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadPigeonJiraConfig(path)
+	if err != nil {
+		t.Fatalf("LoadPigeonJiraConfig: %v", err)
+	}
+	if c.APIVersion() != poller.APIVersionV2 {
+		t.Errorf("APIVersion = %v, want APIVersionV2", c.APIVersion())
+	}
+}
+
+func TestLoadPigeonJiraConfigMissingRequired(t *testing.T) {
+	cases := []struct {
+		name, body, missing string
+	}{
+		{"missing server", "login: a\nproject:\n  key: K\n", "server"},
+		{"missing login", "server: https://x.atlassian.net\nproject:\n  key: K\n", "login"},
+		{"missing project.key", "server: https://x.atlassian.net\nlogin: a\n", "project.key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".config.yml")
+			_ = os.WriteFile(path, []byte(tc.body), 0600)
+			_, err := LoadPigeonJiraConfig(path)
+			if err == nil {
+				t.Errorf("expected error mentioning %q", tc.missing)
+			}
+		})
+	}
+}
+
+func TestLoadPigeonJiraConfigRefusesLocalhost(t *testing.T) {
+	// Various forms of localhost should all fail. IPs are NOT refused
+	// (per the design — pigeon treats 127.0.0.1, ::1, etc. as opaque
+	// hosts and lets the API call decide).
+	cases := []string{
+		"https://localhost",
+		"https://localhost:8080",
+		"http://localhost/",
+		"http://LOCALHOST",
+	}
+	for _, server := range cases {
+		t.Run(server, func(t *testing.T) {
+			body := "server: " + server + "\nlogin: a\nproject:\n  key: K\n"
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".config.yml")
+			_ = os.WriteFile(path, []byte(body), 0600)
+			_, err := LoadPigeonJiraConfig(path)
+			if err == nil {
+				t.Errorf("expected localhost rejection for %q", server)
+			}
+		})
+	}
+}
+
+func TestAccountSlug(t *testing.T) {
+	cases := []struct {
+		server, want string
+	}{
+		{"https://acme.atlassian.net", "acme"},
+		{"https://Acme.atlassian.net/", "acme"},
+		{"https://jira.internal.example.com", "jira"},
+		{"https://127.0.0.1", "127"},
+		{"https://10.0.0.1:8080", "10"},
+	}
+	for _, c := range cases {
+		t.Run(c.server, func(t *testing.T) {
+			cfg := &PigeonJiraConfig{Server: c.server}
+			if got := cfg.AccountSlug(); got != c.want {
+				t.Errorf("AccountSlug(%q) = %q, want %q", c.server, got, c.want)
+			}
+		})
+	}
+}
+
+func TestJiraConfigBuilds(t *testing.T) {
+	cfg := &PigeonJiraConfig{
+		Server:   "https://acme.atlassian.net",
+		Login:    "alice@acme.com",
+		AuthType: "basic",
+		Insecure: false,
+	}
+	jc := cfg.JiraConfig("token-xyz")
+	if jc.Server != cfg.Server {
+		t.Errorf("Server = %q", jc.Server)
+	}
+	if jc.Login != cfg.Login {
+		t.Errorf("Login = %q", jc.Login)
+	}
+	if jc.APIToken != "token-xyz" {
+		t.Errorf("APIToken = %q", jc.APIToken)
+	}
+	if jc.AuthType == nil || string(*jc.AuthType) != "basic" {
+		t.Errorf("AuthType = %v", jc.AuthType)
+	}
+}
+
+func TestJiraConfigMTLS(t *testing.T) {
+	cfg := &PigeonJiraConfig{
+		Server:   "https://jira.internal",
+		Login:    "alice",
+		AuthType: "mtls",
+		MTLS: PigeonJiraMTLSConfig{
+			CACert:     "/etc/ssl/ca.pem",
+			ClientCert: "/etc/ssl/client.pem",
+			ClientKey:  "/etc/ssl/client.key",
+		},
+	}
+	jc := cfg.JiraConfig("tok")
+	if jc.MTLSConfig.CaCert != "/etc/ssl/ca.pem" {
+		t.Errorf("CaCert not propagated: %q", jc.MTLSConfig.CaCert)
+	}
+}
+
+func TestAPIVersion(t *testing.T) {
+	cases := []struct {
+		install string
+		want    poller.APIVersion
+	}{
+		{"Cloud", poller.APIVersionV3},
+		{"Local", poller.APIVersionV2},
+		{"", poller.APIVersionV3}, // empty defaults to Cloud
+	}
+	for _, c := range cases {
+		t.Run(c.install, func(t *testing.T) {
+			cfg := &PigeonJiraConfig{Installation: c.install}
+			if got := cfg.APIVersion(); got != c.want {
+				t.Errorf("APIVersion(%q) = %v, want %v", c.install, got, c.want)
+			}
+		})
+	}
+}

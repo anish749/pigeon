@@ -1,0 +1,136 @@
+package jira
+
+import (
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+
+	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+	"gopkg.in/yaml.v3"
+
+	"github.com/anish749/pigeon/internal/jira/poller"
+)
+
+// PigeonJiraConfig is the subset of a jira-cli YAML pigeon parses. The
+// struct fields and yaml tags mirror jira-cli's on-disk schema; pigeon
+// only models keys it actively consumes when constructing a
+// pkg/jira.Client or routing data on disk. Fields jira-cli writes that
+// pigeon does not consume (board, epic, issue.types[], issue.fields.custom,
+// timezone, project.type, version) are not modeled.
+//
+// One pigeon entry in pigeon's config.yaml binds one PigeonJiraConfig,
+// which in turn exposes one project (jira-cli configs hold a single
+// `project.key` default). For a second project, the user runs
+// `jira init` again with a different config path.
+type PigeonJiraConfig struct {
+	Server       string                  `yaml:"server"`
+	Login        string                  `yaml:"login"`
+	AuthType     string                  `yaml:"auth_type"`
+	Insecure     bool                    `yaml:"insecure"`
+	Installation string                  `yaml:"installation"`
+	MTLS         PigeonJiraMTLSConfig    `yaml:"mtls"`
+	Project      PigeonJiraProjectConfig `yaml:"project"`
+}
+
+// PigeonJiraMTLSConfig holds mTLS cert paths. Populated only when
+// AuthType == "mtls".
+type PigeonJiraMTLSConfig struct {
+	CACert     string `yaml:"ca_cert"`
+	ClientCert string `yaml:"client_cert"`
+	ClientKey  string `yaml:"client_key"`
+}
+
+// PigeonJiraProjectConfig is jira-cli's nested project block. Only Key
+// is consumed by pigeon; Type is written by jira init for its own write
+// commands and ignored here.
+type PigeonJiraProjectConfig struct {
+	Key string `yaml:"key"`
+}
+
+// LoadPigeonJiraConfig reads a jira-cli YAML and returns the parsed
+// PigeonJiraConfig. Validates that every field pigeon will pass to
+// pkg/jira.NewClient or use for routing is present; returns an error
+// otherwise. localhost servers are refused — they're useful for testing
+// jira-cli itself but not for pigeon's ingest, which expects a real
+// Atlassian site.
+func LoadPigeonJiraConfig(path string) (*PigeonJiraConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read jira-cli config %s: %w", path, err)
+	}
+	var c PigeonJiraConfig
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse jira-cli config %s: %w", path, err)
+	}
+	if c.Server == "" {
+		return nil, fmt.Errorf("jira-cli config %s missing required `server` field", path)
+	}
+	if c.Login == "" {
+		return nil, fmt.Errorf("jira-cli config %s missing required `login` field", path)
+	}
+	if c.Project.Key == "" {
+		return nil, fmt.Errorf("jira-cli config %s missing required `project.key` field", path)
+	}
+	if strings.EqualFold(hostname(c.Server), "localhost") {
+		return nil, fmt.Errorf("jira-cli config %s points at localhost; pigeon does not ingest localhost-bound jira instances", path)
+	}
+	return &c, nil
+}
+
+// AccountSlug returns the first DNS label of Server, lowercased. This is
+// the on-disk slug under jira-issues/ — e.g. https://acme.atlassian.net
+// produces "acme". The slug is derived rather than user-supplied because
+// jira-cli has no slug concept of its own and pigeon should not ask the
+// user to invent one.
+func (c *PigeonJiraConfig) AccountSlug() string {
+	host := hostname(c.Server)
+	if i := strings.IndexByte(host, '.'); i >= 0 {
+		return strings.ToLower(host[:i])
+	}
+	return strings.ToLower(host)
+}
+
+// JiraConfig builds a pkg/jira.Config using the given API token. The
+// token is sourced from JIRA_API_TOKEN at the call site, never stored
+// on the PigeonJiraConfig itself.
+func (c *PigeonJiraConfig) JiraConfig(token string) jira.Config {
+	authType := jira.AuthType(strings.ToLower(c.AuthType))
+	insecure := c.Insecure
+	cfg := jira.Config{
+		Server:   c.Server,
+		Login:    c.Login,
+		APIToken: token,
+		AuthType: &authType,
+		Insecure: &insecure,
+	}
+	if c.MTLS.CACert != "" {
+		cfg.MTLSConfig = jira.MTLSConfig{
+			CaCert:     expandHome(c.MTLS.CACert),
+			ClientCert: expandHome(c.MTLS.ClientCert),
+			ClientKey:  expandHome(c.MTLS.ClientKey),
+		}
+	}
+	return cfg
+}
+
+// APIVersion derives v3 (Cloud) vs v2 (Local / on-prem) from Installation.
+// jira-cli writes the exact constants jira.InstallationTypeCloud ("Cloud")
+// or jira.InstallationTypeLocal ("Local"); empty defaults to Cloud since
+// that matches what `jira init` selects for a default install.
+func (c *PigeonJiraConfig) APIVersion() poller.APIVersion {
+	if c.Installation != "" && c.Installation != jira.InstallationTypeCloud {
+		return poller.APIVersionV2
+	}
+	return poller.APIVersionV3
+}
+
+// hostname returns the host (without port) from a server URL, or empty
+// if the URL is unparseable.
+func hostname(server string) string {
+	u, err := url.Parse(server)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
