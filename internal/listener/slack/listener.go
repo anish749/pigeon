@@ -202,25 +202,19 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	slog.InfoContext(ctx, "slack message saved",
 		"from", rs.SenderName, "channel", rs.ChannelName, "account", l.acct, "text_len", len(msg.Text))
 
-	// Notify the hub for messages the user cares about:
+	// Notify the hub for events the user cares about:
 	//   - DMs (im) and multi-party DMs (mpim) — always
 	//   - Private channels (group) — always (user opted in by joining)
 	//   - Public channels — when the bot is @mentioned, OR the message is a
 	//     reply in a thread the bot already participates in (mentioned or
 	//     posted there earlier)
+	threadTS := ""
+	if isThreadReply {
+		threadTS = msg.ThreadTimeStamp
+	}
 	var result hub.RouteResult
-	switch msg.ChannelType {
-	case "im", "mpim":
+	if l.shouldRoute(ctx, msg.ChannelType, rs.ChannelName, threadTS, "message", msg.Text) {
 		result = l.onEvent(hub.NewMsg(l.acct, rs.ChannelName, payload))
-	case "group":
-		result = l.onEvent(hub.NewMsg(l.acct, rs.ChannelName, payload))
-	case "channel":
-		if l.shouldRouteChannelMessage(msg, isThreadReply, rs.ChannelName) {
-			result = l.onEvent(hub.NewMsg(l.acct, rs.ChannelName, payload))
-		}
-	default:
-		slog.WarnContext(ctx, "unrecognized channel type, message not routed to hub",
-			"channel_type", msg.ChannelType, "channel", rs.ChannelName, "account", l.acct)
 	}
 
 	// Auto-reply when someone DMs the bot but no pigeon session is configured.
@@ -235,26 +229,46 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	}
 }
 
-// shouldRouteChannelMessage decides whether a public-channel message should
-// be forwarded to the hub. The bot is forwarded:
-//   - any message whose raw event text @-mentions the bot, or
-//   - any thread reply in a thread the bot already participates in
-//     (mentioned earlier or has posted there).
-//
-// The mention check uses msg.Text directly because the Slack event payload
-// carries the unresolved <@UID> markup; the resolved-text form on disk is
-// used by BotParticipatesInThread for the historical view.
-func (l *Listener) shouldRouteChannelMessage(msg *slackevents.MessageEvent, isThreadReply bool, channelName string) bool {
+// shouldRouteInChannel runs the public-channel routing rule against raw
+// event text + thread context. text must be the unresolved Slack form
+// (carrying <@UID> markup); threadTS is the parent thread's TS when the
+// target is a thread reply, "" otherwise.
+func (l *Listener) shouldRouteInChannel(text, threadTS, channelName string) bool {
 	if l.pigeonBotUID == "" {
 		return false
 	}
-	if strings.Contains(msg.Text, "<@"+l.pigeonBotUID+">") {
+	if strings.Contains(text, "<@"+l.pigeonBotUID+">") {
 		return true
 	}
-	if isThreadReply && l.messages.BotParticipatesInThread(channelName, msg.ThreadTimeStamp, l.pigeonBotUID) {
+	if threadTS != "" && l.messages.BotParticipatesInThread(channelName, threadTS, l.pigeonBotUID) {
 		return true
 	}
 	return false
+}
+
+// shouldRoute decides whether a Slack event should reach the hub. DMs,
+// MPDMs, and private channels (groups) always route; public channels are
+// gated by shouldRouteInChannel against texts (the caller passes one or
+// more — e.g. an edit checks both the new and previous text so adding or
+// removing a mention both surface). Unrecognized channel types log and
+// drop. kind is a short event label (message / edit / delete / ...) used
+// only in the warning.
+func (l *Listener) shouldRoute(ctx context.Context, channelType, channelName, threadTS, kind string, texts ...string) bool {
+	switch channelType {
+	case "im", "mpim", "group":
+		return true
+	case "channel":
+		for _, t := range texts {
+			if l.shouldRouteInChannel(t, threadTS, channelName) {
+				return true
+			}
+		}
+		return false
+	default:
+		slog.WarnContext(ctx, "unrecognized channel type, "+kind+" not routed to hub",
+			"channel_type", channelType, "channel", channelName, "account", l.acct)
+		return false
+	}
 }
 
 // ensureThreadParent fetches the parent message of a thread and writes it to the
@@ -344,6 +358,12 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 	if msg.Message == nil {
 		return
 	}
+	// Slack fires message_changed for thread metadata updates (reply_count,
+	// latest_reply, etc.) where the user did not actually edit. The Edited
+	// block is only set on real user edits.
+	if msg.Message.Edited == nil {
+		return
+	}
 
 	rs, err := l.resolver.ResolveSender(ctx, msg.Channel, *msg.Message)
 	if err != nil {
@@ -360,7 +380,12 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 		return
 	}
 	ts := time.Now().UTC()
+	// ThreadTimestamp == Timestamp identifies the thread parent itself —
+	// reactions/edits/deletes on it stay in the date file.
 	threadTS := msg.Message.ThreadTimestamp
+	if threadTS == msg.Message.Timestamp {
+		threadTS = ""
+	}
 	raw := slackraw.NewSlackRawContent(*msg.Message)
 
 	edit, err := l.messages.AppendEdit(rs, msg.Message.Timestamp, threadTS, text, ts, raw)
@@ -371,6 +396,16 @@ func (l *Listener) handleEdit(ctx context.Context, msg *slackevents.MessageEvent
 
 	slog.InfoContext(ctx, "slack edit saved",
 		"msg_id", msg.Message.Timestamp, "channel", rs.ChannelName, "account", l.acct)
+
+	// Pass both new and previous text so edits adding or removing a
+	// mention both surface.
+	prevText := ""
+	if msg.PreviousMessage != nil {
+		prevText = msg.PreviousMessage.Text
+	}
+	if !l.shouldRoute(ctx, msg.ChannelType, rs.ChannelName, threadTS, "edit", msg.Message.Text, prevText) {
+		return
+	}
 
 	res := l.onEvent(hub.NewEdit(l.acct, rs.ChannelName, edit))
 	slog.InfoContext(ctx, "slack edit routed", "result", res, "account", l.acct)
@@ -419,7 +454,12 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 		SenderID:    id,
 	}
 
+	// ThreadTimestamp == Timestamp identifies the thread parent itself —
+	// reactions/edits/deletes on it stay in the date file.
 	threadTS := msg.PreviousMessage.ThreadTimestamp
+	if threadTS == msg.PreviousMessage.Timestamp {
+		threadTS = ""
+	}
 	del, err := l.messages.AppendDelete(rs, deletedTS, threadTS, ts)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to store delete", "error", err, "account", l.acct)
@@ -428,6 +468,10 @@ func (l *Listener) handleDelete(ctx context.Context, msg *slackevents.MessageEve
 
 	slog.InfoContext(ctx, "slack delete saved",
 		"msg_id", deletedTS, "channel", rs.ChannelName, "account", l.acct)
+
+	if !l.shouldRoute(ctx, msg.ChannelType, rs.ChannelName, threadTS, "delete", msg.PreviousMessage.Text) {
+		return
+	}
 
 	res := l.onEvent(hub.NewDelete(l.acct, rs.ChannelName, del))
 	slog.InfoContext(ctx, "slack delete routed", "result", res, "account", l.acct)
