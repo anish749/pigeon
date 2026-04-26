@@ -1,120 +1,86 @@
 package commands
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/anish749/pigeon/internal/config"
 )
 
-// TestFindResolvedConflict exercises the conflict detection that runs
-// before AddJira during setup. The cases cover the realistic shapes:
-// no conflict, same-raw upsert (not a conflict — AddJira handles it),
-// and the actual collision (different raw, same resolved path).
-func TestFindResolvedConflict(t *testing.T) {
-	// All cases use a controlled jira-cli config home so the resolution
-	// of jira_config: "" is predictable.
+// TestUpsertJiraByResolvedPath verifies the setup-jira idempotency: a
+// second setup that resolves to the same file must replace the first
+// entry, regardless of raw spelling. AddJira's literal-string dedupe
+// is correct for hand-edit semantics; setup-jira's idempotency is
+// resolved-path-based, hence this helper.
+func TestUpsertJiraByResolvedPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdgtest")
 	t.Setenv("JIRA_CONFIG_FILE", "")
-
 	defaultResolved := "/tmp/xdgtest/.jira/.config.yml"
 
 	cases := []struct {
-		name         string
-		existing     []config.JiraConfig
-		newRaw       string
-		newResolved  string
-		wantConflict bool
+		name     string
+		existing []config.JiraConfig
+		newEntry config.JiraConfig
+		resolved string
+		want     []config.JiraConfig
 	}{
 		{
-			name:         "empty config, no conflict",
-			existing:     nil,
-			newRaw:       "",
-			newResolved:  defaultResolved,
-			wantConflict: false,
+			name:     "empty config appends",
+			existing: nil,
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-1"},
+			resolved: defaultResolved,
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-1"}},
 		},
 		{
-			name:         "same raw - upsert path, not a conflict",
-			existing:     []config.JiraConfig{{JiraConfig: ""}},
-			newRaw:       "",
-			newResolved:  defaultResolved,
-			wantConflict: false,
-		},
-		{
-			name:         "same raw explicit - upsert path, not a conflict",
-			existing:     []config.JiraConfig{{JiraConfig: "/some/path.yml"}},
-			newRaw:       "/some/path.yml",
-			newResolved:  "/some/path.yml",
-			wantConflict: false,
-		},
-		{
-			name:         "different raw, different resolved - distinct entries",
-			existing:     []config.JiraConfig{{JiraConfig: "/site-a.yml"}},
-			newRaw:       "/site-b.yml",
-			newResolved:  "/site-b.yml",
-			wantConflict: false,
-		},
-		{
-			name: "empty existing collides with explicit default path",
+			name: "same resolved path - replaces existing",
 			existing: []config.JiraConfig{
-				{JiraConfig: ""},
+				{JiraConfig: defaultResolved, APIToken: "tok-old"},
 			},
-			newRaw:       defaultResolved,
-			newResolved:  defaultResolved,
-			wantConflict: true,
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new"},
+			resolved: defaultResolved,
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new"}},
 		},
 		{
-			name: "explicit existing collides with empty new",
+			name: "empty raw existing collapses with explicit new",
 			existing: []config.JiraConfig{
-				{JiraConfig: defaultResolved},
+				{JiraConfig: "", APIToken: "tok-old"},
 			},
-			newRaw:       "",
-			newResolved:  defaultResolved,
-			wantConflict: true,
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new"},
+			resolved: defaultResolved,
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new"}},
+		},
+		{
+			name: "different resolved path appends",
+			existing: []config.JiraConfig{
+				{JiraConfig: "/site-a.yml", APIToken: "tok-a"},
+			},
+			newEntry: config.JiraConfig{JiraConfig: "/site-b.yml", APIToken: "tok-b"},
+			resolved: "/site-b.yml",
+			want: []config.JiraConfig{
+				{JiraConfig: "/site-a.yml", APIToken: "tok-a"},
+				{JiraConfig: "/site-b.yml", APIToken: "tok-b"},
+			},
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &config.Config{Jira: c.existing}
-			got := findResolvedConflict(cfg, c.newRaw, c.newResolved)
-			if (got != nil) != c.wantConflict {
-				t.Errorf("findResolvedConflict returned %v, wantConflict=%v", got, c.wantConflict)
+			cfg := &config.Config{Jira: append([]config.JiraConfig(nil), c.existing...)}
+			upsertJiraByResolvedPath(cfg, c.newEntry, c.resolved)
+			if !equalJira(cfg.Jira, c.want) {
+				t.Errorf("got %+v, want %+v", cfg.Jira, c.want)
 			}
 		})
 	}
 }
 
-// TestSetupJiraConfigPathHint just covers the hint helper for
-// completeness — failure modes should not be silent.
-func TestSetupJiraConfigPathHint(t *testing.T) {
-	if got := configPathHint(); got == "" {
-		t.Error("configPathHint must return non-empty")
+func equalJira(a, b []config.JiraConfig) bool {
+	if len(a) != len(b) {
+		return false
 	}
-}
-
-// TestRunSetupJiraResolvePathFails covers the early-exit on a malformed
-// override path. We use an env-var-only home with a tilde override that
-// goes through expandHome, so a broken HOME forces the error path.
-func TestRunSetupJiraResolvePathFails(t *testing.T) {
-	// macOS / Linux let HOME be unset and UserHomeDir returns an error.
-	// Setenv HOME to "" to force that path.
-	t.Setenv("HOME", "")
-	// Also force the XDG fallback to be unset so ResolveConfigPath has
-	// to call UserHomeDir.
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("JIRA_CONFIG_FILE", "")
-
-	// Sanity: confirm UserHomeDir actually fails in this env. If not,
-	// this OS auto-recovers from missing HOME and we skip.
-	if _, err := os.UserHomeDir(); err == nil {
-		t.Skip("OS resolves UserHomeDir without HOME; cannot exercise error path here")
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
-
-	err := RunSetupJira(nil)
-	if err == nil {
-		t.Error("expected error when home cannot be resolved")
-	}
-	_ = filepath.Separator // keep import to match style; used in adjacent tests
+	return true
 }

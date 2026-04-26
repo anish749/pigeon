@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
@@ -59,12 +60,11 @@ func (m *JiraManager) Count() int {
 }
 
 func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig) {
-	// Reconcile by jira-cli config path. Two pigeon entries pointing at
-	// the same path collapse to one running poller; that's intentional
-	// since they would write to the same on-disk location anyway. If the
-	// path can't be resolved (broken environment, no $HOME), log and skip
-	// the entry — the daemon stays up for everything else.
-	desiredPaths := make(map[string]struct{})
+	// Reconcile by jira-cli config path. Two pigeon entries that resolve
+	// to the same path collapse to one running poller; if their APIToken
+	// fields differ the last-listed wins, with a warning. setup-jira
+	// upserts by resolved path so this collision is rare in practice.
+	desiredEntries := make(map[string]config.JiraConfig)
 	for _, jc := range desired {
 		path, err := jirapkg.ResolveConfigPath(jc.JiraConfig)
 		if err != nil {
@@ -72,37 +72,53 @@ func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig
 				"jira_config", jc.JiraConfig, "err", err)
 			continue
 		}
-		desiredPaths[path] = struct{}{}
+		if existing, ok := desiredEntries[path]; ok {
+			slog.Warn("two jira entries resolve to the same path, later one wins",
+				"path", path,
+				"previous", existing.JiraConfig,
+				"current", jc.JiraConfig)
+		}
+		desiredEntries[path] = jc
 	}
 
 	for path, running := range m.running {
-		if _, ok := desiredPaths[path]; !ok {
+		if _, ok := desiredEntries[path]; !ok {
 			slog.Info("jira config removed, stopping poller", "path", path)
 			running.cancel()
 			delete(m.running, path)
 		}
 	}
 
-	for path := range desiredPaths {
+	for path, entry := range desiredEntries {
 		if _, ok := m.running[path]; !ok {
-			m.startPath(ctx, path)
+			m.startPath(ctx, path, entry)
 		}
 	}
 }
 
-func (m *JiraManager) startPath(ctx context.Context, path string) {
+func (m *JiraManager) startPath(ctx context.Context, path string, entry config.JiraConfig) {
 	child, cancel := context.WithCancel(ctx)
 	m.running[path] = &runningJiraPoller{cancel: cancel}
 
 	go runWithRestart(child, "jira/"+path, func(ctx context.Context) error {
-		// Load PigeonJiraConfig + token at every restart so YAML edits or
-		// token rotation pick up automatically. runWithRestart's backoff
-		// throttles the retry on persistent failures.
+		// Load PigeonJiraConfig at every restart so YAML edits pick up
+		// automatically. runWithRestart's backoff throttles persistent
+		// failures.
 		cfg, err := jirapkg.LoadPigeonJiraConfig(path)
 		if err != nil {
 			return fmt.Errorf("load jira-cli config: %w", err)
 		}
-		jcfg, err := cfg.JiraConfig()
+
+		// Persisted token from pigeon's config wins; JIRA_API_TOKEN env is
+		// a fallback for hand-edited configs that haven't been re-saved
+		// through setup-jira. PigeonJiraConfig.JiraConfig validates that
+		// non-mtls auth has a non-empty token.
+		token := entry.APIToken
+		if token == "" {
+			token = os.Getenv("JIRA_API_TOKEN")
+		}
+
+		jcfg, err := cfg.JiraConfig(token)
 		if err != nil {
 			return fmt.Errorf("build jira client config: %w", err)
 		}
