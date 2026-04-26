@@ -1,12 +1,21 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository.
 
 ## Build & Run
 
 Run `./pigeon <command>` — the wrapper script auto-builds to `pigeon.bin` (gitignored) and executes.
 Do not run `go build -o pigeon` directly; that overwrites the wrapper script.
 `./pigeon help` gives everything you need to know about available commands and usage.
+
+## GitHub
+
+When creating pull requests, use the GitHub CLI (`gh pr create`) from the local checkout.
+Before committing or opening a PR:
+- Run `gofmt` only on changed Go files.
+- Stage only files changed for the task; add files explicitly by path, never with broad staging commands.
+- Run `go test ./...` and `go vet ./...`.
+- Keep the PR description concise: a couple of sentences covering the change, intent, and outcome, not an exhaustive file-by-file list.
 
 ## Testing
 
@@ -20,7 +29,7 @@ Tests require `ripgrep` (`rg`) and `uv` on PATH. CI (.github/workflows/ci.yml) r
 
 ## Architecture
 
-Pigeon is a local-first messaging bridge for AI agents. It mirrors messaging history (Slack, WhatsApp, Google Workspace, Linear) as JSONL files and provides a CLI + MCP channel server for Claude Code.
+Pigeon is a local-first messaging bridge for AI agents. It mirrors messaging and workspace history (Slack, WhatsApp, Google Workspace, Linear, Jira) as local files and provides a CLI + MCP channel server for Claude Code.
 
 ### Package Layering
 
@@ -38,12 +47,15 @@ cmd/pigeon/main.go → cli.Execute()
   internal/listener/*   Platform-specific listeners (slack, whatsapp) — write to store, observe identity
   internal/gws/*        Google Workspace pollers (drive, gmail, calendar)
   internal/linear/*     Linear issue poller
+  internal/jira/*       Jira issue poller
        ↓
   internal/store        Store interface + JSONL protocol v1 implementation (modelv1/)
   internal/identity     Cross-platform contact identity (Observer/Resolver pattern)
        ↓
   internal/paths        Centralized path resolution — all other packages import paths from here
   internal/read         Read/glob/grep operations using ripgrep
+  internal/search       Parsing and summarizing rg output
+  internal/workstream   Workstream discovery, routing, replay, and TUI support
 ```
 
 ### Key Subsystems
@@ -62,6 +74,8 @@ cmd/pigeon/main.go → cli.Execute()
 
 - **Identity** (`internal/identity`): Cross-source contact resolution. Listeners report signals via `Observer`; `Reader` provides lookup.
 
+- **Workstream** (`internal/workstream`): Reads recent cross-source signals, discovers ongoing efforts, routes signals to workstreams, and persists workstream/proposal state under the data root's workspace area.
+
 ### Reading Data: Store vs Read
 
 There are two sibling subsystems for reading message data, at the same level of the dependency tree. Higher-level code (cli, commands, hub) picks whichever is appropriate for the task.
@@ -74,8 +88,8 @@ cli/commands/hub
 
 **`internal/store`** — Structured, conversation-aware reads. `Store.ReadConversation()` loads JSONL date/thread files, parses each line into typed `modelv1` structs (`MsgLine`, `ReactLine`, `EditLine`, etc.), applies compaction (dedup, edit/delete reconciliation), and resolves reactions onto their parent messages. Returns `ResolvedDateFile` with fully materialized messages. Used by `pigeon read` (via `commands.RunRead`) and the hub for formatting messages to send to Claude. The JSONL format is designed to be greppable — tests in `store/grep_test.go` and `store/rg_test.go` verify this by running actual `rg` commands against written files.
 
-**`internal/read`** — File discovery and content search via ripgrep. Two main entry points:
-- `read.Glob(dir, since)` — finds data files (date JSONL, thread JSONL, Drive content) matching a time window. Thread files are filtered by content (`rg -l` for timestamp prefixes), not filename. Drive files are resolved through their sibling `drive-meta-*.json` files.
+**`internal/read`** — File discovery and content search via ripgrep. Main entry points:
+- `read.Glob(dir, since)` — returns typed `paths.DataFile` values. With `since == 0`, it finds JSONL files plus Drive content. With `since > 0`, it finds date-named JSONL files, thread files filtered by content (`rg -l` for timestamp prefixes), and Drive content resolved through sibling `drive-meta-*.json` files.
 - `read.Grep(dir, opts)` — content search. When `since > 0`, pre-computes the file list via `Glob` then passes it to `rg` as positional args. When `since == 0`, lets `rg` walk the tree with glob filters (faster).
 - `read.GlobFiles(dir, globs)` — raw glob with custom patterns, no date logic.
 
@@ -92,9 +106,10 @@ Both are scoped by `read.SearchDirs(workspace, platform, account)` which resolve
 ### Data Flow
 
 1. Listeners receive platform events → write JSONL lines via `store.Append()`
-2. Hub picks up new messages → pushes to connected MCP sessions via SSE
-3. Claude Code receives channel notifications → can read/search/reply via CLI
-4. Outgoing replies go to the outbox → human approves via `pigeon review` → sent via `api.Send()`
+2. Pollers receive GWS/Linear/Jira updates → write JSONL/content files through the store and typed paths
+3. Hub picks up new messages → pushes to connected MCP sessions via SSE
+4. Claude Code receives channel notifications → can read/search/reply via CLI
+5. Outgoing replies go to the outbox → human approves via `pigeon review` → sent via `api.Send()`
 
 ## Error Handling
 
