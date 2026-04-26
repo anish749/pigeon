@@ -108,14 +108,6 @@ func (s SlackConfig) AppDisplay() string {
 	return "Pigeon"
 }
 
-// AppAttribution returns the Slack app name used in "sent via ..." copy.
-func (s SlackConfig) AppAttribution() string {
-	if s.AppDisplayName != "" {
-		return s.AppDisplayName
-	}
-	return "pigeon"
-}
-
 // Load reads the config file. Returns an empty Config if the file doesn't exist.
 func Load() (*Config, error) {
 	data, err := os.ReadFile(paths.ConfigPath())
@@ -183,9 +175,6 @@ func (c *Config) RemoveSlack(workspace string) {
 func (c *Config) AddSlack(entry SlackConfig) {
 	for i, existing := range c.Slack {
 		if existing.TeamID == entry.TeamID {
-			if entry.AppDisplayName == "" {
-				entry.AppDisplayName = existing.AppDisplayName
-			}
 			c.Slack[i] = entry
 			return
 		}

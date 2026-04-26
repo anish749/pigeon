@@ -49,27 +49,22 @@ func RunSetupSlack(args []string) error {
 		return fmt.Errorf("workspace name is required")
 	}
 
-	configuredAppDisplayName, hasConfiguredAppDisplayName, err := configuredSlackAppDisplayName(workspace)
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	appDisplayName := (config.SlackConfig{}).AppDisplay()
-	appDisplayNameForConfig := ""
-	if hasConfiguredAppDisplayName {
-		appDisplayName = configuredAppDisplayName
-		appDisplayNameForConfig = configuredAppDisplayName
-	}
-	fmt.Printf("  Slack app display name [%s]: ", appDisplayName)
-	appDisplayNameInput, _ := reader.ReadString('\n')
-	appDisplayNameInput = strings.TrimSpace(appDisplayNameInput)
-	if appDisplayNameInput != "" {
-		appDisplayName = appDisplayNameInput
-		appDisplayNameForConfig = appDisplayNameInput
+	existing := lookupSlackConfig(cfg, workspace)
+	fmt.Printf("  Slack app display name [%s]: ", existing.AppDisplay())
+	appDisplayName, _ := reader.ReadString('\n')
+	appDisplayName = strings.TrimSpace(appDisplayName)
+	if appDisplayName == "" {
+		appDisplayName = existing.AppDisplayName
 	}
 	fmt.Println()
 
 	// Render manifest with user's values and copy to clipboard
-	rendered, err := renderManifest(username, workspace, appDisplayName)
+	displayName := config.SlackConfig{AppDisplayName: appDisplayName}.AppDisplay()
+	rendered, err := renderManifest(username, workspace, displayName)
 	if err != nil {
 		fmt.Printf("  (Could not render manifest: %v)\n", err)
 		fmt.Println("  Run `pigeon generate-manifest` manually to create the manifest.")
@@ -132,7 +127,7 @@ func RunSetupSlack(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, appDisplayNameForConfig)
+	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, appDisplayName)
 
 	go func() {
 		if err := srv.Start(ctx); err != nil {

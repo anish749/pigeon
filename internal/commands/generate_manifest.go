@@ -21,12 +21,15 @@ func RunGenerateManifest(username, workspace, appDisplayName string) error {
 		workspace = selected
 	}
 
-	displayName, err := resolveSlackAppDisplayName(workspace, appDisplayName)
-	if err != nil {
-		return err
+	if appDisplayName == "" {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		appDisplayName = lookupSlackConfig(cfg, workspace).AppDisplay()
 	}
 
-	rendered, err := renderManifest(username, workspace, displayName)
+	rendered, err := renderManifest(username, workspace, appDisplayName)
 	if err != nil {
 		return err
 	}
@@ -43,33 +46,13 @@ func RunGenerateManifest(username, workspace, appDisplayName string) error {
 	return nil
 }
 
-func resolveSlackAppDisplayName(workspace, override string) (string, error) {
-	if override != "" {
-		return override, nil
-	}
-
-	if name, ok, err := configuredSlackAppDisplayName(workspace); err != nil {
-		return "", err
-	} else if ok {
-		return name, nil
-	}
-	return (config.SlackConfig{}).AppDisplay(), nil
-}
-
-func configuredSlackAppDisplayName(workspace string) (string, bool, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return "", false, err
-	}
+func lookupSlackConfig(cfg *config.Config, workspace string) config.SlackConfig {
 	for _, sl := range cfg.Slack {
 		if sl.Workspace == workspace {
-			if sl.AppDisplayName != "" {
-				return sl.AppDisplayName, true, nil
-			}
-			return "", false, nil
+			return sl
 		}
 	}
-	return "", false, nil
+	return config.SlackConfig{}
 }
 
 // selectSlackWorkspace shows an interactive picker for configured Slack workspaces.
@@ -123,12 +106,8 @@ func renderManifest(username, workspace, appDisplayName string) (string, error) 
 		return "", fmt.Errorf("read manifest template: %w", err)
 	}
 
-	return renderManifestTemplate(string(tmpl), username, workspace, appDisplayName), nil
-}
-
-func renderManifestTemplate(tmpl, username, workspace, appDisplayName string) string {
-	rendered := strings.ReplaceAll(tmpl, "${USERNAME}", username)
+	rendered := strings.ReplaceAll(string(tmpl), "${USERNAME}", username)
 	rendered = strings.ReplaceAll(rendered, "${WORKSPACE_NAME}", workspace)
 	rendered = strings.ReplaceAll(rendered, "${APP_DISPLAY_NAME}", appDisplayName)
-	return rendered
+	return rendered, nil
 }

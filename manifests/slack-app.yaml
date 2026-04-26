@@ -1,11 +1,13 @@
 display_information:
   name: "${USERNAME}'s ${WORKSPACE_NAME} ${APP_DISPLAY_NAME}"
-  description: "${APP_DISPLAY_NAME} carries messages to ${USERNAME} without posting on its own."
+  description: Carrier pigeon. Picks up messages, flies them to ${USERNAME}. No pecking, no replies.
   long_description: >-
-    This is ${USERNAME}'s personal ${APP_DISPLAY_NAME} for the
-    ${WORKSPACE_NAME} workspace. It picks up messages and carries
+    Coo! This is ${USERNAME}'s personal carrier pigeon for the
+    ${WORKSPACE_NAME} workspace. It picks up messages and flies
     them home so ${USERNAME} can catch up whenever they like.
-    Quiet, reliable, and focused on one job: carrying messages.
+    Quiet, reliable, never makes a fuss. Won't peck at your
+    threads or leave droppings in your channels. Just a
+    well-behaved bird doing its one job: carrying messages.
   background_color: "#2d2d2d"
 
 features:
