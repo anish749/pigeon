@@ -60,7 +60,7 @@ func TestApproveProposalCreatesWorkstream(t *testing.T) {
 	}
 }
 
-func TestApproveProposalIdempotentOnExistingWorkstream(t *testing.T) {
+func TestApproveProposalConflictsWithExistingWorkstream(t *testing.T) {
 	mgr, st := newTestManager(t)
 	ts := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 
@@ -86,12 +86,23 @@ func TestApproveProposalIdempotentOnExistingWorkstream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mgr.ApproveProposal(context.Background(), "p-1"); err != nil {
-		t.Fatal(err)
+	if _, err := mgr.ApproveProposal(context.Background(), "p-1"); err == nil {
+		t.Fatal("expected error on slug conflict, got nil")
 	}
+
+	// Existing workstream untouched.
 	got, _, _ := st.GetWorkstream("ws-auth-refactor")
 	if got.Focus != "User-edited focus that must survive." {
 		t.Errorf("user edit was overwritten: focus = %q", got.Focus)
+	}
+
+	// Proposal still pending — caller must reject explicitly.
+	p, _, _ := st.GetProposal("p-1")
+	if p.State != models.ProposalPending {
+		t.Errorf("proposal state = %q, want pending after conflict", p.State)
+	}
+	if !p.ResolvedAt.IsZero() {
+		t.Errorf("ResolvedAt set on conflict: %v", p.ResolvedAt)
 	}
 }
 

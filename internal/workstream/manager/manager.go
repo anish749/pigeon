@@ -172,11 +172,12 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 // ApproveProposal applies a pending proposal (creating the workstream
 // for ProposalCreate) and marks the proposal approved. Returns the
 // resulting workstream ID. Errors if the proposal is missing, already
-// resolved, or of a type the manager does not yet apply.
+// resolved, of a type the manager does not yet apply, or if it would
+// collide with an existing workstream (same slug ID).
 //
-// Idempotent on the workstream side: if a same-named workstream already
-// exists (same slug ID), no new workstream is written and the existing
-// one's edits are preserved — only the proposal is marked approved.
+// On collision the proposal is left Pending and nothing is written —
+// the user must reject the proposal or rename one side. Approval must
+// never overwrite a workstream that may carry user edits.
 func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) {
 	p, ok, err := m.store.GetProposal(id)
 	if err != nil {
@@ -200,18 +201,17 @@ func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) 
 			Focus:     p.SuggestedFocus,
 			Created:   p.ProposedAt,
 		}
-		existing, exists, err := m.store.GetWorkstream(w.ID)
+		_, exists, err := m.store.GetWorkstream(w.ID)
 		if err != nil {
 			return "", err
 		}
 		if exists {
-			wsID = existing.ID
-		} else {
-			if err := m.store.PutWorkstream(w); err != nil {
-				return "", err
-			}
-			wsID = w.ID
+			return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
 		}
+		if err := m.store.PutWorkstream(w); err != nil {
+			return "", err
+		}
+		wsID = w.ID
 	default:
 		return "", fmt.Errorf("proposal %q has unsupported type %q", id, p.Type)
 	}
