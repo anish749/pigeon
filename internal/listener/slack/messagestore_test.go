@@ -87,6 +87,100 @@ func TestWriteThreadMessage_StampsThreadFields(t *testing.T) {
 	}
 }
 
+// TestAppendEdit_ThreadFields verifies edits stamp both thread_ts and
+// thread_id on disk when the target lives in a thread, and emit neither
+// when the target is a top-level message. The date file is the
+// destination either way — only the line content changes.
+func TestAppendEdit_ThreadFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		threadTS string
+		wantKeys bool
+	}{
+		{name: "thread reply edit stamps both keys", threadTS: "1700000001.000001", wantKeys: true},
+		{name: "top-level edit emits neither key", threadTS: "", wantKeys: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, _, acct := newTestMessageStore(t)
+			rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
+			raw := slackraw.NewSlackRawContent(goslack.Msg{})
+
+			editTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+			if err := ms.AppendEdit(rs, "1700000010.000010", tt.threadTS,
+				"new text", editTime, raw); err != nil {
+				t.Fatalf("AppendEdit: %v", err)
+			}
+
+			path := paths.DefaultDataRoot().AccountFor(acct).Conversation("#general").DateFile("2026-04-26").Path()
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read date file: %v", err)
+			}
+			line := strings.TrimRight(string(data), "\n")
+
+			if tt.wantKeys {
+				if !strings.Contains(line, `"thread_ts":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_ts on edit line; got: %s", line)
+				}
+				if !strings.Contains(line, `"thread_id":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_id on edit line; got: %s", line)
+				}
+			} else {
+				if strings.Contains(line, "thread_ts") || strings.Contains(line, "thread_id") {
+					t.Errorf("non-thread edit must omit thread_ts/thread_id; got: %s", line)
+				}
+			}
+		})
+	}
+}
+
+// TestAppendDelete_ThreadFields mirrors TestAppendEdit_ThreadFields for
+// the delete path.
+func TestAppendDelete_ThreadFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		threadTS string
+		wantKeys bool
+	}{
+		{name: "thread reply delete stamps both keys", threadTS: "1700000001.000001", wantKeys: true},
+		{name: "top-level delete emits neither key", threadTS: "", wantKeys: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, _, acct := newTestMessageStore(t)
+			rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
+
+			delTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+			if err := ms.AppendDelete(rs, "1700000010.000010", tt.threadTS, delTime); err != nil {
+				t.Fatalf("AppendDelete: %v", err)
+			}
+
+			path := paths.DefaultDataRoot().AccountFor(acct).Conversation("#general").DateFile("2026-04-26").Path()
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read date file: %v", err)
+			}
+			line := strings.TrimRight(string(data), "\n")
+
+			if tt.wantKeys {
+				if !strings.Contains(line, `"thread_ts":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_ts on delete line; got: %s", line)
+				}
+				if !strings.Contains(line, `"thread_id":"`+tt.threadTS+`"`) {
+					t.Errorf("expected thread_id on delete line; got: %s", line)
+				}
+			} else {
+				if strings.Contains(line, "thread_ts") || strings.Contains(line, "thread_id") {
+					t.Errorf("non-thread delete must omit thread_ts/thread_id; got: %s", line)
+				}
+			}
+		})
+	}
+}
+
 // TestWriteThreadMessage_OmitemptyOnDisk verifies parent records emit
 // neither thread_ts nor thread_id (omitempty), and reply records emit
 // both keys with the parent's TS as their value — the on-disk shape that

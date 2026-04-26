@@ -98,34 +98,45 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 }
 
 // AppendEdit stores a message edit event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
-	line := modelv1.Line{
-		Type: modelv1.LineEdit,
-		Edit: &modelv1.EditLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-			Text:     text,
-			RawType:  modelv1.RawTypeSlack,
-			Raw:      raw.AsSerializable(),
-		},
+// to the target message's timestamp. threadTS is the parent thread's TS
+// when the edited message lives in a thread (empty otherwise); both
+// ThreadTS and ThreadID are stamped with the same value so the line is
+// self-describing and greppable from either vocabulary — see the schema
+// comment on modelv1.MsgLine for the full rationale.
+func (ms *MessageStore) AppendEdit(rs ResolvedSender, msgTS, threadTS, text string, ts time.Time, raw slackraw.SlackRawContent) error {
+	edit := modelv1.EditLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
+		Text:     text,
+		RawType:  modelv1.RawTypeSlack,
+		Raw:      raw.AsSerializable(),
 	}
+	if threadTS != "" {
+		edit.ThreadTS = threadTS
+		edit.ThreadID = threadTS
+	}
+	line := modelv1.Line{Type: modelv1.LineEdit, Edit: &edit}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
 
 // AppendDelete stores a message delete event in the date file corresponding
-// to the target message's timestamp.
-func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS string, ts time.Time) error {
-	line := modelv1.Line{
-		Type: modelv1.LineDelete,
-		Delete: &modelv1.DeleteLine{
-			Ts:       ts,
-			MsgID:    msgTS,
-			Sender:   rs.SenderName,
-			SenderID: rs.SenderID,
-		},
+// to the target message's timestamp. threadTS is the parent thread's TS
+// when the deleted message lived in a thread (empty otherwise); both
+// ThreadTS and ThreadID are stamped with the same value, mirroring
+// AppendEdit and Slack's MsgLine convention.
+func (ms *MessageStore) AppendDelete(rs ResolvedSender, msgTS, threadTS string, ts time.Time) error {
+	del := modelv1.DeleteLine{
+		Ts:       ts,
+		MsgID:    msgTS,
+		Sender:   rs.SenderName,
+		SenderID: rs.SenderID,
 	}
+	if threadTS != "" {
+		del.ThreadTS = threadTS
+		del.ThreadID = threadTS
+	}
+	line := modelv1.Line{Type: modelv1.LineDelete, Delete: &del}
 	return ms.store.Append(ms.acct, rs.ChannelName, line)
 }
