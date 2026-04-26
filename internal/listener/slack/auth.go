@@ -61,17 +61,19 @@ type AuthServer struct {
 	clientID     string
 	clientSecret string
 	appToken     string
+	appName      string
 	port         int
 	installed    chan config.SlackConfig
 }
 
 // NewAuthServer creates an OAuth server. appToken is saved into the resulting SlackConfig
 // so the entry has all credentials needed to start a listener.
-func NewAuthServer(clientID, clientSecret, appToken string) *AuthServer {
+func NewAuthServer(clientID, clientSecret, appToken, appName string) *AuthServer {
 	return &AuthServer{
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		appToken:     appToken,
+		appName:      strings.TrimSpace(appName),
 		port:         defaultPort,
 		installed:    make(chan config.SlackConfig, 1),
 	}
@@ -141,13 +143,14 @@ func (s *AuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry := config.SlackConfig{
-		Workspace:    resp.Team.Name,
-		ClientID:     s.clientID,
-		ClientSecret: s.clientSecret,
-		AppToken:     s.appToken,
-		BotToken:     resp.AccessToken,
-		UserToken:    resp.AuthedUser.AccessToken,
-		TeamID:       resp.Team.ID,
+		Workspace:      resp.Team.Name,
+		AppDisplayName: s.appName,
+		ClientID:       s.clientID,
+		ClientSecret:   s.clientSecret,
+		AppToken:       s.appToken,
+		BotToken:       resp.AccessToken,
+		UserToken:      resp.AuthedUser.AccessToken,
+		TeamID:         resp.Team.ID,
 	}
 
 	// Save to config

@@ -50,6 +50,14 @@ type SlackSender struct {
 	BotUserID string // the bot's Slack user ID
 	UserName  string // the authenticated user's display name
 	UserID    string // the authenticated user's Slack user ID
+	AppName   string // public Slack app display name used in message copy
+}
+
+func (s *SlackSender) appName() string {
+	if s != nil && strings.TrimSpace(s.AppName) != "" {
+		return strings.TrimSpace(s.AppName)
+	}
+	return "pigeon"
 }
 
 // Server is the daemon's HTTP API server.
@@ -388,7 +396,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req Resolv
 				nil, nil,
 			),
 			goslack.NewContextBlock("",
-				goslack.NewTextBlockObject("mrkdwn", "_sent via pigeon_", false, false),
+				goslack.NewTextBlockObject("mrkdwn", fmt.Sprintf("_sent via %s_", sender.appName()), false, false),
 			),
 		))
 	}

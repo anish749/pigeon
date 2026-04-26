@@ -1,13 +1,11 @@
 display_information:
-  name: "${USERNAME}'s ${WORKSPACE_NAME} Pigeon"
-  description: Carrier pigeon. Picks up messages, flies them to ${USERNAME}. No pecking, no replies.
+  name: "${USERNAME}'s ${WORKSPACE_NAME} ${APP_DISPLAY_NAME}"
+  description: "${APP_DISPLAY_NAME} carries messages to ${USERNAME} without posting on its own."
   long_description: >-
-    Coo! This is ${USERNAME}'s personal carrier pigeon for the
-    ${WORKSPACE_NAME} workspace. It picks up messages and flies
+    This is ${USERNAME}'s personal ${APP_DISPLAY_NAME} for the
+    ${WORKSPACE_NAME} workspace. It picks up messages and carries
     them home so ${USERNAME} can catch up whenever they like.
-    Quiet, reliable, never makes a fuss. Won't peck at your
-    threads or leave droppings in your channels. Just a
-    well-behaved bird doing its one job: carrying messages.
+    Quiet, reliable, and focused on one job: carrying messages.
   background_color: "#2d2d2d"
 
 features:
@@ -15,7 +13,7 @@ features:
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
-    display_name: "${USERNAME}'s ${WORKSPACE_NAME} Pigeon"
+    display_name: "${USERNAME}'s ${WORKSPACE_NAME} ${APP_DISPLAY_NAME}"
     always_online: true
 
 oauth_config:
