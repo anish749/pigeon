@@ -25,11 +25,10 @@ import (
 // The directory name has a leading dot (".jira") which is unusual but
 // matches what `jira init` produces.
 const (
-	jiraConfigEnv     = "JIRA_CONFIG_FILE"
-	jiraConfigSubdir  = ".jira"
-	jiraConfigName    = ".config.yml"
-	jiraAPITokenEnv   = "JIRA_API_TOKEN"
-	jiraInstallCloud  = "cloud"
+	jiraConfigEnv    = "JIRA_CONFIG_FILE"
+	jiraConfigSubdir = ".jira"
+	jiraConfigName   = ".config.yml"
+	jiraAPITokenEnv  = "JIRA_API_TOKEN"
 )
 
 // jiraCLIConfig mirrors the subset of fields pigeon reads from a
@@ -104,11 +103,13 @@ func LoadClientConfig(path string) (jira.Config, poller.APIVersion, error) {
 		return jira.Config{}, 0, fmt.Errorf("jira-cli config %s missing required `login` field", path)
 	}
 
-	// jira-cli writes "Cloud" (capitalized) but treat any case as cloud.
-	// Default to cloud when unset since that is by far the more common case
-	// in 2026; on-prem users should have explicitly set installation: local.
+	// jira-cli writes the constants jira.InstallationTypeCloud ("Cloud") or
+	// jira.InstallationTypeLocal ("Local"). Compare case-sensitive against
+	// those exported constants, not against an ad-hoc string. Empty defaults
+	// to Cloud since that is by far the more common case in 2026 and matches
+	// what `jira init` selects when the user accepts defaults.
 	apiVer := poller.APIVersionV3
-	if !strings.EqualFold(c.Installation, "") && !strings.EqualFold(c.Installation, jiraInstallCloud) {
+	if c.Installation != "" && c.Installation != jira.InstallationTypeCloud {
 		apiVer = poller.APIVersionV2
 	}
 
