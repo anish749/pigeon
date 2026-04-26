@@ -110,7 +110,7 @@ func discoverCmd(mgr Manager, since, until time.Time) tea.Cmd {
 	return tea.Batch(
 		spinTick(),
 		func() tea.Msg {
-			ds, err := mgr.DiscoverAndPropose(context.Background(), since, until)
+			ds, err := mgr.DiscoverAndPropose(context.Background(), since, until, time.Now())
 			return discoverDoneMsg{count: len(ds), err: err}
 		},
 	)

@@ -82,32 +82,33 @@ func (m *Manager) ReadSignals(ctx context.Context, since, until time.Time) ([]mo
 // ID generation) apply. Under AutoApprove the proposals become workstreams
 // immediately; otherwise they land in proposals.json for review.
 //
-// The default workstream is created from the first signal timestamp before
-// discovery runs. The timestamp is also recorded on each created workstream so
-// created dates align with the data window.
+// The now parameter is recorded as the Created timestamp on the default
+// workstream (when freshly created) and on every discovered workstream.
+// Callers pass the current wall-clock time from the outermost layer so
+// Created reflects when discovery ran, not anything derived from the
+// historical signal stream.
 //
 // Returns the raw LLM output so callers can display rich metadata
 // (conversations, participants) that isn't kept on the persisted model.
 // Existing same-named workstreams are left untouched, so re-runs preserve
 // user edits to focus and state.
-func (m *Manager) DiscoverAndPropose(ctx context.Context, since, until time.Time) ([]discovery.DiscoveredWorkstream, error) {
+func (m *Manager) DiscoverAndPropose(ctx context.Context, since, until, now time.Time) ([]discovery.DiscoveredWorkstream, error) {
 	signals, err := m.ReadSignals(ctx, since, until)
 	if err != nil {
 		return nil, err
 	}
-	return m.DiscoverAndProposeSignals(ctx, signals)
+	return m.DiscoverAndProposeSignals(ctx, signals, now)
 }
 
 // DiscoverAndProposeSignals runs discovery over signals that were already read
 // through ReadSignals. It exists for workflows, such as replay, that need the
 // same signal set for additional processing and should not read the window
 // twice.
-func (m *Manager) DiscoverAndProposeSignals(ctx context.Context, signals []models.Signal) ([]discovery.DiscoveredWorkstream, error) {
+func (m *Manager) DiscoverAndProposeSignals(ctx context.Context, signals []models.Signal, now time.Time) ([]discovery.DiscoveredWorkstream, error) {
 	if len(signals) == 0 {
 		return nil, nil
 	}
-	proposedAt := signals[0].Ts
-	if err := m.EnsureDefaultWorkstream(m.cfg.Workspace.Name, proposedAt); err != nil {
+	if err := m.EnsureDefaultWorkstream(m.cfg.Workspace.Name, now); err != nil {
 		return nil, fmt.Errorf("ensure default workstream: %w", err)
 	}
 	discovered, err := m.disc.Discover(ctx, signals)
@@ -116,7 +117,7 @@ func (m *Manager) DiscoverAndProposeSignals(ctx context.Context, signals []model
 	}
 	wsName := m.cfg.Workspace.Name
 	for _, d := range discovered {
-		if _, err := m.ProposeNew(ctx, d.Name, d.Focus, wsName, proposedAt); err != nil {
+		if _, err := m.ProposeNew(ctx, d.Name, d.Focus, wsName, now); err != nil {
 			return nil, fmt.Errorf("propose %q: %w", d.Name, err)
 		}
 	}

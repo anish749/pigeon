@@ -19,7 +19,7 @@ import (
 // interface — callers pass the same manager they built for the CLI
 // `discover`/`replay` commands.
 type Manager interface {
-	DiscoverAndPropose(ctx context.Context, since, until time.Time) ([]discovery.DiscoveredWorkstream, error)
+	DiscoverAndPropose(ctx context.Context, since, until, now time.Time) ([]discovery.DiscoveredWorkstream, error)
 }
 
 // mode is the input-handling state of the TUI. Most modes consume keys
