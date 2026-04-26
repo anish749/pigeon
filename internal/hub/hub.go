@@ -590,9 +590,10 @@ func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.M
 // session. Reactions are delivered out-of-band: they are not gated by the
 // last_delivered cursor since reactions often target older messages.
 //
-// Formatting (and the parent-message lookup it depends on) happens here at
-// delivery time, not at route time — symmetric with deliverLiveMessage. If
-// no session is attached the reaction is dropped without doing the lookup.
+// Formatting (and the parent-message + conv-meta lookups it depends on)
+// happen here at delivery time, not at route time — symmetric with
+// deliverLiveMessage. If no session is attached the reaction is dropped
+// without doing the lookups.
 func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
@@ -604,7 +605,14 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 		return
 	}
 
-	lines := h.formatReactionLines(ch.acct, conversation, react)
+	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
+	if err != nil {
+		slog.Warn("read conv meta for reaction delivery, dropping meta tags",
+			"account", ch.acct, "conversation", conversation, "error", err)
+		convMeta = nil
+	}
+
+	lines := h.formatReactionLines(ch.acct, conversation, react, convMeta)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
@@ -620,13 +628,14 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.Re
 
 // formatReactionLines renders a reaction with parent context when the
 // parent message can be found on disk, falling back to a context-less
-// rendering otherwise. Called from deliverReaction so the disk lookup
-// stays off the listener's hot path.
-func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) []string {
+// rendering otherwise. convMeta tags (type, channel ID, etc.) are appended
+// in both branches when non-nil. Called from deliverReaction so the disk
+// lookups stay off the listener's hot path.
+func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine, convMeta *modelv1.ConvMeta) []string {
 	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
-		return modelv1.FormatReactionNotification(*msg, react, time.Local)
+		return modelv1.FormatReactionNotification(*msg, react, time.Local, convMeta)
 	}
-	return modelv1.FormatReactionFallbackNotification(react, time.Local)
+	return modelv1.FormatReactionFallbackNotification(react, time.Local, convMeta)
 }
 
 // lookupMessage searches for a message by ID in a conversation using grep.

@@ -113,10 +113,13 @@ func formatThreadIDMeta(id string) string {
 	return fmt.Sprintf(" [thread_id:%s]", id)
 }
 
-// FormatReactionNotification formats a message with a single reaction for
-// Claude Code channel notifications. This does not include all reactions
-// associated with the message — only the specific reaction event being delivered.
-func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []string {
+// FormatReactionNotification formats a single reaction event with parent
+// context for Claude Code channel notifications. This does not include all
+// reactions associated with the message — only the specific event being
+// delivered. convMeta may be nil; when present, its tags are appended to
+// the meta line so the agent can identify the conversation (type,
+// channel ID, etc.) the same way it can on a message notification.
+func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location, convMeta *ConvMeta) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
@@ -132,6 +135,11 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 	if r.Via != "" {
 		meta += fmt.Sprintf(" [via:%s]", r.Via)
 	}
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
 	lines = append(lines, meta)
 
 	return lines
@@ -139,16 +147,24 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 
 // FormatReactionFallbackNotification formats a reaction notification for
 // Claude Code when the original message could not be found. This happens
-// when the reacted-to message is not on disk (e.g. older than synced history).
-func FormatReactionFallbackNotification(r ReactLine, loc *time.Location) []string {
+// when the reacted-to message is not on disk (e.g. older than synced
+// history). convMeta is appended on the meta line when non-nil — same
+// shape as FormatReactionNotification.
+func FormatReactionFallbackNotification(r ReactLine, loc *time.Location, convMeta *ConvMeta) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
 	}
+	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+		r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji)
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
 	return []string{
 		fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji),
-		fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
-			r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji),
+		meta,
 	}
 }
 

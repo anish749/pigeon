@@ -446,7 +446,7 @@ func TestFormatReactionLines_MessageFound(t *testing.T) {
 		MsgID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
 		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
 	}
-	lines := h.formatReactionLines(acct, "#general", react)
+	lines := h.formatReactionLines(acct, "#general", react, nil)
 
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty lines")
@@ -467,7 +467,7 @@ func TestFormatReactionLines_MessageNotFound(t *testing.T) {
 		MsgID: "9999999999.999999", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
 		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
 	}
-	lines := h.formatReactionLines(acct, "#general", react)
+	lines := h.formatReactionLines(acct, "#general", react, nil)
 
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty lines")
