@@ -46,16 +46,22 @@ type LinearConfig struct {
 
 // JiraConfig binds one jira-cli configuration to pigeon's ingest.
 //
-// Both fields are populated by `pigeon setup-jira` at install time and
-// snapshot the state that was verified end-to-end. The daemon reads
-// them as-is at startup; no environment variable, default-path chain,
-// or tilde expansion runs at runtime.
+// All three fields are populated by `pigeon setup-jira` at install
+// time and snapshot the state that was verified end-to-end. The daemon
+// reads them as-is at startup; no environment variable, default-path
+// chain, or tilde expansion runs at runtime.
+//
+// Account is the slug derived from the bound YAML's server URL (first
+// DNS label, lowercased) at setup time. Persisting it lets the daemon
+// and workspace machinery resolve the account without reopening the
+// jira-cli YAML.
 //
 // Server / login / auth / project still come from the bound jira-cli
 // YAML, not duplicated here.
 type JiraConfig struct {
 	JiraConfig string `yaml:"jira_config"` // absolute path to jira-cli yaml
 	APIToken   string `yaml:"api_token"`   // Atlassian API token
+	Account    string `yaml:"account"`     // slug derived from server URL at setup time
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.

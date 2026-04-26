@@ -81,38 +81,38 @@ func TestUpsertJiraByResolvedPath(t *testing.T) {
 		{
 			name:     "empty config appends",
 			existing: nil,
-			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-1"},
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-1", Account: "acme"},
 			resolved: defaultResolved,
-			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-1"}},
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-1", Account: "acme"}},
 		},
 		{
 			name: "same resolved path - replaces existing",
 			existing: []config.JiraConfig{
-				{JiraConfig: defaultResolved, APIToken: "tok-old"},
+				{JiraConfig: defaultResolved, APIToken: "tok-old", Account: "acme"},
 			},
-			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new"},
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new", Account: "acme"},
 			resolved: defaultResolved,
-			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new"}},
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new", Account: "acme"}},
 		},
 		{
 			name: "empty raw existing collapses with explicit new",
 			existing: []config.JiraConfig{
-				{JiraConfig: "", APIToken: "tok-old"},
+				{JiraConfig: "", APIToken: "tok-old", Account: "acme"},
 			},
-			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new"},
+			newEntry: config.JiraConfig{JiraConfig: defaultResolved, APIToken: "tok-new", Account: "acme"},
 			resolved: defaultResolved,
-			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new"}},
+			want:     []config.JiraConfig{{JiraConfig: defaultResolved, APIToken: "tok-new", Account: "acme"}},
 		},
 		{
 			name: "different resolved path appends",
 			existing: []config.JiraConfig{
-				{JiraConfig: "/site-a.yml", APIToken: "tok-a"},
+				{JiraConfig: "/site-a.yml", APIToken: "tok-a", Account: "site-a"},
 			},
-			newEntry: config.JiraConfig{JiraConfig: "/site-b.yml", APIToken: "tok-b"},
+			newEntry: config.JiraConfig{JiraConfig: "/site-b.yml", APIToken: "tok-b", Account: "site-b"},
 			resolved: "/site-b.yml",
 			want: []config.JiraConfig{
-				{JiraConfig: "/site-a.yml", APIToken: "tok-a"},
-				{JiraConfig: "/site-b.yml", APIToken: "tok-b"},
+				{JiraConfig: "/site-a.yml", APIToken: "tok-a", Account: "site-a"},
+				{JiraConfig: "/site-b.yml", APIToken: "tok-b", Account: "site-b"},
 			},
 		},
 	}
