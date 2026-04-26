@@ -10,14 +10,14 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
 	"github.com/anish749/pigeon/internal/workstream/router"
 	arstore "github.com/anish749/pigeon/internal/workstream/store"
-	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/store"
 )
 
 // Config is an alias for the shared config.
