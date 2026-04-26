@@ -20,13 +20,14 @@ const backfillDays = 90
 // PollIssues runs one sync cycle for a single Jira project. On first run
 // (no cursor) it backfills active + recently-closed issues; on subsequent
 // runs it queries `updated > <cursor>` for the project. For each issue
-// key returned, it fetches the full body via GetIssueRaw and writes one
+// returned, it fetches the full body via GetIssueRaw and writes one
 // jira-issue line plus N jira-comment lines.
 //
-// Returns the number of issues processed and any error encountered. The
-// cursor is advanced only when the entire batch succeeds — if any issue
-// failed, cursors.Issues.UpdatedAfter stays put so the next poll retries
-// the whole batch (dedup-by-id absorbs the duplicate writes).
+// Returns the number of issue snapshots successfully written and any
+// error encountered. The cursor advances when the batch finished with
+// no transient errors — 404s are treated as permanent (issue gone) and
+// don't block cursor advance; their search-time `updated` is folded
+// into maxUpdated so we don't re-discover them next poll.
 func PollIssues(
 	ctx context.Context,
 	c *jira.Client,
@@ -38,36 +39,36 @@ func PollIssues(
 ) (int, error) {
 	cursor := cursors.Issues.UpdatedAfter
 
-	keys, err := discoverKeys(ctx, c, project, ver, cursor)
+	issues, err := discoverIssues(ctx, c, project, ver, cursor)
 	if err != nil {
-		return 0, fmt.Errorf("discover keys: %w", err)
+		return 0, fmt.Errorf("discover issues: %w", err)
 	}
-	if len(keys) == 0 {
+	if len(issues) == 0 {
 		return 0, nil
 	}
 
-	n, maxUpdated, err := fetchAndWrite(ctx, c, s, projDir, ver, keys)
+	written, maxUpdated, err := fetchAndWrite(ctx, c, s, projDir, ver, issues)
 	if err == nil && maxUpdated > cursor {
 		cursors.Issues.UpdatedAfter = maxUpdated
 	}
-	return n, err
+	return written, err
 }
 
-// discoverKeys returns the issue keys whose snapshots need refreshing.
+// discoverIssues returns the issues whose snapshots need refreshing.
 // First run (cursor empty) → backfill: active + closed-90d.
 // Subsequent runs → incremental: project + updated > cursor.
-func discoverKeys(ctx context.Context, c *jira.Client, project string, ver APIVersion, cursor string) ([]string, error) {
+func discoverIssues(ctx context.Context, c *jira.Client, project string, ver APIVersion, cursor string) ([]discoveredIssue, error) {
 	if cursor == "" {
-		return backfillKeys(ctx, c, project, ver)
+		return backfillIssues(ctx, c, project, ver)
 	}
-	return incrementalKeys(ctx, c, project, ver, cursor)
+	return incrementalIssues(ctx, c, project, ver, cursor)
 }
 
-func backfillKeys(ctx context.Context, c *jira.Client, project string, ver APIVersion) ([]string, error) {
+func backfillIssues(ctx context.Context, c *jira.Client, project string, ver APIVersion) ([]discoveredIssue, error) {
 	slog.Info("jira backfill starting", "project", project)
 
 	activeJQL := fmt.Sprintf(`project = %s AND statusCategory != Done ORDER BY updated DESC`, jqlEscape(project))
-	active, err := searchKeys(ctx, c, activeJQL, ver)
+	active, err := searchIssues(ctx, c, activeJQL, ver)
 	if err != nil {
 		return nil, fmt.Errorf("active: %w", err)
 	}
@@ -75,7 +76,7 @@ func backfillKeys(ctx context.Context, c *jira.Client, project string, ver APIVe
 	cutoff := time.Now().UTC().AddDate(0, 0, -backfillDays).Format(jqlDateLayout)
 	closedJQL := fmt.Sprintf(`project = %s AND statusCategory = Done AND updated > %q ORDER BY updated DESC`,
 		jqlEscape(project), cutoff)
-	closed, err := searchKeys(ctx, c, closedJQL, ver)
+	closed, err := searchIssues(ctx, c, closedJQL, ver)
 	if err != nil {
 		return nil, fmt.Errorf("closed: %w", err)
 	}
@@ -85,7 +86,7 @@ func backfillKeys(ctx context.Context, c *jira.Client, project string, ver APIVe
 	return append(active, closed...), nil
 }
 
-func incrementalKeys(ctx context.Context, c *jira.Client, project string, ver APIVersion, cursor string) ([]string, error) {
+func incrementalIssues(ctx context.Context, c *jira.Client, project string, ver APIVersion, cursor string) ([]discoveredIssue, error) {
 	cutoff, err := jqlCutoff(cursor)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cursor: %w", err)
@@ -95,54 +96,74 @@ func incrementalKeys(ctx context.Context, c *jira.Client, project string, ver AP
 	// look exactly like "no activity" with no error.
 	jql := fmt.Sprintf(`project = %s AND updated > %q ORDER BY updated ASC`,
 		jqlEscape(project), cutoff)
-	return searchKeys(ctx, c, jql, ver)
+	return searchIssues(ctx, c, jql, ver)
 }
 
-// fetchAndWrite pulls each key's full body, splits it into issue + comment
-// lines, and appends them to the per-issue file. Returns the count, the
-// max fields.updated seen (for cursor advance), and any error encountered
-// along the way.
+// fetchAndWrite pulls each issue's full body, splits it into issue + comment
+// lines, and appends them to the per-issue file. Returns:
 //
-// Per-issue errors are accumulated; the loop continues so that a single
-// 401/404 on one issue doesn't block progress on the others. The combined
-// error is returned at the end so the caller can decide whether to advance
-// the cursor.
+//   - written: count of issues whose issue line was successfully written
+//     (NOT the count of issues attempted)
+//   - maxUpdated: the highest fields.updated seen, including search-time
+//     timestamps for issues that 404'd (those are permanently gone, so
+//     advancing the cursor past them prevents an infinite re-discover loop)
+//   - error: errors.Join of every transient failure encountered (network,
+//     5xx, write errors). 404s are NOT included; they're logged and
+//     accounted for as cursor-advance candidates.
+//
+// The loop continues past per-issue failures so a single 5xx on one issue
+// doesn't block ingest of the others. The caller decides whether to
+// advance the cursor based on whether any transient errors occurred.
 func fetchAndWrite(
 	ctx context.Context,
 	c *jira.Client,
 	s *store.FSStore,
 	projDir paths.JiraProjectDir,
 	ver APIVersion,
-	keys []string,
+	issues []discoveredIssue,
 ) (int, string, error) {
 	var errs []error
 	var maxUpdated string
+	written := 0
 
-	for _, key := range keys {
+	for _, di := range issues {
 		if ctx.Err() != nil {
-			return 0, "", ctx.Err()
+			return written, maxUpdated, ctx.Err()
 		}
 
-		raw, err := getIssueRaw(c, key, ver)
+		raw, err := getIssueRaw(ctx, c, di.Key, ver)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("fetch %s: %w", key, err))
+			if isNotFound(err) {
+				// 404: issue moved or deleted. Permanent — log and let
+				// the cursor advance past it via the search-time
+				// updated, otherwise the next poll would re-discover
+				// the same key, get the same 404, and never advance.
+				slog.Warn("jira issue not found, skipping (cursor will advance past)",
+					"key", di.Key, "search_updated", di.Updated)
+				if di.Updated > maxUpdated {
+					maxUpdated = di.Updated
+				}
+				continue
+			}
+			errs = append(errs, fmt.Errorf("fetch %s: %w", di.Key, err))
 			continue
 		}
 
-		issueLine, commentLines, updated, err := splitIssueRaw(key, []byte(raw))
+		issueLine, commentLines, updated, err := splitIssueRaw(di.Key, []byte(raw))
 		if err != nil {
-			errs = append(errs, fmt.Errorf("parse %s: %w", key, err))
+			errs = append(errs, fmt.Errorf("parse %s: %w", di.Key, err))
 			continue
 		}
 
-		file := projDir.IssueFile(key)
+		file := projDir.IssueFile(di.Key)
 		if err := s.AppendLine(file, issueLine); err != nil {
-			errs = append(errs, fmt.Errorf("write issue %s: %w", key, err))
+			errs = append(errs, fmt.Errorf("write issue %s: %w", di.Key, err))
 			continue
 		}
+		written++
 		for _, cl := range commentLines {
 			if err := s.AppendLine(file, cl); err != nil {
-				errs = append(errs, fmt.Errorf("write comment for %s: %w", key, err))
+				errs = append(errs, fmt.Errorf("write comment for %s: %w", di.Key, err))
 			}
 		}
 
@@ -151,5 +172,5 @@ func fetchAndWrite(
 		}
 	}
 
-	return len(keys), maxUpdated, errors.Join(errs...)
+	return written, maxUpdated, errors.Join(errs...)
 }
