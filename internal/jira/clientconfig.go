@@ -11,23 +11,24 @@ import (
 	"strings"
 )
 
-// jira-cli config defaults — verified by running `jira` 1.7.0:
-//
-//	-c, --config string    Config file (default is /Users/anish/.config/.jira/.config.yml,
-//	                       can be overridden with JIRA_CONFIG_FILE env var)
-//
-// The directory name has a leading dot (".jira") which is unusual but
-// matches what `jira init` produces.
+// jira-cli config defaults. The constants `Dir=".jira"`, `FileName=".config"`,
+// `FileType="yml"` live in jira-cli's internal/config/generator.go (and so
+// can't be imported), and the config-home resolution lives in
+// internal/cmdutil/utils.go: GetConfigHome returns $XDG_CONFIG_HOME if set,
+// otherwise $HOME/.config. Pigeon mirrors that exact resolution so both
+// tools agree on which file is bound.
 const (
 	jiraConfigEnv    = "JIRA_CONFIG_FILE"
+	jiraXDGConfigEnv = "XDG_CONFIG_HOME"
+	jiraXDGSubdir    = ".config"
 	jiraConfigSubdir = ".jira"
 	jiraConfigName   = ".config.yml"
 )
 
 // ResolveConfigPath returns the path pigeon should read for the given
-// pigeon-config entry. Resolution order: explicit override → env var →
-// jira-cli default. This matches how jira-cli itself sources its config
-// path, so pigeon and `jira <cmd>` always agree on which file is bound.
+// pigeon-config entry. Resolution order: explicit override → JIRA_CONFIG_FILE
+// env → jira-cli default. The default itself follows jira-cli's resolution:
+// $XDG_CONFIG_HOME/.jira/.config.yml if set, else $HOME/.config/.jira/.config.yml.
 func ResolveConfigPath(override string) string {
 	if override != "" {
 		return expandHome(override)
@@ -35,8 +36,12 @@ func ResolveConfigPath(override string) string {
 	if env := os.Getenv(jiraConfigEnv); env != "" {
 		return env
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, jiraConfigSubdir, jiraConfigName)
+	configHome := os.Getenv(jiraXDGConfigEnv)
+	if configHome == "" {
+		home, _ := os.UserHomeDir()
+		configHome = filepath.Join(home, jiraXDGSubdir)
+	}
+	return filepath.Join(configHome, jiraConfigSubdir, jiraConfigName)
 }
 
 // expandHome resolves a leading "~" in a path. Plain filepath.Join does
