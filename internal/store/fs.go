@@ -117,8 +117,10 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 	compacted := compact.Compact(merged)
 	resolved := modelv1.Resolve(compacted)
 
-	// Interleave thread replies after their parent message.
-	resolved, interleaveErr := s.interleaveThreads(acct, conversation, resolved)
+	// Interleave thread replies after their parent message. For --date the
+	// orphan-dump fallback (replies whose parent isn't in the selected files)
+	// is scoped to that day; otherwise unrelated threads would leak in.
+	resolved, interleaveErr := s.interleaveThreads(acct, conversation, resolved, opts.Date)
 
 	// Apply --since precise cutoff (file selection is coarse by date).
 	if opts.Since > 0 {
@@ -167,7 +169,11 @@ func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string
 
 // interleaveThreads reads thread files for the conversation and splices
 // replies into the resolved output after their parent message, matched by ID.
-func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile) (*modelv1.ResolvedDateFile, error) {
+// orphanDate, if non-empty, scopes the orphan-dump fallback to a single day:
+// only replies dated to that day are appended, and the cross-date parent is
+// dropped. An empty orphanDate keeps the unbounded fallback (used by --since
+// and the default window, where the caller post-filters by ts).
+func (s *FSStore) interleaveThreads(acct account.Account, conversation string, resolved *modelv1.ResolvedDateFile, orphanDate string) (*modelv1.ResolvedDateFile, error) {
 	entries, err := os.ReadDir(s.convDir(acct, conversation).ThreadsDir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -232,10 +238,13 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		// Include the parent so the reader knows which message the replies
 		// belong to — but only if the parent line was actually written. For
 		// orphan thread files we surface the replies alone.
-		if tf.Parent.ID != "" {
+		if orphanDate == "" && tf.Parent.ID != "" {
 			result = append(result, tf.Parent)
 		}
 		for _, r := range tf.Replies {
+			if orphanDate != "" && r.Ts.UTC().Format("2006-01-02") != orphanDate {
+				continue
+			}
 			r.Reply = true
 			result = append(result, r)
 		}

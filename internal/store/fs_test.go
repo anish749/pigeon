@@ -496,6 +496,41 @@ func TestInterleaveThreads_MultipleThreads(t *testing.T) {
 	}
 }
 
+// TestReadConversation_Date_NoFile_DoesNotDumpThreads verifies that asking for
+// a specific --date with no date file for that day returns no messages, even
+// when the conversation has thread files. Previously interleaveThreads dumped
+// every thread file when no parent matched, leaking other days' data.
+func TestReadConversation_Date_NoFile_DoesNotDumpThreads(t *testing.T) {
+	s, acct := setup(t)
+
+	// Parent + reply both live in a thread file on day Y (March 15).
+	parent := msgLine("P1", ts(2026, 3, 15, 9, 0, 0), "Alice", "U1", "thread on 15th")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	reply := msgLine("R1", ts(2026, 3, 15, 9, 1, 0), "Bob", "U2", "reply on 15th")
+	reply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", reply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	// Ask for day X (March 16) — no date file for that day.
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 0 {
+		var ids []string
+		for _, m := range df.Messages {
+			ids = append(ids, m.ID)
+		}
+		t.Errorf("messages = %d, want 0 (no date file for 2026-03-16): %v", len(df.Messages), ids)
+	}
+}
+
 // --- ReadConversation options ---
 
 // setupMultiDay populates a conversation with messages across 5 days
