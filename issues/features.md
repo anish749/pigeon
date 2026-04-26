@@ -32,14 +32,6 @@ Support file attachments (photos, documents, etc.) in Slack messages and deliver
 
 Remaining: handle incoming WhatsApp reaction events. WhatsApp sends `ReactionMessage` in the event handler (`waE2E.Message.ReactionMessage`) with the target message key and emoji text. The listener should extract these and store as `ReactLine` / unreact lines, matching the pattern used in the Slack listener's `handleReaction`.
 
-## WhatsApp edit and delete events
-
-Handle incoming WhatsApp message edits and deletes. WhatsApp supports:
-- **Edits**: `waE2E.Message.ProtocolMessage` with type `MESSAGE_EDIT` contains the edited text and the target message key.
-- **Deletes**: `waE2E.Message.ProtocolMessage` with type `REVOKE` ("delete for everyone") contains the target message key.
-
-The Slack listener already handles both (`message_changed` and `message_deleted` subtypes). The WhatsApp listener should follow the same pattern: extract the event, construct an `EditLine` or `DeleteLine`, and append to the correct date file.
-
 ## Revamp setup / onboarding
 
 The three setup commands (`setup-whatsapp`, `setup-slack`, `setup-gws`) have
