@@ -20,6 +20,8 @@ const (
     EventMessage  EventKind = "message"
     EventReaction EventKind = "reaction" // reaction added
     EventUnreact  EventKind = "unreact"  // reaction removed
+    EventEdit     EventKind = "edit"     // message edited
+    EventDelete   EventKind = "delete"   // message deleted
     EventSystem   EventKind = "system"   // tail connection + replay-error frames
 )
 
@@ -31,10 +33,12 @@ type Envelope struct {
     Conversation    string
 }
 
-// Notification is the published payload. Three concrete types implement it:
-// NotifMsg embeds modelv1.MsgLine, NotifReact embeds modelv1.ReactLine,
-// NotifSystem carries a Content string for lifecycle frames (connection
-// ready, replay error).
+// Notification is the published payload. Concrete types embed Envelope
+// plus their own modelv1 line type: NotifMsg/MsgLine, NotifReact/ReactLine,
+// NotifEdit/EditLine, NotifDelete/DeleteLine. NotifSystem is separate —
+// it carries a Content string for lifecycle frames (connection ready,
+// replay error) and is written by the tail handler directly, never
+// published through the bus.
 type Notification interface { envelope() Envelope }
 
 type NotifMsg struct {
@@ -45,6 +49,16 @@ type NotifMsg struct {
 type NotifReact struct {
     Envelope
     modelv1.ReactLine
+}
+
+type NotifEdit struct {
+    Envelope
+    modelv1.EditLine
+}
+
+type NotifDelete struct {
+    Envelope
+    modelv1.DeleteLine
 }
 
 type NotifSystem struct {

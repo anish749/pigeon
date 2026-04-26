@@ -763,3 +763,151 @@ func TestFormatReactionNotification_ConvMeta(t *testing.T) {
 		})
 	}
 }
+
+// TestFormatEditNotification covers the meta-line shape across the
+// composable axes: bare edit, with via, with thread tags, with conv meta,
+// and a fully-decorated combination. Mirrors the shape used for messages
+// and reactions so a future agent can grep for any of the same tags.
+func TestFormatEditNotification(t *testing.T) {
+	channelMeta := &ConvMeta{Type: ConvChannel, ChannelID: "C0AS"}
+	base := EditLine{
+		Ts: ts(2026, 4, 26, 10, 30, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Text: "edited text",
+	}
+
+	tests := []struct {
+		name     string
+		edit     EditLine
+		convMeta *ConvMeta
+		wantHead string
+		wantMeta string
+	}{
+		{
+			name:     "bare edit, no convMeta",
+			edit:     base,
+			wantHead: "Alice edited message: edited text",
+			wantMeta: "  [edit] [10:30:00] [message_id:M1] [sender_id:U001]",
+		},
+		{
+			name: "edit with via",
+			edit: EditLine{
+				Ts: base.Ts, MsgID: base.MsgID, Sender: base.Sender,
+				SenderID: base.SenderID, Text: base.Text, Via: ViaPigeonAsUser,
+			},
+			wantHead: "Alice (via pigeon) edited message: edited text",
+			wantMeta: "  [edit] [10:30:00] [message_id:M1] [sender_id:U001] [via:pigeon-as-user]",
+		},
+		{
+			name: "edit on thread reply",
+			edit: EditLine{
+				Ts: base.Ts, MsgID: base.MsgID, Sender: base.Sender,
+				SenderID: base.SenderID, Text: base.Text,
+				ThreadTS: "P1", ThreadID: "P1",
+			},
+			wantHead: "Alice edited message: edited text",
+			wantMeta: "  [edit] [10:30:00] [message_id:M1] [sender_id:U001] [thread_ts:P1] [thread_id:P1]",
+		},
+		{
+			name:     "edit with channel convMeta",
+			edit:     base,
+			convMeta: channelMeta,
+			wantHead: "Alice edited message: edited text",
+			wantMeta: "  [edit] [10:30:00] [message_id:M1] [sender_id:U001] [type:channel] [channel_id:C0AS]",
+		},
+		{
+			name: "edit on thread reply with via and channel meta (full)",
+			edit: EditLine{
+				Ts: base.Ts, MsgID: base.MsgID, Sender: base.Sender,
+				SenderID: base.SenderID, Text: base.Text,
+				Via:      ViaToPigeon,
+				ThreadTS: "P1", ThreadID: "P1",
+			},
+			convMeta: channelMeta,
+			wantHead: "sent to pigeon by Alice edited message: edited text",
+			wantMeta: "  [edit] [10:30:00] [message_id:M1] [sender_id:U001] [via:to-pigeon] [thread_ts:P1] [thread_id:P1] [type:channel] [channel_id:C0AS]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := FormatEditNotification(tt.edit, time.UTC, tt.convMeta)
+			if len(lines) < 2 {
+				t.Fatalf("lines = %d, want >=2: %v", len(lines), lines)
+			}
+			if lines[0] != tt.wantHead {
+				t.Errorf("header\n got: %q\nwant: %q", lines[0], tt.wantHead)
+			}
+			if got := lines[len(lines)-1]; got != tt.wantMeta {
+				t.Errorf("meta\n got: %q\nwant: %q", got, tt.wantMeta)
+			}
+		})
+	}
+}
+
+// TestFormatDeleteNotification covers the meta-line shape across the
+// composable axes for delete events. Same axes as edits.
+func TestFormatDeleteNotification(t *testing.T) {
+	channelMeta := &ConvMeta{Type: ConvChannel, ChannelID: "C0AS"}
+	base := DeleteLine{
+		Ts: ts(2026, 4, 26, 10, 30, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001",
+	}
+
+	tests := []struct {
+		name     string
+		del      DeleteLine
+		convMeta *ConvMeta
+		wantHead string
+		wantMeta string
+	}{
+		{
+			name:     "bare delete, no convMeta",
+			del:      base,
+			wantHead: "Alice deleted message M1",
+			wantMeta: "  [delete] [10:30:00] [message_id:M1] [sender_id:U001]",
+		},
+		{
+			name: "delete on thread reply",
+			del: DeleteLine{
+				Ts: base.Ts, MsgID: base.MsgID, Sender: base.Sender,
+				SenderID: base.SenderID,
+				ThreadTS: "P1", ThreadID: "P1",
+			},
+			wantHead: "Alice deleted message M1",
+			wantMeta: "  [delete] [10:30:00] [message_id:M1] [sender_id:U001] [thread_ts:P1] [thread_id:P1]",
+		},
+		{
+			name:     "delete with channel convMeta",
+			del:      base,
+			convMeta: channelMeta,
+			wantHead: "Alice deleted message M1",
+			wantMeta: "  [delete] [10:30:00] [message_id:M1] [sender_id:U001] [type:channel] [channel_id:C0AS]",
+		},
+		{
+			name: "delete on thread reply with channel meta (full)",
+			del: DeleteLine{
+				Ts: base.Ts, MsgID: base.MsgID, Sender: base.Sender,
+				SenderID: base.SenderID,
+				ThreadTS: "P1", ThreadID: "P1",
+			},
+			convMeta: channelMeta,
+			wantHead: "Alice deleted message M1",
+			wantMeta: "  [delete] [10:30:00] [message_id:M1] [sender_id:U001] [thread_ts:P1] [thread_id:P1] [type:channel] [channel_id:C0AS]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := FormatDeleteNotification(tt.del, time.UTC, tt.convMeta)
+			if len(lines) != 2 {
+				t.Fatalf("lines = %d, want 2: %v", len(lines), lines)
+			}
+			if lines[0] != tt.wantHead {
+				t.Errorf("header\n got: %q\nwant: %q", lines[0], tt.wantHead)
+			}
+			if lines[1] != tt.wantMeta {
+				t.Errorf("meta\n got: %q\nwant: %q", lines[1], tt.wantMeta)
+			}
+		})
+	}
+}

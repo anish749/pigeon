@@ -116,12 +116,12 @@ func TestAppendEditDelete_ThreadRouting(t *testing.T) {
 
 			switch tt.kind {
 			case "edit":
-				if err := ms.AppendEdit(rs, "1700000010.000010", tt.threadTS,
+				if _, err := ms.AppendEdit(rs, "1700000010.000010", tt.threadTS,
 					"new text", when, slackraw.NewSlackRawContent(goslack.Msg{})); err != nil {
 					t.Fatalf("AppendEdit: %v", err)
 				}
 			case "delete":
-				if err := ms.AppendDelete(rs, "1700000010.000010", tt.threadTS, when); err != nil {
+				if _, err := ms.AppendDelete(rs, "1700000010.000010", tt.threadTS, when); err != nil {
 					t.Fatalf("AppendDelete: %v", err)
 				}
 			}
@@ -230,7 +230,7 @@ func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
 			time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
 			t.Fatalf("WriteThreadMessage reply: %v", err)
 		}
-		if err := ms.AppendEdit(rs, replyMsgID, threadTS, "edited text",
+		if _, err := ms.AppendEdit(rs, replyMsgID, threadTS, "edited text",
 			time.Unix(1700000020, 0), raw); err != nil {
 			t.Fatalf("AppendEdit: %v", err)
 		}
@@ -260,7 +260,7 @@ func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
 			time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
 			t.Fatalf("WriteThreadMessage reply: %v", err)
 		}
-		if err := ms.AppendDelete(rs, replyMsgID, threadTS, time.Unix(1700000020, 0)); err != nil {
+		if _, err := ms.AppendDelete(rs, replyMsgID, threadTS, time.Unix(1700000020, 0)); err != nil {
 			t.Fatalf("AppendDelete: %v", err)
 		}
 

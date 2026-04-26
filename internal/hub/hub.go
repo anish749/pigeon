@@ -34,17 +34,14 @@ type RouteResult struct {
 	State RouteState
 }
 
-// MessageNotifyFunc is called by listeners when a new message has been
-// written to disk. The msg payload is passed through so the hub can
-// publish a pre-formatted event to the broadcast bus without re-reading
-// from disk.
-type MessageNotifyFunc func(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult
-
-// ReactionNotifyFunc is called by listeners when a reaction event arrives.
-// The react payload is the exact ReactLine written to disk — the hub
-// forwards it verbatim to session delivery and the broadcast bus without
-// constructing new timestamps or regenerating fields.
-type ReactionNotifyFunc func(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult
+// NotifyFunc is the single callback listeners use to hand a typed event
+// off to the hub. It mirrors Hub.RouteEvent so a listener can hold a
+// *Hub or just the method value without caring which.
+//
+// Listeners build the right Notification with the package-level
+// constructors (hub.NewMsg, NewReact, NewEdit, NewDelete) — they don't
+// need to know about EventKind or Envelope shape.
+type NotifyFunc func(evt Notification) RouteResult
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
@@ -265,10 +262,11 @@ func (h *Hub) Unregister(sessionID string) {
 // immediately. Broadcast publish happens regardless of session state so
 // monitor subscribers see every event.
 //
-// Listeners normally call the typed wrappers (Route, RouteReaction) which
-// build the right concrete Notification and delegate here. Adding a new
-// event type means adding a new Notification implementation and a thin
-// wrapper — the hub plumbing below is identical for every kind.
+// Listeners build the concrete Notification with the package-level
+// constructors (NewMsg, NewReact, NewEdit, NewDelete) and pass the
+// result here. Adding a new event type means adding a new Notification
+// implementation alongside its constructor — the hub plumbing below is
+// identical for every kind.
 func (h *Hub) RouteEvent(evt Notification) RouteResult {
 	env := evt.envelope()
 	h.broadcast.Publish(evt)
@@ -291,30 +289,6 @@ func (h *Hub) RouteEvent(evt Notification) RouteResult {
 			"buffer_size", signalBufferSize)
 	}
 	return RouteResult{State: RouteOK}
-}
-
-// Route signals that a new message has arrived for the given account and
-// conversation. Thin wrapper around RouteEvent — exists so listeners pass
-// MsgLine values without building Envelope structs themselves.
-func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult {
-	return h.RouteEvent(NotifMsg{
-		Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: conversation},
-		MsgLine:  msg,
-	})
-}
-
-// RouteReaction signals that a reaction (or unreaction) event has arrived
-// for the given account and conversation. Thin wrapper around RouteEvent.
-// The ReactLine is forwarded as-is — no timestamp or field reconstruction.
-func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
-	kind := EventReaction
-	if react.Remove {
-		kind = EventUnreact
-	}
-	return h.RouteEvent(NotifReact{
-		Envelope:  Envelope{Kind: kind, Account: acct, Conversation: conversation},
-		ReactLine: react,
-	})
 }
 
 // Sessions returns the number of active (connected) sessions.

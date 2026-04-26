@@ -29,15 +29,17 @@ const (
 	EventMessage  EventKind = "message"
 	EventReaction EventKind = "reaction" // reaction added
 	EventUnreact  EventKind = "unreact"  // reaction removed
+	EventEdit     EventKind = "edit"     // message edited
+	EventDelete   EventKind = "delete"   // message deleted
 	// EventSystem is used by the tail handler for out-of-band signals
 	// (connection ready, replay errors). Not published through the bus —
 	// the handler writes it directly to the response.
 	EventSystem EventKind = "system"
 )
 
-// The Envelope, NotifMsg, NotifReact, and NotifSystem types below define
-// the wire shape of every JSON frame emitted by /api/tail. The schema
-// documentation in internal/cli/monitor.go (Long help text) and
+// The Envelope and Notif* types below define the wire shape of every
+// JSON frame emitted by /api/tail. The schema documentation in
+// internal/cli/monitor.go (Long help text) and
 // docs/monitor-fanout-sketch.md mirrors these struct definitions.
 // When you add, remove, or rename a field here — or change a json tag
 // on an embedded type such as modelv1.MsgLine or modelv1.ReactLine —
@@ -106,6 +108,80 @@ func (n NotifReact) FormatNotification(env FormatEnv) []string {
 // often target older messages. Gating last_delivered on a reaction would
 // either skip past undelivered messages or replay them on reconnect.
 func (n NotifReact) AdvancesCursor() bool { return false }
+
+// NotifEdit is a message-edit notification. The payload is the EditLine
+// exactly as written to disk; fields are flattened via embedding.
+type NotifEdit struct {
+	Envelope
+	modelv1.EditLine
+}
+
+func (n NotifEdit) envelope() Envelope { return n.Envelope }
+
+func (n NotifEdit) FormatNotification(env FormatEnv) []string {
+	return modelv1.FormatEditNotification(n.EditLine, env.Loc, env.ConvMeta)
+}
+
+// AdvancesCursor reports true: an edit is a fresh event in time. The
+// agent should know it happened, and a connecting session should not
+// receive it again on the next drain.
+func (n NotifEdit) AdvancesCursor() bool { return true }
+
+// NotifDelete is a message-delete notification. The payload is the
+// DeleteLine exactly as written to disk; fields are flattened via embedding.
+type NotifDelete struct {
+	Envelope
+	modelv1.DeleteLine
+}
+
+func (n NotifDelete) envelope() Envelope { return n.Envelope }
+
+func (n NotifDelete) FormatNotification(env FormatEnv) []string {
+	return modelv1.FormatDeleteNotification(n.DeleteLine, env.Loc, env.ConvMeta)
+}
+
+// AdvancesCursor reports true: a delete is a fresh event in time. Same
+// reasoning as edits — see NotifEdit.AdvancesCursor.
+func (n NotifDelete) AdvancesCursor() bool { return true }
+
+// NewMsg builds a NotifMsg ready for hub delivery. Listeners use this so
+// they don't have to know about EventKind constants or Envelope shape.
+func NewMsg(acct account.Account, conv string, m modelv1.MsgLine) NotifMsg {
+	return NotifMsg{
+		Envelope: Envelope{Kind: EventMessage, Account: acct, Conversation: conv},
+		MsgLine:  m,
+	}
+}
+
+// NewReact builds a NotifReact, picking EventReaction or EventUnreact
+// based on the ReactLine.Remove flag. Centralizing this here keeps the
+// kind-from-Remove rule out of every listener call site.
+func NewReact(acct account.Account, conv string, r modelv1.ReactLine) NotifReact {
+	kind := EventReaction
+	if r.Remove {
+		kind = EventUnreact
+	}
+	return NotifReact{
+		Envelope:  Envelope{Kind: kind, Account: acct, Conversation: conv},
+		ReactLine: r,
+	}
+}
+
+// NewEdit builds a NotifEdit ready for hub delivery.
+func NewEdit(acct account.Account, conv string, e modelv1.EditLine) NotifEdit {
+	return NotifEdit{
+		Envelope: Envelope{Kind: EventEdit, Account: acct, Conversation: conv},
+		EditLine: e,
+	}
+}
+
+// NewDelete builds a NotifDelete ready for hub delivery.
+func NewDelete(acct account.Account, conv string, d modelv1.DeleteLine) NotifDelete {
+	return NotifDelete{
+		Envelope:   Envelope{Kind: EventDelete, Account: acct, Conversation: conv},
+		DeleteLine: d,
+	}
+}
 
 // NotifSystem is a system-level notification written by the tail handler.
 // It carries no account/conversation routing — it's a signal to the
