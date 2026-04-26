@@ -46,7 +46,7 @@ func seedGrepData(t *testing.T) (*FSStore, account.Account) {
 		{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
 			ID: "M6", Ts: ts(2026, 3, 16, 9, 8, 0),
 			Sender: "Bob", SenderID: "U04EFGH",
-			Text: "check this out",
+			Text:        "check this out",
 			Attachments: []modelv1.Attachment{{ID: "F07T3", Type: "image/jpeg"}},
 		}},
 		{Type: modelv1.LineUnreaction, React: &modelv1.ReactLine{

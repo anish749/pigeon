@@ -4,9 +4,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -365,4 +365,3 @@ func TestLookupBySlackID(t *testing.T) {
 		t.Errorf("expected nil for missing ID, got %+v", miss)
 	}
 }
-

@@ -31,9 +31,9 @@ func testLogger() *slog.Logger {
 
 func TestRoute_MatchesSingleWorkstream(t *testing.T) {
 	embedder := &mockEmbedder{embeddings: map[string][]float64{
-		"Deploy the auth service":        {0.9, 0.1, 0.0}, // workstream focus
-		"alice: pushed the auth fix":     {0.85, 0.15, 0.0},
-		"bob: lunch?":                    {0.0, 0.0, 1.0},
+		"Deploy the auth service":    {0.9, 0.1, 0.0}, // workstream focus
+		"alice: pushed the auth fix": {0.85, 0.15, 0.0},
+		"bob: lunch?":                {0.0, 0.0, 1.0},
 	}}
 
 	r := New(embedder, 0.4, "_default", testLogger())

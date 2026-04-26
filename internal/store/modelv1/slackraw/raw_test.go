@@ -197,4 +197,3 @@ func TestNewSlackRawContent_RoundTrip(t *testing.T) {
 		t.Errorf("attachment title = %v, want PR #42", attachments[0].(map[string]any)["title"])
 	}
 }
-

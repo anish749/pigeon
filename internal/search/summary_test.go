@@ -140,10 +140,10 @@ func TestPrintGroupedResults_IncludesFilePaths(t *testing.T) {
 	matches := []Match{
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
 			FilePath: "/data/slack/acme/#general/2026-03-16.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "hello"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "hello"}}},
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
 			FilePath: "/data/slack/acme/#general/2026-03-16.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", Text: "world"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", Text: "world"}}},
 	}
 
 	out := captureStdout(t, func() { PrintGroupedResults(matches) })
@@ -159,10 +159,10 @@ func TestPrintGroupedResults_MultipleFiles(t *testing.T) {
 	matches := []Match{
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
 			FilePath: "/data/slack/acme/#general/2026-03-16.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "hello"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "hello"}}},
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-17",
 			FilePath: "/data/slack/acme/#general/2026-03-17.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 17, 9, 0, 0), Sender: "Bob", Text: "world"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 17, 9, 0, 0), Sender: "Bob", Text: "world"}}},
 	}
 
 	out := captureStdout(t, func() { PrintGroupedResults(matches) })
@@ -179,7 +179,7 @@ func TestPrintGroupedResults_ThreadFilePath(t *testing.T) {
 	matches := []Match{
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "1742100000", Thread: true,
 			FilePath: "/data/slack/acme/#general/threads/1742100000.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "reply"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "R1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "reply"}}},
 	}
 
 	out := captureStdout(t, func() { PrintGroupedResults(matches) })
@@ -210,10 +210,10 @@ func TestPrintGroupedResults_GroupsConversations(t *testing.T) {
 	matches := []Match{
 		{Platform: "slack", Account: "acme", Conversation: "#general", Date: "2026-03-16",
 			FilePath: "/data/slack/acme/#general/2026-03-16.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "one"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M1", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Alice", Text: "one"}}},
 		{Platform: "slack", Account: "acme", Conversation: "#random", Date: "2026-03-16",
 			FilePath: "/data/slack/acme/#random/2026-03-16.jsonl",
-			Line: modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Bob", Text: "two"}}},
+			Line:     modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Bob", Text: "two"}}},
 	}
 
 	out := captureStdout(t, func() { PrintGroupedResults(matches) })

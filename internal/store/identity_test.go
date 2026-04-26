@@ -4,9 +4,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/store"
 )
 
@@ -116,7 +116,7 @@ func TestLoadPeople_SkipsMalformedLines(t *testing.T) {
 this is not json
 {"name":"Bob","seen":"2026-04-11"}
 `
-	if err := os.WriteFile(string(dir.PeopleFile()),[]byte(content), 0o644); err != nil {
+	if err := os.WriteFile(string(dir.PeopleFile()), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,7 +192,7 @@ func TestLoadPeople_SkipsEmptyLines(t *testing.T) {
 
 {"name":"Bob","seen":"2026-04-11"}
 `
-	if err := os.WriteFile(string(dir.PeopleFile()),[]byte(content), 0o644); err != nil {
+	if err := os.WriteFile(string(dir.PeopleFile()), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
