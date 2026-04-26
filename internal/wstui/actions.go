@@ -103,10 +103,6 @@ const spinnerInterval = 120 * time.Millisecond
 // mgr.DiscoverAndPropose(since, until) and posts a discoverDoneMsg
 // when it returns. The ticker posts spinTickMsg while modeDiscovering
 // is the model's mode (the model gates the next tick).
-//
-// No timeout is applied to the LLM call. Discovery is one batch
-// request whose runtime depends on workspace size and model latency;
-// inventing a ceiling here would silently truncate a real run.
 func discoverCmd(mgr Manager, since, until time.Time) tea.Cmd {
 	if mgr == nil {
 		return nil
