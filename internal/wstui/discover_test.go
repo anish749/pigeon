@@ -27,7 +27,7 @@ type fakeManager struct {
 	err   error
 }
 
-func (f *fakeManager) DiscoverAndPropose(_ context.Context, since, until time.Time) ([]discovery.DiscoveredWorkstream, error) {
+func (f *fakeManager) DiscoverAndPropose(_ context.Context, since, until, _ time.Time) ([]discovery.DiscoveredWorkstream, error) {
 	f.calls.Add(1)
 	f.gotSince = since
 	f.gotUntil = until

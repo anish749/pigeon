@@ -208,7 +208,8 @@ func TestDiscoverAndProposeReadsWorkspaceSignals(t *testing.T) {
 	}, st, logger)
 	mgr.disc = disc
 
-	discovered, err := mgr.DiscoverAndPropose(context.Background(), since, until)
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	discovered, err := mgr.DiscoverAndPropose(context.Background(), since, until, now)
 	if err != nil {
 		t.Fatalf("DiscoverAndPropose: %v", err)
 	}
@@ -229,14 +230,14 @@ func TestDiscoverAndProposeReadsWorkspaceSignals(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("default workstream not created: ok=%v err=%v", ok, err)
 	}
-	if !defaultWS.Created.Equal(firstSignal) {
-		t.Errorf("default created = %s, want %s", defaultWS.Created, firstSignal)
+	if !defaultWS.Created.Equal(now) {
+		t.Errorf("default created = %s, want %s", defaultWS.Created, now)
 	}
 	got, ok, err := st.GetWorkstream("ws-auth-refactor")
 	if err != nil || !ok {
 		t.Fatalf("discovered workstream not created: ok=%v err=%v", ok, err)
 	}
-	if got.Focus != "Migrate auth sessions." || !got.Created.Equal(firstSignal) {
+	if got.Focus != "Migrate auth sessions." || !got.Created.Equal(now) {
 		t.Errorf("workstream = %+v", got)
 	}
 }
@@ -255,7 +256,7 @@ func TestDiscoverAndProposeNoSignals(t *testing.T) {
 	}, st, logger)
 	mgr.disc = disc
 
-	discovered, err := mgr.DiscoverAndPropose(context.Background(), time.Now().Add(-time.Hour), time.Now())
+	discovered, err := mgr.DiscoverAndPropose(context.Background(), time.Now().Add(-time.Hour), time.Now(), time.Now())
 	if err != nil {
 		t.Fatalf("DiscoverAndPropose: %v", err)
 	}
