@@ -93,10 +93,10 @@ func TestMatchesPhone_NoPhones(t *testing.T) {
 
 func TestMatchesAnyExactID(t *testing.T) {
 	cases := []struct {
-		name  string
-		p     Person
-		q     string
-		want  bool
+		name string
+		p    Person
+		q    string
+		want bool
 	}{
 		{
 			name: "empty query",

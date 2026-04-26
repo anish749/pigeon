@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // setupGWSFixture creates a data tree with all GWS file types (gmail JSONL,

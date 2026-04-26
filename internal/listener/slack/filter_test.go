@@ -58,12 +58,12 @@ func TestShouldKeepMessage(t *testing.T) {
 
 func TestShouldAutoReply(t *testing.T) {
 	tests := []struct {
-		name       string
-		pigeonBotUID  string
-		msg        *slackevents.MessageEvent
-		routeState hub.RouteState
-		isBotDM    bool
-		want       bool
+		name         string
+		pigeonBotUID string
+		msg          *slackevents.MessageEvent
+		routeState   hub.RouteState
+		isBotDM      bool
+		want         bool
 	}{
 		{"other user DMs bot", "U_BOT",
 			&slackevents.MessageEvent{User: "U_OTHER"}, hub.RouteNoSession, true, true},

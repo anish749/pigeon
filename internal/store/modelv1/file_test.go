@@ -287,9 +287,9 @@ func TestThreadFile_RoundTrip(t *testing.T) {
 
 func TestMarshalThreadFile_SectionOrder(t *testing.T) {
 	f := &ThreadFile{
-		Parent:  MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Bob", SenderID: "U1", Text: "parent"},
-		Replies: []MsgLine{{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "reply", Reply: true}},
-		Context: []MsgLine{{ID: "C1", Ts: ts(2026, 3, 16, 9, 13, 0), Sender: "Charlie", SenderID: "U3", Text: "context"}},
+		Parent:    MsgLine{ID: "P1", Ts: ts(2026, 3, 16, 9, 15, 0), Sender: "Bob", SenderID: "U1", Text: "parent"},
+		Replies:   []MsgLine{{ID: "R1", Ts: ts(2026, 3, 16, 9, 16, 0), Sender: "Alice", SenderID: "U2", Text: "reply", Reply: true}},
+		Context:   []MsgLine{{ID: "C1", Ts: ts(2026, 3, 16, 9, 13, 0), Sender: "Charlie", SenderID: "U3", Text: "context"}},
 		Reactions: []ReactLine{{Ts: ts(2026, 3, 16, 9, 20, 0), MsgID: "P1", Sender: "Alice", SenderID: "U2", Emoji: "tada"}},
 	}
 

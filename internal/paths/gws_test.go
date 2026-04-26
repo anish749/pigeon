@@ -101,7 +101,7 @@ func TestParseDriveMetaPath_NotAMetaFile(t *testing.T) {
 		"/tmp/test/gws/user/gmail/2026-04-07.jsonl",        // wrong subdir
 		"/tmp/test/gws/user/gdrive/doc-abc/Tab1.md",        // content file
 		"/tmp/test/gws/user/gdrive/doc-abc/comments.jsonl", // comments file
-		"/tmp/test/random/file.txt",                         // unrelated
+		"/tmp/test/random/file.txt",                        // unrelated
 	}
 	for _, path := range cases {
 		meta, ok, err := ParseDriveMetaPath(path)
