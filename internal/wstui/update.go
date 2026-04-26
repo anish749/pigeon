@@ -155,9 +155,12 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cycleStateCmd(m, w)
 		}
 	case "m":
-		if w, ok := m.current(); ok && !w.IsDefault() && len(m.items) > 1 {
-			m.mode = modeMergePick
-			m.mergeCursor = firstMergeTarget(m.cursor, len(m.items))
+		if w, ok := m.current(); ok && !w.IsDefault() {
+			target := firstMergeTarget(m.cursor, m.items)
+			if target >= 0 {
+				m.mode = modeMergePick
+				m.mergeCursor = target
+			}
 			_ = w
 		}
 	case "n":
@@ -180,13 +183,17 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// firstMergeTarget picks an initial cursor for the merge picker that
-// avoids the source row.
-func firstMergeTarget(cursor, n int) int {
-	if cursor == 0 && n > 1 {
-		return 1
+// firstMergeTarget picks an initial cursor for the merge picker, skipping
+// the source row and the workspace's default workstream (which is never a
+// valid merge target). Returns -1 when no valid target exists.
+func firstMergeTarget(cursor int, items []models.Workstream) int {
+	for i, w := range items {
+		if i == cursor || w.IsDefault() {
+			continue
+		}
+		return i
 	}
-	return 0
+	return -1
 }
 
 // handleInputKey accumulates characters while in any input-collecting
@@ -282,7 +289,7 @@ func (m Model) handleMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 	case "j", "down":
 		next := m.mergeCursor + 1
-		if next == m.cursor {
+		for next < len(m.items) && (next == m.cursor || m.items[next].IsDefault()) {
 			next++
 		}
 		if next < len(m.items) {
@@ -290,7 +297,7 @@ func (m Model) handleMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "k", "up":
 		next := m.mergeCursor - 1
-		if next == m.cursor {
+		for next >= 0 && (next == m.cursor || m.items[next].IsDefault()) {
 			next--
 		}
 		if next >= 0 {
