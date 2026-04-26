@@ -58,13 +58,12 @@ func RunSetupSlack(args []string) error {
 	appDisplayName, _ := reader.ReadString('\n')
 	appDisplayName = strings.TrimSpace(appDisplayName)
 	if appDisplayName == "" {
-		appDisplayName = existing.AppDisplayName
+		appDisplayName = existing.AppDisplay()
 	}
 	fmt.Println()
 
 	// Render manifest with user's values and copy to clipboard
-	displayName := config.SlackConfig{AppDisplayName: appDisplayName}.AppDisplay()
-	rendered, err := renderManifest(username, workspace, displayName)
+	rendered, err := renderManifest(username, workspace, appDisplayName)
 	if err != nil {
 		fmt.Printf("  (Could not render manifest: %v)\n", err)
 		fmt.Println("  Run `pigeon generate-manifest` manually to create the manifest.")
