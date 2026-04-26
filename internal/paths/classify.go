@@ -24,7 +24,7 @@ import (
 //   - workstream router state (parent dir == WorkstreamSubdir)
 //   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
-//   - Linear issue file (parent dir == issues, under linear-issues platform)
+//   - Issue file (parent dir == issues, under linear-issues or jira-issues platform)
 //   - thread file (parent dir == ThreadsSubdir, filename != date)
 //   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Messaging by location
 //
@@ -89,12 +89,19 @@ func Classify(path string) DataFile {
 		}
 	}
 
-	// 6. Linear issue file: <root>/linear-issues/<acct>/issues/<id>.jsonl.
-	// Issue identifiers are platform-specific strings (PROJ-123 etc.), so the
-	// match is by parent-dir name + the linear-issues platform segment, not
-	// by filename pattern.
-	if filepath.Ext(base) == FileExt && parent == linearIssuesSubdir && pathHasSegment(path, linearPlatform) {
-		return IssueFile(path)
+	// 6. Issue files: <root>/<platform>/<acct>/[<project>/]issues/<KEY>.jsonl.
+	// Issue identifiers are platform-specific strings (PROJ-123, ENG-142 etc.),
+	// so the match is by parent-dir name + a platform segment, not by filename
+	// pattern. Linear stores issues directly under the account; Jira nests one
+	// level deeper for the project key, but both share the same `issues`
+	// parent-dir convention.
+	if filepath.Ext(base) == FileExt && parent == linearIssuesSubdir {
+		switch {
+		case pathHasSegment(path, linearPlatform):
+			return IssueFile(path)
+		case pathHasSegment(path, JiraPlatform):
+			return JiraIssueFile(path)
+		}
 	}
 
 	// 7. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already

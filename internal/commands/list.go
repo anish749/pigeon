@@ -3,11 +3,14 @@ package commands
 import (
 	"cmp"
 	"fmt"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -126,8 +129,11 @@ func RunListScoped(accounts []account.Account, platform string) error {
 // listAccount prints a header and conversations (or GWS services) for a
 // single account.
 func listAccount(s *store.FSStore, acct account.Account) error {
-	if acct.Platform == "gws" {
+	switch acct.Platform {
+	case "gws":
 		return listGWSAccount(s, acct)
+	case paths.JiraPlatform:
+		return listJiraAccount(s, acct)
 	}
 
 	convs, err := s.ListConversations(acct)
@@ -150,6 +156,34 @@ func listAccount(s *store.FSStore, acct account.Account) error {
 			}
 		}
 		fmt.Printf("  %s\n", c)
+	}
+	return nil
+}
+
+// listJiraAccount prints one row per issue under the account, flattened
+// across projects. The display surface is intentionally minimal — only the
+// issue key — so callers can pipe the output to `pigeon read`. Project
+// keys are not shown; users who care about project boundaries can grep
+// the output (`pigeon list -p jira-issues -a tubular | grep ENG-`).
+//
+// Discovery uses read.GlobFiles (one rg --files invocation across all
+// project subdirs) rather than a manual two-level os.ReadDir walk. This
+// matches the codebase principle: file discovery goes through ripgrep,
+// the store layer is reserved for structured parsing.
+func listJiraAccount(_ *store.FSStore, acct account.Account) error {
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
+	files, err := read.GlobFiles(jd.Path(), []string{"*" + paths.FileExt})
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		fmt.Println("No issues found.")
+		return nil
+	}
+	for _, f := range files {
+		base := filepath.Base(f)
+		key := strings.TrimSuffix(base, paths.FileExt)
+		fmt.Printf("  %s\n", key)
 	}
 	return nil
 }

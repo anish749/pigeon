@@ -471,6 +471,74 @@ func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
 	}
 }
 
+func TestExtractConversations_PerIssueJiraGrouping(t *testing.T) {
+	root := t.TempDir()
+	jira := paths.NewDataRoot(root).AccountFor(account.New(paths.JiraPlatform, "tubular")).Jira()
+	issue1 := jira.Project("ENG").IssueFile("ENG-101")
+	issue2 := jira.Project("OPS").IssueFile("OPS-7")
+
+	// Realistic issue+comment lines using Jira's "+0000" offset and the
+	// nested fields.updated location for the issue's update time.
+	body := `{"type":"jira-issue","key":"ENG-101","fields":{"updated":"2026-04-07T10:00:00.000+0000"}}` + "\n" +
+		`{"type":"jira-comment","id":"1","issueKey":"ENG-101","created":"2026-04-08T11:00:00.000+0000","updated":"2026-04-08T11:00:00.000+0000"}` + "\n"
+	for _, f := range []paths.JiraIssueFile{issue1, issue2} {
+		if err := os.MkdirAll(filepath.Dir(f.Path()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f.Path(), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	convs, err := extractConversations([]paths.DataFile{issue1, issue2}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("got %d conversations, want 2 (per-issue): %+v", len(convs), convs)
+	}
+	// Display drops both project segment and "issues" subdir, leaving a
+	// flat <platform>/<acct>/<KEY>.jsonl shape.
+	displays := map[string]bool{convs[0].Display: true, convs[1].Display: true}
+	for _, want := range []string{
+		"jira-issues/tubular/ENG-101.jsonl",
+		"jira-issues/tubular/OPS-7.jsonl",
+	} {
+		if !displays[want] {
+			t.Errorf("missing expected display %q in %v", want, displays)
+		}
+	}
+	// Latest timestamp must reflect the comment (newer than the issue line),
+	// proving Line.Ts() is consulted (rather than scanLatestTs's top-level
+	// field scan, which would miss fields.updated and crash on "+0000").
+	for _, c := range convs {
+		if c.LatestTime.IsZero() {
+			t.Errorf("LatestTime is zero for %q", c.Display)
+		}
+		if filepath.Base(c.Dir) == "ENG-101.jsonl" {
+			want := time.Date(2026, 4, 8, 11, 0, 0, 0, time.UTC)
+			if !c.LatestTime.Equal(want) {
+				t.Errorf("ENG-101 latest = %v, want %v", c.LatestTime, want)
+			}
+		}
+	}
+}
+
+func TestTrimJiraDisplaySegments(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"jira-issues/tubular/ENG/issues/ENG-101.jsonl", "jira-issues/tubular/ENG-101.jsonl"},
+		{"jira-issues/acme/KD-1699/issues/KD-1699-42.jsonl", "jira-issues/acme/KD-1699-42.jsonl"},
+		{"no-marker.jsonl", "no-marker.jsonl"},
+	}
+	for _, tc := range cases {
+		if got := trimJiraDisplaySegments(tc.in); got != tc.want {
+			t.Errorf("trimJiraDisplaySegments(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestDispatch_UnknownKindErrors verifies that both type-switch dispatchers
 // fail loud when handed a DataFile they do not enumerate. nil is the only
 // value that satisfies paths.DataFile but matches no concrete case (every

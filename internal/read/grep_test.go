@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestGrep_BasicQuery(t *testing.T) {
@@ -147,5 +150,28 @@ func TestGrep_ThreadsIncludedWithSince(t *testing.T) {
 	}
 	if len(out) == 0 {
 		t.Error("Grep --since should include thread files containing recent messages")
+	}
+}
+
+// TestGrep_NoSinceMatchesJiraIssues verifies grep without --since searches
+// Jira issue files: it should return content matching across project
+// subdirectories under jira-issues/<acct>/. Same coverage gap that
+// TestGlob_NoSinceClassifiesJiraIssues plugs at the discovery layer; this
+// is the user-facing assertion that grep delivers content too.
+func TestGrep_NoSinceMatchesJiraIssues(t *testing.T) {
+	dir := t.TempDir()
+	root := paths.NewDataRoot(dir)
+	acct := account.New(paths.JiraPlatform, "tubular")
+	issue := root.AccountFor(acct).Jira().Project("ENG").IssueFile("ENG-101")
+	writeFile(t, issue.Path(),
+		`{"type":"jira-issue","key":"ENG-101","fields":{"summary":"Fix login timeout"}}`+"\n",
+	)
+
+	out, err := Grep(dir, GrepOpts{Query: "Fix login timeout"})
+	if err != nil {
+		t.Fatalf("Grep: %v", err)
+	}
+	if !strings.Contains(string(out), "ENG-101") {
+		t.Errorf("Grep should match Jira issue content, got: %s", out)
 	}
 }

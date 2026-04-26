@@ -3,11 +3,13 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
@@ -28,6 +30,8 @@ func RunRead(p ReadParams) error {
 		return fmt.Errorf("read is not supported for gws accounts (data is organized by service, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search gws data")
 	case "linear":
 		return fmt.Errorf("read is not supported for linear accounts (data is organized by issue, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search linear data")
+	case paths.JiraPlatform:
+		return runReadJira(p)
 	}
 
 	s := store.NewFSStore(paths.DefaultDataRoot())
@@ -92,6 +96,49 @@ func RunRead(p ReadParams) error {
 	return errors.Join(errs...)
 }
 
+// runReadJira streams an issue's JSONL file to stdout unchanged. Jira data
+// is organized as one issue file per Jira issue (one jira-issue line + N
+// jira-comment lines), and the agent consuming this output understands the
+// platform's native JSON shape directly — no resolution, formatting, or
+// per-line rendering is applied. The --date, --last and --since filters do
+// not apply to issue files; specifying any of them is a usage error rather
+// than a silent no-op.
+//
+// Contact resolves to the Jira issue key (e.g. ENG-101). Project subdir is
+// not derivable from the key alone (project keys can be opaque, multi-segment
+// strings), so the file is located by a single rg --files glob across the
+// account directory — the same discovery primitive `pigeon glob` uses.
+func runReadJira(p ReadParams) error {
+	if p.Date != "" || p.Last != 0 || p.Since != "" {
+		return fmt.Errorf("read for jira-issues does not support --date, --last, or --since (each issue is one file; use 'pigeon grep' to search across issues)")
+	}
+
+	acct := account.New(p.Platform, p.Account)
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
+
+	matches, err := read.GlobFiles(jd.Path(), []string{p.Contact + paths.FileExt})
+	if err != nil {
+		return fmt.Errorf("locate jira issue %s: %w", p.Contact, err)
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("jira issue %s not found in %s", p.Contact, acct.Display())
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("ambiguous jira issue %s in %s: %d files match", p.Contact, acct.Display(), len(matches))
+	}
+
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return fmt.Errorf("read %s: %w", matches[0], err)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("jira issue %s in %s is empty", p.Contact, acct.Display())
+	}
+	if _, err := os.Stdout.Write(data); err != nil {
+		return fmt.Errorf("write stdout: %w", err)
+	}
+	return nil
+}
 
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {
@@ -141,4 +188,3 @@ func parseDisplayName(dirName string) string {
 	}
 	return dirName
 }
-
