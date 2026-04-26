@@ -101,10 +101,9 @@ func (m Model) renderDetail(w models.Workstream) string {
 	if width < minDetailWidth {
 		width = minDetailWidth
 	}
-	body := fmt.Sprintf("Focus: %s\nID: %s\nCreated: %s",
-		emptyOr(w.Focus, "(no focus set)"),
-		w.ID,
-		w.Created.Format("2006-01-02"))
+	body := fmt.Sprintf("Workspace: %s\nFocus: %s",
+		w.Workspace,
+		emptyOr(w.Focus, "(no focus set)"))
 	box := boxStyle.Width(width).Render(body)
 
 	var b strings.Builder
