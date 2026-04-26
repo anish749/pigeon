@@ -14,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
@@ -60,6 +61,11 @@ func (ms *MessageStore) EnsureThreadContextSeparator(channelName, threadTS strin
 // ThreadExists checks if a thread file exists for the given thread timestamp.
 func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
+}
+
+// LookupMessage searches the channel for msgID; nil if not found.
+func (ms *MessageStore) LookupMessage(channelName, msgID string) *modelv1.MsgLine {
+	return read.LookupMessage(ms.accountDir.Conversation(channelName), msgID)
 }
 
 // BotParticipatesInThread reports whether the bot has been mentioned in or

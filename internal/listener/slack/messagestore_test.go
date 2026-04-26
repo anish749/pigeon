@@ -9,6 +9,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
@@ -275,4 +276,85 @@ func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
 			t.Errorf("replies = %d, want 0 (delete should remove the reply)", len(tf.Replies))
 		}
 	})
+}
+
+func TestAppendReaction_ThreadRouting(t *testing.T) {
+	rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
+	raw := slackraw.NewSlackRawContent(goslack.Msg{})
+	threadTS := "1700000001.000001"
+	replyMsgID := "1700000010.000010"
+	topLevelID := "1700000020.000020"
+	emoji := "thumbsup"
+
+	tests := []struct {
+		name     string
+		targetTS string
+		threadTS string
+	}{
+		{name: "reaction on thread reply", targetTS: replyMsgID, threadTS: threadTS},
+		{name: "reaction on top-level message", targetTS: topLevelID, threadTS: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, s, acct := newTestMessageStore(t)
+			if _, err := ms.WriteThreadMessage(rs, threadTS, "root",
+				time.Unix(1700000001, 0), threadTS, false, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("WriteThreadMessage parent: %v", err)
+			}
+			if _, err := ms.WriteThreadMessage(rs, threadTS, "the reply",
+				time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("WriteThreadMessage reply: %v", err)
+			}
+			if _, err := ms.Write(rs, "top",
+				time.Unix(1700000020, 0), topLevelID, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("Write top-level: %v", err)
+			}
+
+			react, err := ms.AppendReaction("#general", tt.targetTS, tt.threadTS,
+				"Bob", "U002", emoji, false)
+			if err != nil {
+				t.Fatalf("AppendReaction: %v", err)
+			}
+
+			if tt.threadTS != "" {
+				if react.ThreadTS != tt.threadTS || react.ThreadID != tt.threadTS {
+					t.Errorf("ReactLine ThreadTS=%q ThreadID=%q, want both %q",
+						react.ThreadTS, react.ThreadID, tt.threadTS)
+				}
+				tf, err := s.ReadThread(acct, "#general", threadTS)
+				if err != nil {
+					t.Fatalf("ReadThread: %v", err)
+				}
+				if tf == nil || len(tf.Replies) != 1 {
+					t.Fatalf("expected 1 reply, got %v", tf)
+				}
+				got := tf.Replies[0]
+				if len(got.Reactions) != 1 || got.Reactions[0].Emoji != emoji {
+					t.Errorf("reply reactions = %v, want one %q", got.Reactions, emoji)
+				}
+				return
+			}
+
+			if react.ThreadTS != "" || react.ThreadID != "" {
+				t.Errorf("top-level reaction should carry no thread tags; got %+v", react)
+			}
+			df, err := s.ReadConversation(acct, "#general", store.ReadOpts{Last: 100})
+			if err != nil {
+				t.Fatalf("ReadConversation: %v", err)
+			}
+			var matched bool
+			for _, m := range df.Messages {
+				if m.ID == topLevelID {
+					if len(m.Reactions) != 1 || m.Reactions[0].Emoji != emoji {
+						t.Errorf("top-level reactions = %v, want one %q", m.Reactions, emoji)
+					}
+					matched = true
+				}
+			}
+			if !matched {
+				t.Errorf("top-level message %s not found in resolved date file", topLevelID)
+			}
+		})
+	}
 }

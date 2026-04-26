@@ -135,6 +135,8 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location, conv
 	if r.Via != "" {
 		meta += fmt.Sprintf(" [via:%s]", r.Via)
 	}
+	meta += formatThreadTSMeta(r.ThreadTS)
+	meta += formatThreadIDMeta(r.ThreadID)
 	if convMeta != nil {
 		if cm := FormatConvMeta(convMeta); cm != "" {
 			meta += " " + cm
@@ -157,6 +159,8 @@ func FormatReactionFallbackNotification(r ReactLine, loc *time.Location, convMet
 	}
 	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
 		r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji)
+	meta += formatThreadTSMeta(r.ThreadTS)
+	meta += formatThreadIDMeta(r.ThreadID)
 	if convMeta != nil {
 		if cm := FormatConvMeta(convMeta); cm != "" {
 			meta += " " + cm
