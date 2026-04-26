@@ -13,12 +13,12 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/tui"
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
+	"github.com/anish749/pigeon/internal/wstui"
 )
 
 func newWorkstreamCmd() *cobra.Command {
@@ -55,7 +55,7 @@ the current workspace.`,
 			}
 			storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
 			st := wsstore.NewFS(storeDir.Path())
-			return tui.RunWorkstream(st, ws.Name)
+			return wstui.Run(st, ws.Name)
 		},
 	}
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name (default: from config/env)")
