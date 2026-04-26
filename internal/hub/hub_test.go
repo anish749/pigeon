@@ -188,6 +188,157 @@ func TestDrainConversation_IncludesThreadReplies(t *testing.T) {
 	}
 }
 
+// TestDeliverLiveMessage_DirectPushNoDiskRead verifies the live path does
+// not read disk: the typed MsgLine handed to deliverLiveMessage is
+// formatted and pushed to the session in one shot. The on-disk store is
+// intentionally empty — if the implementation regressed to a drain-style
+// disk read, the session would receive nothing.
+func TestDeliverLiveMessage_DirectPushNoDiskRead(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+	root := paths.NewDataRoot(tmp)
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	var delivered []NotificationMsg
+	sess := &Session{
+		SessionID: "sess-1",
+		CWD:       "/tmp",
+		Send: func(_ context.Context, m NotificationMsg) error {
+			delivered = append(delivered, m)
+			return nil
+		},
+		Ready: make(chan struct{}),
+	}
+	close(sess.Ready)
+	h.sessions["sess-1"] = sess
+	ch := &channel{acct: acct, sessionID: "sess-1"}
+
+	now := time.Now()
+	msg := modelv1.MsgLine{
+		ID: "M1", Ts: now, Sender: "Alice", SenderID: "U001",
+		Text: "live arrival",
+	}
+	got, ok := h.deliverLiveMessage(ch, "#general", msg)
+
+	if !ok {
+		t.Fatal("deliverLiveMessage returned ok=false on a healthy push")
+	}
+	if got.Before(now) {
+		t.Errorf("returned cursor %v should not predate the message ts %v", got, now)
+	}
+	if len(delivered) != 1 {
+		t.Fatalf("delivered %d notifications, want 1", len(delivered))
+	}
+	content := delivered[0].Content()
+	if !strings.Contains(content, "live arrival") {
+		t.Errorf("notification missing payload text:\n%s", content)
+	}
+	if !strings.Contains(content, "[message_id:M1]") {
+		t.Errorf("notification missing message_id tag:\n%s", content)
+	}
+}
+
+// TestDeliverLiveMessage_NoSessionDefersCursor verifies that when no
+// session is connected, the live push reports failure (ok=false) so the
+// caller leaves lastDelivered untouched. The next signalConnected drain
+// will re-deliver from disk.
+func TestDeliverLiveMessage_NoSessionDefersCursor(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+	root := paths.NewDataRoot(tmp)
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions: make(map[string]*Session),
+		channels: make(map[string]*channel),
+		store:    s,
+		dataRoot: root,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+	// Channel exists but no session is registered for it.
+	ch := &channel{acct: acct, sessionID: "missing-sess"}
+
+	got, ok := h.deliverLiveMessage(ch, "#general", modelv1.MsgLine{
+		ID: "M1", Ts: time.Now(), Sender: "Alice", SenderID: "U001", Text: "x",
+	})
+	if ok {
+		t.Errorf("expected ok=false when session is not connected, got cursor %v", got)
+	}
+	if !got.IsZero() {
+		t.Errorf("expected zero cursor on no-session, got %v", got)
+	}
+}
+
+// TestRoute_FiresLiveMessageSignal verifies Route enqueues a typed
+// signalLiveMessage carrying the MsgLine, not a stale signalNewMessage
+// kind that would route through the drain path.
+func TestRoute_FiresLiveMessageSignal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PIGEON_DATA_DIR", tmp)
+	root := paths.NewDataRoot(tmp)
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &Hub{
+		sessions:  make(map[string]*Session),
+		channels:  make(map[string]*channel),
+		store:     s,
+		dataRoot:  root,
+		broadcast: NewBroadcast(),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+	ch := &channel{
+		acct:      acct,
+		sessionID: "sess-1",
+		signal:    make(chan deliverySignal, signalBufferSize),
+	}
+	h.channels[acct.String()] = ch
+
+	msg := modelv1.MsgLine{
+		ID: "M1", Ts: time.Now(), Sender: "Alice", SenderID: "U001", Text: "hi",
+	}
+	if res := h.Route(acct, "#general", msg); res.State != RouteOK {
+		t.Fatalf("Route state = %v, want RouteOK", res.State)
+	}
+
+	select {
+	case sig := <-ch.signal:
+		if sig.kind != signalLiveMessage {
+			t.Errorf("signal.kind = %v, want signalLiveMessage", sig.kind)
+		}
+		if sig.conversation != "#general" {
+			t.Errorf("signal.conversation = %q, want #general", sig.conversation)
+		}
+		if sig.msg.ID != "M1" || sig.msg.Text != "hi" {
+			t.Errorf("signal.msg = %+v, want M1/hi round-trip", sig.msg)
+		}
+	default:
+		t.Fatal("Route did not enqueue any signal")
+	}
+}
+
 func setupLookup(t *testing.T) (*Hub, *store.FSStore, account.Account) {
 	t.Helper()
 	root := paths.NewDataRoot(t.TempDir())
@@ -295,7 +446,7 @@ func TestFormatReactionLines_MessageFound(t *testing.T) {
 		MsgID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
 		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
 	}
-	lines := h.formatReactionLines(acct, "#general", react)
+	lines := h.formatReactionLines(acct, "#general", react, nil)
 
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty lines")
@@ -316,7 +467,7 @@ func TestFormatReactionLines_MessageNotFound(t *testing.T) {
 		MsgID: "9999999999.999999", Ts: time.Date(2026, 4, 19, 10, 1, 0, 0, time.UTC),
 		Sender: "Bob", SenderID: "U002", Emoji: "thumbsup",
 	}
-	lines := h.formatReactionLines(acct, "#general", react)
+	lines := h.formatReactionLines(acct, "#general", react, nil)
 
 	if len(lines) == 0 {
 		t.Fatal("expected non-empty lines")

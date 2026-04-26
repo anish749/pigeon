@@ -58,11 +58,13 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 	return lines
 }
 
-// formatMsgNotification renders a message for Claude Code channel notifications.
-// Sender and text lead (visible in truncated UI); metadata follows on an indented line.
+// FormatMsgNotification renders a single message as channel-notification
+// lines: sender and text on the first line (visible when truncated),
+// bracketed metadata on the second.
 //
-// This function does not format reactions — it operates on MsgLine only.
-func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
+// Operates on MsgLine only — reactions are rendered separately by
+// FormatReactionNotification.
+func FormatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -111,10 +113,13 @@ func formatThreadIDMeta(id string) string {
 	return fmt.Sprintf(" [thread_id:%s]", id)
 }
 
-// FormatReactionNotification formats a message with a single reaction for
-// Claude Code channel notifications. This does not include all reactions
-// associated with the message — only the specific reaction event being delivered.
-func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []string {
+// FormatReactionNotification formats a single reaction event with parent
+// context for Claude Code channel notifications. This does not include all
+// reactions associated with the message — only the specific event being
+// delivered. convMeta may be nil; when present, its tags are appended to
+// the meta line so the agent can identify the conversation (type,
+// channel ID, etc.) the same way it can on a message notification.
+func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location, convMeta *ConvMeta) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
@@ -130,6 +135,11 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 	if r.Via != "" {
 		meta += fmt.Sprintf(" [via:%s]", r.Via)
 	}
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
 	lines = append(lines, meta)
 
 	return lines
@@ -137,21 +147,29 @@ func FormatReactionNotification(m MsgLine, r ReactLine, loc *time.Location) []st
 
 // FormatReactionFallbackNotification formats a reaction notification for
 // Claude Code when the original message could not be found. This happens
-// when the reacted-to message is not on disk (e.g. older than synced history).
-func FormatReactionFallbackNotification(r ReactLine, loc *time.Location) []string {
+// when the reacted-to message is not on disk (e.g. older than synced
+// history). convMeta is appended on the meta line when non-nil — same
+// shape as FormatReactionNotification.
+func FormatReactionFallbackNotification(r ReactLine, loc *time.Location, convMeta *ConvMeta) []string {
 	verb := "reacted with"
 	if r.Remove {
 		verb = "removed reaction"
 	}
+	meta := fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
+		r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji)
+	if convMeta != nil {
+		if cm := FormatConvMeta(convMeta); cm != "" {
+			meta += " " + cm
+		}
+	}
 	return []string{
 		fmt.Sprintf("%s %s :%s:", displaySender(r.Sender, r.Via), verb, r.Emoji),
-		fmt.Sprintf("  [reaction] [%s] [message_id:%s] [sender_id:%s] [emoji:%s]",
-			r.Ts.In(loc).Format("15:04:05"), r.MsgID, r.SenderID, r.Emoji),
+		meta,
 	}
 }
 
 // FormatDateFileNotification renders a resolved conversation day for Claude Code
-// channel notifications. See formatMsgNotification for per-message format.
+// channel notifications. See FormatMsgNotification for per-message format.
 // If any non-nil errors are passed, a warning line is appended at the end.
 func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMeta *ConvMeta, errs ...error) []string {
 	if f == nil {
@@ -159,7 +177,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMet
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, formatMsgNotification(m.MsgLine, loc, convMeta)...)
+		lines = append(lines, FormatMsgNotification(m.MsgLine, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)

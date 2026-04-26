@@ -72,20 +72,19 @@ type channel struct {
 	signal    chan deliverySignal
 }
 
-type formattedReactionLines []string
-
 type deliverySignal struct {
-	kind          signalKind
-	conversation  string                 // only set for signalNewMessage and signalReaction
-	reactionLines formattedReactionLines // only set for signalReaction
+	kind         signalKind
+	conversation string            // set for signalLiveMessage and signalReaction
+	msg          modelv1.MsgLine   // set for signalLiveMessage — the typed event from the listener
+	react        modelv1.ReactLine // set for signalReaction — the typed event from the listener
 }
 
 type signalKind int
 
 const (
-	signalNewMessage signalKind = iota // a specific conversation has a new message
-	signalConnected                    // session just connected — send hello and drain all
-	signalReaction                     // a reaction event on a specific conversation
+	signalLiveMessage signalKind = iota // a new message arrived; carries the typed MsgLine
+	signalConnected                     // session just connected — send hello and drain all
+	signalReaction                      // a reaction event on a specific conversation
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -293,7 +292,7 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalNewMessage, conversation: conversation}:
+	case ch.signal <- deliverySignal{kind: signalLiveMessage, conversation: conversation, msg: msg}:
 	default:
 		slog.Error("delivery signal buffer full, message delivery may be delayed",
 			"account", acct, "conversation", conversation,
@@ -309,7 +308,6 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 // subscribers, independent of session state. The ReactLine is forwarded
 // as-is — no timestamp or field reconstruction.
 func (h *Hub) RouteReaction(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult {
-	lines := h.formatReactionLines(acct, conversation, react)
 	kind := EventReaction
 	if react.Remove {
 		kind = EventUnreact
@@ -336,7 +334,7 @@ func (h *Hub) RouteReaction(acct account.Account, conversation string, react mod
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, reactionLines: lines}:
+	case ch.signal <- deliverySignal{kind: signalReaction, conversation: conversation, react: react}:
 	default:
 		slog.Error("delivery signal buffer full, reaction delivery may be delayed",
 			"account", acct, "conversation", conversation,
@@ -433,10 +431,12 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalConnected:
 				h.sendHello(ch)
 				lastDelivered = h.drainAllConversations(ch, lastDelivered)
-			case signalNewMessage:
-				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
+			case signalLiveMessage:
+				if t, ok := h.deliverLiveMessage(ch, sig.conversation, sig.msg); ok {
+					lastDelivered = t
+				}
 			case signalReaction:
-				h.deliverReaction(ch, sig.conversation, sig.reactionLines)
+				h.deliverReaction(ch, sig.conversation, sig.react)
 			}
 		}
 	}
@@ -473,6 +473,12 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 }
 
+// drainAllConversations is the catchup-on-connect path. It runs only on
+// signalConnected — live messages bypass this and are pushed directly via
+// deliverLiveMessage. The drain reads disk for everything since
+// lastDelivered, formats, and pushes per conversation, advancing the
+// cursor. Anything missed during disconnects (or by a dropped live signal)
+// is recovered here on the next connect.
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
 	convs, err := h.store.ListConversations(ch.acct)
 	if err != nil {
@@ -532,10 +538,63 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	return now
 }
 
+// deliverLiveMessage formats and pushes a single MsgLine to the connected
+// session, advancing the last-delivered cursor on success. The MsgLine is
+// the typed event the listener already produced — no disk re-read for the
+// live path. Returns (cursorTs, true) on a successful push so the caller
+// can update lastDelivered; (zero, false) on any error or when no session
+// is attached, leaving the cursor unchanged so the next signalConnected
+// drain will catch up from disk.
+func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.MsgLine) (time.Time, bool) {
+	h.mu.RLock()
+	session := h.sessions[ch.sessionID]
+	h.mu.RUnlock()
+
+	if session == nil {
+		slog.Warn("session not connected, message delivery deferred",
+			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
+			"message_id", msg.ID)
+		return time.Time{}, false
+	}
+
+	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
+	if err != nil {
+		slog.Warn("read conv meta for live delivery, dropping meta tags",
+			"account", ch.acct, "conversation", conversation, "error", err)
+		convMeta = nil
+	}
+	lines := modelv1.FormatMsgNotification(msg, time.Local, convMeta)
+
+	notification := &IncomingMsg{
+		Platform:     ch.acct.Platform,
+		Account:      ch.acct.Name,
+		Conversation: conversation,
+		MsgLines:     lines,
+	}
+	if err := session.Send(h.ctx, notification); err != nil {
+		slog.Error("failed to deliver live message",
+			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
+			"message_id", msg.ID, "error", err)
+		return time.Time{}, false
+	}
+
+	now := time.Now()
+	if err := claude.UpdateLastDelivered(ch.acct, now); err != nil {
+		slog.Error("failed to update last_delivered",
+			"session_id", ch.sessionID, "account", ch.acct, "error", err)
+	}
+	return now, true
+}
+
 // deliverReaction sends a reaction (or unreaction) event to the connected
 // session. Reactions are delivered out-of-band: they are not gated by the
 // last_delivered cursor since reactions often target older messages.
-func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedReactionLines) {
+//
+// Formatting (and the parent-message + conv-meta lookups it depends on)
+// happen here at delivery time, not at route time — symmetric with
+// deliverLiveMessage. If no session is attached the reaction is dropped
+// without doing the lookups.
+func (h *Hub) deliverReaction(ch *channel, conversation string, react modelv1.ReactLine) {
 	h.mu.RLock()
 	session := h.sessions[ch.sessionID]
 	h.mu.RUnlock()
@@ -545,6 +604,15 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedR
 			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation)
 		return
 	}
+
+	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
+	if err != nil {
+		slog.Warn("read conv meta for reaction delivery, dropping meta tags",
+			"account", ch.acct, "conversation", conversation, "error", err)
+		convMeta = nil
+	}
+
+	lines := h.formatReactionLines(ch.acct, conversation, react, convMeta)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
@@ -558,11 +626,16 @@ func (h *Hub) deliverReaction(ch *channel, conversation string, lines formattedR
 	}
 }
 
-func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine) formattedReactionLines {
+// formatReactionLines renders a reaction with parent context when the
+// parent message can be found on disk, falling back to a context-less
+// rendering otherwise. convMeta tags (type, channel ID, etc.) are appended
+// in both branches when non-nil. Called from deliverReaction so the disk
+// lookups stay off the listener's hot path.
+func (h *Hub) formatReactionLines(acct account.Account, conversation string, react modelv1.ReactLine, convMeta *modelv1.ConvMeta) []string {
 	if msg := h.lookupMessage(acct, conversation, react.MsgID); msg != nil {
-		return modelv1.FormatReactionNotification(*msg, react, time.Local)
+		return modelv1.FormatReactionNotification(*msg, react, time.Local, convMeta)
 	}
-	return modelv1.FormatReactionFallbackNotification(react, time.Local)
+	return modelv1.FormatReactionFallbackNotification(react, time.Local, convMeta)
 }
 
 // lookupMessage searches for a message by ID in a conversation using grep.

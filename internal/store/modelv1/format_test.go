@@ -64,7 +64,7 @@ func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender in display line, got %q", lines[0])
 	}
@@ -308,7 +308,7 @@ func TestNotificationFormat_Basic(t *testing.T) {
 		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
 		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -326,7 +326,7 @@ func TestNotificationFormat_Via(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -341,7 +341,7 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
@@ -353,7 +353,7 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -368,7 +368,7 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := FormatMsgNotification(m, time.UTC, meta)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -384,7 +384,7 @@ func TestNotificationFormat_WithChannelMeta(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := FormatMsgNotification(m, time.UTC, meta)
 	want := "  [09:00:00] [message_id:M1] [sender_id:U1] [type:channel] [channel_id:C06U]"
 	if lines[1] != want {
 		t.Errorf("got  %q\nwant %q", lines[1], want)
@@ -479,7 +479,7 @@ func TestNotificationFormat_ThreadTS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := formatMsgNotification(tt.msg, time.UTC, tt.convMeta)
+			lines := FormatMsgNotification(tt.msg, time.UTC, tt.convMeta)
 			if len(lines) != 2 {
 				t.Fatalf("lines = %d, want 2: %v", len(lines), lines)
 			}
@@ -608,7 +608,7 @@ func TestFormatReactionNotification(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, time.UTC, nil)
 	if len(lines) < 2 {
 		t.Fatalf("got %d lines, want at least 2", len(lines))
 	}
@@ -634,7 +634,7 @@ func TestFormatReactionNotification_Remove(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, time.UTC, nil)
 	if !strings.Contains(lines[0], "removed reaction") {
 		t.Errorf("header = %q, want 'removed reaction'", lines[0])
 	}
@@ -651,7 +651,7 @@ func TestFormatReactionNotification_WithRaw(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "eyes",
 	}
 
-	lines := FormatReactionNotification(msg, react, time.UTC)
+	lines := FormatReactionNotification(msg, react, time.UTC, nil)
 	if len(lines) < 3 {
 		t.Fatalf("got %d lines, want at least 3 (header + raw + meta)", len(lines))
 	}
@@ -666,7 +666,7 @@ func TestFormatReactionFallbackNotification(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
 	}
 
-	lines := FormatReactionFallbackNotification(react, time.UTC)
+	lines := FormatReactionFallbackNotification(react, time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2", len(lines))
 	}
@@ -687,8 +687,79 @@ func TestFormatReactionFallbackNotification_Remove(t *testing.T) {
 		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup", Remove: true,
 	}
 
-	lines := FormatReactionFallbackNotification(react, time.UTC)
+	lines := FormatReactionFallbackNotification(react, time.UTC, nil)
 	if !strings.Contains(lines[0], "removed reaction") {
 		t.Errorf("header = %q, want 'removed reaction'", lines[0])
+	}
+}
+
+// TestFormatReactionNotification_ConvMeta verifies that conv meta tags
+// (type, channel ID, etc.) appear on the meta line for both the parent-found
+// and parent-missing (fallback) reaction renderings, mirroring the message
+// notification format.
+func TestFormatReactionNotification_ConvMeta(t *testing.T) {
+	msg := MsgLine{
+		ID: "M1", Ts: ts(2026, 4, 19, 10, 15, 2),
+		Sender: "Bob", SenderID: "U002", Text: "hi",
+	}
+	baseReact := ReactLine{
+		Ts: ts(2026, 4, 19, 10, 20, 0), MsgID: "M1",
+		Sender: "Alice", SenderID: "U001", Emoji: "thumbsup",
+	}
+	channelMeta := &ConvMeta{Type: ConvChannel, ChannelID: "C0AS"}
+	dmMeta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
+
+	tests := []struct {
+		name     string
+		render   func() []string
+		wantMeta string
+	}{
+		{
+			name: "parent-found, no convMeta",
+			render: func() []string {
+				return FormatReactionNotification(msg, baseReact, time.UTC, nil)
+			},
+			wantMeta: "  [reaction] [10:15:02] [message_id:M1] [sender_id:U001] [emoji:thumbsup]",
+		},
+		{
+			name: "parent-found, public channel meta",
+			render: func() []string {
+				return FormatReactionNotification(msg, baseReact, time.UTC, channelMeta)
+			},
+			wantMeta: "  [reaction] [10:15:02] [message_id:M1] [sender_id:U001] [emoji:thumbsup] [type:channel] [channel_id:C0AS]",
+		},
+		{
+			name: "parent-found, dm meta with user_id",
+			render: func() []string {
+				return FormatReactionNotification(msg, baseReact, time.UTC, dmMeta)
+			},
+			wantMeta: "  [reaction] [10:15:02] [message_id:M1] [sender_id:U001] [emoji:thumbsup] [type:dm] [channel_id:D08J] [user_id:U08H]",
+		},
+		{
+			name: "fallback (parent missing), public channel meta",
+			render: func() []string {
+				return FormatReactionFallbackNotification(baseReact, time.UTC, channelMeta)
+			},
+			wantMeta: "  [reaction] [10:20:00] [message_id:M1] [sender_id:U001] [emoji:thumbsup] [type:channel] [channel_id:C0AS]",
+		},
+		{
+			name: "fallback (parent missing), no convMeta",
+			render: func() []string {
+				return FormatReactionFallbackNotification(baseReact, time.UTC, nil)
+			},
+			wantMeta: "  [reaction] [10:20:00] [message_id:M1] [sender_id:U001] [emoji:thumbsup]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := tt.render()
+			if len(lines) < 2 {
+				t.Fatalf("lines = %d, want >= 2: %v", len(lines), lines)
+			}
+			if got := lines[len(lines)-1]; got != tt.wantMeta {
+				t.Errorf("meta line\n got: %q\nwant: %q", got, tt.wantMeta)
+			}
+		})
 	}
 }
