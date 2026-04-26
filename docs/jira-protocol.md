@@ -809,12 +809,12 @@ The API token is read once at `pigeon setup-jira` time from the
 per-entry `api_token` field. After setup, the daemon reads the token
 from the config; environment variables play no role at runtime.
 
-`setup-jira` also derives the account slug from the bound YAML's
+`setup-jira` also captures the account name from the bound YAML's
 `server` URL (first DNS label, lowercased) and persists it on the
-entry as `account`, alongside `jira_config` and `api_token`. The slug
-is the on-disk identifier (`jira-issues/{account}/...`); persisting it
-lets the daemon and workspace machinery resolve the account without
-reopening the jira-cli YAML.
+entry as `account`, alongside `jira_config` and `api_token`. The
+on-disk identifier is the slug of that name (`jira-issues/{slug}/...`);
+persisting the name lets the daemon and workspace machinery construct
+the account without reopening the jira-cli YAML.
 
 If a `jira:` entry is missing any of `jira_config`, `api_token`, or
 `account`, the daemon refuses it and logs an error pointing at
