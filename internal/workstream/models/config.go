@@ -33,7 +33,7 @@ func DefaultConfig() Config {
 		Until:               time.Now(),
 		FocusUpdateInterval: 25,
 		DormancyThreshold:   7 * 24 * time.Hour,
-		Model:               "haiku",
+		Model:               "sonnet",
 		LLMCallTimeout:      60 * time.Second,
 	}
 }

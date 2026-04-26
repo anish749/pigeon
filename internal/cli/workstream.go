@@ -68,7 +68,7 @@ func newWorkstreamDiscoverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "", "Start date (YYYY-MM-DD, default: 30 days ago)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace to discover (default: all workspaces)")
-	cmd.Flags().StringVar(&model, "model", "haiku", "Claude model for discovery")
+	cmd.Flags().StringVar(&model, "model", "sonnet", "Claude model for discovery")
 
 	return cmd
 }
@@ -138,7 +138,7 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sinceStr, "since", "", "Start date (YYYY-MM-DD, default: 30 days ago)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
-	cmd.Flags().StringVar(&cfg.Model, "model", "haiku", "Claude model for classification")
+	cmd.Flags().StringVar(&cfg.Model, "model", "sonnet", "Claude model for classification")
 	cmd.Flags().DurationVar(&cfg.LLMCallTimeout, "timeout", 60*time.Second, "Timeout per LLM call")
 	cmd.Flags().Float64Var(&similarityThreshold, "threshold", 0.4, "Cosine similarity threshold for routing")
 	cmd.Flags().BoolVar(&skipDiscovery, "skip-discovery", false, "Skip cold-start discovery, use persisted workstreams")
