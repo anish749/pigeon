@@ -807,12 +807,12 @@ The API token is read once at `pigeon setup-jira` time from the
 `JIRA_API_TOKEN` environment variable, verified end-to-end via
 `client.Me()`, and persisted to pigeon's `config.yaml` as the
 per-entry `api_token` field. After setup, the daemon reads the token
-from the config and does not consult the environment.
+from the config; environment variables play no role at runtime.
 
-For hand-edited configs that omit `api_token`, the daemon falls back
-to `JIRA_API_TOKEN` env at startup. Re-running `setup-jira` upserts
-the entry by resolved path and refills both fields from the verified
-state.
+If a `jira:` entry is missing either `jira_config` or `api_token`, the
+daemon refuses it and logs an error pointing at `pigeon setup-jira`.
+Re-running `setup-jira` upserts the entry by resolved path so it
+remains the canonical source of those fields.
 
 Users who rely on `.netrc` or keyring with `jira-cli` need to
 `export JIRA_API_TOKEN` once before running `setup-jira` so the value

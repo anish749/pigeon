@@ -46,23 +46,16 @@ type LinearConfig struct {
 
 // JiraConfig binds one jira-cli configuration to pigeon's ingest.
 //
-// JiraConfig (the path) and APIToken are both populated by `pigeon
-// setup-jira` at install time and snapshot the state we verified.
-// The daemon reads them at startup without consulting any env var,
-// so it works the same way under launchd, systemd, or a fresh
-// non-login shell.
-//
-// Hand-edited configs may leave APIToken empty and rely on the
-// JIRA_API_TOKEN env var as a fallback; setup-jira always populates
-// it. The path field is the same — empty falls back to the jira-cli
-// default-chain resolution; setup-jira always writes the resolved
-// absolute path.
+// Both fields are populated by `pigeon setup-jira` at install time and
+// snapshot the state that was verified end-to-end. The daemon reads
+// them as-is at startup; no environment variable, default-path chain,
+// or tilde expansion runs at runtime.
 //
 // Server / login / auth / project still come from the bound jira-cli
 // YAML, not duplicated here.
 type JiraConfig struct {
-	JiraConfig string `yaml:"jira_config,omitempty"` // path to jira-cli yaml; empty = default resolution chain
-	APIToken   string `yaml:"api_token,omitempty"`   // Atlassian API token; empty = fall back to JIRA_API_TOKEN env
+	JiraConfig string `yaml:"jira_config"` // absolute path to jira-cli yaml
+	APIToken   string `yaml:"api_token"`   // Atlassian API token
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
