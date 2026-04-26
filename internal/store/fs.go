@@ -216,6 +216,7 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 			matched[m.ID] = true
 			for _, r := range tf.Replies {
 				r.Reply = true
+				r.ThreadTS = m.ID
 				result = append(result, r)
 			}
 		}
@@ -237,6 +238,7 @@ func (s *FSStore) interleaveThreads(acct account.Account, conversation string, r
 		}
 		for _, r := range tf.Replies {
 			r.Reply = true
+			r.ThreadTS = threadTS
 			result = append(result, r)
 		}
 	}

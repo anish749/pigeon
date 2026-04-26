@@ -430,6 +430,98 @@ func TestInterleaveThreads_NoThreadDir(t *testing.T) {
 	}
 }
 
+// TestInterleaveThreads_ThreadTSPopulated checks that interleaveThreads
+// stamps ResolvedMsg.ThreadTS (the parent's ID) on every reply, regardless
+// of whether the parent was in the selected date files or surfaced as an
+// orphan. Non-reply messages must keep ThreadTS empty.
+func TestInterleaveThreads_ThreadTSPopulated(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        ReadOpts
+		setup       func(s *FSStore, acct account.Account)
+		wantThreads map[string]string // msgID → expected ThreadTS ("" for top-level)
+	}{
+		{
+			name: "reply interleaved after parent in date file",
+			opts: ReadOpts{Date: "2026-03-16"},
+			setup: func(s *FSStore, acct account.Account) {
+				s.Append(acct, "#general", msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "parent"))
+				parent := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "parent")
+				reply := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+					ID: "R1", Ts: ts(2026, 3, 16, 9, 1, 0), Sender: "Bob", SenderID: "U2",
+					Text: "reply", Reply: true,
+				}}
+				s.AppendThread(acct, "#general", "P1", parent)
+				s.AppendThread(acct, "#general", "P1", reply)
+			},
+			wantThreads: map[string]string{"P1": "", "R1": "P1"},
+		},
+		{
+			name: "reply orphan-attached when parent is outside date window",
+			opts: ReadOpts{Since: 30 * time.Minute},
+			setup: func(s *FSStore, acct account.Account) {
+				oldParent := msgLine("P9", time.Now().Add(-72*time.Hour), "Alice", "U1", "old parent")
+				recentReply := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+					ID: "R9", Ts: time.Now().Add(-1 * time.Minute), Sender: "Bob", SenderID: "U2",
+					Text: "fresh reply", Reply: true,
+				}}
+				s.Append(acct, "#general", oldParent)
+				s.AppendThread(acct, "#general", "P9", oldParent)
+				s.AppendThread(acct, "#general", "P9", recentReply)
+			},
+			wantThreads: map[string]string{"R9": "P9"},
+		},
+		{
+			name: "orphan thread file (no parent line in thread) still stamps replies",
+			opts: ReadOpts{Since: 30 * time.Minute},
+			setup: func(s *FSStore, acct account.Account) {
+				// An unrelated date-file message keeps ReadConversation from
+				// short-circuiting on empty dir; the thread itself has only a
+				// reply (parent line never made it to the thread file).
+				s.Append(acct, "#general", msgLine("Other", time.Now().Add(-2*time.Minute), "Carol", "U3", "unrelated"))
+				orphanReply := modelv1.Line{Type: modelv1.LineMessage, Msg: &modelv1.MsgLine{
+					ID: "ROrphan", Ts: time.Now().Add(-1 * time.Minute), Sender: "Bob", SenderID: "U2",
+					Text: "orphan", Reply: true,
+				}}
+				s.AppendThread(acct, "#general", "POrphan", orphanReply)
+			},
+			wantThreads: map[string]string{"ROrphan": "POrphan", "Other": ""},
+		},
+		{
+			name: "non-reply message keeps ThreadTS empty",
+			opts: ReadOpts{Date: "2026-03-16"},
+			setup: func(s *FSStore, acct account.Account) {
+				s.Append(acct, "#general", msgLine("M1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "plain"))
+			},
+			wantThreads: map[string]string{"M1": ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, acct := setup(t)
+			tt.setup(s, acct)
+
+			df, err := s.ReadConversation(acct, "#general", tt.opts)
+			if err != nil {
+				t.Fatalf("ReadConversation: %v", err)
+			}
+
+			got := make(map[string]string, len(df.Messages))
+			for _, m := range df.Messages {
+				got[m.ID] = m.ThreadTS
+			}
+			for id, want := range tt.wantThreads {
+				if g, ok := got[id]; !ok {
+					t.Errorf("message %q missing from result; got %v", id, got)
+				} else if g != want {
+					t.Errorf("message %q: ThreadTS = %q, want %q", id, g, want)
+				}
+			}
+		})
+	}
+}
+
 func TestInterleaveThreads_CorruptThreadFile(t *testing.T) {
 	s, acct := setup(t)
 

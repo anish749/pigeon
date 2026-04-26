@@ -64,7 +64,7 @@ func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender in display line, got %q", lines[0])
 	}
@@ -308,7 +308,7 @@ func TestNotificationFormat_Basic(t *testing.T) {
 		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
 		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -326,7 +326,7 @@ func TestNotificationFormat_Via(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -341,7 +341,7 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
@@ -353,7 +353,7 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -368,7 +368,7 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, meta)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -384,10 +384,79 @@ func TestNotificationFormat_WithChannelMeta(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := formatMsgNotification(ResolvedMsg{MsgLine: m}, time.UTC, meta)
 	want := "  [09:00:00] [message_id:M1] [sender_id:U1] [type:channel] [channel_id:C06U]"
 	if lines[1] != want {
 		t.Errorf("got  %q\nwant %q", lines[1], want)
+	}
+}
+
+// TestNotificationFormat_ThreadTS verifies the meta line includes
+// [thread_ts:<parent_ts>] only when ResolvedMsg.ThreadTS is set, and that
+// it composes correctly with via, reply_to, and convMeta.
+func TestNotificationFormat_ThreadTS(t *testing.T) {
+	base := MsgLine{
+		ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+		Sender: "Bob", SenderID: "U2", Text: "yes",
+	}
+	channelMeta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
+
+	tests := []struct {
+		name     string
+		msg      ResolvedMsg
+		convMeta *ConvMeta
+		wantMeta string
+	}{
+		{
+			name:     "no thread, no convMeta",
+			msg:      ResolvedMsg{MsgLine: base},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2]",
+		},
+		{
+			name:     "thread reply",
+			msg:      ResolvedMsg{MsgLine: base, ThreadTS: "P1"},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1]",
+		},
+		{
+			name: "thread reply with via",
+			msg: ResolvedMsg{
+				MsgLine:  MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Bob", SenderID: "U2", Text: "yes", Via: ViaToPigeon},
+				ThreadTS: "P1",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [via:to-pigeon] [thread_ts:P1]",
+		},
+		{
+			name: "thread reply with replyTo (whatsapp quote inside slack thread is hypothetical, but ordering should be stable)",
+			msg: ResolvedMsg{
+				MsgLine:  MsgLine{ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0), Sender: "Bob", SenderID: "U2", Text: "yes", ReplyTo: "M1"},
+				ThreadTS: "P1",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [reply_to:M1] [thread_ts:P1]",
+		},
+		{
+			name:     "thread reply with channel convMeta",
+			msg:      ResolvedMsg{MsgLine: base, ThreadTS: "P1"},
+			convMeta: channelMeta,
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1] [type:channel] [channel_id:C06U]",
+		},
+		{
+			name:     "non-reply with channel convMeta has no thread_ts",
+			msg:      ResolvedMsg{MsgLine: base},
+			convMeta: channelMeta,
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [type:channel] [channel_id:C06U]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := formatMsgNotification(tt.msg, time.UTC, tt.convMeta)
+			if len(lines) != 2 {
+				t.Fatalf("lines = %d, want 2: %v", len(lines), lines)
+			}
+			if lines[1] != tt.wantMeta {
+				t.Errorf("meta line\n got: %q\nwant: %q", lines[1], tt.wantMeta)
+			}
+		})
 	}
 }
 

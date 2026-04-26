@@ -4,6 +4,10 @@ package modelv1
 type ResolvedMsg struct {
 	MsgLine
 	Reactions []ReactLine
+	// ThreadTS is the parent thread's timestamp when this message is a reply.
+	// Populated by the read layer during thread interleave; not persisted on
+	// disk (the parent ts lives in the thread file's filename).
+	ThreadTS string
 }
 
 // ResolvedDateFile is a compacted, resolved conversation ready for reading.

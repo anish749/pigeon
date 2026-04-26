@@ -61,8 +61,12 @@ func FormatMsg(m ResolvedMsg, loc *time.Location) []string {
 // formatMsgNotification renders a message for Claude Code channel notifications.
 // Sender and text lead (visible in truncated UI); metadata follows on an indented line.
 //
-// This function does not format reactions — it operates on MsgLine only.
-func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []string {
+// Takes ResolvedMsg so the meta line can include the parent thread's
+// timestamp ([thread_ts:...]) when the message is a reply — that field is
+// only populated by the interleave path, not on the underlying MsgLine.
+//
+// This function does not format reactions.
+func formatMsgNotification(m ResolvedMsg, loc *time.Location, convMeta *ConvMeta) []string {
 	tsStr := m.Ts.In(loc).Format("15:04:05")
 
 	var lines []string
@@ -75,6 +79,9 @@ func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 	}
 	if m.ReplyTo != "" {
 		meta += fmt.Sprintf(" [reply_to:%s]", m.ReplyTo)
+	}
+	if m.ThreadTS != "" {
+		meta += fmt.Sprintf(" [thread_ts:%s]", m.ThreadTS)
 	}
 	if convMeta != nil {
 		if cm := FormatConvMeta(convMeta); cm != "" {
@@ -134,7 +141,7 @@ func FormatDateFileNotification(f *ResolvedDateFile, loc *time.Location, convMet
 	}
 	var lines []string
 	for _, m := range f.Messages {
-		lines = append(lines, formatMsgNotification(m.MsgLine, loc, convMeta)...)
+		lines = append(lines, formatMsgNotification(m, loc, convMeta)...)
 	}
 	if w := formatWarning(errs...); w != "" {
 		lines = append(lines, w)
