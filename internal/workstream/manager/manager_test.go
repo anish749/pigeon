@@ -25,7 +25,6 @@ func TestApproveProposalCreatesWorkstreamAndDeletesProposal(t *testing.T) {
 
 	if err := st.PutProposal(&models.Proposal{
 		ID:             "p-1",
-		Type:           models.ProposalCreate,
 		SuggestedName:  "Auth Refactor",
 		SuggestedFocus: "Migrate session tokens off the legacy middleware.",
 		Workspace:      "acme",
@@ -72,7 +71,6 @@ func TestApproveProposalConflictsWithExistingWorkstream(t *testing.T) {
 	}
 	if err := st.PutProposal(&models.Proposal{
 		ID:             "p-1",
-		Type:           models.ProposalCreate,
 		SuggestedName:  "Auth Refactor",
 		SuggestedFocus: "LLM's newer focus that should NOT overwrite.",
 		Workspace:      "acme",
@@ -109,7 +107,6 @@ func TestApproveProposalDoubleApproveFails(t *testing.T) {
 	ts := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	if err := st.PutProposal(&models.Proposal{
 		ID:             "p-1",
-		Type:           models.ProposalCreate,
 		SuggestedName:  "Auth Refactor",
 		SuggestedFocus: "first focus",
 		Workspace:      "acme",
@@ -130,7 +127,6 @@ func TestRejectProposalDeletes(t *testing.T) {
 	mgr, st := newTestManager(t)
 	if err := st.PutProposal(&models.Proposal{
 		ID:            "p-1",
-		Type:          models.ProposalCreate,
 		SuggestedName: "Auth Refactor",
 	}); err != nil {
 		t.Fatal(err)

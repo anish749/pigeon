@@ -147,7 +147,6 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	}
 	proposal := &models.Proposal{
 		ID:             fmt.Sprintf("p-%d", seq),
-		Type:           models.ProposalCreate,
 		SuggestedName:  name,
 		SuggestedFocus: focus,
 		Workspace:      ws,
@@ -165,10 +164,9 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 	return "", nil
 }
 
-// ApproveProposal applies a pending proposal (creating the workstream
-// for ProposalCreate) and removes the proposal from the queue. Returns
-// the resulting workstream ID. Errors if the proposal is missing, of a
-// type the manager does not yet apply, or if it would collide with an
+// ApproveProposal creates the workstream for a pending proposal and
+// removes the proposal from the queue. Returns the resulting workstream
+// ID. Errors if the proposal is missing or would collide with an
 // existing workstream (same slug ID).
 //
 // On collision the proposal is left in place and nothing is written —
@@ -189,37 +187,30 @@ func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) 
 		return "", fmt.Errorf("proposal %q not found", id)
 	}
 
-	var wsID string
-	switch p.Type {
-	case models.ProposalCreate:
-		w := models.Workstream{
-			ID:        generateWorkstreamID(p.SuggestedName),
-			Name:      p.SuggestedName,
-			Workspace: p.Workspace,
-			State:     models.StateActive,
-			Focus:     p.SuggestedFocus,
-			Created:   p.ProposedAt,
-		}
-		_, exists, err := m.store.GetWorkstream(w.ID)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
-		}
-		if err := m.store.PutWorkstream(w); err != nil {
-			return "", err
-		}
-		wsID = w.ID
-	default:
-		return "", fmt.Errorf("proposal %q has unsupported type %q", id, p.Type)
+	w := models.Workstream{
+		ID:        generateWorkstreamID(p.SuggestedName),
+		Name:      p.SuggestedName,
+		Workspace: p.Workspace,
+		State:     models.StateActive,
+		Focus:     p.SuggestedFocus,
+		Created:   p.ProposedAt,
+	}
+	_, exists, err := m.store.GetWorkstream(w.ID)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", fmt.Errorf("proposal %q would conflict with existing workstream %q — reject this proposal or rename one side", id, w.ID)
+	}
+	if err := m.store.PutWorkstream(w); err != nil {
+		return "", err
 	}
 
 	if err := m.store.DeleteProposal(id); err != nil {
-		return "", fmt.Errorf("delete proposal after creating workstream %q: %w", wsID, err)
+		return "", fmt.Errorf("delete proposal after creating workstream %q: %w", w.ID, err)
 	}
-	m.logger.Info("proposal approved", "id", id, "workstream", wsID)
-	return wsID, nil
+	m.logger.Info("proposal approved", "id", id, "workstream", w.ID)
+	return w.ID, nil
 }
 
 // RejectProposal removes a pending proposal from the queue without

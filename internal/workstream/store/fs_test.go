@@ -65,7 +65,7 @@ func TestFSRoundTrip(t *testing.T) {
 			t.Errorf("got seq %d, want 1", seq)
 		}
 
-		p := &models.Proposal{ID: "p-1", Type: models.ProposalCreate, SuggestedName: "Alpha", ProposedAt: ts}
+		p := &models.Proposal{ID: "p-1", SuggestedName: "Alpha", ProposedAt: ts}
 		if err := s.PutProposal(p); err != nil {
 			t.Fatal(err)
 		}
