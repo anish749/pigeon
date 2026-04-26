@@ -56,7 +56,8 @@ type Model struct {
 	mode        mode
 	input       string
 	scratchName string // holds name across the new-name → new-focus transition
-	mergeCursor int    // selected target while in modeMergePick
+	mergeCursor int    // selected target while in modeMergePick (index into m.items)
+	mergeOffset int    // index of the topmost visible candidate while in modeMergePick
 
 	// spinnerFrame advances on each spinTickMsg while in modeDiscovering.
 	// Non-zero only during discovery.

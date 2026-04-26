@@ -39,15 +39,20 @@ func (m Model) View() string {
 		return m.renderFullScreen(b.String(), m.renderFooter())
 	}
 
-	leftWidth, rightWidth := m.columnWidths()
-	listCol := m.renderListColumn(leftWidth)
-	var rightCol string
-	if w, ok := m.current(); ok {
-		rightCol = m.renderDetailBox(w, rightWidth)
+	if m.mode == modeMergePick {
+		b.WriteString(indentLines(m.renderMergePicker(), strings.Repeat(" ", bodyMargin)))
+		b.WriteString("\n")
+	} else {
+		leftWidth, rightWidth := m.columnWidths()
+		listCol := m.renderListColumn(leftWidth)
+		var rightCol string
+		if w, ok := m.current(); ok {
+			rightCol = m.renderDetailBox(w, rightWidth)
+		}
+		body := lipgloss.JoinHorizontal(lipgloss.Top, listCol, strings.Repeat(" ", bodyGap), rightCol)
+		b.WriteString(indentLines(body, strings.Repeat(" ", bodyMargin)))
+		b.WriteString("\n")
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, listCol, strings.Repeat(" ", bodyGap), rightCol)
-	b.WriteString(indentLines(body, strings.Repeat(" ", bodyMargin)))
-	b.WriteString("\n")
 
 	if m.status != "" {
 		fmt.Fprintf(&b, "  %s\n\n", hintStyle.Render(m.status))
@@ -160,55 +165,18 @@ func (m Model) renderListColumn(width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// visibleRange returns the [start, end) item indices that fit within
-// listLineBudget given the current listOffset and cursor. listOffset is
-// treated as a hint; the range is shifted forward if the cursor would
-// otherwise be hidden, and clamped backward to keep the cursor in view
-// when it sits above the offset.
+// visibleRange returns the [start, end) item indices for the workstream
+// list given the current listOffset and cursor. Wraps the shared
+// viewport helper with the per-item line counter that wraps names to
+// nameWidth.
 func (m Model) visibleRange(nameWidth int) (start, end int) {
-	n := len(m.items)
-	if n == 0 {
-		return 0, 0
-	}
-	budget := m.listLineBudget()
-	if budget <= 0 {
-		return 0, n
-	}
 	if nameWidth < 4 {
 		nameWidth = 4
 	}
-
 	itemHeight := func(i int) int {
 		return len(wrapName(m.items[i].Name, nameWidth, "  "))
 	}
-
-	start = m.listOffset
-	if start < 0 {
-		start = 0
-	}
-	if start > m.cursor {
-		start = m.cursor
-	}
-	if start >= n {
-		start = n - 1
-	}
-
-	for {
-		used := 0
-		end = start
-		for end < n {
-			h := itemHeight(end)
-			if used+h > budget && used > 0 {
-				break
-			}
-			used += h
-			end++
-		}
-		if m.cursor < end || start >= n-1 {
-			return start, end
-		}
-		start++
-	}
+	return viewport(len(m.items), m.cursor, m.listOffset, m.listLineBudget(), itemHeight)
 }
 
 // listLineBudget is how many vertical lines the list column has to
@@ -313,7 +281,7 @@ func (m Model) renderFooter() string {
 	case modeNewFocus:
 		return inputPrompt("New workstream — focus:", m.input, "  enter create  esc cancel")
 	case modeMergePick:
-		return m.renderMergePicker()
+		return helpStyle.Render("  enter confirm  j/k pick  esc cancel")
 	case modeConfirmDelete:
 		w, _ := m.current()
 		return "  " + errorStyle.Render(fmt.Sprintf("Delete %q? (y/n)", w.Name))
@@ -341,27 +309,104 @@ func inputPrompt(label, value, help string) string {
 	return fmt.Sprintf("  %s %s█\n%s", titleStyle.Render(label), value, helpStyle.Render(help))
 }
 
-func (m Model) renderMergePicker() string {
-	src, _ := m.current()
-	var b strings.Builder
-	fmt.Fprintf(&b, "  %s\n", titleStyle.Render(fmt.Sprintf("Merge %q into:", src.Name)))
+// mergeCandidates returns the m.items indices that are valid merge
+// targets — every workstream except the source row and the workspace
+// default.
+func (m Model) mergeCandidates() []int {
+	var out []int
 	for i, w := range m.items {
 		if i == m.cursor || w.IsDefault() {
 			continue
 		}
-		marker := "    "
-		name := w.Name
-		if i == m.mergeCursor {
-			marker = "  " + selectedStyle.Render("→ ")
-			name = selectedStyle.Render(name)
-		} else {
-			name = dimStyle.Render(name)
-		}
-		fmt.Fprintf(&b, "%s%s\n", marker, name)
+		out = append(out, i)
 	}
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("  enter confirm  j/k pick  esc cancel"))
-	return b.String()
+	return out
+}
+
+// mergeNameWidth is the per-row name area for the merge picker.
+func (m Model) mergeNameWidth() int {
+	width := m.width - 2*bodyMargin
+	if width <= 0 {
+		width = defaultWidth - 2*bodyMargin
+	}
+	const markerWidth = 4 // "  → " or four spaces
+	nameWidth := width - markerWidth
+	if nameWidth < 4 {
+		nameWidth = 4
+	}
+	return nameWidth
+}
+
+// mergeViewport runs the shared viewport helper with the merge-picker's
+// per-candidate height and budget.
+func (m Model) mergeViewport(candidates []int, cursorPos, offsetPos int) (start, end int) {
+	nameWidth := m.mergeNameWidth()
+	itemHeight := func(k int) int {
+		return len(wrapName(m.items[candidates[k]].Name, nameWidth, "  "))
+	}
+	return viewport(len(candidates), cursorPos, offsetPos, m.mergeLineBudget(), itemHeight)
+}
+
+func (m Model) renderMergePicker() string {
+	src, _ := m.current()
+	candidates := m.mergeCandidates()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", titleStyle.Render(fmt.Sprintf("Merge %q into:", src.Name)))
+
+	if len(candidates) == 0 {
+		b.WriteString(dimStyle.Render("  (no eligible targets)"))
+		return b.String()
+	}
+
+	cursorPos := indexOfInt(candidates, m.mergeCursor)
+	if cursorPos < 0 {
+		cursorPos = 0
+	}
+	offsetPos := indexOfInt(candidates, m.mergeOffset)
+	if offsetPos < 0 {
+		offsetPos = cursorPos
+	}
+	startK, endK := m.mergeViewport(candidates, cursorPos, offsetPos)
+	nameWidth := m.mergeNameWidth()
+
+	for k := startK; k < endK; k++ {
+		idx := candidates[k]
+		w := m.items[idx]
+		var firstMarker string
+		var nameStyle lipgloss.Style
+		if idx == m.mergeCursor {
+			firstMarker = "  " + selectedStyle.Render("→ ")
+			nameStyle = selectedStyle
+		} else {
+			firstMarker = "    "
+			nameStyle = dimStyle
+		}
+		lines := wrapName(w.Name, nameWidth, "  ")
+		for j, line := range lines {
+			if j == 0 {
+				b.WriteString(firstMarker)
+			} else {
+				b.WriteString("    ")
+			}
+			b.WriteString(nameStyle.Render(line))
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// mergeLineBudget mirrors listLineBudget but reserves an extra row for
+// the picker title.
+func (m Model) mergeLineBudget() int {
+	if m.height <= 0 {
+		return 1 << 30
+	}
+	budget := m.listLineBudget() - 1 // room for the title line
+	if budget < 1 {
+		return 1
+	}
+	return budget
 }
 
 func emptyOr(s, fallback string) string {
