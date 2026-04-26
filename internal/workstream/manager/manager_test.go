@@ -19,7 +19,7 @@ func newTestManager(t *testing.T) (*Manager, store.Store) {
 	t.Helper()
 	st := store.NewFS(t.TempDir())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mgr := New(nil, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, logger)
+	mgr := New(nil, &fakeSignalReader{}, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, logger)
 	return mgr, st
 }
 
@@ -199,13 +199,13 @@ func TestDiscoverAndProposeReadsWorkspaceSignals(t *testing.T) {
 		Name:  "Auth Refactor",
 		Focus: "Migrate auth sessions.",
 	}}}
-	mgr := New(nil, NewStatCollector(), models.Config{
+	mgr := New(nil, reader, NewStatCollector(), models.Config{
 		ApprovalMode: models.AutoApprove,
 		Workspace: workspace.Workspace{
 			Name:     "acme",
 			Accounts: accounts,
 		},
-	}, st, logger, WithSignalReader(reader))
+	}, st, logger)
 	mgr.disc = disc
 
 	discovered, err := mgr.DiscoverAndPropose(context.Background(), since, until)
@@ -249,10 +249,10 @@ func TestDiscoverAndProposeNoSignals(t *testing.T) {
 		Name:  "Should Not Run",
 		Focus: "No signals.",
 	}}}
-	mgr := New(nil, NewStatCollector(), models.Config{
+	mgr := New(nil, reader, NewStatCollector(), models.Config{
 		ApprovalMode: models.AutoApprove,
 		Workspace:    workspace.Workspace{Name: "acme"},
-	}, st, logger, WithSignalReader(reader))
+	}, st, logger)
 	mgr.disc = disc
 
 	discovered, err := mgr.DiscoverAndPropose(context.Background(), time.Now().Add(-time.Hour), time.Now())

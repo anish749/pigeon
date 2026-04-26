@@ -16,27 +16,15 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/paths"
-	rawstore "github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
-	"github.com/anish749/pigeon/internal/workstream/reader"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
 )
 
 // SignalReader reads historical signals for workspace accounts.
 type SignalReader interface {
 	ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error)
-}
-
-type Option func(*Manager)
-
-// WithSignalReader overrides the default filesystem-backed signal reader.
-func WithSignalReader(r SignalReader) Option {
-	return func(m *Manager) {
-		m.reader = r
-	}
 }
 
 // Manager owns the lifecycle of all workstreams. It is the only component
@@ -64,22 +52,17 @@ type Manager struct {
 }
 
 // New creates a workstream manager.
-func New(client *clients.Client, sc *StatCollector, cfg models.Config, st wsstore.Store, logger *slog.Logger, opts ...Option) *Manager {
-	root := paths.DefaultDataRoot()
-	m := &Manager{
+func New(client *clients.Client, signalReader SignalReader, sc *StatCollector, cfg models.Config, st wsstore.Store, logger *slog.Logger) *Manager {
+	return &Manager{
 		client:             client,
 		disc:               discovery.NewLLMDiscovery(client, logger),
-		reader:             reader.New(rawstore.NewFSStore(root), root),
+		reader:             signalReader,
 		sc:                 sc,
 		store:              st,
 		cfg:                cfg,
 		logger:             logger,
 		signalsSinceUpdate: make(map[string]int),
 	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
 }
 
 // ReadSignals reads historical signals for the manager's configured workspace
@@ -121,23 +104,20 @@ func (m *Manager) DiscoverAndPropose(ctx context.Context, since, until time.Time
 	if err != nil {
 		return nil, err
 	}
-	if len(signals) == 0 {
-		return nil, nil
-	}
-	if err := m.EnsureDefaultWorkstream(m.cfg.Workspace.Name, signals[0].Ts); err != nil {
-		return nil, fmt.Errorf("ensure default workstream: %w", err)
-	}
-	return m.discoverSignalsAndPropose(ctx, signals, signals[0].Ts)
+	return m.DiscoverAndProposeSignals(ctx, signals)
 }
 
-// discoverSignalsAndPropose runs LLM-based batch discovery on the given signals
-// and routes each result through ProposeNew, so the same lifecycle
-// invariants (idempotent existence check, proposal record, ID generation)
-// apply. Under AutoApprove the proposals become workstreams immediately;
-// otherwise they land in proposals.json for review.
-func (m *Manager) discoverSignalsAndPropose(ctx context.Context, signals []models.Signal, proposedAt time.Time) ([]discovery.DiscoveredWorkstream, error) {
+// DiscoverAndProposeSignals runs discovery over signals that were already read
+// through ReadSignals. It exists for workflows, such as replay, that need the
+// same signal set for additional processing and should not read the window
+// twice.
+func (m *Manager) DiscoverAndProposeSignals(ctx context.Context, signals []models.Signal) ([]discovery.DiscoveredWorkstream, error) {
 	if len(signals) == 0 {
 		return nil, nil
+	}
+	proposedAt := signals[0].Ts
+	if err := m.EnsureDefaultWorkstream(m.cfg.Workspace.Name, proposedAt); err != nil {
+		return nil, fmt.Errorf("ensure default workstream: %w", err)
 	}
 	discovered, err := m.disc.Discover(ctx, signals)
 	if err != nil {
