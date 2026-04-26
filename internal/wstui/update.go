@@ -156,6 +156,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if target >= 0 {
 				m.mode = modeMergePick
 				m.mergeCursor = target
+				m.mergeOffset = target
 			}
 			_ = w
 		}
@@ -290,6 +291,7 @@ func (m Model) handleMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if next < len(m.items) {
 			m.mergeCursor = next
+			m = m.scrollMergeIntoView()
 		}
 	case "k", "up":
 		next := m.mergeCursor - 1
@@ -298,6 +300,7 @@ func (m Model) handleMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if next >= 0 {
 			m.mergeCursor = next
+			m = m.scrollMergeIntoView()
 		}
 	case "enter":
 		src, ok := m.current()
@@ -310,6 +313,40 @@ func (m Model) handleMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, mergeCmd(m, src, dst)
 	}
 	return m, nil
+}
+
+// scrollMergeIntoView is the merge-picker analogue of scrollIntoView:
+// nudges mergeOffset so the target cursor stays in view as the user
+// navigates the candidate list. Mirrors the list's pull-back-on-up,
+// push-forward-via-viewport pattern.
+func (m Model) scrollMergeIntoView() Model {
+	candidates := m.mergeCandidates()
+	if len(candidates) == 0 {
+		m.mergeOffset = 0
+		return m
+	}
+	cursorPos := indexOfInt(candidates, m.mergeCursor)
+	if cursorPos < 0 {
+		cursorPos = 0
+		m.mergeCursor = candidates[0]
+	}
+	offsetPos := indexOfInt(candidates, m.mergeOffset)
+	if offsetPos < 0 || offsetPos > cursorPos {
+		offsetPos = cursorPos
+	}
+	startK, _ := m.mergeViewport(candidates, cursorPos, offsetPos)
+	m.mergeOffset = candidates[startK]
+	return m
+}
+
+// indexOfInt returns the position of target in s, or -1.
+func indexOfInt(s []int, target int) int {
+	for i, v := range s {
+		if v == target {
+			return i
+		}
+	}
+	return -1
 }
 
 // handleConfirmKey runs while the delete confirmation prompt is open.
