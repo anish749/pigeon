@@ -64,7 +64,7 @@ func TestNotificationFormat_ViaSenderDecoration(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender in display line, got %q", lines[0])
 	}
@@ -308,7 +308,7 @@ func TestNotificationFormat_Basic(t *testing.T) {
 		ID: "M1", Ts: ts(2026, 3, 16, 9, 15, 2),
 		Sender: "Alice", SenderID: "U1", Text: "hello world",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -326,7 +326,7 @@ func TestNotificationFormat_Via(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 		Via: ViaToPigeon,
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "sent to pigeon by Alice: ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -341,7 +341,7 @@ func TestNotificationFormat_ReplyTo(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.Contains(lines[1], "[reply_to:M1]") {
 		t.Errorf("expected reply_to tag, got %q", lines[1])
 	}
@@ -353,7 +353,7 @@ func TestNotificationFormat_AllOptional(t *testing.T) {
 		Sender: "Bob", SenderID: "U2", Text: "yes",
 		Via: ViaPigeonAsUser, ReplyTo: "M1",
 	}
-	lines := formatMsgNotification(m, time.UTC, nil)
+	lines := FormatMsgNotification(m, time.UTC, nil)
 	if !strings.HasPrefix(lines[0], "Bob (via pigeon): ") {
 		t.Errorf("expected decorated sender, got %q", lines[0])
 	}
@@ -368,7 +368,7 @@ func TestNotificationFormat_WithConvMeta(t *testing.T) {
 		Sender: "Eve", SenderID: "U08H", Text: "hey",
 	}
 	meta := &ConvMeta{Type: ConvDM, ChannelID: "D08J", UserID: "U08H"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := FormatMsgNotification(m, time.UTC, meta)
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d, want 2", len(lines))
 	}
@@ -384,7 +384,7 @@ func TestNotificationFormat_WithChannelMeta(t *testing.T) {
 		Sender: "Alice", SenderID: "U1", Text: "hello",
 	}
 	meta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
-	lines := formatMsgNotification(m, time.UTC, meta)
+	lines := FormatMsgNotification(m, time.UTC, meta)
 	want := "  [09:00:00] [message_id:M1] [sender_id:U1] [type:channel] [channel_id:C06U]"
 	if lines[1] != want {
 		t.Errorf("got  %q\nwant %q", lines[1], want)
@@ -479,7 +479,7 @@ func TestNotificationFormat_ThreadTS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := formatMsgNotification(tt.msg, time.UTC, tt.convMeta)
+			lines := FormatMsgNotification(tt.msg, time.UTC, tt.convMeta)
 			if len(lines) != 2 {
 				t.Fatalf("lines = %d, want 2: %v", len(lines), lines)
 			}

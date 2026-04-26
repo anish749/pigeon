@@ -560,11 +560,13 @@ func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.M
 		return time.Time{}, false
 	}
 
-	convMeta, metaErr := h.store.ReadMeta(ch.acct, conversation)
-	lines := modelv1.FormatDateFileNotification(
-		&modelv1.ResolvedDateFile{Messages: []modelv1.ResolvedMsg{{MsgLine: msg}}},
-		time.Local, convMeta, metaErr,
-	)
+	convMeta, err := h.store.ReadMeta(ch.acct, conversation)
+	if err != nil {
+		slog.Warn("read conv meta for live delivery, dropping meta tags",
+			"account", ch.acct, "conversation", conversation, "error", err)
+		convMeta = nil
+	}
+	lines := modelv1.FormatMsgNotification(msg, time.Local, convMeta)
 
 	notification := &IncomingMsg{
 		Platform:     ch.acct.Platform,
