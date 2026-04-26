@@ -55,7 +55,16 @@ the current workspace.`,
 			}
 			storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
 			st := wsstore.NewFS(storeDir.Path())
-			return wstui.Run(st, ws.Name)
+
+			// Discovery defaults: 30-day window, sonnet — same as
+			// `pigeon workstream discover` without a --since flag.
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			discover := func(ctx context.Context) (int, error) {
+				since := time.Now().AddDate(0, 0, -30)
+				until := time.Now()
+				return commands.DiscoverWorkspace(ctx, ws, since, until, "sonnet", logger)
+			}
+			return wstui.Run(st, ws.Name, discover)
 		},
 	}
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name (default: from config/env)")

@@ -75,4 +75,3 @@ func TestStateRank(t *testing.T) {
 		t.Error("unknown state should rank last")
 	}
 }
-
