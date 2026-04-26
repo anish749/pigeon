@@ -13,6 +13,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
@@ -60,55 +61,49 @@ type WorkstreamReport struct {
 func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float64, skipDiscovery bool, logger *slog.Logger) (*Report, error) {
 	startTime := time.Now()
 
-	// Read signals.
+	// Build the reader once; pass it to the manager and reuse it for the
+	// skipDiscovery path that needs raw signals without invoking the LLM.
 	root := paths.DefaultDataRoot()
-	fsStore := store.NewFSStore(root)
-	signals, err := reader.New(fsStore, root).ReadAll(cfg.Since, cfg.Until)
-	if err != nil {
-		return nil, fmt.Errorf("read signals: %w", err)
-	}
-	logger.Info("signals loaded", "count", len(signals))
-	if len(signals) == 0 {
-		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
-	}
+	r := reader.New(store.NewFSStore(root), root)
 
-	// Filter to workspace accounts.
-	allowed := make(map[string]bool, len(cfg.Workspace.Accounts))
-	for _, a := range cfg.Workspace.Accounts {
-		allowed[a.String()] = true
-	}
-	filtered := signals[:0]
-	for _, sig := range signals {
-		if allowed[sig.Account.String()] {
-			filtered = append(filtered, sig)
-		}
-	}
-	signals = filtered
-	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
-
-	// Set up persistence and manager.
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir.Path())
 	claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
 	sc := manager.NewStatCollector()
-	mgr := manager.New(claude, sc, cfg, st, logger)
+	mgr := manager.New(claude, sc, cfg, st, r, logger)
 	wsName := cfg.Workspace.Name
 
-	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
-		return nil, fmt.Errorf("ensure default workstream: %w", err)
-	}
-
-	// Discovery or load persisted workstreams.
+	// Discovery (or load persisted workstreams) and obtain the signals
+	// for the routing loop. Single read across both paths.
+	var signals []models.Signal
 	if skipDiscovery {
+		var err error
+		signals, err = r.ReadAccounts(cfg.Workspace.Accounts, cfg.Since, cfg.Until)
+		if err != nil {
+			return nil, fmt.Errorf("read signals: %w", err)
+		}
+		if len(signals) == 0 {
+			return &Report{Since: cfg.Since, Until: cfg.Until}, nil
+		}
+		if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
+			return nil, fmt.Errorf("ensure default workstream: %w", err)
+		}
 		active, err := st.ActiveWorkstreams()
 		if err != nil {
 			return nil, fmt.Errorf("load persisted workstreams: %w", err)
 		}
-		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
+		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active), "signals", len(signals))
 	} else {
-		if _, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts); err != nil {
+		var err error
+		var discovered []discovery.DiscoveredWorkstream
+		signals, discovered, err = mgr.Discover(ctx, cfg.Since, cfg.Until)
+		if err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
 		}
+		if len(signals) == 0 {
+			return &Report{Since: cfg.Since, Until: cfg.Until}, nil
+		}
+		logger.Info("discovery complete", "signals", len(signals), "discovered", len(discovered))
 	}
 
 	// Build semantic router from active workstreams.

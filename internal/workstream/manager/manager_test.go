@@ -15,7 +15,7 @@ func newTestManager(t *testing.T) (*Manager, store.Store) {
 	t.Helper()
 	st := store.NewFS(t.TempDir())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mgr := New(nil, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, logger)
+	mgr := New(nil, NewStatCollector(), models.Config{ApprovalMode: models.Interactive}, st, nil, logger)
 	return mgr, st
 }
 
