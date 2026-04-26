@@ -9,6 +9,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 // EnvWorkspace is the environment variable that sets the active workspace.
@@ -59,6 +60,9 @@ func resolve(cfg *config.Config, ws config.WorkspaceName, source string) (*Works
 	}
 	for _, slug := range wsCfg.Linear {
 		accounts = append(accounts, account.New("linear-issues", slug))
+	}
+	for _, slug := range wsCfg.Jira {
+		accounts = append(accounts, account.New(paths.JiraPlatform, slug))
 	}
 	return &Workspace{Name: ws, Accounts: accounts}, nil
 }
@@ -116,6 +120,9 @@ func allAccounts(cfg *config.Config) []account.Account {
 	}
 	for _, l := range cfg.Linear {
 		accounts = append(accounts, account.New("linear-issues", l.Workspace))
+	}
+	for _, j := range cfg.Jira {
+		accounts = append(accounts, j.Account())
 	}
 	return accounts
 }

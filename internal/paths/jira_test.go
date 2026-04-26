@@ -9,10 +9,10 @@ import (
 
 func TestJiraDirPath(t *testing.T) {
 	root := NewDataRoot("/data")
-	acct := account.New(JiraPlatform, "Tubular Labs")
+	acct := account.New(JiraPlatform, "Acme Corp")
 	jd := root.AccountFor(acct).Jira()
 
-	want := "/data/jira-issues/tubular-labs"
+	want := "/data/jira-issues/acme-corp"
 	if jd.Path() != want {
 		t.Errorf("JiraDir.Path() = %q, want %q", jd.Path(), want)
 	}
@@ -20,16 +20,16 @@ func TestJiraDirPath(t *testing.T) {
 
 func TestJiraProjectDirPath(t *testing.T) {
 	root := NewDataRoot("/data")
-	acct := account.New(JiraPlatform, "tubular")
+	acct := account.New(JiraPlatform, "acme")
 	pd := root.AccountFor(acct).Jira().Project("ENG")
 
 	cases := []struct {
 		got, want, name string
 	}{
-		{pd.Path(), "/data/jira-issues/tubular/ENG", "Path"},
-		{pd.IssuesDir(), "/data/jira-issues/tubular/ENG/issues", "IssuesDir"},
-		{pd.IssueFile("ENG-142").Path(), "/data/jira-issues/tubular/ENG/issues/ENG-142.jsonl", "IssueFile"},
-		{pd.SyncCursorsFile().Path(), "/data/jira-issues/tubular/ENG/.sync-cursors.yaml", "SyncCursorsFile"},
+		{pd.Path(), "/data/jira-issues/acme/ENG", "Path"},
+		{pd.IssuesDir(), "/data/jira-issues/acme/ENG/issues", "IssuesDir"},
+		{pd.IssueFile("ENG-142").Path(), "/data/jira-issues/acme/ENG/issues/ENG-142.jsonl", "IssueFile"},
+		{pd.SyncCursorsFile().Path(), "/data/jira-issues/acme/ENG/.sync-cursors.yaml", "SyncCursorsFile"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
