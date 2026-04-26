@@ -173,3 +173,35 @@ were extracted out of #313 / #315 to keep both PRs scoped. They build
 but have no tests; treat them as a starting point, not a finished
 implementation. Tests should cover at minimum: discovery → persistence
 round trip, re-run idempotency, and the cancellation path.
+
+## Workstream proposals: ephemeral queue, not historical record
+
+`proposals.json` today keeps every proposal forever, transitioning state
+from `pending` → `approved` / `rejected` with a `ResolvedAt` timestamp.
+The intended model is simpler: proposals are a queue of pending decisions.
+Approve converts a proposal into a workstream and deletes the proposal.
+Reject deletes the proposal. The file then only ever contains pending
+items.
+
+Scope of the change:
+
+- `store.Store` gets `DeleteProposal(id) error`; FS implementation
+  rewrites `proposals.json` without the deleted entry.
+- `manager.ApproveProposal` flow becomes `PutWorkstream` + `DeleteProposal`.
+  Decide an order and a failure story — if PutWorkstream succeeds and
+  DeleteProposal fails you'd have both the workstream and a stale Pending
+  proposal. Either delete first (proposal lost on workstream-write fail)
+  or accept that the conflict-error in ApproveProposal will surface the
+  stale entry on the next attempt.
+- `manager.RejectProposal` flow becomes a single `DeleteProposal`.
+- `models.ProposalApproved`, `models.ProposalRejected`, and
+  `models.Proposal.ResolvedAt` become unused — drop them in the same PR.
+- `replay.Report.ProposalsApproved` / `ProposalsRejected` currently
+  derive counts by scanning `proposals.json` (replay.go:159-171). After
+  deletion those counts must come from the StatCollector during the run,
+  or the fields drop from the report.
+
+Audit trail: deletion loses the "what was rejected and why" record that
+proposals.json provides today. If that history matters for replay or
+debugging, log Approve/Reject at info level on slog so the trail lives in
+the daemon log instead.
