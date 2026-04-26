@@ -138,12 +138,36 @@ func TestAccount(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.server, func(t *testing.T) {
 			cfg := &PigeonJiraConfig{Server: c.server}
-			acct := cfg.Account()
+			acct, err := cfg.Account()
+			if err != nil {
+				t.Fatalf("Account: %v", err)
+			}
 			if acct.Platform != "jira-issues" {
 				t.Errorf("Platform = %q, want jira-issues", acct.Platform)
 			}
 			if acct.NameSlug() != c.wantSlug {
 				t.Errorf("NameSlug() = %q, want %q", acct.NameSlug(), c.wantSlug)
+			}
+		})
+	}
+}
+
+func TestAccountMalformedServer(t *testing.T) {
+	// Cases where url.Parse "succeeds" with an empty Host (no scheme) or
+	// outright fails. Either way Account() must error rather than return
+	// an empty slug that would land issues at jira-issues//<project>/.
+	cases := []string{
+		"acme.atlassian.net",         // missing scheme
+		"https://",                   // scheme only
+		"://broken",                  // no scheme name
+		"",                           // empty
+		"ht!tp://acme.atlassian.net", // illegal scheme char
+	}
+	for _, server := range cases {
+		t.Run(server, func(t *testing.T) {
+			cfg := &PigeonJiraConfig{Server: server}
+			if _, err := cfg.Account(); err == nil {
+				t.Errorf("Account() returned no error for malformed Server %q", server)
 			}
 		})
 	}

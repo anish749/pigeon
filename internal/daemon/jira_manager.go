@@ -61,10 +61,18 @@ func (m *JiraManager) Count() int {
 func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig) {
 	// Reconcile by jira-cli config path. Two pigeon entries pointing at
 	// the same path collapse to one running poller; that's intentional
-	// since they would write to the same on-disk location anyway.
+	// since they would write to the same on-disk location anyway. If the
+	// path can't be resolved (broken environment, no $HOME), log and skip
+	// the entry — the daemon stays up for everything else.
 	desiredPaths := make(map[string]struct{})
 	for _, jc := range desired {
-		desiredPaths[jirapkg.ResolveConfigPath(jc.JiraConfig)] = struct{}{}
+		path, err := jirapkg.ResolveConfigPath(jc.JiraConfig)
+		if err != nil {
+			slog.Error("resolve jira-cli config path, skipping entry",
+				"jira_config", jc.JiraConfig, "err", err)
+			continue
+		}
+		desiredPaths[path] = struct{}{}
 	}
 
 	for path, running := range m.running {
@@ -100,7 +108,10 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 		}
 
 		client := jira.NewClient(jcfg)
-		acct := cfg.Account()
+		acct, err := cfg.Account()
+		if err != nil {
+			return fmt.Errorf("derive account from jira-cli config: %w", err)
+		}
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 
 		p := jirapoller.New(jiraPollInterval, client, cfg.APIVersion(), acct, cfg.Project.Key, projDir, m.store, m.syncTracker)

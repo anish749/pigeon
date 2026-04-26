@@ -74,7 +74,11 @@ func LoadPigeonJiraConfig(path string) (*PigeonJiraConfig, error) {
 	if c.Project.Key == "" {
 		return nil, fmt.Errorf("jira-cli config %s missing required `project.key` field", path)
 	}
-	if strings.EqualFold(hostname(c.Server), "localhost") {
+	host, err := serverHostname(c.Server)
+	if err != nil {
+		return nil, fmt.Errorf("jira-cli config %s: %w", path, err)
+	}
+	if strings.EqualFold(host, "localhost") {
 		return nil, fmt.Errorf("jira-cli config %s points at localhost; pigeon does not ingest localhost-bound jira instances", path)
 	}
 	return &c, nil
@@ -82,24 +86,21 @@ func LoadPigeonJiraConfig(path string) (*PigeonJiraConfig, error) {
 
 // Account returns the pigeon account.Account this jira-cli config maps
 // to. The platform is fixed as paths.JiraPlatform and the account name
-// is the lowercased first DNS label of Server. Slug derivation is owned
-// by this method — callers ask for an account, not a string they have
-// to feed into account.New themselves.
-func (c *PigeonJiraConfig) Account() account.Account {
-	return account.New(paths.JiraPlatform, c.accountSlug())
-}
-
-// accountSlug returns the lowercased first DNS label of Server, used as
-// the on-disk slug under jira-issues/. Internal — exposed only via
-// Account(). Slug derivation is here (rather than user-supplied) because
-// jira-cli has no slug concept and pigeon should not ask the user to
-// invent one.
-func (c *PigeonJiraConfig) accountSlug() string {
-	host := hostname(c.Server)
-	if i := strings.IndexByte(host, '.'); i >= 0 {
-		return strings.ToLower(host[:i])
+// is the lowercased first DNS label of Server. Returns an error if
+// Server is malformed (no scheme, unparseable URL, or empty hostname).
+// LoadPigeonJiraConfig validates Server at load time, so callers using
+// Load won't see this error in practice — but the error path is real
+// because direct PigeonJiraConfig construction (e.g. in tests) bypasses
+// that validation.
+func (c *PigeonJiraConfig) Account() (account.Account, error) {
+	host, err := serverHostname(c.Server)
+	if err != nil {
+		return account.Account{}, err
 	}
-	return strings.ToLower(host)
+	if i := strings.IndexByte(host, '.'); i >= 0 {
+		host = host[:i]
+	}
+	return account.New(paths.JiraPlatform, strings.ToLower(host)), nil
 }
 
 // JiraConfig builds a pkg/jira.Config ready to pass to jira.NewClient.
@@ -127,10 +128,22 @@ func (c *PigeonJiraConfig) JiraConfig() (jira.Config, error) {
 		if c.MTLS.CACert == "" || c.MTLS.ClientCert == "" || c.MTLS.ClientKey == "" {
 			return jira.Config{}, fmt.Errorf("auth_type is mtls but mtls.{ca_cert, client_cert, client_key} are not all set in jira-cli config")
 		}
+		caCert, err := expandHome(c.MTLS.CACert)
+		if err != nil {
+			return jira.Config{}, fmt.Errorf("expand mtls.ca_cert: %w", err)
+		}
+		clientCert, err := expandHome(c.MTLS.ClientCert)
+		if err != nil {
+			return jira.Config{}, fmt.Errorf("expand mtls.client_cert: %w", err)
+		}
+		clientKey, err := expandHome(c.MTLS.ClientKey)
+		if err != nil {
+			return jira.Config{}, fmt.Errorf("expand mtls.client_key: %w", err)
+		}
 		cfg.MTLSConfig = jira.MTLSConfig{
-			CaCert:     expandHome(c.MTLS.CACert),
-			ClientCert: expandHome(c.MTLS.ClientCert),
-			ClientKey:  expandHome(c.MTLS.ClientKey),
+			CaCert:     caCert,
+			ClientCert: clientCert,
+			ClientKey:  clientKey,
 		}
 		return cfg, nil
 	}
@@ -154,12 +167,19 @@ func (c *PigeonJiraConfig) APIVersion() poller.APIVersion {
 	return poller.APIVersionV3
 }
 
-// hostname returns the host (without port) from a server URL, or empty
-// if the URL is unparseable.
-func hostname(server string) string {
+// serverHostname extracts the hostname (no port) from a server URL.
+// Returns an error if the URL is malformed or has no hostname — note
+// that "acme.atlassian.net" without a scheme parses cleanly via
+// url.Parse but produces an empty Host, so the second case is a real
+// failure mode and not just paranoia.
+func serverHostname(server string) (string, error) {
 	u, err := url.Parse(server)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("parse server URL %q: %w", server, err)
 	}
-	return u.Hostname()
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("server URL %q has no hostname (missing scheme like https://?)", server)
+	}
+	return host, nil
 }

@@ -6,6 +6,7 @@
 package jira
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,28 +34,40 @@ const (
 // pigeon-config entry. Resolution order: explicit override → JIRA_CONFIG_FILE
 // env → jira-cli default. The default itself follows jira-cli's resolution:
 // $XDG_CONFIG_HOME/.jira/.config.yml if set, else $HOME/.config/.jira/.config.yml.
-func ResolveConfigPath(override string) string {
+//
+// Returns an error when the home directory is needed (no override, no
+// JIRA_CONFIG_FILE, no XDG_CONFIG_HOME) but `os.UserHomeDir` fails — at
+// that point the default path is undefined and silently producing a
+// relative path like ".config/.jira/.config.yml" would surface later as
+// a hard-to-debug "file not found" against the daemon's working dir.
+func ResolveConfigPath(override string) (string, error) {
 	if override != "" {
 		return expandHome(override)
 	}
 	if env := os.Getenv(jiraConfigEnv); env != "" {
-		return env
+		return env, nil
 	}
 	configHome := os.Getenv(jiraXDGConfigEnv)
 	if configHome == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home dir for default jira-cli config path: %w", err)
+		}
 		configHome = filepath.Join(home, jiraXDGSubdir)
 	}
-	return filepath.Join(configHome, jiraConfigSubdir, jiraConfigName)
+	return filepath.Join(configHome, jiraConfigSubdir, jiraConfigName), nil
 }
 
-// expandHome resolves a leading "~" in a path. Plain filepath.Join does
-// not expand it; users put `~/...` paths in pigeon's config.yaml all the
-// time, so resolve here rather than at every call site.
-func expandHome(p string) string {
+// expandHome resolves a leading "~" in a path. Returns an error if "~"
+// is present but `os.UserHomeDir` fails. The non-tilde fast path never
+// errors.
+func expandHome(p string) (string, error) {
 	if !strings.HasPrefix(p, "~") {
-		return p
+		return p, nil
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, strings.TrimPrefix(p, "~"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand %q: resolve home dir: %w", p, err)
+	}
+	return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
 }
