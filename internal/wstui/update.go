@@ -48,8 +48,14 @@ func (m Model) applyLoaded(msg loadedMsg) Model {
 	return m
 }
 
-// handleKey routes a key press to the right per-mode handler.
+// handleKey routes a key press to the right per-mode handler. Ctrl+C
+// always quits regardless of mode — without this, sub-modes like
+// modeMergePick or any input mode would trap the user with no way out
+// because their handlers don't otherwise dispatch tea.Quit.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
 	switch m.mode {
 	case modeEditName, modeEditFocus, modeNewName, modeNewFocus:
 		return m.handleInputKey(msg)

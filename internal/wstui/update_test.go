@@ -104,6 +104,27 @@ func TestHandleListKey_QuitsOnQ(t *testing.T) {
 	}
 }
 
+// TestCtrlC_QuitsFromAnyMode locks in the fix for the bug where Ctrl+C
+// was only honored in modeList. Sub-modes (input, merge picker, delete
+// confirm) handled `q`/`esc` as "exit sub-mode back to list" and ignored
+// Ctrl+C, which meant a user who pressed n or m had no way to exit the
+// program without killing the terminal.
+func TestCtrlC_QuitsFromAnyMode(t *testing.T) {
+	ctrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
+	for _, mode := range []mode{modeList, modeEditName, modeEditFocus, modeNewName, modeNewFocus, modeMergePick, modeConfirmDelete} {
+		m := newSeededModel()
+		m.mode = mode
+		_, cmd := m.Update(ctrlC)
+		if cmd == nil {
+			t.Errorf("mode %v: expected quit cmd, got nil", mode)
+			continue
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("mode %v: expected QuitMsg, got %T", mode, cmd())
+		}
+	}
+}
+
 func TestHandleInputKey_TypeAndCommit(t *testing.T) {
 	st := newFakeStore(seedItems()...)
 	m := NewModel(st, "personal")
