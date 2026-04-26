@@ -12,7 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 )
 
-func RunGenerateManifest(username, workspace string) error {
+func RunGenerateManifest(username, workspace, appDisplayName string) error {
 	if workspace == "" {
 		selected, err := selectSlackWorkspace()
 		if err != nil {
@@ -21,7 +21,12 @@ func RunGenerateManifest(username, workspace string) error {
 		workspace = selected
 	}
 
-	rendered, err := renderManifest(username, workspace)
+	displayName, err := resolveSlackAppDisplayName(workspace, appDisplayName)
+	if err != nil {
+		return err
+	}
+
+	rendered, err := renderManifest(username, workspace, displayName)
 	if err != nil {
 		return err
 	}
@@ -36,6 +41,35 @@ func RunGenerateManifest(username, workspace string) error {
 	}
 
 	return nil
+}
+
+func resolveSlackAppDisplayName(workspace, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+
+	if name, ok, err := configuredSlackAppDisplayName(workspace); err != nil {
+		return "", err
+	} else if ok {
+		return name, nil
+	}
+	return (config.SlackConfig{}).AppDisplay(), nil
+}
+
+func configuredSlackAppDisplayName(workspace string) (string, bool, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", false, err
+	}
+	for _, sl := range cfg.Slack {
+		if sl.Workspace == workspace {
+			if sl.AppDisplayName != "" {
+				return sl.AppDisplayName, true, nil
+			}
+			return "", false, nil
+		}
+	}
+	return "", false, nil
 }
 
 // selectSlackWorkspace shows an interactive picker for configured Slack workspaces.
@@ -72,8 +106,8 @@ func selectSlackWorkspace() (string, error) {
 	return names[idx], nil
 }
 
-// renderManifest reads the manifest template and substitutes username/workspace.
-func renderManifest(username, workspace string) (string, error) {
+// renderManifest reads the manifest template and substitutes username/workspace/app display name.
+func renderManifest(username, workspace, appDisplayName string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("find executable: %w", err)
@@ -89,7 +123,12 @@ func renderManifest(username, workspace string) (string, error) {
 		return "", fmt.Errorf("read manifest template: %w", err)
 	}
 
-	rendered := strings.ReplaceAll(string(tmpl), "${USERNAME}", username)
+	return renderManifestTemplate(string(tmpl), username, workspace, appDisplayName), nil
+}
+
+func renderManifestTemplate(tmpl, username, workspace, appDisplayName string) string {
+	rendered := strings.ReplaceAll(tmpl, "${USERNAME}", username)
 	rendered = strings.ReplaceAll(rendered, "${WORKSPACE_NAME}", workspace)
-	return rendered, nil
+	rendered = strings.ReplaceAll(rendered, "${APP_DISPLAY_NAME}", appDisplayName)
+	return rendered
 }

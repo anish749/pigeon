@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/anish749/pigeon/internal/config"
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 )
 
@@ -47,10 +48,28 @@ func RunSetupSlack(args []string) error {
 	if workspace == "" {
 		return fmt.Errorf("workspace name is required")
 	}
+
+	configuredAppDisplayName, hasConfiguredAppDisplayName, err := configuredSlackAppDisplayName(workspace)
+	if err != nil {
+		return err
+	}
+	appDisplayName := (config.SlackConfig{}).AppDisplay()
+	appDisplayNameForConfig := ""
+	if hasConfiguredAppDisplayName {
+		appDisplayName = configuredAppDisplayName
+		appDisplayNameForConfig = configuredAppDisplayName
+	}
+	fmt.Printf("  Slack app display name [%s]: ", appDisplayName)
+	appDisplayNameInput, _ := reader.ReadString('\n')
+	appDisplayNameInput = strings.TrimSpace(appDisplayNameInput)
+	if appDisplayNameInput != "" {
+		appDisplayName = appDisplayNameInput
+		appDisplayNameForConfig = appDisplayNameInput
+	}
 	fmt.Println()
 
 	// Render manifest with user's values and copy to clipboard
-	rendered, err := renderManifest(username, workspace)
+	rendered, err := renderManifest(username, workspace, appDisplayName)
 	if err != nil {
 		fmt.Printf("  (Could not render manifest: %v)\n", err)
 		fmt.Println("  Run `pigeon generate-manifest` manually to create the manifest.")
@@ -113,7 +132,7 @@ func RunSetupSlack(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken)
+	srv := slacklistener.NewAuthServer(clientID, clientSecret, appToken, appDisplayNameForConfig)
 
 	go func() {
 		if err := srv.Start(ctx); err != nil {
