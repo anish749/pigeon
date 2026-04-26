@@ -6,15 +6,26 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
+
+func setupLookup(t *testing.T) (paths.DataRoot, *store.FSStore, account.Account) {
+	t.Helper()
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	acct := account.New("slack", "acme-corp")
+	return root, s, acct
+}
 
 // TestNotifReact_FormatNotification_MessageFound verifies the parent-found
 // branch: when LookupParent returns a MsgLine, the rendered header
 // includes the parent's text and sender. Exercises NotifReact's own
 // formatting via the shared FormatEnv contract.
 func TestNotifReact_FormatNotification_MessageFound(t *testing.T) {
-	h, s, acct := setupLookup(t)
+	root, s, acct := setupLookup(t)
 
 	if err := s.Append(acct, "#general", modelv1.Line{
 		Type: modelv1.LineMessage,
@@ -36,7 +47,7 @@ func TestNotifReact_FormatNotification_MessageFound(t *testing.T) {
 	env := FormatEnv{
 		Loc: time.UTC,
 		LookupParent: func(id string) *modelv1.MsgLine {
-			return h.lookupMessage(acct, "#general", id)
+			return read.LookupMessage(root.AccountFor(acct).Conversation("#general"), id)
 		},
 	}
 	lines := evt.FormatNotification(env)
@@ -56,7 +67,7 @@ func TestNotifReact_FormatNotification_MessageFound(t *testing.T) {
 // branch: when LookupParent returns nil, the renderer omits the parent's
 // text and emits a context-less reaction line.
 func TestNotifReact_FormatNotification_MessageNotFound(t *testing.T) {
-	h, _, acct := setupLookup(t)
+	root, _, acct := setupLookup(t)
 
 	evt := NotifReact{
 		Envelope: Envelope{Kind: EventReaction, Account: acct, Conversation: "#general"},
@@ -68,7 +79,7 @@ func TestNotifReact_FormatNotification_MessageNotFound(t *testing.T) {
 	env := FormatEnv{
 		Loc: time.UTC,
 		LookupParent: func(id string) *modelv1.MsgLine {
-			return h.lookupMessage(acct, "#general", id)
+			return read.LookupMessage(root.AccountFor(acct).Conversation("#general"), id)
 		},
 	}
 	lines := evt.FormatNotification(env)

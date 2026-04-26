@@ -14,9 +14,11 @@ import (
 )
 
 func TestConnectedClaudeSessions_Empty(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
 	h := &Hub{
 		sessions: make(map[string]*Session),
 		channels: make(map[string]*channel),
+		dataRoot: root,
 	}
 	got := h.ConnectedClaudeSessions()
 	if len(got) != 0 {
@@ -25,6 +27,7 @@ func TestConnectedClaudeSessions_Empty(t *testing.T) {
 }
 
 func TestConnectedClaudeSessions_SingleSession(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
 	h := &Hub{
 		sessions: map[string]*Session{
 			"sess-1": {SessionID: "sess-1", CWD: "/home/user/project"},
@@ -35,6 +38,7 @@ func TestConnectedClaudeSessions_SingleSession(t *testing.T) {
 				sessionID: "sess-1",
 			},
 		},
+		dataRoot: root,
 	}
 
 	got := h.ConnectedClaudeSessions()
@@ -53,6 +57,7 @@ func TestConnectedClaudeSessions_SingleSession(t *testing.T) {
 }
 
 func TestConnectedClaudeSessions_MultipleSessions(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
 	h := &Hub{
 		sessions: map[string]*Session{
 			"sess-1": {SessionID: "sess-1", CWD: "/home/user/project-a"},
@@ -68,6 +73,7 @@ func TestConnectedClaudeSessions_MultipleSessions(t *testing.T) {
 				sessionID: "sess-2",
 			},
 		},
+		dataRoot: root,
 	}
 
 	got := h.ConnectedClaudeSessions()
@@ -88,11 +94,13 @@ func TestConnectedClaudeSessions_MultipleSessions(t *testing.T) {
 
 func TestConnectedClaudeSessions_SessionWithNoChannel(t *testing.T) {
 	// A session exists but no channel points to it — Account should be empty.
+	root := paths.NewDataRoot(t.TempDir())
 	h := &Hub{
 		sessions: map[string]*Session{
 			"sess-orphan": {SessionID: "sess-orphan", CWD: "/tmp"},
 		},
 		channels: make(map[string]*channel),
+		dataRoot: root,
 	}
 
 	got := h.ConnectedClaudeSessions()
@@ -473,95 +481,5 @@ func TestDeliverEvent_AdvancesCursor(t *testing.T) {
 				t.Errorf("expected zero cursor when advance=false, got %v", got)
 			}
 		})
-	}
-}
-
-func setupLookup(t *testing.T) (*Hub, *store.FSStore, account.Account) {
-	t.Helper()
-	root := paths.NewDataRoot(t.TempDir())
-	s := store.NewFSStore(root)
-	acct := account.New("slack", "acme-corp")
-	h := &Hub{dataRoot: root}
-	return h, s, acct
-}
-
-func TestLookupMessage_DateFile(t *testing.T) {
-	h, s, acct := setupLookup(t)
-
-	msg := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
-			Sender: "Alice", SenderID: "U001", Text: "hello world",
-		},
-	}
-	if err := s.Append(acct, "#general", msg); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	got := h.lookupMessage(acct, "#general", "1700000001.000001")
-	if got == nil {
-		t.Fatal("lookupMessage returned nil, want match")
-	}
-	if got.Sender != "Alice" {
-		t.Errorf("Sender = %q, want %q", got.Sender, "Alice")
-	}
-	if got.Text != "hello world" {
-		t.Errorf("Text = %q, want %q", got.Text, "hello world")
-	}
-}
-
-func TestLookupMessage_ThreadFile(t *testing.T) {
-	h, s, acct := setupLookup(t)
-
-	reply := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "1700000002.000002", Ts: time.Date(2026, 4, 19, 10, 5, 0, 0, time.UTC),
-			Sender: "Bob", SenderID: "U002", Text: "thread reply", Reply: true,
-		},
-	}
-	if err := s.AppendThread(acct, "#general", "1700000001.000001", reply); err != nil {
-		t.Fatalf("AppendThread: %v", err)
-	}
-
-	got := h.lookupMessage(acct, "#general", "1700000002.000002")
-	if got == nil {
-		t.Fatal("lookupMessage returned nil, want match")
-	}
-	if got.Sender != "Bob" {
-		t.Errorf("Sender = %q, want %q", got.Sender, "Bob")
-	}
-	if got.Text != "thread reply" {
-		t.Errorf("Text = %q, want %q", got.Text, "thread reply")
-	}
-}
-
-func TestLookupMessage_NotFound(t *testing.T) {
-	h, s, acct := setupLookup(t)
-
-	msg := modelv1.Line{
-		Type: modelv1.LineMessage,
-		Msg: &modelv1.MsgLine{
-			ID: "1700000001.000001", Ts: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
-			Sender: "Alice", SenderID: "U001", Text: "hello",
-		},
-	}
-	if err := s.Append(acct, "#general", msg); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	got := h.lookupMessage(acct, "#general", "9999999999.999999")
-	if got != nil {
-		t.Errorf("expected nil, got %+v", got)
-	}
-}
-
-func TestLookupMessage_NoConversation(t *testing.T) {
-	h, _, acct := setupLookup(t)
-
-	got := h.lookupMessage(acct, "#nonexistent", "1700000001.000001")
-	if got != nil {
-		t.Errorf("expected nil, got %+v", got)
 	}
 }
