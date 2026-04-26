@@ -59,9 +59,7 @@ func RunSetupSlack(args []string) error {
 	input = strings.TrimSpace(input)
 	fmt.Println()
 
-	// Save the raw value (possibly empty) so the lowercase "pigeon"
-	// attribution default still applies when the user accepts the default.
-	// The manifest needs the resolved name.
+	// Save raw (empty preserves the per-method defaults); render needs resolved.
 	appDisplayName, displayName := input, input
 	if appDisplayName == "" {
 		appDisplayName = existing.AppDisplayName
