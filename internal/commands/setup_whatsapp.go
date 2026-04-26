@@ -38,7 +38,7 @@ func RunSetupWhatsApp(dbPath string) error {
 	defer lock.Close()
 
 	ctx := context.Background()
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
 
 	container, err := sqlstore.New(ctx, "sqlite", dsn, walog.New(ctx, "whatsapp-db"))
 	if err != nil {
