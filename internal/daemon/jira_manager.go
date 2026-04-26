@@ -75,6 +75,11 @@ func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig
 				"jira_config", jc.JiraConfig)
 			continue
 		}
+		if jc.AccountName == "" {
+			slog.Error("jira entry missing `account`, run `pigeon setup-jira` to populate it",
+				"jira_config", jc.JiraConfig)
+			continue
+		}
 		if existing, ok := desiredEntries[jc.JiraConfig]; ok {
 			slog.Warn("two jira entries with the same jira_config path, later one wins",
 				"path", jc.JiraConfig,
@@ -118,10 +123,7 @@ func (m *JiraManager) startPath(ctx context.Context, path string, entry config.J
 		}
 
 		client := jira.NewClient(jcfg)
-		acct, err := cfg.Account()
-		if err != nil {
-			return fmt.Errorf("derive account from jira-cli config: %w", err)
-		}
+		acct := entry.Account()
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 
 		p := jirapoller.New(jiraPollInterval, client, cfg.APIVersion(), acct, cfg.Project.Key, projDir, m.store, m.syncTracker)

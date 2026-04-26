@@ -6,6 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 )
 
@@ -46,16 +47,31 @@ type LinearConfig struct {
 
 // JiraConfig binds one jira-cli configuration to pigeon's ingest.
 //
-// Both fields are populated by `pigeon setup-jira` at install time and
-// snapshot the state that was verified end-to-end. The daemon reads
-// them as-is at startup; no environment variable, default-path chain,
-// or tilde expansion runs at runtime.
+// All three fields are populated by `pigeon setup-jira` at install
+// time and snapshot the state that was verified end-to-end. The daemon
+// reads them as-is at startup; no environment variable, default-path
+// chain, or tilde expansion runs at runtime.
+//
+// AccountName is the lowercased first DNS label of the bound YAML's
+// server URL, captured at setup time. Persisting it lets the daemon
+// and workspace machinery resolve the account.Account without
+// reopening the jira-cli YAML — see the Account method.
 //
 // Server / login / auth / project still come from the bound jira-cli
 // YAML, not duplicated here.
 type JiraConfig struct {
-	JiraConfig string `yaml:"jira_config"` // absolute path to jira-cli yaml
-	APIToken   string `yaml:"api_token"`   // Atlassian API token
+	JiraConfig  string `yaml:"jira_config"` // absolute path to jira-cli yaml
+	APIToken    string `yaml:"api_token"`   // Atlassian API token
+	AccountName string `yaml:"account"`     // first DNS label of server URL, captured at setup
+}
+
+// Account returns the account.Account this entry maps to. The
+// platform is fixed as paths.JiraPlatform and the name is the
+// AccountName captured by setup-jira; constructing it here keeps
+// callers (daemon, workspace) from having to know the platform
+// constant or replicate account.New wiring.
+func (j JiraConfig) Account() account.Account {
+	return account.New(paths.JiraPlatform, j.AccountName)
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
