@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/anish749/pigeon/internal/config"
 )
@@ -120,21 +121,9 @@ func TestUpsertJiraByResolvedPath(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := &config.Config{Jira: append([]config.JiraConfig(nil), c.existing...)}
 			upsertJiraByResolvedPath(cfg, c.newEntry, c.resolved)
-			if !equalJira(cfg.Jira, c.want) {
-				t.Errorf("got %+v, want %+v", cfg.Jira, c.want)
+			if diff := cmp.Diff(c.want, cfg.Jira); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
-}
-
-func equalJira(a, b []config.JiraConfig) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
