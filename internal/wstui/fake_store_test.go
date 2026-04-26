@@ -4,8 +4,18 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
+
+// testCfg returns a minimal models.Config scoped to ws. Tests that
+// need a discovery window override Since/Until on the returned value.
+func testCfg(ws config.WorkspaceName) models.Config {
+	return models.Config{
+		Workspace: workspace.Workspace{Name: ws},
+	}
+}
 
 // fakeStore is a minimal in-memory store.Store implementation for use
 // in tests. It records calls so assertions can verify which method

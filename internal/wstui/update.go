@@ -1,6 +1,7 @@
 package wstui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -28,10 +29,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 	case clearStatusMsg:
 		m.status = ""
+	case spinTickMsg:
+		// The ticker only matters while discovery is in flight. Once the
+		// goroutine posts discoverDoneMsg and we leave modeDiscovering,
+		// we stop scheduling the next tick — late ticks are dropped here.
+		if m.mode == modeDiscovering {
+			m.spinnerFrame++
+			return m, spinTick()
+		}
+	case discoverDoneMsg:
+		return m.applyDiscoverDone(msg)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// applyDiscoverDone exits modeDiscovering and either flashes a success
+// status (and reloads the list) or surfaces the error.
+func (m Model) applyDiscoverDone(msg discoverDoneMsg) (tea.Model, tea.Cmd) {
+	m.mode = modeList
+	m.spinnerFrame = 0
+	if msg.err != nil {
+		m.err = msg.err
+		return m, nil
+	}
+	m.err = nil
+	detail := fmt.Sprintf("discovered %d workstreams", msg.count)
+	if msg.count == 0 {
+		detail = "no workstreams found"
+	}
+	return m, tea.Batch(setStatus(detail), loadCmd(m))
 }
 
 // applyLoaded swaps in fresh items and clamps the cursor.
@@ -63,6 +91,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMergeKey(msg)
 	case modeConfirmDelete:
 		return m.handleConfirmKey(msg)
+	case modeDiscovering:
+		// Discovery runs to completion (or context timeout). All keys
+		// other than Ctrl+C above are ignored — re-pressing D would
+		// double-fire the LLM call.
+		return m, nil
 	}
 	return m.handleListKey(msg)
 }
@@ -108,6 +141,13 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if w, ok := m.current(); ok && !w.IsDefault() {
 			m.mode = modeConfirmDelete
 			_ = w
+		}
+	case "D":
+		if m.manager != nil {
+			m.mode = modeDiscovering
+			m.spinnerFrame = 0
+			m.err = nil
+			return m, discoverCmd(m.manager, m.cfg.Since, m.cfg.Until)
 		}
 	}
 	return m, nil
@@ -204,7 +244,7 @@ func (m Model) commitNewFocus() (tea.Model, tea.Cmd) {
 	if name == "" {
 		return m, nil
 	}
-	w := models.NewWorkstream(name, m.workspace, focus, time.Now().UTC())
+	w := models.NewWorkstream(name, m.cfg.Workspace.Name, focus, time.Now().UTC())
 	return m, putCmd(m, w, "created")
 }
 

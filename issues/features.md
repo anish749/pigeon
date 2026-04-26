@@ -137,39 +137,3 @@ deferred this as "the read layer needs to be unified across all
 platforms." This is the prerequisite for most of the other items above
 being done cleanly rather than as per-platform branches.
 
-## Workstream TUI: in-app discovery
-
-The workstream TUI (`pigeon workstream tui`, #313) lists and edits
-workstreams in the active workspace. It assumes the store is already
-populated — there is no way to trigger discovery from inside the UI. An
-empty workspace shows "no workstreams; press n to create one manually,"
-which doesn't match how the system is meant to be used.
-
-The persistence prerequisite is this PR — once `pigeon workstream
-discover` writes its results to the per-workspace store, the TUI needs:
-
-- An empty-state prompt: "no workstreams in this workspace — D to
-  discover from your messaging history, n to create manually."
-- A `D` key (also available from the populated list) that runs discovery
-  in the background and shows a spinner. Discovery is an LLM call that
-  can take 30–90 seconds.
-- On completion, the list reloads from the store and a status flash
-  reports how many were found (or that none were).
-- Cancellation via ctrl+c during discovery should leave the store
-  untouched.
-
-Open questions for the implementer:
-- Discovery uses a default 30-day window today. Should the TUI expose
-  since/until knobs, or stay zero-config?
-- Re-running discovery overwrites same-named workstreams. Should
-  user-edited focus/state survive a re-run, or is "the LLM is the source
-  of truth on re-run" the right policy?
-- What happens to workstreams the LLM no longer surfaces — leave,
-  dormant, or delete?
-
-A starting sketch exists in commits 568893d (TUI wiring + spinner) and
-869538b (CLI persistence) on branch `worktree-workstream-tui`. They
-were extracted out of #313 / #315 to keep both PRs scoped. They build
-but have no tests; treat them as a starting point, not a finished
-implementation. Tests should cover at minimum: discovery → persistence
-round trip, re-run idempotency, and the cancellation path.

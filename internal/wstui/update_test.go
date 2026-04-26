@@ -1,6 +1,7 @@
 package wstui
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func seedItems() []models.Workstream {
 
 func newSeededModel() Model {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	return m
 }
@@ -127,7 +128,7 @@ func TestCtrlC_QuitsFromAnyMode(t *testing.T) {
 
 func TestHandleInputKey_TypeAndCommit(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeEditName
 	m.input = "Alpha"
@@ -215,7 +216,7 @@ func TestCommitNewName_EmptyAborts(t *testing.T) {
 
 func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeNewFocus
 	m.scratchName = "Recommendations"
@@ -254,7 +255,7 @@ func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 
 func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 
 	_, cmd := m.Update(keyRune('s'))
@@ -270,7 +271,7 @@ func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
 
 func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeConfirmDelete
 
@@ -284,7 +285,7 @@ func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
 
 func TestConfirmDelete_NoCancels(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeConfirmDelete
 
@@ -300,7 +301,7 @@ func TestConfirmDelete_NoCancels(t *testing.T) {
 
 func TestMergePicker_EnterMerges(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeMergePick
 	m.cursor = 0      // Alpha is source
@@ -331,7 +332,7 @@ func TestMergePicker_EnterMerges(t *testing.T) {
 
 func TestMergePicker_EscCancels(t *testing.T) {
 	st := newFakeStore(seedItems()...)
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 	m.items = filterAndSort(seedItems(), "personal")
 	m.mode = modeMergePick
 
@@ -365,7 +366,7 @@ func TestApplyLoaded_SurfacesError(t *testing.T) {
 func TestPutCmd_StoreErrorSurfacesAsLoadedMsgErr(t *testing.T) {
 	st := newFakeStore()
 	st.putErr = errOnPut
-	m := NewModel(st, "personal")
+	m := NewModel(st, testCfg("personal"), nil)
 
 	cmd := putCmd(m, models.Workstream{ID: "x", Name: "X", Workspace: "personal"}, "saved")
 	gotErr := false
@@ -397,9 +398,13 @@ func drainBatch(cmd tea.Cmd) {
 }
 
 // fanOut returns every message produced by cmd, recursively expanding
-// tea.BatchMsg into its component cmds. tea.Sequence is reduced to its
-// first message only — that's enough for tests that care about the
-// initial side-effect (the put/delete) without driving the timer.
+// tea.BatchMsg and tea.Sequence into their component cmds. Sequence is
+// detected by reflection because its sequenceMsg type is unexported.
+//
+// For sequence/batch, every component is fanned out (so callers see
+// every msg in order — status flashes, store ops, and the eventual
+// reload all surface). Timers (tea.Tick results) are returned as-is;
+// tests that don't care just ignore them.
 func fanOut(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
@@ -414,9 +419,35 @@ func fanOut(cmd tea.Cmd) []tea.Msg {
 		return out
 	case nil:
 		return nil
-	default:
-		return []tea.Msg{msg}
 	}
+	// tea.Sequence wraps cmds in an unexported sequenceMsg, which is
+	// `type sequenceMsg []tea.Cmd`. Use reflection to detect it and
+	// drill into the FIRST component only — later components are
+	// typically tea.Tick-based cleanups (e.g. the auto-clear after a
+	// status flash) and invoking them would block tests on the timer.
+	if subs, ok := unwrapSequence(msg); ok && len(subs) > 0 {
+		return fanOut(subs[0])
+	}
+	return []tea.Msg{msg}
+}
+
+// unwrapSequence reflectively peeks at msg to extract the underlying
+// []tea.Cmd if it is the unexported tea.sequenceMsg slice type.
+func unwrapSequence(msg tea.Msg) ([]tea.Cmd, bool) {
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice {
+		return nil, false
+	}
+	out := make([]tea.Cmd, 0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i).Interface()
+		c, ok := elem.(tea.Cmd)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, c)
+	}
+	return out, true
 }
 
 // contains is a tiny strings.Contains shim so the test file doesn't
