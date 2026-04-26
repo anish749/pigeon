@@ -8,13 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gosimple/slug"
+
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
+	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
+	wsstore "github.com/anish749/pigeon/internal/workstream/store"
 )
 
 // RunWorkstreamDiscover discovers workstreams for one or all workspaces by
@@ -73,7 +77,38 @@ func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LL
 	}
 
 	printDiscovered(w, discovered)
+
+	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+	st := wsstore.NewFS(storeDir.Path())
+	saved, err := persistDiscovered(st, ws.Name, discovered)
+	if err != nil {
+		return fmt.Errorf("persist discovered workstreams: %w", err)
+	}
+	if saved > 0 {
+		fmt.Fprintf(w, "  Persisted %d workstreams to %s.\n", saved, storeDir.Path())
+	}
 	return nil
+}
+
+// persistDiscovered writes discovered workstreams to the per-workspace store.
+// Workstreams are keyed by name-derived ID, so re-running discovery
+// replaces same-named workstreams in place rather than duplicating them.
+func persistDiscovered(st wsstore.Store, ws config.WorkspaceName, discovered []discovery.DiscoveredWorkstream) (int, error) {
+	now := time.Now().UTC()
+	for _, d := range discovered {
+		w := models.Workstream{
+			ID:        "ws-" + slug.Make(d.Name),
+			Name:      d.Name,
+			Workspace: ws,
+			State:     models.StateActive,
+			Focus:     d.Focus,
+			Created:   now,
+		}
+		if err := st.PutWorkstream(w); err != nil {
+			return 0, fmt.Errorf("put %q: %w", d.Name, err)
+		}
+	}
+	return len(discovered), nil
 }
 
 func printDiscovered(w io.Writer, discovered []discovery.DiscoveredWorkstream) {
