@@ -457,6 +457,24 @@ func TestNotificationFormat_ThreadTS(t *testing.T) {
 			convMeta: channelMeta,
 			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [type:channel] [channel_id:C06U]",
 		},
+		{
+			name: "reply with thread_id only (whatsapp-style opaque parent)",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadID: "WAMSG_PARENT_ID",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_id:WAMSG_PARENT_ID]",
+		},
+		{
+			name: "reply with both thread_ts and thread_id (defensive: both emit)",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadTS: "P1", ThreadID: "OTHER",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1] [thread_id:OTHER]",
+		},
 	}
 
 	for _, tt := range tests {
