@@ -69,7 +69,7 @@ The account must already be set up (via setup-slack, setup-gws, etc.).`,
 			return commands.RunWorkspaceAdd(cfg, args[0], platform, account)
 		},
 	}
-	cmd.Flags().StringP("platform", "p", "", "platform (slack, gws, whatsapp)")
+	cmd.Flags().StringP("platform", "p", "", "platform (slack, gws, whatsapp, linear, jira)")
 	cmd.Flags().StringP("account", "a", "", "account name")
 	cmd.MarkFlagRequired("platform")
 	cmd.MarkFlagRequired("account")
@@ -99,7 +99,7 @@ func newWorkspaceRemoveCmd() *cobra.Command {
 			return commands.RunWorkspaceRemove(cfg, args[0], platform, account)
 		},
 	}
-	cmd.Flags().StringP("platform", "p", "", "platform (slack, gws, whatsapp)")
+	cmd.Flags().StringP("platform", "p", "", "platform (slack, gws, whatsapp, linear, jira)")
 	cmd.Flags().StringP("account", "a", "", "account name")
 	cmd.MarkFlagRequired("platform")
 	cmd.MarkFlagRequired("account")
