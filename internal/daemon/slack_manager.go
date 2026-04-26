@@ -173,7 +173,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 		BotUserID: botUserID,
 		UserName:  userName,
 		UserID:    userID,
-		AppName:   sl.AppDisplay(),
+		AppName:   sl.AppAttribution(),
 	})
 
 	slog.InfoContext(ctx, "slack listener started", "account", acct, "users", users, "channels", channels)

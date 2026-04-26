@@ -108,6 +108,15 @@ func (s SlackConfig) AppDisplay() string {
 	return "Pigeon"
 }
 
+// AppAttribution returns the name used in "sent via ..." footer copy.
+// Defaults to lowercase "pigeon"; user-configured names pass through unchanged.
+func (s SlackConfig) AppAttribution() string {
+	if s.AppDisplayName != "" {
+		return s.AppDisplayName
+	}
+	return "pigeon"
+}
+
 // Load reads the config file. Returns an empty Config if the file doesn't exist.
 func Load() (*Config, error) {
 	data, err := os.ReadFile(paths.ConfigPath())
