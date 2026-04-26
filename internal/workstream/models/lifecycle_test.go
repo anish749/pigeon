@@ -37,23 +37,6 @@ func TestNewWorkstream_NameWithSpacesAndPunctuation(t *testing.T) {
 	}
 }
 
-func TestNextState(t *testing.T) {
-	cases := []struct {
-		from, to WorkstreamState
-	}{
-		{StateActive, StateDormant},
-		{StateDormant, StateResolved},
-		{StateResolved, StateActive},
-		{WorkstreamState("garbage"), StateActive},
-	}
-	for _, c := range cases {
-		got := c.from.NextState()
-		if got != c.to {
-			t.Errorf("%q.NextState() = %q, want %q", c.from, got, c.to)
-		}
-	}
-}
-
 func TestMergeInto(t *testing.T) {
 	src := Workstream{ID: "ws-a", Name: "A", State: StateActive, Focus: "ranking signal mix"}
 	dst := Workstream{ID: "ws-b", Name: "B", State: StateActive, Focus: "deal review process"}

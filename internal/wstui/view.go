@@ -329,9 +329,9 @@ func listHelp(m Model) string {
 		}
 		return help + "  " + dimStyle.Render("(default workstream: limited actions)")
 	}
-	help := "  r rename  e edit focus  s state  m merge  n new  d delete  j/k nav  q quit"
+	help := "  r rename  e edit focus  m merge  n new  d delete  j/k nav  q quit"
 	if m.manager != nil {
-		help = "  r rename  e edit focus  s state  m merge  n new  d delete  D discover  j/k nav  q quit"
+		help = "  r rename  e edit focus  m merge  n new  d delete  D discover  j/k nav  q quit"
 	}
 	return help
 }

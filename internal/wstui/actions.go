@@ -77,14 +77,6 @@ func mergeCmd(m Model, src, dst models.Workstream) tea.Cmd {
 	)
 }
 
-// cycleStateCmd advances w's state to the next in the active → dormant
-// → resolved rotation and persists.
-func cycleStateCmd(m Model, w models.Workstream) tea.Cmd {
-	next := w.State.NextState()
-	updated := w.WithState(next)
-	return putCmd(m, updated, fmt.Sprintf("%s → %s", w.Name, next))
-}
-
 // setStatus emits a status line followed by an automatic clear after
 // statusDuration.
 func setStatus(s string) tea.Cmd {

@@ -253,22 +253,6 @@ func TestCommitNewFocus_PersistsNewWorkstream(t *testing.T) {
 	}
 }
 
-func TestHandleListKey_StateCyclesThroughLifecycle(t *testing.T) {
-	st := newFakeStore(seedItems()...)
-	m := NewModel(st, testCfg("personal"), nil)
-	m.items = filterAndSort(seedItems(), "personal")
-
-	_, cmd := m.Update(keyRune('s'))
-	drainBatch(cmd)
-
-	if len(st.puts) != 1 {
-		t.Fatalf("expected 1 put, got %d", len(st.puts))
-	}
-	if st.puts[0].State != models.StateDormant {
-		t.Errorf("state after 1 cycle = %q, want dormant", st.puts[0].State)
-	}
-}
-
 func TestConfirmDelete_YesPersistsDelete(t *testing.T) {
 	st := newFakeStore(seedItems()...)
 	m := NewModel(st, testCfg("personal"), nil)
