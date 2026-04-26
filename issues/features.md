@@ -136,6 +136,10 @@ This change spans two places:
 
 The tail feature introduced in PR #291 (`pigeon monitor` / `/api/tail`) does not yet support scoping. When someone is working on a workstream, they should be able to scope the monitor to that workstream so the stream only carries events relevant to that effort.
 
+## Platform enum
+
+Introduce a platform enum so platform identifiers stop being bare strings scattered across the codebase. This is a breaking change to the on-disk layout and stored data — that is acceptable; existing stored data can be deleted as part of the migration.
+
 ## Unified read abstraction across messaging and GWS
 
 The read layer (`store.Store`, `modelv1.Line`, `internal/read`,
