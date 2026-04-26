@@ -185,14 +185,16 @@ func (l Line) Ts() time.Time {
 
 // jiraParseTime parses Jira's timestamp format. The Jira REST API returns
 // timestamps as RFC 3339 with millisecond precision and a numeric offset
-// (e.g. "2026-04-05T09:44:15.076+0000") rather than the canonical "...Z" form
-// — note the offset has no colon. time.RFC3339 expects "...Z07:00", so we
-// have to try both layouts.
+// (e.g. "2026-04-05T09:44:15.076+0000") rather than the canonical "...Z"
+// form — note the offset has no colon. time.RFC3339 expects "...Z07:00", so
+// we try jira.RFC3339MilliLayout (the constant pkg/jira exports for this
+// exact shape) first, then fall back to RFC 3339 for any line written under
+// canonical Z-form.
 func jiraParseTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	if t, err := time.Parse("2006-01-02T15:04:05.000-0700", s); err == nil {
+	if t, err := time.Parse(jira.RFC3339MilliLayout, s); err == nil {
 		return t
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {

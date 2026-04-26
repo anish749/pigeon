@@ -3,12 +3,9 @@ package poller
 import (
 	"fmt"
 	"time"
-)
 
-// jiraTimeLayout is the layout Jira returns in `fields.updated` and similar
-// timestamps. The numeric "+0000" offset has no colon, so time.RFC3339 does
-// not parse it directly.
-const jiraTimeLayout = "2006-01-02T15:04:05.000-0700"
+	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+)
 
 // jqlDateLayout is the format JQL accepts for date-comparison cutoffs.
 // JQL silently returns zero matches for any other format (including
@@ -25,7 +22,7 @@ func jqlCutoff(stored string) (string, error) {
 	if stored == "" {
 		return "", nil
 	}
-	if t, err := time.Parse(jiraTimeLayout, stored); err == nil {
+	if t, err := time.Parse(jira.RFC3339MilliLayout, stored); err == nil {
 		return t.UTC().Format(jqlDateLayout), nil
 	}
 	if t, err := time.Parse(time.RFC3339, stored); err == nil {
