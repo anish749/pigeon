@@ -99,7 +99,7 @@ func (m *JiraManager) startPath(ctx context.Context, path string) {
 			return fmt.Errorf("build jira client config: %w", err)
 		}
 
-		client := jira.NewClient(jcfg, jira.WithTimeout(30*time.Second))
+		client := jira.NewClient(jcfg)
 		acct := cfg.Account()
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 
