@@ -31,6 +31,8 @@ var botScopes = []string{
 	"mpim:history",
 	"mpim:read",
 	"mpim:write",
+	"reactions:read",
+	"reactions:write",
 	"users:read",
 	"users:read.email",
 }
@@ -49,7 +51,9 @@ var userScopes = []string{
 	"mpim:history",
 	"mpim:read",
 	"mpim:write",
+	"search:read",
 	"users:read",
+	"users:read.email",
 }
 
 // AuthServer runs a localhost HTTP server that handles the Slack OAuth redirect flow.
