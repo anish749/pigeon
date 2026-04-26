@@ -140,6 +140,10 @@ The tail feature introduced in PR #291 (`pigeon monitor` / `/api/tail`) does not
 
 Introduce a platform enum so platform identifiers stop being bare strings scattered across the codebase. This is a breaking change to the on-disk layout and stored data — that is acceptable; existing stored data can be deleted as part of the migration.
 
+## Poll metrics for Linear and Jira
+
+The poll metrics system currently tracks how GWS polling is doing. Extend the same poll metrics to Linear and Jira so their pollers report the same kind of health/status signal as GWS. Jira itself is not yet introduced — this should land alongside or after Jira support.
+
 ## Unified read abstraction across messaging and GWS
 
 The read layer (`store.Store`, `modelv1.Line`, `internal/read`,
