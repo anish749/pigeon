@@ -23,6 +23,9 @@ type Store interface {
 	ListProposals() ([]*models.Proposal, error)
 	// PutProposal creates or updates a proposal.
 	PutProposal(*models.Proposal) error
+	// DeleteProposal removes a proposal from the store. Returns nil if the
+	// proposal is already absent — deletion is idempotent.
+	DeleteProposal(id string) error
 	// NextProposalSeq increments and returns the next proposal sequence number.
 	NextProposalSeq() (int, error)
 }

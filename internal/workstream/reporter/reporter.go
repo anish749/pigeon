@@ -31,15 +31,6 @@ func Print(w io.Writer, r *replay.Report) {
 	fmt.Fprintf(w, "\nStats:\n")
 	fmt.Fprintf(w, "  Focus updates:     %d\n", r.ManagerStats.FocusUpdates)
 
-	// Proposal stats.
-	if r.ProposalsTotal > 0 {
-		fmt.Fprintf(w, "\nProposals:\n")
-		fmt.Fprintf(w, "  Total:     %d\n", r.ProposalsTotal)
-		fmt.Fprintf(w, "  Approved:  %d\n", r.ProposalsApproved)
-		fmt.Fprintf(w, "  Rejected:  %d\n", r.ProposalsRejected)
-		fmt.Fprintf(w, "  Pending:   %d\n", r.ProposalsPending)
-	}
-
 	// Group workstreams by workspace.
 	byWorkspace := make(map[config.WorkspaceName][]replay.WorkstreamReport)
 	for _, ws := range r.Workstreams {

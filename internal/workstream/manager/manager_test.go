@@ -19,14 +19,13 @@ func newTestManager(t *testing.T) (*Manager, store.Store) {
 	return mgr, st
 }
 
-func TestApproveProposalCreatesWorkstream(t *testing.T) {
+func TestApproveProposalCreatesWorkstreamAndDeletesProposal(t *testing.T) {
 	mgr, st := newTestManager(t)
 	ts := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 
 	if err := st.PutProposal(&models.Proposal{
 		ID:             "p-1",
 		Type:           models.ProposalCreate,
-		State:          models.ProposalPending,
 		SuggestedName:  "Auth Refactor",
 		SuggestedFocus: "Migrate session tokens off the legacy middleware.",
 		Workspace:      "acme",
@@ -51,12 +50,9 @@ func TestApproveProposalCreatesWorkstream(t *testing.T) {
 		t.Errorf("workstream = %+v", got)
 	}
 
-	p, _, _ := st.GetProposal("p-1")
-	if p.State != models.ProposalApproved {
-		t.Errorf("proposal state = %q, want approved", p.State)
-	}
-	if p.ResolvedAt.IsZero() {
-		t.Error("ResolvedAt not set")
+	// Proposal removed from queue.
+	if _, ok, _ := st.GetProposal("p-1"); ok {
+		t.Error("expected proposal deleted after approval")
 	}
 }
 
@@ -77,7 +73,6 @@ func TestApproveProposalConflictsWithExistingWorkstream(t *testing.T) {
 	if err := st.PutProposal(&models.Proposal{
 		ID:             "p-1",
 		Type:           models.ProposalCreate,
-		State:          models.ProposalPending,
 		SuggestedName:  "Auth Refactor",
 		SuggestedFocus: "LLM's newer focus that should NOT overwrite.",
 		Workspace:      "acme",
@@ -96,27 +91,9 @@ func TestApproveProposalConflictsWithExistingWorkstream(t *testing.T) {
 		t.Errorf("user edit was overwritten: focus = %q", got.Focus)
 	}
 
-	// Proposal still pending — caller must reject explicitly.
-	p, _, _ := st.GetProposal("p-1")
-	if p.State != models.ProposalPending {
-		t.Errorf("proposal state = %q, want pending after conflict", p.State)
-	}
-	if !p.ResolvedAt.IsZero() {
-		t.Errorf("ResolvedAt set on conflict: %v", p.ResolvedAt)
-	}
-}
-
-func TestApproveProposalRejectsResolved(t *testing.T) {
-	mgr, st := newTestManager(t)
-	if err := st.PutProposal(&models.Proposal{
-		ID:    "p-1",
-		Type:  models.ProposalCreate,
-		State: models.ProposalApproved,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := mgr.ApproveProposal(context.Background(), "p-1"); err == nil {
-		t.Error("expected error when approving already-approved proposal")
+	// Proposal still in queue — caller must reject explicitly.
+	if _, ok, _ := st.GetProposal("p-1"); !ok {
+		t.Error("proposal removed despite conflict; should remain for caller to reject")
 	}
 }
 
@@ -127,12 +104,33 @@ func TestApproveProposalNotFound(t *testing.T) {
 	}
 }
 
-func TestRejectProposal(t *testing.T) {
+func TestApproveProposalDoubleApproveFails(t *testing.T) {
+	mgr, st := newTestManager(t)
+	ts := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	if err := st.PutProposal(&models.Proposal{
+		ID:             "p-1",
+		Type:           models.ProposalCreate,
+		SuggestedName:  "Auth Refactor",
+		SuggestedFocus: "first focus",
+		Workspace:      "acme",
+		ProposedAt:     ts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.ApproveProposal(context.Background(), "p-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Second approval surfaces as not-found because the proposal was deleted.
+	if _, err := mgr.ApproveProposal(context.Background(), "p-1"); err == nil {
+		t.Error("expected error on second approval")
+	}
+}
+
+func TestRejectProposalDeletes(t *testing.T) {
 	mgr, st := newTestManager(t)
 	if err := st.PutProposal(&models.Proposal{
 		ID:            "p-1",
 		Type:          models.ProposalCreate,
-		State:         models.ProposalPending,
 		SuggestedName: "Auth Refactor",
 	}); err != nil {
 		t.Fatal(err)
@@ -141,12 +139,8 @@ func TestRejectProposal(t *testing.T) {
 	if err := mgr.RejectProposal(context.Background(), "p-1"); err != nil {
 		t.Fatal(err)
 	}
-	p, _, _ := st.GetProposal("p-1")
-	if p.State != models.ProposalRejected {
-		t.Errorf("state = %q, want rejected", p.State)
-	}
-	if p.ResolvedAt.IsZero() {
-		t.Error("ResolvedAt not set")
+	if _, ok, _ := st.GetProposal("p-1"); ok {
+		t.Error("expected proposal deleted after rejection")
 	}
 
 	// No workstream should have been created.
@@ -155,8 +149,8 @@ func TestRejectProposal(t *testing.T) {
 		t.Errorf("workstreams created on reject: %d", len(all))
 	}
 
-	// Re-rejecting fails.
+	// Re-rejecting surfaces as not-found.
 	if err := mgr.RejectProposal(context.Background(), "p-1"); err == nil {
-		t.Error("expected error when rejecting already-rejected proposal")
+		t.Error("expected error when rejecting already-deleted proposal")
 	}
 }

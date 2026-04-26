@@ -129,6 +129,26 @@ func (s *FS) ListProposals() ([]*models.Proposal, error) {
 	return pf.Proposals, nil
 }
 
+func (s *FS) DeleteProposal(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pf, err := s.loadProposalFile()
+	if err != nil {
+		return err
+	}
+	out := pf.Proposals[:0]
+	for _, p := range pf.Proposals {
+		if p.ID != id {
+			out = append(out, p)
+		}
+	}
+	if len(out) == len(pf.Proposals) {
+		return nil
+	}
+	pf.Proposals = out
+	return s.save(proposalsFile, pf)
+}
+
 func (s *FS) PutProposal(p *models.Proposal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

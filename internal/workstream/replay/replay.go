@@ -35,11 +35,6 @@ type Report struct {
 
 	ManagerStats manager.Stats
 
-	ProposalsTotal    int
-	ProposalsApproved int
-	ProposalsRejected int
-	ProposalsPending  int
-
 	Duration time.Duration
 }
 
@@ -153,22 +148,6 @@ func buildReport(cfg Config, signals []models.Signal, startTime time.Time, mgr *
 		ByType:       countByType(signals),
 		ManagerStats: mgr.Stats(),
 		Duration:     time.Since(startTime),
-	}
-
-	proposals, err := st.ListProposals()
-	if err != nil {
-		return nil, fmt.Errorf("list proposals: %w", err)
-	}
-	for _, p := range proposals {
-		report.ProposalsTotal++
-		switch p.State {
-		case models.ProposalApproved:
-			report.ProposalsApproved++
-		case models.ProposalRejected:
-			report.ProposalsRejected++
-		case models.ProposalPending:
-			report.ProposalsPending++
-		}
 	}
 
 	workstreams, err := st.ListWorkstreams()

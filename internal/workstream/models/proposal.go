@@ -15,21 +15,13 @@ const (
 	ProposalSplit  ProposalType = "split"
 )
 
-// ProposalState tracks whether a proposal has been acted on.
-type ProposalState string
-
-const (
-	ProposalPending  ProposalState = "pending"
-	ProposalApproved ProposalState = "approved"
-	ProposalRejected ProposalState = "rejected"
-)
-
-// Proposal represents a suggested workstream lifecycle change that needs
-// user confirmation before taking effect.
+// Proposal represents a pending suggestion for a workstream lifecycle
+// change. Proposals are an ephemeral queue — Approve converts a proposal
+// to a workstream and deletes it; Reject deletes it. No state field is
+// needed because every proposal in the store is implicitly pending.
 type Proposal struct {
-	ID    string        `json:"id"`
-	Type  ProposalType  `json:"type"`
-	State ProposalState `json:"state"`
+	ID   string       `json:"id"`
+	Type ProposalType `json:"type"`
 
 	// For create proposals.
 	SuggestedName  string               `json:"suggested_name"`
@@ -43,9 +35,7 @@ type Proposal struct {
 	// Context — what triggered this proposal.
 	TriggeringSignals []Signal `json:"triggering_signals,omitempty"`
 
-	// Timestamps
 	ProposedAt time.Time `json:"proposed_at"`
-	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 }
 
 // ApprovalMode controls how proposals are handled during replay.
