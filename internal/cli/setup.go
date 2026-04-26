@@ -71,3 +71,34 @@ func newSetupLinearCmd() *cobra.Command {
 		},
 	}
 }
+
+func newSetupJiraCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup-jira [path-to-jira-cli-config]",
+		Short:   "Register a jira-cli configuration for Jira issue tracking",
+		GroupID: groupSetup,
+		Long: `Binds a jira-cli configuration to pigeon's ingest.
+
+Pigeon reads the bound jira-cli YAML for server / login / project / auth at
+runtime — no Jira credentials are stored in pigeon's own config.
+
+Pre-requisites:
+  1. Install jira-cli (https://github.com/ankitpokhrel/jira-cli)
+  2. Generate an Atlassian API token at
+     https://id.atlassian.com/manage-profile/security/api-tokens
+  3. Export it: export JIRA_API_TOKEN=<token>
+  4. Run jira init to create the jira-cli YAML
+
+Then:
+  pigeon setup-jira              # use $JIRA_CONFIG_FILE or jira-cli's default path
+  pigeon setup-jira /path/to/jira.yml
+
+The command verifies auth end-to-end via /myself before saving — a 401
+here is the same diagnostic as 'jira me' returning 401, but caught at
+setup time rather than from a daemon log later.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return commands.RunSetupJira(args)
+		},
+	}
+}
