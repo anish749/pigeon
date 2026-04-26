@@ -1,5 +1,7 @@
-// Package reader reads all signals from the pigeon data store chronologically.
-// It is used by the replay engine to feed historical data through the routing model.
+// Package reader reads signals from the pigeon data store
+// chronologically. The workstream manager uses it for discovery; the
+// replay engine uses it to feed historical data through the routing
+// model.
 package reader
 
 import (
@@ -13,10 +15,10 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // Reader reads all signals from the pigeon data store chronologically.
@@ -42,40 +44,6 @@ func (r *Reader) ReadAccounts(accounts []account.Account, since, until time.Time
 			errs = append(errs, fmt.Errorf("read %s: %w", acct.Display(), err))
 		}
 		signals = append(signals, sigs...)
-	}
-
-	sort.Slice(signals, func(i, j int) bool {
-		return signals[i].Ts.Before(signals[j].Ts)
-	})
-
-	return signals, errors.Join(errs...)
-}
-
-// ReadAll reads all signals within the given time range across all platforms
-// and workspaces. Returns them sorted by timestamp.
-func (r *Reader) ReadAll(since, until time.Time) ([]models.Signal, error) {
-	platforms, err := r.store.ListPlatforms()
-	if err != nil {
-		return nil, fmt.Errorf("list platforms: %w", err)
-	}
-
-	var signals []models.Signal
-	var errs []error
-
-	for _, platform := range platforms {
-		acctNames, err := r.store.ListAccounts(platform)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("list accounts for %s: %w", platform, err))
-			continue
-		}
-		for _, acctName := range acctNames {
-			acct := account.NewFromSlug(platform, acctName)
-			sigs, err := r.readAccount(acct, since, until)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("read %s: %w", acct.Display(), err))
-			}
-			signals = append(signals, sigs...)
-		}
 	}
 
 	sort.Slice(signals, func(i, j int) bool {

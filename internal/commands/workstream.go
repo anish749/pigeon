@@ -64,7 +64,7 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 	fmt.Fprintf(w, "Workspace %q (%s → %s)\n",
 		ws.Name, since.Format("2006-01-02"), until.Format("2006-01-02"))
 
-	discovered, err := mgr.Discover(ctx, since, until)
+	_, discovered, err := mgr.Discover(ctx, since, until)
 	if err != nil {
 		return err
 	}
