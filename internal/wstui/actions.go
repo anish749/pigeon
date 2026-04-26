@@ -11,7 +11,7 @@ import (
 
 // statusDuration is how long a transient status line stays visible
 // before it's cleared automatically.
-const statusDuration = 3 * time.Second
+const statusDuration = 5 * time.Second
 
 // loadCmd reads from the store and dispatches a loadedMsg containing
 // the filtered+sorted slice for the model's workspace.
