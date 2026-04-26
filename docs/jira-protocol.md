@@ -277,14 +277,31 @@ dedup on disk.
 ```
 ~/.local/share/pigeon/
 └── jira-issues/                           # platform
-    └── {site-slug}/                       # e.g. acme (from acme.atlassian.net)
-        └── {project-key}/                 # e.g. ENG
+    └── {account-slug}/                    # first DNS label of the server URL
+        └── {project-key}/                 # e.g. ENG (case preserved from project.key)
             ├── .sync-cursors.yaml         # cursor state
             └── issues/
                 ├── ENG-101.jsonl          # all activity for ENG-101
                 ├── ENG-142.jsonl          # all activity for ENG-142
                 └── ENG-205.jsonl
 ```
+
+`{account-slug}` is the lowercased first DNS label of the `server`
+field in the bound `jira-cli` YAML — `https://acme.atlassian.net`
+becomes `acme`. Pigeon does not ask the user to invent a slug because
+`jira-cli` itself has no slug concept and there is no canonical
+identifier in its configuration; the URL hostname is the only stable
+naming the user already controls. Two `jira-cli` configs with the
+same server hostname collide on disk; pigeon treats this as the user
+having two pointers at the same instance, which is the intended
+semantic.
+
+`{project-key}` is the value of `project.key` from the bound
+`jira-cli` YAML — `jira init` writes one default project per config
+file and pigeon ingests that one. Pigeon does not invent multi-project
+semantics on top of `jira-cli`; for a second project, the user runs
+`jira init` again with a different config path and lists both paths
+in pigeon's `config.yaml`.
 
 ### Why Per-Issue Files
 
@@ -301,27 +318,22 @@ the human-readable key.
 
 Unlike Linear (one workspace ≈ one team ≈ one issue namespace), Jira
 lets a single Atlassian site host many projects with independent key
-prefixes (`ENG-`, `OPS-`, `MKT-`, …). `jira-cli` itself is configured
-against a single site + single default project per config file,
-switched via `JIRA_CONFIG_FILE` or the `-c/--config` flag.
+prefixes (`ENG-`, `OPS-`, `MKT-`, …). `jira-cli` is configured against
+a single site + single default project per config file, switched via
+`JIRA_CONFIG_FILE` or the `-c/--config` flag.
 
-Pigeon mirrors this by scoping cursors and storage to
-`{site-slug}/{project-key}`. Each configured project gets an
-independent cursor and directory. The poller iterates over all
-configured (site, project) pairs on each cycle.
-
-The site slug is derived from the `server` field in the bound
-`jira-cli` config — for `https://acme.atlassian.net` the slug is
-`acme`. For on-premise installations (e.g. `https://jira.internal.example.com`),
-the slug is the lowercase first DNS label (`jira`), or, when that
-would collide with another host, the first two labels joined with `-`
-(`jira-internal`). Collision resolution is a config-time concern;
-when ambiguous, pigeon falls back to using the entry's `account`
-field as the slug.
+Pigeon follows that one-config-one-project model exactly. Each pigeon
+`jira:` entry binds one `jira-cli` YAML; the resulting on-disk path
+is `{account-slug}/{project-key}` where both segments are read from
+that YAML. Multi-project on the same site means multiple `jira-cli`
+configs, each pointing at the same server with a different `project.key`,
+each listed as its own entry in pigeon's `config.yaml`. Multi-site
+works the same way — different `server`, different `jira-cli` YAML,
+another entry.
 
 ### Cursor File
 
-Path: `jira-issues/{site-slug}/{project-key}/.sync-cursors.yaml`
+Path: `jira-issues/{account-slug}/{project-key}/.sync-cursors.yaml`
 
 ```yaml
 issues:
@@ -688,13 +700,13 @@ maintaining a parallel auth/config story. The user must have
    `bearer` is for Server PATs only, even when your Cloud login goes
    through SSO.
 6. **Verify**: `jira me` should print the authenticated user.
-7. **Add a pigeon config entry** (see "Configuration" below).
-8. **Run `pigeon setup jira <account>`** — pigeon reads the jira-cli
-   config, calls `client.Me()` (or equivalent) to verify, prints the
-   configured projects, and exits.
+7. **Add a pigeon config entry** (see "Configuration" below). For a
+   single-config user with `JIRA_CONFIG_FILE` unset, this is one line
+   (`- {}`) — the empty entry resolves to `jira-cli`'s default path.
 
-If the user already runs `jira-cli` for daily work, only steps 7 and 8
-are new.
+If the user already runs `jira-cli` for daily work, only step 7 is new.
+The poller will pick up the entry on the daemon's next config-watch
+tick and start backfilling the bound project.
 
 ### SSO and the API Token Gotcha
 
@@ -726,54 +738,44 @@ round of `jira init`.
 
 ## Configuration
 
-Pigeon's only Jira-specific config is *which `jira-cli` config(s) to
-read, and which projects on each site to ingest*. Server URL, login,
-auth type, mTLS, and `insecure` flag are all sourced from the
-`jira-cli` YAML — pigeon does not duplicate them.
+Pigeon's only Jira-specific config is the path to a `jira-cli` YAML.
+Server, login, auth, project, and everything else live in that YAML
+and are read at runtime; pigeon never duplicates them.
 
 ```yaml
 jira:
   - jira_config: ~/.config/.jira/.config.yml   # optional; defaults to $JIRA_CONFIG_FILE or jira-cli's default path
-    projects: [ENG, OPS]                       # projects on this site to ingest
-    account: acme                              # display name shown by `pigeon list`
 ```
 
-For a single-site, single-project user the entry is a one-liner:
+For the most common case — a user with one `jira init` already done
+and `JIRA_CONFIG_FILE` unset — the entry is a one-liner with no fields
+at all:
 
 ```yaml
 jira:
-  - projects: [ENG]
-    account: acme
+  - {}
 ```
 
 ### Field semantics
 
 - **`jira_config`** (string, optional): Path to a `jira-cli` YAML.
   Resolution order: explicit value here → `$JIRA_CONFIG_FILE` env →
-  `jira-cli`'s default (`~/.config/.jira/.config.yml`). Set this when
-  you maintain multiple `jira-cli` configs (e.g. one per Atlassian
-  site).
-- **`projects`** (list of string, required): Project keys on the site
-  whose issues should be ingested. The poller filters JQL with
-  `project in (PROJECT_KEYS...)`. Auth is site-scoped (one token per
-  Atlassian site), so a single `jira_config` covers all projects in
-  this list.
-- **`account`** (string, required): Display name pigeon uses in
-  listings and for human-readable references. Independent of the
-  on-disk directory path.
+  `jira-cli`'s default (`~/.jira/.config.yml`). Set this when you
+  maintain multiple `jira-cli` configs (one per Atlassian site or one
+  per project).
 
-### Multi-site
+### Multiple projects or sites
 
-Use one entry per site, each pointing at its own `jira-cli` config:
+Each pigeon entry binds one `jira-cli` YAML, which is one project.
+For a second project — same site or different — generate a second
+`jira-cli` config with `JIRA_CONFIG_FILE=<new-path> jira init` and
+add the new path as another pigeon entry:
 
 ```yaml
 jira:
-  - jira_config: ~/.config/.jira/acme-cloud.yml
-    projects: [ENG, OPS]
-    account: acme
-  - jira_config: ~/.config/.jira/contoso-onprem.yml
-    projects: [SUPPORT]
-    account: contoso
+  - jira_config: ~/.jira/acme-eng.yml      # project ENG on acme.atlassian.net
+  - jira_config: ~/.jira/acme-ops.yml      # project OPS on acme.atlassian.net
+  - jira_config: ~/.jira/contoso-support.yml  # project SUPPORT on a different site
 ```
 
 V1 assumes a single `JIRA_API_TOKEN` env var covers all sites. If a
@@ -787,7 +789,7 @@ Only the fields needed to construct a `jira.Config` for `pkg/jira.NewClient`:
 
 | jira-cli YAML key | Used as |
 |---|---|
-| `server` | `jira.Config.Server` (also: site-slug for directory layout) |
+| `server` | `jira.Config.Server` (runtime only — not part of any on-disk path) |
 | `login` | `jira.Config.Login` |
 | `auth_type` | `jira.Config.AuthType` (`basic`, `bearer`, or `mtls`) |
 | `insecure` | `jira.Config.Insecure` |

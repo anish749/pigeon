@@ -599,6 +599,19 @@ func (s *FSStore) SaveLinearCursors(acct paths.AccountDir, c *LinearCursors) err
 	return s.saveCursors(acct.SyncCursorsFile(), c)
 }
 
+// LoadJiraCursors reads Jira polling cursors for the given project.
+// Each project under each Jira site has its own cursor file, since the
+// JQL incremental query is project-scoped. Returns empty cursors if the
+// file does not exist yet (first-run case).
+func (s *FSStore) LoadJiraCursors(proj paths.JiraProjectDir) (*JiraCursors, error) {
+	return loadCursors[JiraCursors](proj.SyncCursorsFile())
+}
+
+// SaveJiraCursors writes Jira polling cursors for the given project.
+func (s *FSStore) SaveJiraCursors(proj paths.JiraProjectDir, c *JiraCursors) error {
+	return s.saveCursors(proj.SyncCursorsFile(), c)
+}
+
 // LoadSlackCursors reads Slack per-channel cursors for the given account.
 // Returns an empty map if the file does not exist yet (first-run case).
 func (s *FSStore) LoadSlackCursors(acct paths.AccountDir) (SlackCursors, error) {

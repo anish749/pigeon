@@ -14,13 +14,14 @@ type Config struct {
 	Slack    []SlackConfig    `yaml:"slack,omitempty"`
 	GWS      []GWSConfig      `yaml:"gws,omitempty"`
 	Linear   []LinearConfig   `yaml:"linear,omitempty"`
+	Jira     []JiraConfig     `yaml:"jira,omitempty"`
 
 	// Workspaces define named account groupings. When a workspace is active,
 	// identity resolution and reads are scoped to that workspace's accounts.
 	// When no workspace is set, all accounts are visible and identity is
 	// merged across every known source.
 	Workspaces       map[WorkspaceName]WorkspaceConfig `yaml:"workspaces,omitempty"`
-	DefaultWorkspace WorkspaceName `yaml:"default_workspace,omitempty"`
+	DefaultWorkspace WorkspaceName                     `yaml:"default_workspace,omitempty"`
 }
 
 // WorkspaceName is the resolved name of the active workspace.
@@ -34,12 +35,23 @@ type WorkspaceConfig struct {
 	GWS      []string `yaml:"gws,omitempty"`
 	WhatsApp []string `yaml:"whatsapp,omitempty"`
 	Linear   []string `yaml:"linear,omitempty"`
+	Jira     []string `yaml:"jira,omitempty"`
 }
 
 // LinearConfig holds configuration for a single Linear workspace.
 type LinearConfig struct {
 	Workspace string `yaml:"workspace"` // Linear workspace slug
 	Account   string `yaml:"account"`   // display name for pigeon
+}
+
+// JiraConfig binds one jira-cli configuration to pigeon's ingest. The
+// only pigeon-side field is the path to that jira-cli YAML; everything
+// else (server, login, auth, project) is read from the YAML at daemon
+// start. One pigeon entry binds one jira-cli config, which holds one
+// project (per jira-cli's own data model). For a second project, the
+// user runs `jira init` again with a different config path.
+type JiraConfig struct {
+	JiraConfig string `yaml:"jira_config,omitempty"` // path to jira-cli yaml; empty = default resolution chain
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
@@ -150,6 +162,44 @@ func (c *Config) AddLinear(entry LinearConfig) {
 		}
 	}
 	c.Linear = append(c.Linear, entry)
+}
+
+// AddJira upserts a Jira configuration entry by the JiraConfig field as
+// the user typed it — a literal string compare, NOT a resolved-path
+// compare. An empty string and an explicit path that happen to resolve
+// to the same file are treated as distinct entries on purpose: the
+// empty sentinel means "follow the JIRA_CONFIG_FILE env / default
+// chain at runtime" and an explicit path is a pinned override; collapsing
+// them would erase that intent.
+//
+// At runtime, JiraManager.reconcile resolves each entry via
+// ResolveConfigPath and dedupes the resulting paths via a map, so two
+// entries that resolve to the same file produce only one poller — the
+// hand-edited config can carry redundant-looking entries without
+// corrupting ingest.
+//
+// Resolved-path conflict detection ("you already have an entry pointing
+// at this file") belongs in `pigeon setup jira` rather than here: only
+// the setup command has the user's attention and an interactive prompt
+// to decide what to keep.
+func (c *Config) AddJira(entry JiraConfig) {
+	for i, existing := range c.Jira {
+		if existing.JiraConfig == entry.JiraConfig {
+			c.Jira[i] = entry
+			return
+		}
+	}
+	c.Jira = append(c.Jira, entry)
+}
+
+// RemoveJira removes a Jira configuration entry by jira-cli config path.
+func (c *Config) RemoveJira(jiraConfig string) {
+	for i, existing := range c.Jira {
+		if existing.JiraConfig == jiraConfig {
+			c.Jira = append(c.Jira[:i], c.Jira[i+1:]...)
+			return
+		}
+	}
 }
 
 // AddGWS upserts a GWS configuration entry by email.
