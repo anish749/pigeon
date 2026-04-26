@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
@@ -20,17 +21,19 @@ import (
 // jiraPollInterval matches Linear and the Jira protocol spec.
 const jiraPollInterval = 30 * time.Second
 
-// JiraManager owns the lifecycle of one poller goroutine per (account,
-// project) pair. Two projects under the same account share one Atlassian
-// REST client because auth is site-scoped, but each runs its own loop and
-// has its own cursor.
+// JiraManager owns the lifecycle of one poller goroutine per pigeon
+// jira: entry. Each entry binds one jira-cli config, which holds one
+// project (per jira-cli's own data model — pigeon does not invent
+// multi-project semantics on top). The goroutine reads the YAML on
+// every restart, so YAML edits and token rotations are picked up
+// without restarting the daemon.
 type JiraManager struct {
 	store       *store.FSStore
 	syncTracker *syncstatus.Tracker
-	running     map[string]*runningJiraProject // key = "<accountSlug>/<projectKey>"
+	running     map[string]*runningJiraPoller // key = jira-cli config path
 }
 
-type runningJiraProject struct {
+type runningJiraPoller struct {
 	cancel context.CancelFunc
 }
 
@@ -39,12 +42,12 @@ func NewJiraManager(s *store.FSStore, syncTracker *syncstatus.Tracker) *JiraMana
 	return &JiraManager{
 		store:       s,
 		syncTracker: syncTracker,
-		running:     make(map[string]*runningJiraProject),
+		running:     make(map[string]*runningJiraPoller),
 	}
 }
 
-// Run starts pollers for all configured (account, project) pairs and
-// reconciles on config changes. Blocks until ctx is cancelled.
+// Run starts pollers for the configured jira-cli configs and reconciles
+// on config changes. Blocks until ctx is cancelled.
 func (m *JiraManager) Run(ctx context.Context, initial []config.JiraConfig) {
 	m.reconcile(ctx, initial)
 	for updated := range config.Watch(ctx) {
@@ -52,76 +55,64 @@ func (m *JiraManager) Run(ctx context.Context, initial []config.JiraConfig) {
 	}
 }
 
-// Count returns the number of running per-project pollers.
+// Count returns the number of running per-config pollers.
 func (m *JiraManager) Count() int {
 	return len(m.running)
 }
 
-// projectKey is the unique key for a (account, project) running poller.
-// account.Account.NameSlug is used (not the raw display label) so the key
-// matches the on-disk slug — same string everywhere.
-func projectKey(accountSlug, project string) string {
-	return accountSlug + "/" + project
-}
-
 func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig) {
-	desiredKeys := make(map[string]projectStart)
+	// Reconcile by jira-cli config path. Two pigeon entries pointing at
+	// the same path collapse to one running poller; that's intentional
+	// since they would write to the same on-disk location anyway.
+	desiredPaths := make(map[string]config.JiraConfig)
 	for _, jc := range desired {
-		acct := account.New(paths.JiraPlatform, jc.Account)
-		for _, project := range jc.Projects {
-			desiredKeys[projectKey(acct.NameSlug(), project)] = projectStart{
-				entry:   jc,
-				project: project,
-				acct:    acct,
-			}
-		}
+		path := jirapkg.ResolveConfigPath(jc.JiraConfig)
+		desiredPaths[path] = jc
 	}
 
-	// Stop pollers whose (account, project) is no longer desired.
-	for key, running := range m.running {
-		if _, ok := desiredKeys[key]; !ok {
-			slog.Info("jira project removed, stopping", "key", key)
+	for path, running := range m.running {
+		if _, ok := desiredPaths[path]; !ok {
+			slog.Info("jira config removed, stopping poller", "path", path)
 			running.cancel()
-			delete(m.running, key)
+			delete(m.running, path)
 		}
 	}
 
-	// Start new ones.
-	for key, ps := range desiredKeys {
-		if _, ok := m.running[key]; !ok {
-			m.startProject(ctx, key, ps)
+	for path, jc := range desiredPaths {
+		if _, ok := m.running[path]; !ok {
+			m.startPath(ctx, path, jc)
 		}
 	}
 }
 
-// projectStart bundles the parameters needed to start one project poller.
-type projectStart struct {
-	entry   config.JiraConfig
-	project string
-	acct    account.Account
-}
-
-func (m *JiraManager) startProject(ctx context.Context, key string, ps projectStart) {
-	projDir := paths.DefaultDataRoot().AccountFor(ps.acct).Jira().Project(ps.project)
-
+func (m *JiraManager) startPath(ctx context.Context, path string, jc config.JiraConfig) {
 	child, cancel := context.WithCancel(ctx)
-	m.running[key] = &runningJiraProject{cancel: cancel}
+	m.running[path] = &runningJiraPoller{cancel: cancel}
 
-	go runWithRestart(child, "jira/"+key, func(ctx context.Context) error {
-		// Read jira-cli config + build client INSIDE the restart loop, so
-		// that a YAML edit or token rotation gets picked up after the
-		// goroutine restarts.
-		path := jirapkg.ResolveConfigPath(ps.entry.JiraConfig)
-		jcfg, apiVer, err := jirapkg.LoadClientConfig(path)
+	go runWithRestart(child, "jira/"+path, func(ctx context.Context) error {
+		// Load PigeonJiraConfig + token at every restart so YAML edits or
+		// token rotation pick up automatically. runWithRestart's backoff
+		// throttles the retry on persistent failures.
+		_ = jc // jc is captured for future fields; only the path is used today
+		cli, err := jirapkg.LoadPigeonJiraConfig(path)
 		if err != nil {
-			return fmt.Errorf("load client config: %w", err)
+			return fmt.Errorf("load jira-cli config: %w", err)
 		}
-		c := jira.NewClient(jcfg, jira.WithTimeout(30*time.Second))
+		token := os.Getenv("JIRA_API_TOKEN")
+		if token == "" {
+			return fmt.Errorf("JIRA_API_TOKEN env var is unset (see docs/jira-protocol.md)")
+		}
 
-		p := jirapoller.New(jiraPollInterval, c, apiVer, ps.acct, ps.project, projDir, m.store, m.syncTracker)
+		client := jira.NewClient(cli.JiraConfig(token), jira.WithTimeout(30*time.Second))
+		acct := account.New(paths.JiraPlatform, cli.AccountSlug())
+		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cli.Project.Key)
+
+		p := jirapoller.New(jiraPollInterval, client, cli.APIVersion(), acct, cli.Project.Key, projDir, m.store, m.syncTracker)
 		slog.Info("jira poller started",
-			"account", ps.entry.Account, "project", ps.project,
-			"jira_config", path, "project_dir", projDir.Path())
+			"path", path,
+			"account", cli.AccountSlug(),
+			"project", cli.Project.Key,
+			"project_dir", projDir.Path())
 		return p.Run(ctx)
 	})
 }
