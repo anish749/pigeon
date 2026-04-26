@@ -174,14 +174,13 @@ func TestAccountMalformedServer(t *testing.T) {
 }
 
 func TestJiraConfigBuilds(t *testing.T) {
-	t.Setenv(jiraAPITokenEnv, "token-xyz")
 	cfg := &PigeonJiraConfig{
 		Server:   "https://acme.atlassian.net",
 		Login:    "alice@acme.com",
 		AuthType: "basic",
 		Insecure: false,
 	}
-	jcfg, err := cfg.JiraConfig()
+	jcfg, err := cfg.JiraConfig("token-xyz")
 	if err != nil {
 		t.Fatalf("JiraConfig: %v", err)
 	}
@@ -200,21 +199,19 @@ func TestJiraConfigBuilds(t *testing.T) {
 }
 
 func TestJiraConfigMissingToken(t *testing.T) {
-	t.Setenv(jiraAPITokenEnv, "")
 	cfg := &PigeonJiraConfig{
 		Server:   "https://acme.atlassian.net",
 		Login:    "alice@acme.com",
 		AuthType: "basic",
 	}
-	if _, err := cfg.JiraConfig(); err == nil {
-		t.Error("expected error when JIRA_API_TOKEN is unset")
+	if _, err := cfg.JiraConfig(""); err == nil {
+		t.Error("expected error when token is empty")
 	}
 }
 
 func TestJiraConfigMTLS(t *testing.T) {
-	// mTLS authenticates via cert files, not the env token, so JIRA_API_TOKEN
-	// is not required.
-	t.Setenv(jiraAPITokenEnv, "")
+	// mTLS authenticates via cert files, not the API token, so the
+	// token argument is ignored when AuthType == "mtls".
 	cfg := &PigeonJiraConfig{
 		Server:   "https://jira.internal",
 		Login:    "alice",
@@ -225,7 +222,7 @@ func TestJiraConfigMTLS(t *testing.T) {
 			ClientKey:  "/etc/ssl/client.key",
 		},
 	}
-	jcfg, err := cfg.JiraConfig()
+	jcfg, err := cfg.JiraConfig("")
 	if err != nil {
 		t.Fatalf("JiraConfig: %v", err)
 	}
@@ -235,7 +232,6 @@ func TestJiraConfigMTLS(t *testing.T) {
 }
 
 func TestJiraConfigMTLSIncomplete(t *testing.T) {
-	t.Setenv(jiraAPITokenEnv, "")
 	cfg := &PigeonJiraConfig{
 		Server:   "https://jira.internal",
 		Login:    "alice",
@@ -245,7 +241,7 @@ func TestJiraConfigMTLSIncomplete(t *testing.T) {
 			// ClientCert and ClientKey missing
 		},
 	}
-	if _, err := cfg.JiraConfig(); err == nil {
+	if _, err := cfg.JiraConfig(""); err == nil {
 		t.Error("expected error when mtls.client_cert and mtls.client_key are missing")
 	}
 }

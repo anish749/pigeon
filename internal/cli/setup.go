@@ -71,3 +71,20 @@ func newSetupLinearCmd() *cobra.Command {
 		},
 	}
 }
+
+func newSetupJiraCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "setup-jira [path-to-jira-cli-config]",
+		Short:   "Register a jira-cli configuration for Jira issue tracking",
+		GroupID: groupSetup,
+		Long: `Registers a jira-cli configuration with pigeon. Run 'jira init' first
+to create the YAML, and export JIRA_API_TOKEN with an API token from
+https://id.atlassian.com/manage-profile/security/api-tokens.`,
+		Example: `  pigeon setup-jira                     # use the default jira-cli config
+  pigeon setup-jira /path/to/jira.yml   # bind a specific jira-cli config`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return commands.RunSetupJira(args)
+		},
+	}
+}

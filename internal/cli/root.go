@@ -324,6 +324,7 @@ MAINTENANCE
 		newSetupSlackCmd(),
 		newSetupGWSCmd(),
 		newSetupLinearCmd(),
+		newSetupJiraCmd(),
 		newWorkspaceCmd(),
 
 		// Daemon

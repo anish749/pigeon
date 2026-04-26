@@ -103,18 +103,17 @@ func (c *PigeonJiraConfig) Account() (account.Account, error) {
 	return account.New(paths.JiraPlatform, strings.ToLower(host)), nil
 }
 
-// JiraConfig builds a pkg/jira.Config ready to pass to jira.NewClient.
-// It owns the entire transformation: parsed YAML → token from env →
-// validated MTLS paths → jira.Config. Callers don't touch env vars or
-// validate auth-mode invariants themselves.
+// JiraConfig builds a pkg/jira.Config from the parsed YAML and the
+// caller-supplied API token. The token comes from pigeon's persisted
+// config (populated by setup-jira) — sourcing it is the caller's
+// concern, not this method's.
 //
 // Returns an error when:
-//   - AuthType is not "mtls" and JIRA_API_TOKEN is unset (token-based
-//     authentication needs the env var)
+//   - AuthType is not "mtls" and token is empty
 //   - AuthType is "mtls" and any of MTLS.{CACert, ClientCert, ClientKey}
 //     is missing (mTLS authenticates via cert files, not a token, but
 //     all three paths are required)
-func (c *PigeonJiraConfig) JiraConfig() (jira.Config, error) {
+func (c *PigeonJiraConfig) JiraConfig(token string) (jira.Config, error) {
 	authType := jira.AuthType(strings.ToLower(c.AuthType))
 	insecure := c.Insecure
 	cfg := jira.Config{
@@ -148,9 +147,8 @@ func (c *PigeonJiraConfig) JiraConfig() (jira.Config, error) {
 		return cfg, nil
 	}
 
-	token := os.Getenv(jiraAPITokenEnv)
 	if token == "" {
-		return jira.Config{}, fmt.Errorf("%s env var is unset (set it to an Atlassian API token; see docs/jira-protocol.md)", jiraAPITokenEnv)
+		return jira.Config{}, fmt.Errorf("api token is empty (run `pigeon setup-jira` to populate it)")
 	}
 	cfg.APIToken = token
 	return cfg, nil
