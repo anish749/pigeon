@@ -8,14 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gosimple/slug"
-
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
+	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
@@ -50,14 +49,14 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 	r := reader.New(fsStore, root)
 
 	for _, ws := range workspaces {
-		if err := discoverWorkspace(ctx, r, disc, ws, since, until, w); err != nil {
+		if err := discoverWorkspace(ctx, claude, r, disc, ws, since, until, logger, w); err != nil {
 			return fmt.Errorf("discover workspace %q: %w", ws.Name, err)
 		}
 	}
 	return nil
 }
 
-func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LLMDiscovery, ws *workspace.Workspace, since, until time.Time, w io.Writer) error {
+func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Reader, disc *discovery.LLMDiscovery, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
 	signals, err := r.ReadAccounts(ws.Accounts, since, until)
 	if err != nil {
 		return fmt.Errorf("read signals: %w", err)
@@ -80,35 +79,35 @@ func discoverWorkspace(ctx context.Context, r *reader.Reader, disc *discovery.LL
 
 	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
 	st := wsstore.NewFS(storeDir.Path())
-	saved, err := persistDiscovered(st, ws.Name, discovered)
-	if err != nil {
+	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
+		ApprovalMode: models.AutoApprove,
+		Workspace:    *ws,
+	}, st, logger)
+
+	if err := mgr.EnsureDefaultWorkstream(ws.Name, signals[0].Ts); err != nil {
+		return fmt.Errorf("ensure default workstream: %w", err)
+	}
+
+	if err := persistDiscovered(ctx, mgr, ws.Name, discovered, signals[0].Ts); err != nil {
 		return fmt.Errorf("persist discovered workstreams: %w", err)
 	}
-	if saved > 0 {
-		fmt.Fprintf(w, "  Persisted %d workstreams to %s.\n", saved, storeDir.Path())
+	if len(discovered) > 0 {
+		fmt.Fprintf(w, "  Persisted to %s.\n", storeDir.Path())
 	}
 	return nil
 }
 
-// persistDiscovered writes discovered workstreams to the per-workspace store.
-// Workstreams are keyed by name-derived ID, so re-running discovery
-// replaces same-named workstreams in place rather than duplicating them.
-func persistDiscovered(st wsstore.Store, ws config.WorkspaceName, discovered []discovery.DiscoveredWorkstream) (int, error) {
-	now := time.Now().UTC()
+// persistDiscovered routes each discovered workstream through the manager,
+// which owns ID generation, the idempotent existence check, and proposal
+// recording. Existing same-named entries are left untouched, so user edits
+// to focus/state survive re-runs.
+func persistDiscovered(ctx context.Context, mgr *manager.Manager, ws config.WorkspaceName, discovered []discovery.DiscoveredWorkstream, proposedAt time.Time) error {
 	for _, d := range discovered {
-		w := models.Workstream{
-			ID:        "ws-" + slug.Make(d.Name),
-			Name:      d.Name,
-			Workspace: ws,
-			State:     models.StateActive,
-			Focus:     d.Focus,
-			Created:   now,
-		}
-		if err := st.PutWorkstream(w); err != nil {
-			return 0, fmt.Errorf("put %q: %w", d.Name, err)
+		if _, err := mgr.ProposeNew(ctx, d.Name, d.Focus, ws, proposedAt); err != nil {
+			return fmt.Errorf("propose %q: %w", d.Name, err)
 		}
 	}
-	return len(discovered), nil
+	return nil
 }
 
 func printDiscovered(w io.Writer, discovered []discovery.DiscoveredWorkstream) {
