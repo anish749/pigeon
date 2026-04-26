@@ -4,6 +4,7 @@ package reader
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,10 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // Reader reads all signals from the pigeon data store chronologically.
@@ -32,11 +33,14 @@ func New(s *store.FSStore, root paths.DataRoot) *Reader {
 
 // ReadAccounts reads signals for the given accounts within the time range.
 // Returns them sorted by timestamp.
-func (r *Reader) ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
+func (r *Reader) ReadAccounts(ctx context.Context, accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
 	var signals []models.Signal
 	var errs []error
 
 	for _, acct := range accounts {
+		if err := ctx.Err(); err != nil {
+			return signals, errors.Join(append(errs, err)...)
+		}
 		sigs, err := r.readAccount(acct, since, until)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read %s: %w", acct.Display(), err))

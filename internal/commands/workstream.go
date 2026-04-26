@@ -10,11 +10,13 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/reader"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
 )
 
@@ -50,9 +52,11 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 }
 
 func discoverWorkspace(ctx context.Context, claude *clients.Client, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
-	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+	root := paths.DefaultDataRoot()
+	storeDir := root.Workspace(string(ws.Name)).WorkstreamStore()
 	st := wsstore.NewFS(storeDir.Path())
-	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
+	signalReader := reader.New(store.NewFSStore(root), root)
+	mgr := manager.New(claude, signalReader, manager.NewStatCollector(), models.Config{
 		ApprovalMode: models.AutoApprove,
 		Workspace:    *ws,
 	}, st, logger)

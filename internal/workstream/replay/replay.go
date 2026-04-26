@@ -11,9 +11,11 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/reader"
 	"github.com/anish749/pigeon/internal/workstream/router"
 	arstore "github.com/anish749/pigeon/internal/workstream/store"
 )
@@ -63,8 +65,9 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir.Path())
 	claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
+	signalReader := reader.New(store.NewFSStore(root), root)
 	sc := manager.NewStatCollector()
-	mgr := manager.New(claude, sc, cfg, st, logger)
+	mgr := manager.New(claude, signalReader, sc, cfg, st, logger)
 	wsName := cfg.Workspace.Name
 
 	// Read workspace-scoped signals through the manager.
@@ -77,21 +80,20 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 		return &Report{Since: cfg.Since, Until: cfg.Until}, nil
 	}
 
-	logger.Info("filtered to workspace", "workspace", string(cfg.Workspace.Name), "count", len(signals))
-
-	if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
-		return nil, fmt.Errorf("ensure default workstream: %w", err)
-	}
+	logger.Info("workspace signals loaded", "workspace", string(cfg.Workspace.Name), "count", len(signals))
 
 	// Discovery or load persisted workstreams.
 	if skipDiscovery {
+		if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
+			return nil, fmt.Errorf("ensure default workstream: %w", err)
+		}
 		active, err := st.ActiveWorkstreams()
 		if err != nil {
 			return nil, fmt.Errorf("load persisted workstreams: %w", err)
 		}
 		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
 	} else {
-		if _, err := mgr.DiscoverAndPropose(ctx, cfg.Since, cfg.Until); err != nil {
+		if _, err := mgr.DiscoverAndProposeSignals(ctx, signals); err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
 		}
 	}
