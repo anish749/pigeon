@@ -106,12 +106,22 @@ type ReactLine struct {
 
 // EditLine represents a message edit event.
 type EditLine struct {
-	Ts          time.Time    `json:"ts"`               // when the edit happened
-	MsgID       string       `json:"msg"`              // target message ID
-	Sender      string       `json:"sender"`           // who edited (display name)
-	SenderID    string       `json:"from"`             // who edited (platform ID)
-	Via         Via          `json:"via,omitempty"`    // message pathway
-	Text        string       `json:"text,omitempty"`   // new message text
+	Ts       time.Time `json:"ts"`             // when the edit happened
+	MsgID    string    `json:"msg"`            // target message ID
+	Sender   string    `json:"sender"`         // who edited (display name)
+	SenderID string    `json:"from"`           // who edited (platform ID)
+	Via      Via       `json:"via,omitempty"`  // message pathway
+	Text     string    `json:"text,omitempty"` // new message text
+
+	// ThreadTS and ThreadID identify the parent thread when the edited
+	// message lives inside a thread. Same shape and semantics as
+	// MsgLine.ThreadTS / ThreadID — both omitempty, exactly one populated
+	// per platform (Slack writes thread_ts, WhatsApp comments write
+	// thread_id), kept as separate keys so the on-disk JSONL is greppable
+	// from either vocabulary. See MsgLine for the full rationale.
+	ThreadTS string `json:"thread_ts,omitempty"` // Slack parent TS
+	ThreadID string `json:"thread_id,omitempty"` // platform-neutral parent ID
+
 	Attachments []Attachment `json:"attach,omitempty"` // complete attachment set after edit
 
 	// Platform specific raw fields.
@@ -126,6 +136,13 @@ type DeleteLine struct {
 	Sender   string    `json:"sender"`        // who deleted (display name)
 	SenderID string    `json:"from"`          // who deleted (platform ID)
 	Via      Via       `json:"via,omitempty"` // message pathway
+
+	// ThreadTS and ThreadID identify the parent thread when the deleted
+	// message lived inside a thread. Same shape and semantics as
+	// MsgLine.ThreadTS / ThreadID — both omitempty, exactly one populated
+	// per platform. See MsgLine for the full rationale.
+	ThreadTS string `json:"thread_ts,omitempty"` // Slack parent TS
+	ThreadID string `json:"thread_id,omitempty"` // platform-neutral parent ID
 }
 
 // Line is a parsed protocol line. Exactly one of the payload pointers is

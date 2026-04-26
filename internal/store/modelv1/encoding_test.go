@@ -184,6 +184,59 @@ func TestDelete_RoundTrip(t *testing.T) {
 	assertDeleteEqual(t, got, d)
 }
 
+// TestEditDelete_ThreadFields verifies thread_ts and thread_id round-trip
+// for EditLine and DeleteLine, and that omitempty keeps both keys off
+// disk when the event targets a top-level (non-thread) message.
+func TestEditDelete_ThreadFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		threadTS  string
+		threadID  string
+		wantTSKey bool // true ⇒ "thread_ts" must appear on disk
+		wantIDKey bool // true ⇒ "thread_id" must appear on disk
+	}{
+		{name: "no thread", threadTS: "", threadID: "", wantTSKey: false, wantIDKey: false},
+		{name: "slack-style (both set)", threadTS: "1700000001.000001", threadID: "1700000001.000001", wantTSKey: true, wantIDKey: true},
+		{name: "thread_id only (whatsapp-style)", threadTS: "", threadID: "WAMSG_PARENT", wantTSKey: false, wantIDKey: true},
+	}
+
+	for _, tt := range tests {
+		t.Run("EditLine/"+tt.name, func(t *testing.T) {
+			e := EditLine{
+				Ts: ts(2026, 3, 16, 9, 18, 0), MsgID: "MSG1",
+				Sender: "Alice", SenderID: "U1", Text: "edited",
+				ThreadTS: tt.threadTS, ThreadID: tt.threadID,
+			}
+			line := mustMarshal(t, Line{Type: LineEdit, Edit: &e})
+			if got := strings.Contains(line, `"thread_ts"`); got != tt.wantTSKey {
+				t.Errorf("on-disk thread_ts presence = %v, want %v\nline: %s", got, tt.wantTSKey, line)
+			}
+			if got := strings.Contains(line, `"thread_id"`); got != tt.wantIDKey {
+				t.Errorf("on-disk thread_id presence = %v, want %v\nline: %s", got, tt.wantIDKey, line)
+			}
+			parsed := mustParseEdit(t, line)
+			assertEditEqual(t, parsed, e)
+		})
+
+		t.Run("DeleteLine/"+tt.name, func(t *testing.T) {
+			d := DeleteLine{
+				Ts: ts(2026, 3, 16, 9, 19, 0), MsgID: "MSG1",
+				Sender: "Alice", SenderID: "U1",
+				ThreadTS: tt.threadTS, ThreadID: tt.threadID,
+			}
+			line := mustMarshal(t, Line{Type: LineDelete, Delete: &d})
+			if got := strings.Contains(line, `"thread_ts"`); got != tt.wantTSKey {
+				t.Errorf("on-disk thread_ts presence = %v, want %v\nline: %s", got, tt.wantTSKey, line)
+			}
+			if got := strings.Contains(line, `"thread_id"`); got != tt.wantIDKey {
+				t.Errorf("on-disk thread_id presence = %v, want %v\nline: %s", got, tt.wantIDKey, line)
+			}
+			parsed := mustParseDelete(t, line)
+			assertDeleteEqual(t, parsed, d)
+		})
+	}
+}
+
 func TestSeparator(t *testing.T) {
 	line := mustMarshal(t, Line{Type: LineSeparator})
 	if line != SeparatorLine {
@@ -339,7 +392,8 @@ func assertEditEqual(t *testing.T, got, want EditLine) {
 	t.Helper()
 	if got.MsgID != want.MsgID || !got.Ts.Equal(want.Ts) ||
 		got.Sender != want.Sender || got.SenderID != want.SenderID ||
-		got.Via != want.Via || got.Text != want.Text {
+		got.Via != want.Via || got.Text != want.Text ||
+		got.ThreadTS != want.ThreadTS || got.ThreadID != want.ThreadID {
 		t.Errorf("EditLine mismatch:\n got  %+v\n want %+v", got, want)
 	}
 	if len(got.Attachments) != len(want.Attachments) {
@@ -357,7 +411,8 @@ func assertDeleteEqual(t *testing.T, got, want DeleteLine) {
 	t.Helper()
 	if got.MsgID != want.MsgID || !got.Ts.Equal(want.Ts) ||
 		got.Sender != want.Sender || got.SenderID != want.SenderID ||
-		got.Via != want.Via {
+		got.Via != want.Via ||
+		got.ThreadTS != want.ThreadTS || got.ThreadID != want.ThreadID {
 		t.Errorf("DeleteLine mismatch:\n got  %+v\n want %+v", got, want)
 	}
 }
