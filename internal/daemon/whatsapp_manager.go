@@ -19,6 +19,7 @@ import (
 	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/syncstatus"
 	"github.com/anish749/pigeon/internal/walog"
 )
@@ -28,7 +29,7 @@ import (
 // starts/stops accounts as they are added or removed.
 type WhatsAppManager struct {
 	apiServer   *api.Server
-	onMessage   hub.MessageNotifyFunc
+	onMessage   hub.NotifyFunc[modelv1.MsgLine]
 	store       store.Store
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -46,7 +47,7 @@ type runningWAAccount struct {
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
 // whatsapp/<account-slug>/identity/people.jsonl.
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.MessageNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
+func NewWhatsAppManager(apiServer *api.Server, s store.Store, onMessage hub.NotifyFunc[modelv1.MsgLine], idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
 	return &WhatsAppManager{
 		apiServer:   apiServer,
 		onMessage:   onMessage,

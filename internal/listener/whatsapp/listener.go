@@ -25,16 +25,16 @@ type Listener struct {
 	acct        account.Account
 	resolver    *Resolver
 	store       store.Store
-	syncing     atomic.Bool           // true while history sync is in progress
-	onLogout    func()                // called when device is unpaired remotely
-	onMessage   hub.MessageNotifyFunc // called when a message is received
+	syncing     atomic.Bool                     // true while history sync is in progress
+	onLogout    func()                          // called when device is unpaired remotely
+	onMessage   hub.NotifyFunc[modelv1.MsgLine] // called when a message is received
 	syncTracker *syncstatus.Tracker
 }
 
 // New creates a WhatsApp listener for the given client and account.
 // onLogout is called when the device is unpaired from the phone (may be nil).
 // onMessage is called when a message is received and written to disk (may be nil).
-func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.MessageNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func New(client *whatsmeow.Client, acct account.Account, s store.Store, onLogout func(), onMessage hub.NotifyFunc[modelv1.MsgLine], syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:      client,
 		acct:        acct,

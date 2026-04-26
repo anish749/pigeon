@@ -30,10 +30,10 @@ type Listener struct {
 	acct         account.Account
 	teamID       string
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
-	onMessage    hub.MessageNotifyFunc
-	onReaction   hub.ReactionNotifyFunc
-	onEdit       hub.EditNotifyFunc
-	onDelete     hub.DeleteNotifyFunc
+	onMessage    hub.NotifyFunc[modelv1.MsgLine]
+	onReaction   hub.NotifyFunc[modelv1.ReactLine]
+	onEdit       hub.NotifyFunc[modelv1.EditLine]
+	onDelete     hub.NotifyFunc[modelv1.DeleteLine]
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -43,7 +43,7 @@ type Listener struct {
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction, onEdit, and onDelete are called when the corresponding events
 // arrive. All four callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onEdit hub.EditNotifyFunc, onDelete hub.DeleteNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.NotifyFunc[modelv1.MsgLine], onReaction hub.NotifyFunc[modelv1.ReactLine], onEdit hub.NotifyFunc[modelv1.EditLine], onDelete hub.NotifyFunc[modelv1.DeleteLine], syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,

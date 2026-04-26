@@ -17,6 +17,7 @@ import (
 	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
@@ -25,10 +26,10 @@ import (
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
 	apiServer   *api.Server
-	onMessage   hub.MessageNotifyFunc
-	onReaction  hub.ReactionNotifyFunc
-	onEdit      hub.EditNotifyFunc
-	onDelete    hub.DeleteNotifyFunc
+	onMessage   hub.NotifyFunc[modelv1.MsgLine]
+	onReaction  hub.NotifyFunc[modelv1.ReactLine]
+	onEdit      hub.NotifyFunc[modelv1.EditLine]
+	onDelete    hub.NotifyFunc[modelv1.DeleteLine]
 	store       *store.FSStore
 	idStore     identity.Store
 	dataRoot    paths.DataRoot
@@ -46,7 +47,7 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, onEdit hub.EditNotifyFunc, onDelete hub.DeleteNotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onMessage hub.NotifyFunc[modelv1.MsgLine], onReaction hub.NotifyFunc[modelv1.ReactLine], onEdit hub.NotifyFunc[modelv1.EditLine], onDelete hub.NotifyFunc[modelv1.DeleteLine], idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
 	return &SlackManager{
 		apiServer:   apiServer,
 		onMessage:   onMessage,

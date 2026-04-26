@@ -34,25 +34,12 @@ type RouteResult struct {
 	State RouteState
 }
 
-// MessageNotifyFunc is called by listeners when a new message has been
-// written to disk. The msg payload is passed through so the hub can
-// publish a pre-formatted event to the broadcast bus without re-reading
-// from disk.
-type MessageNotifyFunc func(acct account.Account, conversation string, msg modelv1.MsgLine) RouteResult
-
-// ReactionNotifyFunc is called by listeners when a reaction event arrives.
-// The react payload is the exact ReactLine written to disk — the hub
-// forwards it verbatim to session delivery and the broadcast bus without
-// constructing new timestamps or regenerating fields.
-type ReactionNotifyFunc func(acct account.Account, conversation string, react modelv1.ReactLine) RouteResult
-
-// EditNotifyFunc is called by listeners when an edit event arrives. The edit
-// payload (including ThreadTS when the target lives in a thread) is what the
-// hub formats for session delivery.
-type EditNotifyFunc func(acct account.Account, conversation string, edit modelv1.EditLine) RouteResult
-
-// DeleteNotifyFunc is called by listeners when a delete event arrives.
-type DeleteNotifyFunc func(acct account.Account, conversation string, del modelv1.DeleteLine) RouteResult
+// NotifyFunc is called by listeners after a JSONL line is written to disk. The
+// event payload is passed through so the hub can publish to the broadcast bus
+// (and format for session delivery) without re-reading from disk. MsgLine
+// drives message formatting; ReactLine is forwarded verbatim; EditLine and
+// DeleteLine carry thread context when the target lives in a thread.
+type NotifyFunc[T modelv1.MsgLine | modelv1.ReactLine | modelv1.EditLine | modelv1.DeleteLine] func(acct account.Account, conversation string, event T) RouteResult
 
 // signalBufferSize is the capacity of each channel's delivery signal buffer.
 // If full, new signals are dropped — the goroutine will catch up on its
