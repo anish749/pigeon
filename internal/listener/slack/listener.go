@@ -30,6 +30,7 @@ type Listener struct {
 	acct         account.Account
 	teamID       string
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
+	appName      string
 	onMessage    hub.MessageNotifyFunc
 	onReaction   hub.ReactionNotifyFunc
 	syncTracker  *syncstatus.Tracker
@@ -41,7 +42,7 @@ type Listener struct {
 // DMs, multi-party DMs, private channel posts, or bot mentions.
 // onReaction is called when a reaction or unreaction event arrives.
 // Both callbacks must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onMessage hub.MessageNotifyFunc, onReaction hub.ReactionNotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
@@ -51,6 +52,7 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		acct:         acct,
 		teamID:       teamID,
 		pigeonBotUID: pigeonBotUID,
+		appName:      appName,
 		onMessage:    onMessage,
 		onReaction:   onReaction,
 		syncTracker:  syncTracker,
@@ -226,7 +228,7 @@ func (l *Listener) handleMessage(ctx context.Context, msg *slackevents.MessageEv
 	if shouldAutoReply(l.pigeonBotUID, msg, result.State, isBotDM) {
 		botAPI := goslack.New(l.botToken)
 		_, _, err := botAPI.PostMessageContext(ctx, msg.Channel,
-			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up Pigeon, so this message won't be delivered. Please reach out to them directly and ask them to complete their Pigeon setup.", false),
+			goslack.MsgOptionText("The user you're trying to reach hasn't finished setting up "+l.appName+", so this message won't be delivered. Please reach out to them directly and ask them to complete their "+l.appName+" setup.", false),
 			goslack.MsgOptionMetadata(PigeonSendMetadata(modelv1.ViaPigeonAsBot)))
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to send auto-reply", "error", err, "account", l.acct)

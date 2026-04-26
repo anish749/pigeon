@@ -90,13 +90,32 @@ type WhatsAppConfig struct {
 // SlackConfig holds all credentials for a single workspace.
 // Each workspace has its own internal Slack app for full rate limits.
 type SlackConfig struct {
-	Workspace    string `yaml:"workspace"`
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	AppToken     string `yaml:"app_token"`
-	BotToken     string `yaml:"bot_token"`
-	UserToken    string `yaml:"user_token,omitempty"`
-	TeamID       string `yaml:"team_id"`
+	Workspace      string `yaml:"workspace"`
+	AppDisplayName string `yaml:"app_display_name,omitempty"`
+	ClientID       string `yaml:"client_id"`
+	ClientSecret   string `yaml:"client_secret"`
+	AppToken       string `yaml:"app_token"`
+	BotToken       string `yaml:"bot_token"`
+	UserToken      string `yaml:"user_token,omitempty"`
+	TeamID         string `yaml:"team_id"`
+}
+
+// AppDisplay returns the proper-noun form: manifest name, bot display name,
+// listener auto-reply. Defaults to "Pigeon".
+func (s SlackConfig) AppDisplay() string {
+	if s.AppDisplayName != "" {
+		return s.AppDisplayName
+	}
+	return "Pigeon"
+}
+
+// AppAttribution returns the sentence-case form: "sent via X" footer.
+// Defaults to lowercase "pigeon".
+func (s SlackConfig) AppAttribution() string {
+	if s.AppDisplayName != "" {
+		return s.AppDisplayName
+	}
+	return "pigeon"
 }
 
 // Load reads the config file. Returns an empty Config if the file doesn't exist.

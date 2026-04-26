@@ -24,11 +24,16 @@ it to the clipboard. Use this before creating or updating a Slack app.`,
 			if err != nil {
 				return err
 			}
-			return commands.RunGenerateManifest(username, workspace)
+			appDisplayName, err := cmd.Flags().GetString("app-display-name")
+			if err != nil {
+				return err
+			}
+			return commands.RunGenerateManifest(username, workspace, appDisplayName)
 		},
 	}
 	cmd.Flags().String("username", "", "display name for the bot owner")
 	cmd.Flags().String("slack-workspace", "", "Slack workspace display name baked into the manifest (interactive picker if omitted)")
+	cmd.Flags().String("app-display-name", "", "Slack app/bot display name (defaults to slack config or Pigeon)")
 	cmd.MarkFlagRequired("username")
 	return cmd
 }

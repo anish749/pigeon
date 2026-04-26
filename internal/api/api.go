@@ -41,15 +41,16 @@ type WhatsAppSender struct {
 
 // SlackSender holds everything needed to send a Slack message.
 type SlackSender struct {
-	BotAPI    *goslack.Client // bot token client (default for sends)
-	UserAPI   *goslack.Client // user token client (--as-user sends)
-	Resolver  *slacklistener.Resolver
-	Messages  *slacklistener.MessageStore
-	Acct      account.Account
-	BotName   string // the bot's display name
-	BotUserID string // the bot's Slack user ID
-	UserName  string // the authenticated user's display name
-	UserID    string // the authenticated user's Slack user ID
+	BotAPI         *goslack.Client // bot token client (default for sends)
+	UserAPI        *goslack.Client // user token client (--as-user sends)
+	Resolver       *slacklistener.Resolver
+	Messages       *slacklistener.MessageStore
+	Acct           account.Account
+	BotName        string // the bot's display name
+	BotUserID      string // the bot's Slack user ID
+	UserName       string // the authenticated user's display name
+	UserID         string // the authenticated user's Slack user ID
+	AppAttribution string // name used in the "sent via X" footer
 }
 
 // Server is the daemon's HTTP API server.
@@ -388,7 +389,7 @@ func (s *Server) sendSlack(ctx context.Context, acct account.Account, req Resolv
 				nil, nil,
 			),
 			goslack.NewContextBlock("",
-				goslack.NewTextBlockObject("mrkdwn", "_sent via pigeon_", false, false),
+				goslack.NewTextBlockObject("mrkdwn", fmt.Sprintf("_sent via %s_", sender.AppAttribution), false, false),
 			),
 		))
 	}
