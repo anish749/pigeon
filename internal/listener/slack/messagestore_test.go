@@ -9,6 +9,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 )
@@ -275,4 +276,109 @@ func TestThreadEditDelete_RoundTripThroughCompactThread(t *testing.T) {
 			t.Errorf("replies = %d, want 0 (delete should remove the reply)", len(tf.Replies))
 		}
 	})
+}
+
+// TestAppendReaction_ThreadRouting verifies that AppendReaction lands in
+// the thread file (and stamps the line with thread tags) when threadTS is
+// non-empty, and in the date file otherwise. Asserts the user-visible
+// behaviour through resolved reads:
+//
+//   - Reaction on a thread reply attaches to the resolved reply.
+//   - Reaction on a top-level message attaches to the resolved message.
+//   - The thread-targeted line carries ThreadTS and ThreadID; the
+//     top-level line carries neither.
+//
+// Pre-fix, all reactions landed in the date file and CompactThread
+// dropped reactions on thread replies because it never saw them.
+func TestAppendReaction_ThreadRouting(t *testing.T) {
+	rs := ResolvedSender{ChannelName: "#general", SenderName: "Alice", SenderID: "U001"}
+	raw := slackraw.NewSlackRawContent(goslack.Msg{})
+	threadTS := "1700000001.000001"
+	replyMsgID := "1700000010.000010"
+	topLevelID := "1700000020.000020"
+	emoji := "thumbsup"
+
+	tests := []struct {
+		name string
+		// targetTS is the ID of the message being reacted to. The fixture
+		// builds two distinct messages: the reply lives in the thread
+		// file, the top-level lives in the date file.
+		targetTS string
+		// threadTS is the value AppendReaction is called with — empty
+		// means "treat the target as date-file-resident".
+		threadTS string
+	}{
+		{name: "reaction on thread reply", targetTS: replyMsgID, threadTS: threadTS},
+		{name: "reaction on top-level message", targetTS: topLevelID, threadTS: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms, s, acct := newTestMessageStore(t)
+			// Fixture: a thread (parent + reply) plus a top-level message.
+			if _, err := ms.WriteThreadMessage(rs, threadTS, "root",
+				time.Unix(1700000001, 0), threadTS, false, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("WriteThreadMessage parent: %v", err)
+			}
+			if _, err := ms.WriteThreadMessage(rs, threadTS, "the reply",
+				time.Unix(1700000010, 0), replyMsgID, true, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("WriteThreadMessage reply: %v", err)
+			}
+			if _, err := ms.Write(rs, "top",
+				time.Unix(1700000020, 0), topLevelID, modelv1.ViaOrganic, raw); err != nil {
+				t.Fatalf("Write top-level: %v", err)
+			}
+
+			react, err := ms.AppendReaction("#general", tt.targetTS, tt.threadTS,
+				"Bob", "U002", emoji, false)
+			if err != nil {
+				t.Fatalf("AppendReaction: %v", err)
+			}
+
+			if tt.threadTS != "" {
+				if react.ThreadTS != tt.threadTS || react.ThreadID != tt.threadTS {
+					t.Errorf("returned ReactLine ThreadTS=%q ThreadID=%q, want both %q",
+						react.ThreadTS, react.ThreadID, tt.threadTS)
+				}
+				tf, err := s.ReadThread(acct, "#general", threadTS)
+				if err != nil {
+					t.Fatalf("ReadThread: %v", err)
+				}
+				if tf == nil || len(tf.Replies) != 1 {
+					t.Fatalf("expected 1 reply on read, got %v", tf)
+				}
+				got := tf.Replies[0]
+				if len(got.Reactions) != 1 {
+					t.Errorf("reply has %d reactions, want 1 (reaction lost in compaction)", len(got.Reactions))
+				} else if got.Reactions[0].Emoji != emoji {
+					t.Errorf("reaction emoji = %q, want %q", got.Reactions[0].Emoji, emoji)
+				}
+				return
+			}
+
+			// threadTS == "" path: the line should land in the date file
+			// and resolve onto the top-level message; the reply's
+			// reactions should remain empty.
+			if react.ThreadTS != "" || react.ThreadID != "" {
+				t.Errorf("top-level reaction should carry no thread tags; got ThreadTS=%q ThreadID=%q",
+					react.ThreadTS, react.ThreadID)
+			}
+			df, err := s.ReadConversation(acct, "#general", store.ReadOpts{Last: 100})
+			if err != nil {
+				t.Fatalf("ReadConversation: %v", err)
+			}
+			var matched bool
+			for _, m := range df.Messages {
+				if m.ID == topLevelID {
+					if len(m.Reactions) != 1 || m.Reactions[0].Emoji != emoji {
+						t.Errorf("top-level reactions = %v, want one %q", m.Reactions, emoji)
+					}
+					matched = true
+				}
+			}
+			if !matched {
+				t.Errorf("top-level message %s not found in resolved date file", topLevelID)
+			}
+		})
+	}
 }

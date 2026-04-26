@@ -62,6 +62,14 @@ func (ms *MessageStore) ThreadExists(channelName, threadTS string) bool {
 	return ms.store.ThreadExists(ms.acct, channelName, threadTS)
 }
 
+// FindThreadForReply returns the parent thread's TS when msgTS is a reply
+// inside some thread file under the channel; "" when msgTS is a
+// top-level message, a thread parent, or unknown. Used by reaction
+// routing so reactions on thread replies land in the thread file.
+func (ms *MessageStore) FindThreadForReply(channelName, msgTS string) string {
+	return ms.store.FindThreadForReply(ms.acct, channelName, msgTS)
+}
+
 // BotParticipatesInThread reports whether the bot has been mentioned in or
 // has posted in this thread — the criterion for routing non-mention thread
 // replies in public channels. Source of truth is the thread file: any line

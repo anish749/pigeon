@@ -74,10 +74,17 @@ func (ms *MessageStore) WriteThreadContext(rs ResolvedSender, threadTS, text str
 	return ms.store.AppendThread(ms.acct, rs.ChannelName, threadTS, line)
 }
 
-// AppendReaction stores a reaction or unreaction event in the date file
-// corresponding to the target message's timestamp, and returns the ReactLine
-// that was written so the caller can forward it downstream (e.g. to the hub).
-func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emoji string, remove bool) (modelv1.ReactLine, error) {
+// AppendReaction stores a reaction or unreaction event and returns the
+// ReactLine that was written so the caller can forward it downstream
+// (e.g. to the hub).
+//
+// When threadTS is non-empty, the reaction targets a thread reply: the
+// line is appended to the thread file so ParseThreadFile + CompactThread
+// reconcile it onto the reply on read, and ThreadTS / ThreadID are
+// stamped on the line. Otherwise the line lands in the date file with
+// no thread tags — matching the routing for top-level messages and
+// thread parents.
+func (ms *MessageStore) AppendReaction(channelName, msgTS, threadTS, sender, senderID, emoji string, remove bool) (modelv1.ReactLine, error) {
 	lineType := modelv1.LineReaction
 	if remove {
 		lineType = modelv1.LineUnreaction
@@ -90,8 +97,18 @@ func (ms *MessageStore) AppendReaction(channelName, msgTS, sender, senderID, emo
 		Emoji:    emoji,
 		Remove:   remove,
 	}
+	if threadTS != "" {
+		react.ThreadTS = threadTS
+		react.ThreadID = threadTS
+	}
 	line := modelv1.Line{Type: lineType, React: &react}
-	if err := ms.store.Append(ms.acct, channelName, line); err != nil {
+	var err error
+	if threadTS != "" {
+		err = ms.store.AppendThread(ms.acct, channelName, threadTS, line)
+	} else {
+		err = ms.store.Append(ms.acct, channelName, line)
+	}
+	if err != nil {
 		return modelv1.ReactLine{}, err
 	}
 	return react, nil

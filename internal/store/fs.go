@@ -146,6 +146,42 @@ func (s *FSStore) ThreadExists(acct account.Account, conversation, threadTS stri
 	return fileExists(s.convDir(acct, conversation).ThreadFile(threadTS))
 }
 
+// FindThreadForReply returns the parent thread's TS when msgTS appears as
+// a reply in some thread file under the conversation; "" when msgTS is a
+// top-level message, a thread parent, or simply unknown.
+//
+// The lookup is used by event paths that arrive with only (channel, msgTS)
+// — reactions, edits, deletes — so they can route the resulting line to
+// the same thread file as its target. Skips the file whose name is msgTS
+// itself: that case means msgTS is a thread parent (lives in the date
+// file as the originating message), not a reply.
+func (s *FSStore) FindThreadForReply(acct account.Account, conversation, msgTS string) string {
+	threadsDir := s.convDir(acct, conversation).ThreadsDir()
+	entries, err := os.ReadDir(threadsDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), paths.FileExt) {
+			continue
+		}
+		threadTS := strings.TrimSuffix(e.Name(), paths.FileExt)
+		if threadTS == msgTS {
+			continue
+		}
+		tf, err := s.ReadThread(acct, conversation, threadTS)
+		if err != nil || tf == nil {
+			continue
+		}
+		for _, r := range tf.Replies {
+			if r.ID == msgTS {
+				return threadTS
+			}
+		}
+	}
+	return ""
+}
+
 // ReadThread loads a thread file, applying compaction and resolution.
 func (s *FSStore) ReadThread(acct account.Account, conversation, threadTS string) (*modelv1.ResolvedThreadFile, error) {
 	data, err := os.ReadFile(s.convDir(acct, conversation).ThreadFile(threadTS).Path())

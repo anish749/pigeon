@@ -158,6 +158,78 @@ func TestReadThread_NotFound(t *testing.T) {
 	}
 }
 
+// TestFindThreadForReply covers the four cases the lookup distinguishes:
+// the target msgTS is a reply inside a thread file (returns parent's TS),
+// is itself a thread parent (returns ""), is a top-level message
+// (returns ""), or no threads dir exists (returns "").
+func TestFindThreadForReply(t *testing.T) {
+	s, acct := setup(t)
+	conv := "#general"
+
+	// Set up: parent P1 with one reply R1 in its thread file. A second
+	// thread file P2 exists but has no replies.
+	parentLine := func(id string, t time.Time, sender, senderID, text string) modelv1.Line {
+		return msgLine(id, t, sender, senderID, text)
+	}
+	replyLine := func(id string, t time.Time, sender, senderID, text string) modelv1.Line {
+		l := msgLine(id, t, sender, senderID, text)
+		l.Msg.Reply = true
+		return l
+	}
+
+	if err := s.AppendThread(acct, conv, "P1",
+		parentLine("P1", ts(2026, 4, 26, 9, 0, 0), "Alice", "U1", "parent")); err != nil {
+		t.Fatalf("AppendThread parent P1: %v", err)
+	}
+	if err := s.AppendThread(acct, conv, "P1",
+		replyLine("R1", ts(2026, 4, 26, 9, 1, 0), "Bob", "U2", "reply")); err != nil {
+		t.Fatalf("AppendThread reply R1: %v", err)
+	}
+	if err := s.AppendThread(acct, conv, "P2",
+		parentLine("P2", ts(2026, 4, 26, 9, 5, 0), "Alice", "U1", "another parent")); err != nil {
+		t.Fatalf("AppendThread parent P2: %v", err)
+	}
+	// A top-level message in the date file (not in any thread).
+	if err := s.Append(acct, conv,
+		msgLine("T1", ts(2026, 4, 26, 9, 10, 0), "Alice", "U1", "top-level")); err != nil {
+		t.Fatalf("Append top-level: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		msgTS string
+		want  string
+	}{
+		{name: "reply finds its parent thread", msgTS: "R1", want: "P1"},
+		{name: "thread parent itself returns empty", msgTS: "P1", want: ""},
+		{name: "thread parent without replies returns empty", msgTS: "P2", want: ""},
+		{name: "top-level message returns empty", msgTS: "T1", want: ""},
+		{name: "unknown message returns empty", msgTS: "ZZZ", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.FindThreadForReply(acct, conv, tt.msgTS)
+			if got != tt.want {
+				t.Errorf("FindThreadForReply(%q) = %q, want %q", tt.msgTS, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFindThreadForReply_NoThreadsDir guards the early return when the
+// conversation has no threads/ subdirectory at all.
+func TestFindThreadForReply_NoThreadsDir(t *testing.T) {
+	s, acct := setup(t)
+	if err := s.Append(acct, "#general",
+		msgLine("T1", ts(2026, 4, 26, 9, 0, 0), "A", "U1", "top")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if got := s.FindThreadForReply(acct, "#general", "T1"); got != "" {
+		t.Errorf("FindThreadForReply with no threads dir = %q, want empty", got)
+	}
+}
+
 // --- List ---
 
 func TestListPlatformsAndAccounts(t *testing.T) {
