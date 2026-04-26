@@ -77,9 +77,11 @@ func (s *fakeStore) DeleteWorkstream(id string) error {
 	return nil
 }
 
-func (s *fakeStore) ListProposals() ([]*models.Proposal, error) { return nil, nil }
-func (s *fakeStore) PutProposal(*models.Proposal) error         { return nil }
-func (s *fakeStore) NextProposalSeq() (int, error)              { return 0, nil }
+func (s *fakeStore) GetProposal(string) (*models.Proposal, bool, error) { return nil, false, nil }
+func (s *fakeStore) ListProposals() ([]*models.Proposal, error)         { return nil, nil }
+func (s *fakeStore) PutProposal(*models.Proposal) error                 { return nil }
+func (s *fakeStore) DeleteProposal(string) error                        { return nil }
+func (s *fakeStore) NextProposalSeq() (int, error)                      { return 0, nil }
 
 // errOnPut returns a configured error to short-circuit PutWorkstream.
 // Used by tests that exercise the error-bearing loadedMsg path.
