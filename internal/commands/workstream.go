@@ -21,7 +21,7 @@ import (
 )
 
 // RunWorkstreamDiscover discovers workstreams for one or all workspaces by
-// reading signals and running LLM-based batch analysis.
+// reading signals and running LLM-based batch analysis through the manager.
 func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFlag string, since, until time.Time, model string, logger *slog.Logger, w io.Writer) error {
 	var workspaces []*workspace.Workspace
 	if workspaceFlag != "" {
@@ -42,21 +42,18 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 	}
 
 	claude := clients.New(model, logger)
-	disc := discovery.NewLLMDiscovery(claude, logger)
-
 	root := paths.DefaultDataRoot()
-	fsStore := store.NewFSStore(root)
-	r := reader.New(fsStore, root)
+	r := reader.New(store.NewFSStore(root), root)
 
 	for _, ws := range workspaces {
-		if err := discoverWorkspace(ctx, claude, r, disc, ws, since, until, logger, w); err != nil {
+		if err := discoverWorkspace(ctx, claude, r, ws, since, until, logger, w); err != nil {
 			return fmt.Errorf("discover workspace %q: %w", ws.Name, err)
 		}
 	}
 	return nil
 }
 
-func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Reader, disc *discovery.LLMDiscovery, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
+func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Reader, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
 	signals, err := r.ReadAccounts(ws.Accounts, since, until)
 	if err != nil {
 		return fmt.Errorf("read signals: %w", err)
@@ -70,13 +67,6 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 		return nil
 	}
 
-	discovered, err := disc.Discover(ctx, signals)
-	if err != nil {
-		return fmt.Errorf("discovery: %w", err)
-	}
-
-	printDiscovered(w, discovered)
-
 	storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
 	st := wsstore.NewFS(storeDir.Path())
 	mgr := manager.New(claude, manager.NewStatCollector(), models.Config{
@@ -88,24 +78,14 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 		return fmt.Errorf("ensure default workstream: %w", err)
 	}
 
-	if err := persistDiscovered(ctx, mgr, ws.Name, discovered, signals[0].Ts); err != nil {
-		return fmt.Errorf("persist discovered workstreams: %w", err)
+	discovered, err := mgr.Discover(ctx, signals, signals[0].Ts)
+	if err != nil {
+		return err
 	}
+
+	printDiscovered(w, discovered)
 	if len(discovered) > 0 {
 		fmt.Fprintf(w, "  Persisted to %s.\n", storeDir.Path())
-	}
-	return nil
-}
-
-// persistDiscovered routes each discovered workstream through the manager,
-// which owns ID generation, the idempotent existence check, and proposal
-// recording. Existing same-named entries are left untouched, so user edits
-// to focus/state survive re-runs.
-func persistDiscovered(ctx context.Context, mgr *manager.Manager, ws config.WorkspaceName, discovered []discovery.DiscoveredWorkstream, proposedAt time.Time) error {
-	for _, d := range discovered {
-		if _, err := mgr.ProposeNew(ctx, d.Name, d.Focus, ws, proposedAt); err != nil {
-			return fmt.Errorf("propose %q: %w", d.Name, err)
-		}
 	}
 	return nil
 }

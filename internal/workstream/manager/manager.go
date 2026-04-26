@@ -16,6 +16,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/store"
 )
@@ -52,6 +53,37 @@ func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.
 		logger:             logger,
 		signalsSinceUpdate: make(map[string]int),
 	}
+}
+
+// Discover runs LLM-based batch discovery on the given signals and routes
+// each result through ProposeNew, so the same lifecycle invariants
+// (idempotent existence check, proposal record, ID generation) apply.
+//
+// Reading signals is the caller's responsibility — discovery operates on
+// inputs, not files. proposedAt is recorded on each created workstream;
+// pass the timestamp of the first signal so created dates align with the
+// data window.
+//
+// Returns the raw LLM output so callers can display rich metadata
+// (conversations, participants) that isn't kept on the persisted model.
+// Existing same-named workstreams are left untouched, so re-runs preserve
+// user edits to focus and state.
+func (m *Manager) Discover(ctx context.Context, signals []models.Signal, proposedAt time.Time) ([]discovery.DiscoveredWorkstream, error) {
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	disc := discovery.NewLLMDiscovery(m.client, m.logger)
+	discovered, err := disc.Discover(ctx, signals)
+	if err != nil {
+		return nil, fmt.Errorf("discover: %w", err)
+	}
+	wsName := m.cfg.Workspace.Name
+	for _, d := range discovered {
+		if _, err := m.ProposeNew(ctx, d.Name, d.Focus, wsName, proposedAt); err != nil {
+			return nil, fmt.Errorf("propose %q: %w", d.Name, err)
+		}
+	}
+	return discovered, nil
 }
 
 // EnsureDefaultWorkstream creates the default workstream for a workspace
