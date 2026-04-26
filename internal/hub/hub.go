@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -520,7 +519,8 @@ func (h *Hub) deliverEvent(ch *channel, evt Notification) (time.Time, bool) {
 		Loc:      time.Local,
 		ConvMeta: convMeta,
 		LookupParent: func(msgID string) *modelv1.MsgLine {
-			return h.lookupMessage(ch.acct, conversation, msgID)
+			conv := h.dataRoot.AccountFor(ch.acct).Conversation(conversation)
+			return read.LookupMessage(conv, msgID)
 		},
 	}
 	lines := evt.FormatNotification(formatEnv)
@@ -548,34 +548,6 @@ func (h *Hub) deliverEvent(ch *channel, evt Notification) (time.Time, bool) {
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}
 	return now, true
-}
-
-// lookupMessage searches for a message by ID in a conversation using grep.
-// Returns nil if not found or on error.
-func (h *Hub) lookupMessage(acct account.Account, conversation, msgID string) *modelv1.MsgLine {
-	dir := h.dataRoot.AccountFor(acct).Conversation(conversation).Path()
-	out, err := read.Grep(dir, read.GrepOpts{
-		Query:        msgID,
-		FixedStrings: true,
-		NoFilename:   true,
-	})
-	if err != nil || len(out) == 0 {
-		return nil
-	}
-
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parsed, err := modelv1.Parse(line)
-		if err != nil {
-			continue
-		}
-		if parsed.Type == modelv1.LineMessage && parsed.Msg != nil && parsed.Msg.ID == msgID {
-			return parsed.Msg
-		}
-	}
-	return nil
 }
 
 // RegistrationError is returned when session registration fails.
