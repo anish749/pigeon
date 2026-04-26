@@ -69,7 +69,7 @@ the current workspace.`,
 			cfg := models.DefaultConfig()
 			cfg.Workspace = *ws
 			cfg.ApprovalMode = models.AutoApprove
-			claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
+			claude := clients.New(cfg.Model, logger)
 			signalReader := reader.New(store.NewFSStore(root), root)
 			mgr := manager.New(claude, signalReader, manager.NewStatCollector(), cfg, st, logger)
 
@@ -189,7 +189,6 @@ func newWorkstreamReplayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&untilStr, "until", "", "End date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Filter to specific workspace")
 	cmd.Flags().StringVar(&cfg.Model, "model", "sonnet", "Claude model for classification")
-	cmd.Flags().DurationVar(&cfg.LLMCallTimeout, "timeout", 60*time.Second, "Timeout per LLM call")
 	cmd.Flags().Float64Var(&similarityThreshold, "threshold", 0.4, "Cosine similarity threshold for routing")
 	cmd.Flags().BoolVar(&skipDiscovery, "skip-discovery", false, "Skip cold-start discovery, use persisted workstreams")
 	cmd.Flags().BoolVar(&clearState, "clear", false, "Delete persisted state before running")

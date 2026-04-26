@@ -19,8 +19,7 @@ type Config struct {
 	ApprovalMode        ApprovalMode  // auto-approve or interactive for workstream creation
 
 	// LLM — Claude CLI settings.
-	Model          string        // claude model name (e.g. "haiku", "sonnet")
-	LLMCallTimeout time.Duration // per-call timeout for each LLM subprocess invocation
+	Model string // claude model name (e.g. "haiku", "sonnet")
 
 	// Filters.
 	Workspace workspace.Workspace // resolved workspace — scopes signals to its accounts
@@ -34,6 +33,5 @@ func DefaultConfig() Config {
 		FocusUpdateInterval: 25,
 		DormancyThreshold:   7 * 24 * time.Hour,
 		Model:               "sonnet",
-		LLMCallTimeout:      60 * time.Second,
 	}
 }

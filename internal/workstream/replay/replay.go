@@ -64,7 +64,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	root := paths.DefaultDataRoot()
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir.Path())
-	claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
+	claude := clients.New(cfg.Model, logger)
 	signalReader := reader.New(store.NewFSStore(root), root)
 	sc := manager.NewStatCollector()
 	mgr := manager.New(claude, signalReader, sc, cfg, st, logger)
