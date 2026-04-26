@@ -76,16 +76,17 @@ type formattedReactionLines []string
 
 type deliverySignal struct {
 	kind          signalKind
-	conversation  string                 // only set for signalNewMessage and signalReaction
-	reactionLines formattedReactionLines // only set for signalReaction
+	conversation  string                 // set for signalLiveMessage and signalReaction
+	msg           modelv1.MsgLine        // set for signalLiveMessage — the typed event from the listener
+	reactionLines formattedReactionLines // set for signalReaction
 }
 
 type signalKind int
 
 const (
-	signalNewMessage signalKind = iota // a specific conversation has a new message
-	signalConnected                    // session just connected — send hello and drain all
-	signalReaction                     // a reaction event on a specific conversation
+	signalLiveMessage signalKind = iota // a new message arrived; carries the typed MsgLine
+	signalConnected                     // session just connected — send hello and drain all
+	signalReaction                      // a reaction event on a specific conversation
 )
 
 // Hub manages active MCP sessions and routes incoming messages to them.
@@ -293,7 +294,7 @@ func (h *Hub) Route(acct account.Account, conversation string, msg modelv1.MsgLi
 	}
 
 	select {
-	case ch.signal <- deliverySignal{kind: signalNewMessage, conversation: conversation}:
+	case ch.signal <- deliverySignal{kind: signalLiveMessage, conversation: conversation, msg: msg}:
 	default:
 		slog.Error("delivery signal buffer full, message delivery may be delayed",
 			"account", acct, "conversation", conversation,
@@ -433,8 +434,10 @@ func (h *Hub) deliveryLoop(ch *channel, lastDelivered time.Time) {
 			case signalConnected:
 				h.sendHello(ch)
 				lastDelivered = h.drainAllConversations(ch, lastDelivered)
-			case signalNewMessage:
-				lastDelivered = h.drainConversation(ch, sig.conversation, lastDelivered)
+			case signalLiveMessage:
+				if t, ok := h.deliverLiveMessage(ch, sig.conversation, sig.msg); ok {
+					lastDelivered = t
+				}
 			case signalReaction:
 				h.deliverReaction(ch, sig.conversation, sig.reactionLines)
 			}
@@ -473,6 +476,12 @@ func (h *Hub) sendHello(ch *channel) {
 	}
 }
 
+// drainAllConversations is the catchup-on-connect path. It runs only on
+// signalConnected — live messages bypass this and are pushed directly via
+// deliverLiveMessage. The drain reads disk for everything since
+// lastDelivered, formats, and pushes per conversation, advancing the
+// cursor. Anything missed during disconnects (or by a dropped live signal)
+// is recovered here on the next connect.
 func (h *Hub) drainAllConversations(ch *channel, lastDelivered time.Time) time.Time {
 	convs, err := h.store.ListConversations(ch.acct)
 	if err != nil {
@@ -530,6 +539,52 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 			"session_id", ch.sessionID, "error", err)
 	}
 	return now
+}
+
+// deliverLiveMessage formats and pushes a single MsgLine to the connected
+// session, advancing the last-delivered cursor on success. The MsgLine is
+// the typed event the listener already produced — no disk re-read for the
+// live path. Returns (cursorTs, true) on a successful push so the caller
+// can update lastDelivered; (zero, false) on any error or when no session
+// is attached, leaving the cursor unchanged so the next signalConnected
+// drain will catch up from disk.
+func (h *Hub) deliverLiveMessage(ch *channel, conversation string, msg modelv1.MsgLine) (time.Time, bool) {
+	h.mu.RLock()
+	session := h.sessions[ch.sessionID]
+	h.mu.RUnlock()
+
+	if session == nil {
+		slog.Warn("session not connected, message delivery deferred",
+			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
+			"message_id", msg.ID)
+		return time.Time{}, false
+	}
+
+	convMeta, metaErr := h.store.ReadMeta(ch.acct, conversation)
+	lines := modelv1.FormatDateFileNotification(
+		&modelv1.ResolvedDateFile{Messages: []modelv1.ResolvedMsg{{MsgLine: msg}}},
+		time.Local, convMeta, metaErr,
+	)
+
+	notification := &IncomingMsg{
+		Platform:     ch.acct.Platform,
+		Account:      ch.acct.Name,
+		Conversation: conversation,
+		MsgLines:     lines,
+	}
+	if err := session.Send(h.ctx, notification); err != nil {
+		slog.Error("failed to deliver live message",
+			"session_id", ch.sessionID, "account", ch.acct, "conversation", conversation,
+			"message_id", msg.ID, "error", err)
+		return time.Time{}, false
+	}
+
+	now := time.Now()
+	if err := claude.UpdateLastDelivered(ch.acct, now); err != nil {
+		slog.Error("failed to update last_delivered",
+			"session_id", ch.sessionID, "account", ch.acct, "error", err)
+	}
+	return now, true
 }
 
 // deliverReaction sends a reaction (or unreaction) event to the connected
