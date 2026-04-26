@@ -124,6 +124,19 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		return
 	}
 
+	// Edits and deletes (revokes) ride the same *events.Message channel.
+	// IsEdit is set by whatsmeow's UnwrapRaw when the wire payload was a
+	// Message wrapped in EditedMessage; revokes arrive as plain protocol
+	// messages with type REVOKE.
+	if evt.IsEdit {
+		l.handleEdit(ctx, evt)
+		return
+	}
+	if id := RevokedMessageID(evt.Message); id != "" {
+		l.handleDelete(ctx, evt, id)
+		return
+	}
+
 	text := ExtractText(evt.Message)
 	if text == "" {
 		return
@@ -166,5 +179,74 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	// — there's no hub to notify. In daemon-managed listeners it is always set.
 	if l.onEvent != nil {
 		l.onEvent(hub.NewMsg(l.acct, convDir, *line.Msg))
+	}
+}
+
+// handleEdit stores a WhatsApp message edit and routes it to the connected
+// session. Called from handleMessage after broadcast/self filters and after
+// IsEdit is detected.
+func (l *Listener) handleEdit(ctx context.Context, evt *events.Message) {
+	origID, edited := EditedMessage(evt.Message)
+	if origID == "" {
+		return
+	}
+	text := ExtractText(edited)
+	if text == "" {
+		// Media-only edits don't carry text; nothing meaningful to write.
+		return
+	}
+
+	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
+	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
+
+	line := modelv1.Line{
+		Type: modelv1.LineEdit,
+		Edit: &modelv1.EditLine{
+			Ts:       evt.Info.Timestamp,
+			MsgID:    origID,
+			Sender:   senderName,
+			SenderID: evt.Info.Sender.String(),
+			Text:     text,
+		},
+	}
+	if err := l.store.Append(l.acct, convDir, line); err != nil {
+		slog.ErrorContext(ctx, "failed to write edit", "error", err, "account", l.acct)
+		return
+	}
+
+	slog.InfoContext(ctx, "edit saved",
+		"from", senderName, "conv", convDir, "msg_id", origID)
+
+	if l.onEvent != nil {
+		l.onEvent(hub.NewEdit(l.acct, convDir, *line.Edit))
+	}
+}
+
+// handleDelete stores a WhatsApp message revoke and routes it to the
+// connected session. origID is the target message's ID, already extracted
+// from the protocol message by the caller.
+func (l *Listener) handleDelete(ctx context.Context, evt *events.Message, origID string) {
+	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
+	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
+
+	line := modelv1.Line{
+		Type: modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{
+			Ts:       evt.Info.Timestamp,
+			MsgID:    origID,
+			Sender:   senderName,
+			SenderID: evt.Info.Sender.String(),
+		},
+	}
+	if err := l.store.Append(l.acct, convDir, line); err != nil {
+		slog.ErrorContext(ctx, "failed to write delete", "error", err, "account", l.acct)
+		return
+	}
+
+	slog.InfoContext(ctx, "delete saved",
+		"from", senderName, "conv", convDir, "msg_id", origID)
+
+	if l.onEvent != nil {
+		l.onEvent(hub.NewDelete(l.acct, convDir, *line.Delete))
 	}
 }
