@@ -54,15 +54,33 @@ const (
 // The "ts" field name and ISO 8601 format are depended on by read.threadDatePatterns,
 // which uses rg -l to find thread files by matching "ts":"YYYY-MM-DD in serialized JSONL.
 type MsgLine struct {
-	ID          string       `json:"id"`                // platform message ID
-	Ts          time.Time    `json:"ts"`                // message timestamp
-	Sender      string       `json:"sender"`            // display name (best-effort at write time)
-	SenderID    string       `json:"from"`              // platform user ID (stable identity)
-	Via         Via          `json:"via,omitempty"`     // message pathway
-	ReplyTo     string       `json:"replyTo,omitempty"` // quoted message ID (WhatsApp quote-reply), empty if not a reply
-	Text        string       `json:"text,omitempty"`    // message body (may contain newlines)
-	Reply       bool         `json:"reply,omitempty"`   // thread reply
-	Attachments []Attachment `json:"attach,omitempty"`  // zero or more attachments -- slack attachements are not stored in this.
+	ID       string    `json:"id"`                // platform message ID
+	Ts       time.Time `json:"ts"`                // message timestamp
+	Sender   string    `json:"sender"`            // display name (best-effort at write time)
+	SenderID string    `json:"from"`              // platform user ID (stable identity)
+	Via      Via       `json:"via,omitempty"`     // message pathway
+	ReplyTo  string    `json:"replyTo,omitempty"` // quoted message ID (WhatsApp quote-reply), empty if not a reply
+	Text     string    `json:"text,omitempty"`    // message body (may contain newlines)
+	Reply    bool      `json:"reply,omitempty"`   // thread reply
+
+	// ThreadTS and ThreadID both identify the parent thread when this line
+	// is a reply; only one is populated per line, depending on the platform.
+	// They exist as separate keys so the on-disk JSONL is greppable from
+	// either vocabulary:
+	//
+	//   Slack listener writes thread_ts (Slack's parent identifier IS a
+	//     timestamp string — `1711568940.789012`); agents that know Slack
+	//     reach for `rg '"thread_ts"'`.
+	//   WhatsApp's CommentMetadata.CommentParentKey carries an opaque
+	//     MessageID (the wire field is `thread_msg_id`); not a timestamp,
+	//     so it lands in thread_id when the WhatsApp listener wires it up.
+	//
+	// Both omitempty: a non-reply has neither key on disk; a reply has
+	// exactly one. Format helpers emit whichever is set.
+	ThreadTS string `json:"thread_ts,omitempty"` // Slack parent TS (Slack message IDs are timestamps)
+	ThreadID string `json:"thread_id,omitempty"` // platform-neutral parent ID (WhatsApp comments, future platforms)
+
+	Attachments []Attachment `json:"attach,omitempty"` // zero or more attachments -- slack attachements are not stored in this.
 
 	// Platform specific raw fields.
 	RawType RawType        `json:"rawType,omitempty"` // type of the raw fields

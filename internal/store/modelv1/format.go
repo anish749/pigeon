@@ -76,6 +76,8 @@ func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 	if m.ReplyTo != "" {
 		meta += fmt.Sprintf(" [reply_to:%s]", m.ReplyTo)
 	}
+	meta += formatThreadTSMeta(m.ThreadTS)
+	meta += formatThreadIDMeta(m.ThreadID)
 	if convMeta != nil {
 		if cm := FormatConvMeta(convMeta); cm != "" {
 			meta += " " + cm
@@ -84,6 +86,29 @@ func formatMsgNotification(m MsgLine, loc *time.Location, convMeta *ConvMeta) []
 	lines = append(lines, meta)
 
 	return lines
+}
+
+// formatThreadTSMeta returns the rendered " [thread_ts:<ts>]" segment, or
+// an empty string when ts is empty. Slack's parent identifier is a TS, so
+// notifications carrying Slack thread context emit this tag.
+//
+// Centralized so future per-line-type notification formatters (edit,
+// delete, reaction) emit the same shape.
+func formatThreadTSMeta(ts string) string {
+	if ts == "" {
+		return ""
+	}
+	return fmt.Sprintf(" [thread_ts:%s]", ts)
+}
+
+// formatThreadIDMeta returns the rendered " [thread_id:<id>]" segment, or
+// an empty string when id is empty. Platforms whose parent identifier is
+// not a timestamp (WhatsApp comments) emit this tag instead.
+func formatThreadIDMeta(id string) string {
+	if id == "" {
+		return ""
+	}
+	return fmt.Sprintf(" [thread_id:%s]", id)
 }
 
 // FormatReactionNotification formats a message with a single reaction for

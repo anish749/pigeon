@@ -391,6 +391,105 @@ func TestNotificationFormat_WithChannelMeta(t *testing.T) {
 	}
 }
 
+// TestNotificationFormat_ThreadTS verifies the meta line includes
+// [thread_ts:<parent_ts>] only when MsgLine.ThreadTS is set, and that it
+// composes correctly with via, reply_to, and convMeta.
+func TestNotificationFormat_ThreadTS(t *testing.T) {
+	channelMeta := &ConvMeta{Type: ConvChannel, ChannelID: "C06U"}
+
+	tests := []struct {
+		name     string
+		msg      MsgLine
+		convMeta *ConvMeta
+		wantMeta string
+	}{
+		{
+			name: "non-reply, no convMeta",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2]",
+		},
+		{
+			name: "reply with thread_ts",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadTS: "P1",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1]",
+		},
+		{
+			name: "reply with via and thread_ts",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Via: ViaToPigeon, Reply: true, ThreadTS: "P1",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [via:to-pigeon] [thread_ts:P1]",
+		},
+		{
+			name: "reply with replyTo and thread_ts (whatsapp-style quote inside a slack thread is hypothetical, but ordering must be stable)",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				ReplyTo: "M1", Reply: true, ThreadTS: "P1",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [reply_to:M1] [thread_ts:P1]",
+		},
+		{
+			name: "reply with thread_ts and channel convMeta",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadTS: "P1",
+			},
+			convMeta: channelMeta,
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1] [type:channel] [channel_id:C06U]",
+		},
+		{
+			name: "non-reply with channel convMeta has no thread_ts",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+			},
+			convMeta: channelMeta,
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [type:channel] [channel_id:C06U]",
+		},
+		{
+			name: "reply with thread_id only (whatsapp-style opaque parent)",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadID: "WAMSG_PARENT_ID",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_id:WAMSG_PARENT_ID]",
+		},
+		{
+			name: "reply with both thread_ts and thread_id (defensive: both emit)",
+			msg: MsgLine{
+				ID: "M2", Ts: ts(2026, 3, 16, 9, 0, 0),
+				Sender: "Bob", SenderID: "U2", Text: "yes",
+				Reply: true, ThreadTS: "P1", ThreadID: "OTHER",
+			},
+			wantMeta: "  [09:00:00] [message_id:M2] [sender_id:U2] [thread_ts:P1] [thread_id:OTHER]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := formatMsgNotification(tt.msg, time.UTC, tt.convMeta)
+			if len(lines) != 2 {
+				t.Fatalf("lines = %d, want 2: %v", len(lines), lines)
+			}
+			if lines[1] != tt.wantMeta {
+				t.Errorf("meta line\n got: %q\nwant: %q", lines[1], tt.wantMeta)
+			}
+		})
+	}
+}
+
 func TestFormatDateFileNotification(t *testing.T) {
 	f := &ResolvedDateFile{
 		Messages: []ResolvedMsg{
