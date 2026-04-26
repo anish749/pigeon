@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -124,6 +125,19 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 		return
 	}
 
+	// Edits and deletes (revokes) both ride the same *events.Message channel
+	// as inner ProtocolMessages. Live edits are NOT consistently wrapped in
+	// an EditedMessage envelope (which is what would set evt.IsEdit), so we
+	// detect both kinds the same way: by peeking at ProtocolMessage.Type.
+	if origID, edited := EditedMessage(evt.Message); origID != "" {
+		l.handleEdit(ctx, evt, origID, edited)
+		return
+	}
+	if id := RevokedMessageID(evt.Message); id != "" {
+		l.handleDelete(ctx, evt, id)
+		return
+	}
+
 	text := ExtractText(evt.Message)
 	if text == "" {
 		return
@@ -166,5 +180,70 @@ func (l *Listener) handleMessage(ctx context.Context, evt *events.Message) {
 	// — there's no hub to notify. In daemon-managed listeners it is always set.
 	if l.onEvent != nil {
 		l.onEvent(hub.NewMsg(l.acct, convDir, *line.Msg))
+	}
+}
+
+// handleEdit stores a WhatsApp message edit and routes it to the connected
+// session. origID and edited are extracted from the inner ProtocolMessage
+// by the caller.
+func (l *Listener) handleEdit(ctx context.Context, evt *events.Message, origID string, edited *waE2E.Message) {
+	text := ExtractText(edited)
+	if text == "" {
+		// Media-only edits don't carry text; nothing meaningful to write.
+		return
+	}
+
+	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
+	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
+
+	line := modelv1.Line{
+		Type: modelv1.LineEdit,
+		Edit: &modelv1.EditLine{
+			Ts:       evt.Info.Timestamp,
+			MsgID:    origID,
+			Sender:   senderName,
+			SenderID: evt.Info.Sender.String(),
+			Text:     text,
+		},
+	}
+	if err := l.store.Append(l.acct, convDir, line); err != nil {
+		slog.ErrorContext(ctx, "failed to write edit", "error", err, "account", l.acct)
+		return
+	}
+
+	slog.InfoContext(ctx, "edit saved",
+		"from", senderName, "conv", convDir, "msg_id", origID)
+
+	if l.onEvent != nil {
+		l.onEvent(hub.NewEdit(l.acct, convDir, *line.Edit))
+	}
+}
+
+// handleDelete stores a WhatsApp message revoke and routes it to the
+// connected session. origID is the target message's ID, already extracted
+// from the protocol message by the caller.
+func (l *Listener) handleDelete(ctx context.Context, evt *events.Message, origID string) {
+	senderName := l.resolver.ContactName(ctx, evt.Info.Sender)
+	convDir := l.resolver.ConvDir(ctx, evt.Info.Chat)
+
+	line := modelv1.Line{
+		Type: modelv1.LineDelete,
+		Delete: &modelv1.DeleteLine{
+			Ts:       evt.Info.Timestamp,
+			MsgID:    origID,
+			Sender:   senderName,
+			SenderID: evt.Info.Sender.String(),
+		},
+	}
+	if err := l.store.Append(l.acct, convDir, line); err != nil {
+		slog.ErrorContext(ctx, "failed to write delete", "error", err, "account", l.acct)
+		return
+	}
+
+	slog.InfoContext(ctx, "delete saved",
+		"from", senderName, "conv", convDir, "msg_id", origID)
+
+	if l.onEvent != nil {
+		l.onEvent(hub.NewDelete(l.acct, convDir, *line.Delete))
 	}
 }

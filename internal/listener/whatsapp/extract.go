@@ -36,3 +36,31 @@ func SanitizeFilename(name string) string {
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "\x00", "")
 	return replacer.Replace(name)
 }
+
+// EditedMessage extracts the original message ID and the new contents from
+// an edit event. WhatsApp delivers edits as a ProtocolMessage with type
+// MESSAGE_EDIT — sometimes wrapped in an EditedMessage envelope (which sets
+// events.Message.IsEdit), sometimes not. Either way the inner ProtocolMessage
+// holds the target ID in Key.ID and the replacement content in EditedMessage,
+// so detecting via the ProtocolMessage type covers both delivery shapes.
+//
+// Returns ("", nil) when msg is not a MESSAGE_EDIT protocol message.
+func EditedMessage(msg *waE2E.Message) (origID string, edited *waE2E.Message) {
+	proto := msg.GetProtocolMessage()
+	if proto.GetType() != waE2E.ProtocolMessage_MESSAGE_EDIT {
+		return "", nil
+	}
+	return proto.GetKey().GetID(), proto.GetEditedMessage()
+}
+
+// RevokedMessageID returns the ID of a message being revoked (deleted), or
+// the empty string if msg is not a REVOKE protocol message. REVOKE is the
+// default value of ProtocolMessage_Type, so callers must guard against bare
+// non-protocol messages — this helper checks ProtocolMessage is set first.
+func RevokedMessageID(msg *waE2E.Message) string {
+	proto := msg.GetProtocolMessage()
+	if proto == nil || proto.GetType() != waE2E.ProtocolMessage_REVOKE {
+		return ""
+	}
+	return proto.GetKey().GetID()
+}
