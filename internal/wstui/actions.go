@@ -1,6 +1,7 @@
 package wstui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -91,4 +92,36 @@ func setStatus(s string) tea.Cmd {
 		func() tea.Msg { return statusMsg(s) },
 		tea.Tick(statusDuration, func(time.Time) tea.Msg { return clearStatusMsg{} }),
 	)
+}
+
+// spinnerInterval is how often the spinner advances a frame while
+// discovery is running.
+const spinnerInterval = 120 * time.Millisecond
+
+// discoverCmd starts the in-flight discovery goroutine and the
+// spinner-advance ticker. The goroutine calls fn and posts a
+// discoverDoneMsg when it returns. The ticker posts spinTickMsg while
+// modeDiscovering is the model's mode (the model gates the next
+// tick).
+//
+// No TUI-level timeout: the LLM call's own timeout is configured on
+// clients.Client by the constructing caller (see cfg.LLMCallTimeout).
+// Inventing a separate ceiling here would either silently truncate a
+// real run or be redundant.
+func discoverCmd(fn DiscoverFunc) tea.Cmd {
+	if fn == nil {
+		return nil
+	}
+	return tea.Batch(
+		spinTick(),
+		func() tea.Msg {
+			n, err := fn(context.Background())
+			return discoverDoneMsg{count: n, err: err}
+		},
+	)
+}
+
+// spinTick schedules a single spinner advance.
+func spinTick() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
 }

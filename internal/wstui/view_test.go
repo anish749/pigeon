@@ -29,7 +29,7 @@ func stripAnsi(s string) string {
 }
 
 func TestView_EmptyShowsCreateHint(t *testing.T) {
-	m := NewModel(newFakeStore(), "personal")
+	m := NewModel(newFakeStore(), "personal", nil)
 	out := stripAnsi(m.View())
 	if !strings.Contains(out, "No workstreams in this workspace") {
 		t.Errorf("missing empty header: %q", out)
@@ -40,7 +40,7 @@ func TestView_EmptyShowsCreateHint(t *testing.T) {
 }
 
 func TestView_PopulatedRendersAllItems(t *testing.T) {
-	m := NewModel(newFakeStore(), "personal")
+	m := NewModel(newFakeStore(), "personal", nil)
 	m.items = []models.Workstream{
 		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha focus"},
 		{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateDormant, Focus: "beta focus"},
@@ -54,7 +54,7 @@ func TestView_PopulatedRendersAllItems(t *testing.T) {
 }
 
 func TestView_DefaultRowGetsLabel(t *testing.T) {
-	m := NewModel(newFakeStore(), "personal")
+	m := NewModel(newFakeStore(), "personal", nil)
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	m.items = []models.Workstream{def}
 	out := stripAnsi(m.View())
@@ -64,7 +64,7 @@ func TestView_DefaultRowGetsLabel(t *testing.T) {
 }
 
 func TestView_DefaultHelpIsLimited(t *testing.T) {
-	m := NewModel(newFakeStore(), "personal")
+	m := NewModel(newFakeStore(), "personal", nil)
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	m.items = []models.Workstream{def}
 	out := stripAnsi(m.View())
@@ -77,7 +77,7 @@ func TestView_DefaultHelpIsLimited(t *testing.T) {
 }
 
 func TestView_DeleteConfirmShowsName(t *testing.T) {
-	m := NewModel(newFakeStore(), "personal")
+	m := NewModel(newFakeStore(), "personal", nil)
 	m.items = []models.Workstream{
 		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive},
 	}

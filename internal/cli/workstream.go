@@ -13,8 +13,12 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workspace"
+	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
+	"github.com/anish749/pigeon/internal/workstream/reader"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
@@ -53,9 +57,27 @@ the current workspace.`,
 			if ws.Name == "" {
 				return fmt.Errorf("no workspace selected — pass --workspace or set a default")
 			}
-			storeDir := paths.DefaultDataRoot().Workspace(string(ws.Name)).WorkstreamStore()
+			root := paths.DefaultDataRoot()
+			storeDir := root.Workspace(string(ws.Name)).WorkstreamStore()
 			st := wsstore.NewFS(storeDir.Path())
-			return wstui.Run(st, ws.Name)
+
+			// Build the manager once, with the same dependencies and
+			// configured defaults that `pigeon workstream discover` uses.
+			// The TUI's D-key delegates to mgr.DiscoverAndPropose; signal
+			// reading lives inside the manager.
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			cfg := models.DefaultConfig()
+			cfg.Workspace = *ws
+			cfg.ApprovalMode = models.AutoApprove
+			claude := clients.New(cfg.Model, logger, clients.WithTimeout(cfg.LLMCallTimeout))
+			signalReader := reader.New(store.NewFSStore(root), root)
+			mgr := manager.New(claude, signalReader, manager.NewStatCollector(), cfg, st, logger)
+
+			discover := func(ctx context.Context) (int, error) {
+				ds, err := mgr.DiscoverAndPropose(ctx, cfg.Since, cfg.Until)
+				return len(ds), err
+			}
+			return wstui.Run(st, ws.Name, discover)
 		},
 	}
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name (default: from config/env)")
