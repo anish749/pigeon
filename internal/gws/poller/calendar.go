@@ -172,6 +172,13 @@ func (p *Poller) maybeExpandWindow(cur *store.GWSCalendarCursor, calID string) e
 
 // writeEvents appends events to their date-partitioned JSONL files and
 // pushes identity signals from event attendees.
+//
+// NOTE: Multi-day events are stored across all dates they span. The date
+// attribution uses DatesForStorage() which returns all dates an event occupies:
+// - All-day events: start to end-1 (end date exclusive per Google Calendar API)
+// - Timed events: start through end (both inclusive) to capture span across dates
+//
+// This ensures multi-day events are retrievable when querying by date.
 func (p *Poller) writeEvents(calID string, events []*modelv1.CalendarEvent) []error {
 	var errs []error
 	var signals []identity.Signal
