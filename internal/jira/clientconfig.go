@@ -58,16 +58,23 @@ func ResolveConfigPath(override string) (string, error) {
 	return filepath.Join(configHome, jiraConfigSubdir, jiraConfigName), nil
 }
 
-// expandHome resolves a leading "~" in a path. Returns an error if "~"
-// is present but `os.UserHomeDir` fails. The non-tilde fast path never
-// errors.
+// expandHome resolves a leading "~" or "~/..." in a path against
+// os.UserHomeDir. Anything else (including "~user/..." which means
+// "user 'user's home dir" in shell convention) is returned untouched
+// — Go's standard library doesn't expose user-database lookup and
+// silently treating "~bob/foo" as "$HOME/bob/foo" would corrupt paths.
+// Returns an error only when "~" or "~/" appears but the home dir
+// can't be resolved.
 func expandHome(p string) (string, error) {
-	if !strings.HasPrefix(p, "~") {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("expand %q: resolve home dir: %w", p, err)
 	}
-	return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, p[2:]), nil
 }

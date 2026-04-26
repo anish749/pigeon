@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	cases := []struct {
+		in, want string
+	}{
+		{"~", home},
+		{"~/foo", filepath.Join(home, "foo")},
+		{"~/foo/bar.yml", filepath.Join(home, "foo", "bar.yml")},
+		// "~bob/foo" is shell-convention "user bob's home" but Go has
+		// no portable way to look that up. Return literal.
+		{"~bob/foo", "~bob/foo"},
+		{"~user", "~user"},
+		// No tilde: pass through.
+		{"/abs/path", "/abs/path"},
+		{"rel/path", "rel/path"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			got, err := expandHome(c.in)
+			if err != nil {
+				t.Fatalf("expandHome(%q): %v", c.in, err)
+			}
+			if got != c.want {
+				t.Errorf("expandHome(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestResolveConfigPath(t *testing.T) {
 	t.Setenv(jiraConfigEnv, "")
 	t.Setenv(jiraXDGConfigEnv, "")
