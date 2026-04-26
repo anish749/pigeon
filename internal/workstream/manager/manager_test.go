@@ -163,7 +163,7 @@ type fakeSignalReader struct {
 	err         error
 }
 
-func (f *fakeSignalReader) ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
+func (f *fakeSignalReader) ReadAccounts(_ context.Context, accounts []account.Account, since, until time.Time) ([]models.Signal, error) {
 	f.gotAccounts = append([]account.Account(nil), accounts...)
 	f.gotSince = since
 	f.gotUntil = until

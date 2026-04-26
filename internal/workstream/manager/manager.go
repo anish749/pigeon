@@ -24,7 +24,7 @@ import (
 
 // SignalReader reads historical signals for workspace accounts.
 type SignalReader interface {
-	ReadAccounts(accounts []account.Account, since, until time.Time) ([]models.Signal, error)
+	ReadAccounts(ctx context.Context, accounts []account.Account, since, until time.Time) ([]models.Signal, error)
 }
 
 // Manager owns the lifecycle of all workstreams. It is the only component
@@ -69,18 +69,9 @@ func New(client *clients.Client, signalReader SignalReader, sc *StatCollector, c
 // within the given time range. The returned signals are scoped to
 // cfg.Workspace.Accounts and sorted by timestamp by the underlying reader.
 func (m *Manager) ReadSignals(ctx context.Context, since, until time.Time) ([]models.Signal, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if m.reader == nil {
-		return nil, fmt.Errorf("signal reader not configured")
-	}
-	signals, err := m.reader.ReadAccounts(m.cfg.Workspace.Accounts, since, until)
+	signals, err := m.reader.ReadAccounts(ctx, m.cfg.Workspace.Accounts, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("read workspace signals: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
 	}
 	return signals, nil
 }
