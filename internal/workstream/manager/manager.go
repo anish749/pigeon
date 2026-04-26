@@ -26,6 +26,7 @@ import (
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
 	client *clients.Client
+	disc   discovery.WorkspaceDiscovery
 	sc     *StatCollector
 	store  store.Store
 	cfg    models.Config
@@ -47,6 +48,7 @@ type Manager struct {
 func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.Store, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
+		disc:               discovery.NewLLMDiscovery(client, logger),
 		sc:                 sc,
 		store:              st,
 		cfg:                cfg,
@@ -72,8 +74,7 @@ func (m *Manager) Discover(ctx context.Context, signals []models.Signal, propose
 	if len(signals) == 0 {
 		return nil, nil
 	}
-	disc := discovery.NewLLMDiscovery(m.client, m.logger)
-	discovered, err := disc.Discover(ctx, signals)
+	discovered, err := m.disc.Discover(ctx, signals)
 	if err != nil {
 		return nil, fmt.Errorf("discover: %w", err)
 	}
