@@ -21,7 +21,7 @@ type Config struct {
 	// When no workspace is set, all accounts are visible and identity is
 	// merged across every known source.
 	Workspaces       map[WorkspaceName]WorkspaceConfig `yaml:"workspaces,omitempty"`
-	DefaultWorkspace WorkspaceName `yaml:"default_workspace,omitempty"`
+	DefaultWorkspace WorkspaceName                     `yaml:"default_workspace,omitempty"`
 }
 
 // WorkspaceName is the resolved name of the active workspace.
@@ -44,14 +44,14 @@ type LinearConfig struct {
 	Account   string `yaml:"account"`   // display name for pigeon
 }
 
-// JiraConfig holds configuration for a single Atlassian site (one set of
-// credentials covering one or more projects). Pigeon reads server, login,
-// and auth fields from the bound jira-cli config rather than duplicating
-// them here. The token is sourced from JIRA_API_TOKEN at daemon start.
+// JiraConfig binds one jira-cli configuration to pigeon's ingest. The
+// only pigeon-side field is the path to that jira-cli YAML; everything
+// else (server, login, auth, project) is read from the YAML at daemon
+// start. One pigeon entry binds one jira-cli config, which holds one
+// project (per jira-cli's own data model). For a second project, the
+// user runs `jira init` again with a different config path.
 type JiraConfig struct {
-	JiraConfig string   `yaml:"jira_config,omitempty"` // path to jira-cli yaml; empty = default resolution chain
-	Projects   []string `yaml:"projects"`              // project keys to ingest (one cursor per project)
-	Account    string   `yaml:"account"`               // display name; also drives the on-disk slug via account.NameSlug
+	JiraConfig string `yaml:"jira_config,omitempty"` // path to jira-cli yaml; empty = default resolution chain
 }
 
 // GWSConfig holds configuration for a single Google Workspace account.
@@ -164,12 +164,13 @@ func (c *Config) AddLinear(entry LinearConfig) {
 	c.Linear = append(c.Linear, entry)
 }
 
-// AddJira upserts a Jira configuration entry by account label. The label is
-// the unique key because it doubles as the on-disk slug; two entries with
-// the same account would collide on disk.
+// AddJira upserts a Jira configuration entry by jira-cli config path.
+// The path is the unique key because each jira-cli YAML maps to exactly
+// one (server, login, project) tuple; two entries with the same path
+// would manage the same on-disk location.
 func (c *Config) AddJira(entry JiraConfig) {
 	for i, existing := range c.Jira {
-		if existing.Account == entry.Account {
+		if existing.JiraConfig == entry.JiraConfig {
 			c.Jira[i] = entry
 			return
 		}
@@ -177,10 +178,10 @@ func (c *Config) AddJira(entry JiraConfig) {
 	c.Jira = append(c.Jira, entry)
 }
 
-// RemoveJira removes a Jira configuration entry by account label.
-func (c *Config) RemoveJira(account string) {
+// RemoveJira removes a Jira configuration entry by jira-cli config path.
+func (c *Config) RemoveJira(jiraConfig string) {
 	for i, existing := range c.Jira {
-		if existing.Account == account {
+		if existing.JiraConfig == jiraConfig {
 			c.Jira = append(c.Jira[:i], c.Jira[i+1:]...)
 			return
 		}

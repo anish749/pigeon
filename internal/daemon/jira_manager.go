@@ -64,10 +64,9 @@ func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig
 	// Reconcile by jira-cli config path. Two pigeon entries pointing at
 	// the same path collapse to one running poller; that's intentional
 	// since they would write to the same on-disk location anyway.
-	desiredPaths := make(map[string]config.JiraConfig)
+	desiredPaths := make(map[string]struct{})
 	for _, jc := range desired {
-		path := jirapkg.ResolveConfigPath(jc.JiraConfig)
-		desiredPaths[path] = jc
+		desiredPaths[jirapkg.ResolveConfigPath(jc.JiraConfig)] = struct{}{}
 	}
 
 	for path, running := range m.running {
@@ -78,14 +77,14 @@ func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig
 		}
 	}
 
-	for path, jc := range desiredPaths {
+	for path := range desiredPaths {
 		if _, ok := m.running[path]; !ok {
-			m.startPath(ctx, path, jc)
+			m.startPath(ctx, path)
 		}
 	}
 }
 
-func (m *JiraManager) startPath(ctx context.Context, path string, jc config.JiraConfig) {
+func (m *JiraManager) startPath(ctx context.Context, path string) {
 	child, cancel := context.WithCancel(ctx)
 	m.running[path] = &runningJiraPoller{cancel: cancel}
 
@@ -93,7 +92,6 @@ func (m *JiraManager) startPath(ctx context.Context, path string, jc config.Jira
 		// Load PigeonJiraConfig + token at every restart so YAML edits or
 		// token rotation pick up automatically. runWithRestart's backoff
 		// throttles the retry on persistent failures.
-		_ = jc // jc is captured for future fields; only the path is used today
 		cli, err := jirapkg.LoadPigeonJiraConfig(path)
 		if err != nil {
 			return fmt.Errorf("load jira-cli config: %w", err)

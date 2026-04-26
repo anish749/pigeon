@@ -1,20 +1,14 @@
-// Package jira reads a jira-cli configuration file and builds the
-// pkg/jira.Config plus API-version flag pigeon needs to construct a
-// Jira REST client. Pigeon never owns these fields itself — every
-// connection setting lives in the user's existing jira-cli YAML, and
-// pigeon simply lifts them.
+// Package jira reads a jira-cli configuration file (the YAML produced by
+// `jira init`) and exposes it as a Go type pigeon can consume. Pigeon
+// never owns connection settings itself — every server, login, and auth
+// detail lives in the user's existing jira-cli YAML and is lifted at
+// runtime via PigeonJiraConfig.
 package jira
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
-	"gopkg.in/yaml.v3"
-
-	"github.com/anish749/pigeon/internal/jira/poller"
 )
 
 // jira-cli config defaults — verified by running `jira` 1.7.0:
@@ -28,25 +22,7 @@ const (
 	jiraConfigEnv    = "JIRA_CONFIG_FILE"
 	jiraConfigSubdir = ".jira"
 	jiraConfigName   = ".config.yml"
-	jiraAPITokenEnv  = "JIRA_API_TOKEN"
 )
-
-// jiraCLIConfig mirrors the subset of fields pigeon reads from a
-// jira-cli YAML. Discovered fields written by `jira init` (project.key,
-// board, epic.*, issue.types, issue.fields.custom) are ignored — they
-// exist for jira-cli's write commands and do not affect read-only ingest.
-type jiraCLIConfig struct {
-	Installation string `yaml:"installation"`
-	Server       string `yaml:"server"`
-	Login        string `yaml:"login"`
-	AuthType     string `yaml:"auth_type"`
-	Insecure     bool   `yaml:"insecure"`
-	MTLS         struct {
-		CACert     string `yaml:"ca_cert"`
-		ClientCert string `yaml:"client_cert"`
-		ClientKey  string `yaml:"client_key"`
-	} `yaml:"mtls"`
-}
 
 // ResolveConfigPath returns the path pigeon should read for the given
 // pigeon-config entry. Resolution order: explicit override → env var →
@@ -72,64 +48,4 @@ func expandHome(p string) string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, strings.TrimPrefix(p, "~"))
-}
-
-// LoadClientConfig reads a jira-cli config from the given path, sources
-// the API token from JIRA_API_TOKEN env, and returns a jira.Config ready
-// to pass to jira.NewClient plus the APIVersion that selects v3 vs v2
-// endpoint dispatch in the poller.
-//
-// Returns an error if the file is missing, malformed, or the env token is
-// unset — the daemon should disable Jira ingest in that case rather than
-// loop with auth failures.
-func LoadClientConfig(path string) (jira.Config, poller.APIVersion, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return jira.Config{}, 0, fmt.Errorf("read jira-cli config %s: %w", path, err)
-	}
-	var c jiraCLIConfig
-	if err := yaml.Unmarshal(data, &c); err != nil {
-		return jira.Config{}, 0, fmt.Errorf("parse jira-cli config %s: %w", path, err)
-	}
-
-	token := os.Getenv(jiraAPITokenEnv)
-	if token == "" {
-		return jira.Config{}, 0, fmt.Errorf("%s env var is unset (set it to an Atlassian API token; see docs/jira-protocol.md)", jiraAPITokenEnv)
-	}
-	if c.Server == "" {
-		return jira.Config{}, 0, fmt.Errorf("jira-cli config %s missing required `server` field", path)
-	}
-	if c.Login == "" {
-		return jira.Config{}, 0, fmt.Errorf("jira-cli config %s missing required `login` field", path)
-	}
-
-	// jira-cli writes the constants jira.InstallationTypeCloud ("Cloud") or
-	// jira.InstallationTypeLocal ("Local"). Compare case-sensitive against
-	// those exported constants, not against an ad-hoc string. Empty defaults
-	// to Cloud since that is by far the more common case in 2026 and matches
-	// what `jira init` selects when the user accepts defaults.
-	apiVer := poller.APIVersionV3
-	if c.Installation != "" && c.Installation != jira.InstallationTypeCloud {
-		apiVer = poller.APIVersionV2
-	}
-
-	authType := jira.AuthType(strings.ToLower(c.AuthType))
-	insecure := c.Insecure
-
-	jcfg := jira.Config{
-		Server:   c.Server,
-		Login:    c.Login,
-		APIToken: token,
-		AuthType: &authType,
-		Insecure: &insecure,
-	}
-	if c.MTLS.CACert != "" {
-		jcfg.MTLSConfig = jira.MTLSConfig{
-			CaCert:     expandHome(c.MTLS.CACert),
-			ClientCert: expandHome(c.MTLS.ClientCert),
-			ClientKey:  expandHome(c.MTLS.ClientKey),
-		}
-	}
-
-	return jcfg, apiVer, nil
 }
