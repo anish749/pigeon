@@ -57,9 +57,11 @@ func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.
 	}
 }
 
-// Discover runs LLM-based batch discovery on the given signals and routes
-// each result through ProposeNew, so the same lifecycle invariants
-// (idempotent existence check, proposal record, ID generation) apply.
+// DiscoverAndPropose runs LLM-based batch discovery on the given signals
+// and routes each result through ProposeNew, so the same lifecycle
+// invariants (idempotent existence check, proposal record, ID generation)
+// apply. Under AutoApprove the proposals become workstreams immediately;
+// otherwise they land in proposals.json for review.
 //
 // Reading signals is the caller's responsibility — discovery operates on
 // inputs, not files. proposedAt is recorded on each created workstream;
@@ -70,7 +72,7 @@ func New(client *clients.Client, sc *StatCollector, cfg models.Config, st store.
 // (conversations, participants) that isn't kept on the persisted model.
 // Existing same-named workstreams are left untouched, so re-runs preserve
 // user edits to focus and state.
-func (m *Manager) Discover(ctx context.Context, signals []models.Signal, proposedAt time.Time) ([]discovery.DiscoveredWorkstream, error) {
+func (m *Manager) DiscoverAndPropose(ctx context.Context, signals []models.Signal, proposedAt time.Time) ([]discovery.DiscoveredWorkstream, error) {
 	if len(signals) == 0 {
 		return nil, nil
 	}

@@ -111,7 +111,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 		}
 		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
 	} else {
-		if _, err := mgr.Discover(ctx, signals, signals[0].Ts); err != nil {
+		if _, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts); err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
 		}
 	}

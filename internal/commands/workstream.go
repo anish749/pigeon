@@ -78,7 +78,7 @@ func discoverWorkspace(ctx context.Context, claude *clients.Client, r *reader.Re
 		return fmt.Errorf("ensure default workstream: %w", err)
 	}
 
-	discovered, err := mgr.Discover(ctx, signals, signals[0].Ts)
+	discovered, err := mgr.DiscoverAndPropose(ctx, signals, signals[0].Ts)
 	if err != nil {
 		return err
 	}
