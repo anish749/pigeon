@@ -70,6 +70,24 @@ When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), t
 
 The platform names `linear-issues` and `jira-issues` are confusing — the "-issues" suffix reads like a sub-resource of the platform rather than the platform itself. They should be `linear` and `jira`, matching how the other platforms (`slack`, `whatsapp`) are named.
 
+## Slack: edits to messages aren't delivered to the agent in real time
+
+When a Slack message is edited, the slack listener writes an edit line to disk but no notification reaches the connected Claude session. `handleEdit` in `internal/listener/slack/listener.go` calls `messages.AppendEdit(...)` and stops — there is no callback to the hub, so the hub never learns an edit happened.
+
+## Slack: deletes to messages aren't delivered to the agent in real time
+
+Symmetric to the edit bug above. `handleDelete` writes a delete line to disk and stops; no signal to the hub, so the connected Claude session never sees the delete.
+
+## Slack: notification format doesn't carry thread context
+
+The channel notification delivered to the agent for a thread reply contains the message id, sender id, channel type, and channel id, but no `thread_ts`. From the payload alone, the agent cannot tell that the message is a reply, which thread it belongs to, what the parent message was, or whether to thread its own reply back into the same thread.
+
+Reactions should be subject to the same treatment — when a reaction lands on a thread message, the formatted notification should also carry `thread_ts` so the agent knows where the reaction happened. (Reaction delivery itself works post-#322; only the format payload is missing thread context.)
+
+## Slack: edits/deletes on thread replies persisted to the wrong file
+
+Edits and deletes that target a thread reply are persisted to the channel date file rather than the thread file. As a result, neither `Compact()` nor `CompactThread()` apply them — a `pigeon read` after the edit still shows the original text.
+
 ## Slack write phase: blocks stored even when identical to text fallback
 
 In the Slack write phase, blocks are stored raw even when the text fallback is the exact same representation of what is in the blocks. When the text and blocks carry the same content, writing the blocks adds no additional value.
