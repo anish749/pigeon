@@ -105,15 +105,19 @@ DATA LAYOUT
     │   │   └── gcalendar/
     │   │       └── primary/
     │   │           └── 2026-03-16.jsonl  # events by start date
-    ├── linear-issues/
+    ├── linear/
     │   ├── my-team/                       # workspace
     │   │   └── issues/
-    │   │       ├── ENG-101.jsonl         # all activity for ENG-101
-    │   │       └── ENG-142.jsonl
+    │   │       ├── ENG-101/
+    │   │       │   ├── issue.jsonl       # snapshots
+    │   │       │   └── comments.jsonl    # comments
+    │   │       └── ENG-142/
+    │   │           ├── issue.jsonl
+    │   │           └── comments.jsonl
 
   Messaging: platform / account / conversation / YYYY-MM-DD.jsonl
   GWS:       gws / account / service / YYYY-MM-DD.jsonl (or per-file dirs)
-  Linear:    linear-issues / workspace / issues / IDENTIFIER.jsonl
+  Linear:    linear / workspace / issues / IDENTIFIER / {issue,comments}.jsonl
   Each file is JSONL — one JSON object per line, greppable with rg and jq.
 
   All JSONL lines have a "type" field — use it with jq to filter:

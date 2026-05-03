@@ -24,7 +24,7 @@ import (
 //   - workstream router state (parent dir == WorkstreamSubdir)
 //   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
-//   - Linear issue file (parent dir == issues, under linear-issues platform)
+//   - Linear per-issue logs (issue.jsonl / comments.jsonl, under linear platform)
 //   - thread file (parent dir == ThreadsSubdir, filename != date)
 //   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Messaging by location
 //
@@ -89,12 +89,19 @@ func Classify(path string) DataFile {
 		}
 	}
 
-	// 6. Linear issue file: <root>/linear-issues/<acct>/issues/<id>.jsonl.
-	// Issue identifiers are platform-specific strings (PROJ-123 etc.), so the
-	// match is by parent-dir name + the linear-issues platform segment, not
-	// by filename pattern.
-	if filepath.Ext(base) == FileExt && parent == linearIssuesSubdir && pathHasSegment(path, linearPlatform) {
-		return IssueFile(path)
+	// 6. Linear per-issue logs:
+	//   <root>/linear/<acct>/issues/<id>/issue.jsonl
+	//   <root>/linear/<acct>/issues/<id>/comments.jsonl
+	// Match by filename plus the linear platform segment so the same base
+	// names under unrelated trees (e.g. Drive's comments.jsonl) keep their
+	// existing classification.
+	if pathHasSegment(path, linearPlatform) {
+		switch base {
+		case linearIssueFilename:
+			return LinearIssueFile(path)
+		case linearCommentsFilename:
+			return LinearCommentsFile(path)
+		}
 	}
 
 	// 7. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already

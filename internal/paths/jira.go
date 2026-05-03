@@ -74,7 +74,7 @@ func (d JiraProjectDir) SyncCursorsFile() SyncCursorsFile {
 // JiraIssueFile is a path to a Jira issue's JSONL file:
 // <base>/jira-issues/<account>/<project>/issues/<KEY>.jsonl
 //
-// Distinct from Linear's IssueFile so that compile-time routing prevents
+// Distinct from Linear's per-issue logs so that compile-time routing prevents
 // writing one platform's lines into the other's tree.
 type JiraIssueFile string
 
