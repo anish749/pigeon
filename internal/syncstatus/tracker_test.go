@@ -172,3 +172,73 @@ func TestTimestampOrdering(t *testing.T) {
 		t.Error("CompletedAt should be after StartedAt")
 	}
 }
+
+func TestIsSyncing(t *testing.T) {
+	tr := NewTracker()
+	if tr.IsSyncing("unknown") {
+		t.Error("IsSyncing(unknown) = true, want false")
+	}
+	tr.Start("key", KindPoll)
+	if !tr.IsSyncing("key") {
+		t.Error("IsSyncing during sync = false, want true")
+	}
+	tr.Done("key", nil)
+	if tr.IsSyncing("key") {
+		t.Error("IsSyncing after Done = true, want false")
+	}
+}
+
+func TestWaitForDone_NotSyncing(t *testing.T) {
+	tr := NewTracker()
+	if ch := tr.WaitForDone("unknown"); ch != nil {
+		t.Error("WaitForDone(unknown) returned non-nil channel, want nil")
+	}
+	tr.Start("key", KindPoll)
+	tr.Done("key", nil)
+	if ch := tr.WaitForDone("key"); ch != nil {
+		t.Error("WaitForDone(after Done) returned non-nil channel, want nil")
+	}
+}
+
+func TestWaitForDone_ClosesOnDone(t *testing.T) {
+	tr := NewTracker()
+	tr.Start("key", KindPoll)
+	ch := tr.WaitForDone("key")
+	if ch == nil {
+		t.Fatal("WaitForDone during sync returned nil, want non-nil channel")
+	}
+	select {
+	case <-ch:
+		t.Fatal("channel closed before Done was called")
+	case <-time.After(20 * time.Millisecond):
+		// expected: still open
+	}
+
+	tr.Done("key", nil)
+	select {
+	case <-ch:
+		// expected: closed
+	case <-time.After(time.Second):
+		t.Fatal("channel did not close after Done")
+	}
+}
+
+// TestWaitForDone_StartAfterStartClosesPriorChannel covers the defensive
+// branch where Start is called twice without an intervening Done: any
+// subscriber from the first sync should be released at the boundary
+// rather than waiting forever for a Done that's been overwritten.
+func TestWaitForDone_StartAfterStartClosesPriorChannel(t *testing.T) {
+	tr := NewTracker()
+	tr.Start("key", KindPoll)
+	ch := tr.WaitForDone("key")
+	if ch == nil {
+		t.Fatal("WaitForDone during sync returned nil")
+	}
+	tr.Start("key", KindPoll) // double Start without Done
+	select {
+	case <-ch:
+		// expected: prior channel closed at the Start boundary
+	case <-time.After(time.Second):
+		t.Fatal("prior channel did not close after second Start")
+	}
+}

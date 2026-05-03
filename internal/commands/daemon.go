@@ -166,10 +166,19 @@ func DaemonRun(version string) error {
 	tracker := syncstatus.NewTracker()
 	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
 
+	// MaintenanceManager owns the single Maintain worker for the daemon
+	// and runs the periodic scheduler that picks up stale accounts.
+	// Constructed first so listeners can plumb its Trigger as their
+	// post-sync compaction signal; routing every compaction through one
+	// worker is what guarantees eager (post-sync) and periodic passes
+	// never race on the same files.
+	maintMgr := daemon.NewMaintenanceManager(store, dataRoot, tracker)
+	go maintMgr.Run(ctx, cfg)
+
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	gwsMgr := daemon.NewGWSManager(apiServer, store, store, dataRoot, tracker)

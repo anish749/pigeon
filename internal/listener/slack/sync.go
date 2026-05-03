@@ -33,22 +33,37 @@ type MessageStore struct {
 	acct       account.Account
 	accountDir paths.AccountDir
 	store      *store.FSStore
-	mu         gosync.Mutex
-	cursors    store.SlackCursors
+	// triggerMaintain asks the daemon's maintenance worker to compact
+	// this account's freshly written files. Required (non-nil): the
+	// daemon passes MaintenanceManager.Trigger, tests pass a no-op
+	// closure. Routing through this hook (rather than calling Maintain
+	// directly) keeps eager post-sync compaction and the periodic
+	// scheduler serialised on the same worker so they never race on
+	// the same files. Context lets the call return on shutdown rather
+	// than parking on a buffered channel after the worker has exited.
+	triggerMaintain func(context.Context, account.Account)
+	mu              gosync.Mutex
+	cursors         store.SlackCursors
 }
 
-// NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account, s *store.FSStore) (*MessageStore, error) {
+// NewMessageStore creates a MessageStore, loading any existing cursors from
+// disk. triggerMaintain must be non-nil; daemon callers pass
+// MaintenanceManager.Trigger and tests pass a no-op closure.
+func NewMessageStore(acct account.Account, s *store.FSStore, triggerMaintain func(context.Context, account.Account)) (*MessageStore, error) {
+	if triggerMaintain == nil {
+		return nil, fmt.Errorf("NewMessageStore: triggerMaintain is required")
+	}
 	accountDir := paths.DefaultDataRoot().AccountFor(acct)
 	cursors, err := s.LoadSlackCursors(accountDir)
 	if err != nil {
 		return nil, fmt.Errorf("load slack cursors: %w", err)
 	}
 	return &MessageStore{
-		acct:       acct,
-		accountDir: accountDir,
-		store:      s,
-		cursors:    cursors,
+		acct:            acct,
+		accountDir:      accountDir,
+		store:           s,
+		triggerMaintain: triggerMaintain,
+		cursors:         cursors,
 	}, nil
 }
 
@@ -348,18 +363,15 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
-	// Run maintenance after sync. Sync writes user messages and bot DM messages
-	// to the same date files, potentially out of order and with duplicates.
-	// Maintenance deduplicates, sorts, and compacts these files on disk.
-	//
-	// This is best-effort: if it fails, correctness is not affected because
-	// readers always dedup and sort in-memory. The periodic maintenance pass
-	// will also pick up any files missed here. We run it eagerly after sync
-	// because we know the files are dirty and it improves on-disk readability
-	// for grep/cat.
-	if err := ms.store.Maintain(acct); err != nil {
-		slog.WarnContext(ctx, "slack sync: maintenance failed", "account", acct, "error", err)
-	}
+	// Eager compaction: sync writes user and bot DM messages to the same
+	// date files, potentially out of order and with duplicates, so the
+	// files are visibly dirty at exactly this moment. Triggering here
+	// (rather than waiting for the periodic scheduler) tightens the
+	// window in which `pigeon read` / `grep` / `jq` would see the raw
+	// duplicates. Trigger funnels into the maintenance worker's queue
+	// and blocks when the queue is full — the resulting backpressure on
+	// sync is intentional.
+	ms.triggerMaintain(ctx, acct)
 
 	return nil
 }

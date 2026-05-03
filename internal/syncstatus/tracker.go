@@ -33,6 +33,12 @@ type entry struct {
 	completedAt time.Time
 	detail      string
 	lastErr     string
+
+	// done is closed when the in-progress sync finishes (Start sets it,
+	// Done closes it). Subscribers (e.g. the maintenance worker) read from
+	// the channel returned by WaitForDone to block until the sync is no
+	// longer running. nil when the account is not currently syncing.
+	done chan struct{}
 }
 
 // Tracker is a thread-safe registry of per-account sync state.
@@ -51,11 +57,19 @@ func (t *Tracker) Start(key string, kind Kind) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.getOrCreate(key)
+	// Close any leftover done channel so subscribers from a prior sync
+	// don't get stuck if Start was called twice without an intervening
+	// Done. In practice each platform pairs Start/Done in a defer, so
+	// this is defensive only.
+	if e.done != nil {
+		close(e.done)
+	}
 	e.kind = kind
 	e.syncing = true
 	e.startedAt = time.Now()
 	e.detail = ""
 	e.lastErr = ""
+	e.done = make(chan struct{})
 }
 
 // Update sets the progress detail for a syncing account.
@@ -78,6 +92,43 @@ func (t *Tracker) Done(key string, err error) {
 	if err != nil {
 		e.lastErr = err.Error()
 	}
+	if e.done != nil {
+		close(e.done)
+		e.done = nil
+	}
+}
+
+// IsSyncing reports whether the account is currently syncing.
+func (t *Tracker) IsSyncing(key string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	e, ok := t.entries[key]
+	return ok && e.syncing
+}
+
+// WaitForDone returns a channel that closes when the current sync for key
+// finishes. Returns nil when no sync is in progress, so callers can
+// proceed immediately:
+//
+//	if done := tracker.WaitForDone(key); done != nil {
+//	    select {
+//	    case <-done:
+//	    case <-ctx.Done():
+//	        return
+//	    }
+//	}
+//
+// Holding the returned channel across a subsequent Start re-uses the
+// same channel-close (the new Start closes the old channel before
+// installing a fresh one), so the waiter wakes up at the boundary
+// between two syncs rather than waiting forever.
+func (t *Tracker) WaitForDone(key string) <-chan struct{} {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if e, ok := t.entries[key]; ok && e.syncing {
+		return e.done
+	}
+	return nil
 }
 
 // All returns a snapshot of every tracked account's sync state.

@@ -118,6 +118,31 @@ func (s SlackConfig) AppAttribution() string {
 	return "pigeon"
 }
 
+// AllAccounts returns every account.Account derivable from this config
+// across all platforms. The single canonical place where the cross-
+// platform shape of Config is unrolled into the per-account model that
+// the rest of the daemon (workspace resolution, maintenance scheduler,
+// list filters) operates on.
+func (c *Config) AllAccounts() []account.Account {
+	var accounts []account.Account
+	for _, s := range c.Slack {
+		accounts = append(accounts, account.New("slack", s.Workspace))
+	}
+	for _, g := range c.GWS {
+		accounts = append(accounts, account.New("gws", g.Email))
+	}
+	for _, w := range c.WhatsApp {
+		accounts = append(accounts, account.New("whatsapp", w.Account))
+	}
+	for _, l := range c.Linear {
+		accounts = append(accounts, account.New("linear", l.Workspace))
+	}
+	for _, j := range c.Jira {
+		accounts = append(accounts, j.Account())
+	}
+	return accounts
+}
+
 // Load reads the config file. Returns an empty Config if the file doesn't exist.
 func Load() (*Config, error) {
 	data, err := os.ReadFile(paths.ConfigPath())

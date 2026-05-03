@@ -38,7 +38,7 @@ func GetCurrentWorkspace(cfg *config.Config, flagOverride string) (*Workspace, e
 	if cfg.DefaultWorkspace != "" {
 		return resolve(cfg, cfg.DefaultWorkspace, "default_workspace in config")
 	}
-	return &Workspace{Accounts: allAccounts(cfg)}, nil
+	return &Workspace{Accounts: cfg.AllAccounts()}, nil
 }
 
 // resolve looks up a workspace by name and maps its account slugs to
@@ -96,7 +96,7 @@ func (w *Workspace) Contains(acct account.Account) bool {
 // NameSlug — so a slug-equivalent display name resolves the same as it
 // does inside a workspace.
 func IsConfigured(cfg *config.Config, acct account.Account) bool {
-	for _, a := range allAccounts(cfg) {
+	for _, a := range cfg.AllAccounts() {
 		if a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug() {
 			return true
 		}
@@ -117,25 +117,4 @@ func (w *Workspace) AccountsForPlatform(platform string) []account.Account {
 		}
 	}
 	return out
-}
-
-// allAccounts returns every configured account across all platforms.
-func allAccounts(cfg *config.Config) []account.Account {
-	var accounts []account.Account
-	for _, s := range cfg.Slack {
-		accounts = append(accounts, account.New("slack", s.Workspace))
-	}
-	for _, g := range cfg.GWS {
-		accounts = append(accounts, account.New("gws", g.Email))
-	}
-	for _, w := range cfg.WhatsApp {
-		accounts = append(accounts, account.New("whatsapp", w.Account))
-	}
-	for _, l := range cfg.Linear {
-		accounts = append(accounts, account.New("linear", l.Workspace))
-	}
-	for _, j := range cfg.Jira {
-		accounts = append(accounts, j.Account())
-	}
-	return accounts
 }

@@ -24,13 +24,14 @@ import (
 // It starts initial workspaces, watches for config changes, and
 // starts/stops workspaces as they are added or removed.
 type SlackManager struct {
-	apiServer   *api.Server
-	onEvent     hub.NotifyFunc
-	store       *store.FSStore
-	idStore     identity.Store
-	dataRoot    paths.DataRoot
-	syncTracker *syncstatus.Tracker
-	running     map[string]*runningWorkspace // teamID → workspace
+	apiServer       *api.Server
+	onEvent         hub.NotifyFunc
+	store           *store.FSStore
+	idStore         identity.Store
+	dataRoot        paths.DataRoot
+	syncTracker     *syncstatus.Tracker
+	triggerMaintain func(context.Context, account.Account)
+	running         map[string]*runningWorkspace // teamID → workspace
 }
 
 type runningWorkspace struct {
@@ -43,17 +44,24 @@ type runningWorkspace struct {
 // at the listener call sites via hub.NewMsg / NewReact / NewEdit / NewDelete.
 // Must be non-nil.
 //
+// triggerMaintain is invoked by each workspace's syncer after a successful
+// sync to compact the freshly written files. Routing through this hook
+// (instead of calling FSStore.Maintain directly) keeps eager post-sync
+// compaction and the periodic scheduler serialised on the daemon's
+// single maintenance worker. Required non-nil.
+//
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account)) *SlackManager {
 	return &SlackManager{
-		apiServer:   apiServer,
-		onEvent:     onEvent,
-		store:       s,
-		idStore:     idStore,
-		dataRoot:    dataRoot,
-		syncTracker: syncTracker,
-		running:     make(map[string]*runningWorkspace),
+		apiServer:       apiServer,
+		onEvent:         onEvent,
+		store:           s,
+		idStore:         idStore,
+		dataRoot:        dataRoot,
+		syncTracker:     syncTracker,
+		triggerMaintain: triggerMaintain,
+		running:         make(map[string]*runningWorkspace),
 	}
 }
 
@@ -156,7 +164,7 @@ func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackCon
 		slog.WarnContext(ctx, "failed to get bot auth info", "account", acct, "error", err)
 	}
 
-	messages, err := slacklistener.NewMessageStore(acct, m.store)
+	messages, err := slacklistener.NewMessageStore(acct, m.store, m.triggerMaintain)
 	if err != nil {
 		return fmt.Errorf("create message store for %s: %w", acct, err)
 	}
