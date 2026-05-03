@@ -309,16 +309,28 @@ semantics on top of `jira-cli`; for a second project, the user runs
 `jira init` again with a different config path and lists both paths
 in pigeon's `config.yaml`.
 
-### Why Per-Issue Files
+### Why Per-Issue Directories With Split Logs
 
 Same reasoning as Linear (see `linear-protocol.md`): Jira issues are
 mutable entities with stable identifiers. Filing by date gives either
 stale snapshots (file-by-created) or cross-file flutter
-(file-by-updated). The natural unit is one file per issue, named by
-the human-readable key.
+(file-by-updated). The natural unit is one directory per issue, named
+by the human-readable key, with snapshots and comments split into
+their own append-only logs:
 
-`pigeon read jira ENG-101` becomes a direct file read, and
-`pigeon grep "deploy" --source=jira` is a recursive grep.
+- **`issue.jsonl`** holds successive issue snapshots (one append per
+  poll cycle that detects a change).
+- **`comments.jsonl`** holds the comment stream (appends from each
+  poll cycle that fetched comments).
+
+Splitting the two streams keeps issue-level reads (status, assignee,
+priority, summary) independent of comment volume, and the two schemas
+(`jira-issue` vs `jira-comment` lines) differ enough that mixing them
+in one file made grepping awkward.
+
+`pigeon read jira ENG-101` becomes two file reads, and
+`pigeon grep "deploy" --source=jira` is a recursive grep across the
+issue tree.
 
 ### Multiple Sites and Projects
 
@@ -372,7 +384,7 @@ not be interesting):
 |-------|------|-------------|
 | `type` | `"jira-issue"` | Storage discriminator (injected, not from CLI) |
 | `id` | string | Jira issue numeric ID as a string (dedup key) |
-| `key` | string | Human-readable key (e.g. `ENG-142`) — used as filename |
+| `key` | string | Human-readable key (e.g. `ENG-142`) — used as the per-issue directory name |
 | `self` | string | Full REST API URL for this issue |
 | `fields.summary` | string | Issue title |
 | `fields.issuetype.name` | string | Issue type (`Bug`, `Story`, `Epic`, `Task`, `Sub-task`) |
@@ -434,22 +446,27 @@ Injecting `issueKey` makes cross-issue grep ("all comments mentioning
 
 ### Line Ordering Within a File
 
-Lines in an issue file are ordered chronologically by write time, the
-same as Linear:
+Lines in each log are ordered chronologically by write time. A typical
+`issue.jsonl` looks like:
 
 ```jsonl
 {"type":"jira-issue",...,"fields":{...,"updated":"2026-04-02T15:14:52+0000",...}}
+{"type":"jira-issue",...,"fields":{...,"updated":"2026-04-08T14:37:10+0000",...}}
+```
+
+A typical `comments.jsonl` looks like:
+
+```jsonl
 {"type":"jira-comment",...,"created":"2026-04-07T09:28:55+0000",...}
 {"type":"jira-comment",...,"created":"2026-04-07T10:36:38+0000",...}
-{"type":"jira-issue",...,"fields":{...,"updated":"2026-04-08T14:37:10+0000",...}}
 {"type":"jira-comment",...,"created":"2026-04-08T14:04:31+0000",...}
 ```
 
 Issue snapshot lines appear whenever the poller detects a change
 (status transition, assignee change, label update, new comment, etc.).
-Comment lines appear interleaved at their write time. After dedup
-(keep last by ID), the file reduces to the latest issue snapshot and
-the full set of unique comments.
+After dedup (keep last by `id`), each file reduces to the unique set
+of records — `issue.jsonl` to a single latest snapshot,
+`comments.jsonl` to the current set of comments.
 
 ## Go Type Definitions
 
@@ -558,9 +575,9 @@ Default when no filter: issues updated in the last 7 days.
 
 **Single issue** (`pigeon read jira ENG-101`):
 
-1. Read `issues/ENG-101.jsonl`.
-2. Deduplicate by `id` (keep last) — reduces to latest issue snapshot
-   + all unique comments.
+1. Read `issues/ENG-101/issue.jsonl` and `issues/ENG-101/comments.jsonl`.
+2. Deduplicate each by `id` (keep last) — reduces to the latest issue
+   snapshot plus the set of unique comments.
 3. Display: issue header (key, summary, status, assignee, priority,
    components, labels), then description (converting ADF → markdown
    via `jira-cli`'s ADF renderer when available, or passing through as
@@ -569,8 +586,8 @@ Default when no filter: issues updated in the last 7 days.
 
 **All issues** (`pigeon read jira --since=7d`):
 
-1. For each `issues/*.jsonl` file across all configured sites +
-   projects, read the last issue line.
+1. For each `issues/<key>/issue.jsonl` file across all configured sites
+   + projects, read the last issue line.
 2. Filter by `fields.updated` within the requested time window.
 3. Sort by `fields.updated` descending (most recently active first).
 4. Display as a list: key, summary, status, assignee, last update.
@@ -639,7 +656,7 @@ bodies, use `jq` to flatten:
 
 ```bash
 jq -r 'select(.type=="jira-issue") | .fields.description
-       | .. | .text? // empty' issues/ENG-142.jsonl | rg "deploy"
+       | .. | .text? // empty' issues/ENG-142/issue.jsonl | rg "deploy"
 ```
 
 On Server installations (API v2), bodies are plain wiki-markup strings
@@ -655,19 +672,23 @@ pigeon grep "deploy" --source=jira --since=7d
 
 ## Maintenance
 
-Issue files accumulate duplicate issue snapshots over time (one per
-poll cycle where the issue changed). Maintenance compacts each file:
+Both `issue.jsonl` and `comments.jsonl` accumulate duplicates over
+time — one snapshot per poll cycle that saw the issue change, and
+re-fetches of the comment list whenever the parent issue changed.
+The shared maintenance pass (`FSStore.Maintain`) treats Jira files
+the same way it treats Linear and GWS files: it walks the account
+tree, finds each `*.jsonl` under a Jira `/issues/` segment, and
+rewrites the file with stale duplicates removed.
 
-1. Deduplicate issue lines by `id` (keep last) — removes stale
+1. Deduplicate `issue.jsonl` by `id` (keep last) — removes stale
    snapshots, keeping only the latest.
-2. Deduplicate comment lines by `id` (keep last) — removes duplicates
-   from re-fetches.
-3. Rewrite the file with the deduplicated lines in chronological
-   order.
+2. Deduplicate `comments.jsonl` by `id` (keep last) — removes
+   duplicates from comment re-fetches.
+3. Each file is rewritten only when its content actually changes.
 
-Maintenance is lightweight because individual issue files are small
-(tens to low hundreds of lines). It can run opportunistically without
-blocking reads or writes.
+Read-time dedup uses the same rule, so listings remain correct
+regardless of when maintenance last ran. Maintenance is lightweight
+because individual logs are small (tens to low hundreds of lines).
 
 ## Setup
 
