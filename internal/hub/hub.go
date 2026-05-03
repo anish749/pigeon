@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/claude"
+	"github.com/anish749/pigeon/internal/mcp/ccsession"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
@@ -96,7 +96,7 @@ type Hub struct {
 // watches for new session files. Returns an error if session files cannot
 // be read (no sessions configured yet is not an error). Call Stop() to shut down.
 func New(ctx context.Context, s store.Store, dataRoot paths.DataRoot) (*Hub, error) {
-	sessions, err := claude.ListAllSessions()
+	sessions, err := ccsession.ListAllSessions()
 	if err != nil {
 		return nil, fmt.Errorf("load session files: %w", err)
 	}
@@ -128,14 +128,14 @@ func New(ctx context.Context, s store.Store, dataRoot paths.DataRoot) (*Hub, err
 // watchSessionFiles watches for changes in the sessions directory and
 // starts delivery channels for any new session files.
 func (h *Hub) watchSessionFiles(ctx context.Context) {
-	for sessions := range claude.WatchSessions(ctx) {
+	for sessions := range ccsession.WatchSessions(ctx) {
 		h.reconcileChannels(sessions)
 	}
 }
 
 // reconcileChannels ensures each session file has a delivery channel with
 // the correct session ID. Starts new channels and repoints existing ones.
-func (h *Hub) reconcileChannels(sessions []*claude.Session) {
+func (h *Hub) reconcileChannels(sessions []*ccsession.Session) {
 	for _, s := range sessions {
 		acct := account.New(s.Platform, s.Account)
 		key := acct.String()
@@ -179,11 +179,11 @@ func (h *Hub) Stop() {
 // session ID exists in a session file and the CWD matches.
 func (h *Hub) Register(s *Session) error {
 	// Validate against session files on disk.
-	sessions, err := claude.ListAllSessions()
+	sessions, err := ccsession.ListAllSessions()
 	if err != nil {
 		return fmt.Errorf("validate session: %w", err)
 	}
-	var found *claude.Session
+	var found *ccsession.Session
 	for _, cs := range sessions {
 		if cs.SessionID == s.SessionID {
 			found = cs
@@ -347,7 +347,7 @@ func (h *Hub) NotifySession(sessionID string, text string) error {
 	return s.Send(h.ctx, &TextNotificationMsg{Text: text})
 }
 
-func (h *Hub) startChannel(s *claude.Session) {
+func (h *Hub) startChannel(s *ccsession.Session) {
 	acct := account.New(s.Platform, s.Account)
 
 	ch := &channel{
@@ -476,7 +476,7 @@ func (h *Hub) drainConversation(ch *channel, conversation string, lastDelivered 
 	}
 
 	// Update cursor to now — everything up to this point has been delivered.
-	if err := claude.UpdateLastDelivered(ch.acct, now); err != nil {
+	if err := ccsession.UpdateLastDelivered(ch.acct, now); err != nil {
 		slog.Error("failed to update last_delivered",
 			"session_id", ch.sessionID, "error", err)
 	}
@@ -543,7 +543,7 @@ func (h *Hub) deliverEvent(ch *channel, evt Notification) (time.Time, bool) {
 	}
 
 	now := time.Now()
-	if err := claude.UpdateLastDelivered(ch.acct, now); err != nil {
+	if err := ccsession.UpdateLastDelivered(ch.acct, now); err != nil {
 		slog.Error("failed to update last_delivered",
 			"session_id", ch.sessionID, "account", ch.acct, "error", err)
 	}

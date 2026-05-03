@@ -18,7 +18,7 @@ import (
 )
 
 // newTestHub builds a Hub rooted at a tmp data dir with no sessions.
-// Isolates PIGEON_STATE_DIR so claude.ListAllSessions doesn't pick up
+// Isolates PIGEON_STATE_DIR so ccsession.ListAllSessions doesn't pick up
 // the developer's real session files.
 func newTestHub(t *testing.T) (*Hub, store.Store, paths.DataRoot) {
 	t.Helper()
