@@ -208,6 +208,85 @@ func TestMaintenanceManager_SchedulerEnqueuesStale(t *testing.T) {
 	}
 }
 
+// TestMaintenanceManager_SchedulerPicksUpReconciledAccounts drives the
+// scheduler tick across a config change to verify that new accounts get
+// enqueued and removed accounts stop being enqueued. This covers the
+// loop end-to-end: setAccounts updates the atomic snapshot, the
+// scheduler reads it on the next tick, and the right requests land on
+// the queue.
+func TestMaintenanceManager_SchedulerPicksUpReconciledAccounts(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
+	ctx := context.Background()
+
+	// One scheduler tick over the current snapshot. Mirrors the loop body
+	// of m.scheduler so the test can run it inline without waiting an
+	// hour for the real ticker.
+	tick := func() {
+		for _, acct := range m.snapshotAccounts() {
+			if m.isStale(acct) {
+				m.Trigger(ctx, acct)
+			}
+		}
+	}
+
+	// Drain everything currently on the requests channel into a sorted
+	// slice of keys. Used as the observable for "what did this tick
+	// enqueue?".
+	drain := func() []string {
+		var out []string
+		for {
+			select {
+			case got := <-m.requests:
+				out = append(out, got.String())
+			case <-time.After(20 * time.Millisecond):
+				sort.Strings(out)
+				return out
+			}
+		}
+	}
+
+	// Initial config: alpha only. Tick should enqueue alpha.
+	m.setAccounts(&config.Config{Linear: []config.LinearConfig{{Workspace: "alpha"}}})
+	tick()
+	if got, want := drain(), []string{"linear-alpha"}; !equalStrings(got, want) {
+		t.Fatalf("tick #1: got %v, want %v", got, want)
+	}
+
+	// Reconcile: drop alpha, add beta and gamma. Next tick targets the
+	// new set.
+	m.setAccounts(&config.Config{
+		Linear: []config.LinearConfig{
+			{Workspace: "beta"},
+			{Workspace: "gamma"},
+		},
+	})
+	tick()
+	if got, want := drain(), []string{"linear-beta", "linear-gamma"}; !equalStrings(got, want) {
+		t.Fatalf("tick #2: got %v, want %v", got, want)
+	}
+
+	// Reconcile to empty. Tick should enqueue nothing.
+	m.setAccounts(&config.Config{})
+	tick()
+	if got := drain(); len(got) != 0 {
+		t.Fatalf("tick #3: got %v, want []", got)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestMaintenanceManager_SetAccountsReconciliation exercises the live
 // account snapshot the scheduler reads on every tick. A config change
 // must add new accounts and drop removed ones from the active set so a
