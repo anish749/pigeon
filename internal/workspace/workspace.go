@@ -91,6 +91,19 @@ func (w *Workspace) Contains(acct account.Account) bool {
 	return false
 }
 
+// IsConfigured reports whether acct is present anywhere in cfg.
+// Comparison matches Workspace.Contains — equality on Platform and
+// NameSlug — so a slug-equivalent display name resolves the same as it
+// does inside a workspace.
+func IsConfigured(cfg *config.Config, acct account.Account) bool {
+	for _, a := range allAccounts(cfg) {
+		if a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug() {
+			return true
+		}
+	}
+	return false
+}
+
 // AccountsForPlatform returns the subset of workspace accounts matching the
 // given platform. Returns all accounts if platform is empty.
 func (w *Workspace) AccountsForPlatform(platform string) []account.Account {

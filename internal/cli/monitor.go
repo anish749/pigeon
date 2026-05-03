@@ -123,10 +123,8 @@ func runMonitor(cmd *cobra.Command, _ []string) error {
 	// the workspace account list if both are set.
 	switch {
 	case platform != "" && acctName != "":
-		if activeWorkspace != nil {
-			if err := validateAccountInWorkspace(account.New(platform, acctName)); err != nil {
-				return err
-			}
+		if err := validateAccountInScope(account.New(platform, acctName)); err != nil {
+			return err
 		}
 		req.Accounts = []account.Account{account.New(platform, acctName)}
 	case platform != "":

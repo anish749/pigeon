@@ -243,6 +243,39 @@ func TestContains(t *testing.T) {
 	}
 }
 
+func TestIsConfigured(t *testing.T) {
+	cfg := &config.Config{
+		Slack:    []config.SlackConfig{{Workspace: "acme-corp"}},
+		GWS:      []config.GWSConfig{{Email: "work@co.com"}},
+		WhatsApp: []config.WhatsAppConfig{{Account: "+15551234567"}},
+		Linear:   []config.LinearConfig{{Workspace: "eng"}},
+	}
+
+	tests := []struct {
+		name string
+		acct account.Account
+		want bool
+	}{
+		{"slack configured", account.New("slack", "acme-corp"), true},
+		{"gws configured", account.New("gws", "work@co.com"), true},
+		{"whatsapp configured", account.New("whatsapp", "+15551234567"), true},
+		{"linear configured", account.New("linear-issues", "eng"), true},
+		{"slack typo not configured", account.New("slack", "acme-crop"), false},
+		{"unknown platform", account.New("nope", "acme-corp"), false},
+		// NameSlug parity with Workspace.Contains: a display-name variant
+		// that slugifies the same as a configured account is treated as
+		// configured.
+		{"slug-equivalent name", account.New("slack", "Acme Corp"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsConfigured(cfg, tt.acct); got != tt.want {
+				t.Errorf("IsConfigured(%s) = %v, want %v", tt.acct.Display(), got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAccountsForPlatform(t *testing.T) {
 	ws := &Workspace{
 		Name: "work",
