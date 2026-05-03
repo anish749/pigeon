@@ -32,7 +32,7 @@ func TestAllAccounts(t *testing.T) {
 		account.New("gws", "user@example.com"),
 		account.New("whatsapp", "+15551234567"),
 		account.New("linear", "my-team"),
-		account.New("jira-issues", "atlassian"),
+		account.New("jira", "atlassian"),
 	}
 	wantKeys := make([]string, 0, len(want))
 	for _, a := range want {

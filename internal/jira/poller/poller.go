@@ -85,7 +85,7 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 // label returns a syncstatus key that distinguishes per-project pollers
-// within the same account. Account.Display is something like "jira-issues/Tubular";
+// within the same account. Account.Display is something like "jira/Tubular";
 // appending the project key avoids collisions when one account has many
 // projects.
 func (p *Poller) label() string {

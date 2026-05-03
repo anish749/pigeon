@@ -25,6 +25,7 @@ import (
 //   - identity people file (parent dir == IdentitySubdir)
 //   - Drive subtree: attachments → formula CSV → CSV → markdown → comments JSONL
 //   - Linear per-issue logs (issue.jsonl / comments.jsonl, under linear platform)
+//   - Jira per-issue logs (issue.jsonl / comments.jsonl, under jira platform)
 //   - thread file (parent dir == ThreadsSubdir, filename != date)
 //   - YYYY-MM-DD.jsonl, dispatched into Email/Calendar/Messaging by location
 //
@@ -104,14 +105,28 @@ func Classify(path string) DataFile {
 		}
 	}
 
-	// 7. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
+	// 7. Jira per-issue logs:
+	//   <root>/jira/<acct>/<project>/issues/<KEY>/issue.jsonl
+	//   <root>/jira/<acct>/<project>/issues/<KEY>/comments.jsonl
+	// Same shape as Linear but a distinct platform segment so the two
+	// platforms route to their own typed file kinds.
+	if pathHasSegment(path, JiraPlatform) {
+		switch base {
+		case jiraIssueFilename:
+			return JiraIssueFile(path)
+		case jiraCommentsFilename:
+			return JiraCommentsFile(path)
+		}
+	}
+
+	// 8. Thread file: <conv>/threads/<ts>.jsonl. IsThreadFile already
 	// excludes YYYY-MM-DD.jsonl so a conversation literally named "threads"
 	// keeps its date children classified as messaging-date below.
 	if IsThreadFile(path) {
 		return ThreadFile(path)
 	}
 
-	// 8. Date-named JSONL — disambiguate by location segment.
+	// 9. Date-named JSONL — disambiguate by location segment.
 	if IsDateFile(base) {
 		switch {
 		case pathHasSegment(path, GmailSubdir):

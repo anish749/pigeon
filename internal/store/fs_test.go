@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store/modelv1"
@@ -938,6 +940,101 @@ func TestMaintain_LinearDedup(t *testing.T) {
 		t.Fatalf("comments.jsonl: got %d lines, want 1 (deduped)", len(commentLines))
 	}
 	if got := commentLines[0].LinearComment.Serialized["body"]; got != "edited" {
+		t.Errorf("comments.jsonl: body = %v, want %q (last occurrence kept)", got, "edited")
+	}
+}
+
+// TestMaintain_JiraDedup is the Jira analogue of TestMaintain_LinearDedup:
+// verifies maintainFile dispatches JiraIssueFile and JiraCommentsFile through
+// the id-dedup compaction (regression guard for adding a typed kind without
+// updating the type-switch).
+func TestMaintain_JiraDedup(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New(paths.JiraPlatform, "acme")
+	issueDir := root.AccountFor(acct).Jira().Project("ENG").Issue("ENG-101")
+
+	issueLine := func(id, summary, updated string) modelv1.Line {
+		return modelv1.Line{
+			Type: modelv1.LineJiraIssue,
+			JiraIssue: &modelv1.JiraIssue{
+				Runtime: jira.Issue{
+					Key:    "ENG-101",
+					Fields: jira.IssueFields{Summary: summary, Updated: updated},
+				},
+				Serialized: map[string]any{
+					"id":  id,
+					"key": "ENG-101",
+					"fields": map[string]any{
+						"summary": summary,
+						"updated": updated,
+					},
+				},
+			},
+		}
+	}
+	commentLine := func(id, body, updated string) modelv1.Line {
+		return modelv1.Line{
+			Type: modelv1.LineJiraComment,
+			JiraComment: &modelv1.JiraComment{
+				Runtime: modelv1.JiraCommentRuntime{
+					ID:       id,
+					IssueKey: "ENG-101",
+					Created:  "2026-04-01T11:00:00.000+0000",
+					Updated:  updated,
+				},
+				Serialized: map[string]any{
+					"id":       id,
+					"issueKey": "ENG-101",
+					"body":     body,
+					"created":  "2026-04-01T11:00:00.000+0000",
+					"updated":  updated,
+				},
+			},
+		}
+	}
+
+	for _, line := range []modelv1.Line{
+		issueLine("10042", "Old summary", "2026-04-01T10:00:00.000+0000"),
+		issueLine("10042", "New summary", "2026-04-02T10:00:00.000+0000"),
+	} {
+		if err := s.AppendLine(issueDir.IssueFile(), line); err != nil {
+			t.Fatalf("AppendLine issue: %v", err)
+		}
+	}
+	for _, line := range []modelv1.Line{
+		commentLine("10501", "first draft", "2026-04-01T11:00:00.000+0000"),
+		commentLine("10501", "edited", "2026-04-01T11:30:00.000+0000"),
+	} {
+		if err := s.AppendLine(issueDir.CommentsFile(), line); err != nil {
+			t.Fatalf("AppendLine comment: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	issueLines, err := s.ReadLines(issueDir.IssueFile())
+	if err != nil {
+		t.Fatalf("ReadLines issue.jsonl: %v", err)
+	}
+	if len(issueLines) != 1 {
+		t.Fatalf("issue.jsonl: got %d lines, want 1 (deduped)", len(issueLines))
+	}
+	fields, _ := issueLines[0].JiraIssue.Serialized["fields"].(map[string]any)
+	if got := fields["summary"]; got != "New summary" {
+		t.Errorf("issue.jsonl: summary = %v, want %q (last occurrence kept)", got, "New summary")
+	}
+
+	commentLines, err := s.ReadLines(issueDir.CommentsFile())
+	if err != nil {
+		t.Fatalf("ReadLines comments.jsonl: %v", err)
+	}
+	if len(commentLines) != 1 {
+		t.Fatalf("comments.jsonl: got %d lines, want 1 (deduped)", len(commentLines))
+	}
+	if got := commentLines[0].JiraComment.Serialized["body"]; got != "edited" {
 		t.Errorf("comments.jsonl: body = %v, want %q (last occurrence kept)", got, "edited")
 	}
 }

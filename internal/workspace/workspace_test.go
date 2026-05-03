@@ -165,7 +165,7 @@ func TestGetCurrentWorkspace_IncludesJira(t *testing.T) {
 	}
 	want := []account.Account{
 		account.New("slack", "acme-corp"),
-		account.New("jira-issues", "acme"),
+		account.New("jira", "acme"),
 	}
 	if len(ws.Accounts) != len(want) {
 		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
@@ -200,7 +200,7 @@ func TestGetCurrentWorkspace_NoWorkspaceReturnsAll(t *testing.T) {
 	}
 	// Jira account is constructed from JiraConfig.Account() so it carries
 	// the persisted AccountName, not derived at runtime from any YAML.
-	want := account.New("jira-issues", "acme")
+	want := account.New("jira", "acme")
 	if ws.Accounts[4] != want {
 		t.Errorf("jira account = %v, want %v", ws.Accounts[4], want)
 	}

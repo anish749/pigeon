@@ -172,10 +172,10 @@ Each poll cycle:
    (v2), looping pages until exhausted (see "Pagination" above).
 4. For each returned `*jira.Issue`, take its `.Key`, then:
    a. Call `client.GetIssueRaw(key)` (v3) or `client.GetIssueV2Raw(key)` (v2).
-   b. Append the issue snapshot to `issues/{KEY}.jsonl` (with
+   b. Append the issue snapshot to `issues/{KEY}/issue.jsonl` (with
       `fields.comment.comments` removed from the line).
-   c. Append each comment as a separate `jira-comment` line to the
-      same file.
+   c. Append each comment as a separate `jira-comment` line to
+      `issues/{KEY}/comments.jsonl`.
 5. Update the cursor to the maximum `fields.updated` across all issues
    fetched in this batch.
 6. Save the cursor.
@@ -276,14 +276,20 @@ dedup on disk.
 
 ```
 ~/.local/share/pigeon/
-└── jira-issues/                           # platform
+└── jira/                                  # platform
     └── {account-slug}/                    # first DNS label of the server URL
         └── {project-key}/                 # e.g. ENG (case preserved from project.key)
             ├── .sync-cursors.yaml         # cursor state
             └── issues/
-                ├── ENG-101.jsonl          # all activity for ENG-101
-                ├── ENG-142.jsonl          # all activity for ENG-142
-                └── ENG-205.jsonl
+                ├── ENG-101/
+                │   ├── issue.jsonl        # snapshots
+                │   └── comments.jsonl     # comments
+                ├── ENG-142/
+                │   ├── issue.jsonl
+                │   └── comments.jsonl
+                └── ENG-205/
+                    ├── issue.jsonl
+                    └── comments.jsonl
 ```
 
 `{account-slug}` is the lowercased first DNS label of the `server`
@@ -333,7 +339,7 @@ another entry.
 
 ### Cursor File
 
-Path: `jira-issues/{account-slug}/{project-key}/.sync-cursors.yaml`
+Path: `jira/{account-slug}/{project-key}/.sync-cursors.yaml`
 
 ```yaml
 issues:
@@ -595,22 +601,22 @@ Standard text tools work directly on the JSONL files:
 
 ```bash
 # Find all issues and comments mentioning "deploy"
-rg "deploy" ~/.local/share/pigeon/jira-issues/
+rg "deploy" ~/.local/share/pigeon/jira/
 
-# Find issues assigned to alice
-rg '"displayName":"Alice' ~/.local/share/pigeon/jira-issues/acme/ENG/issues/
+# Find issues assigned to alice (issue snapshots only)
+rg '"displayName":"Alice' ~/.local/share/pigeon/jira/acme/ENG/issues/*/issue.jsonl
 
 # Find all In Progress issues
-rg '"name":"In Progress"' ~/.local/share/pigeon/jira-issues/acme/ENG/issues/
+rg '"name":"In Progress"' ~/.local/share/pigeon/jira/acme/ENG/issues/*/issue.jsonl
 
 # Find comments by bob
-rg '"type":"jira-comment".*"displayName":"Bob' ~/.local/share/pigeon/jira-issues/acme/ENG/issues/
+rg '"displayName":"Bob' ~/.local/share/pigeon/jira/acme/ENG/issues/*/comments.jsonl
 
-# Count lines per issue (proxy for activity)
-wc -l ~/.local/share/pigeon/jira-issues/acme/ENG/issues/*.jsonl
+# Count comments per issue
+wc -l ~/.local/share/pigeon/jira/acme/ENG/issues/*/comments.jsonl
 
 # Find all internal (non-public) comments
-rg '"type":"jira-comment".*"jsdPublic":false' ~/.local/share/pigeon/jira-issues/
+rg '"jsdPublic":false' ~/.local/share/pigeon/jira/*/issues/*/comments.jsonl
 ```
 
 Because issues and comments are stored as raw CLI JSON, any field the
@@ -812,7 +818,7 @@ from the config; environment variables play no role at runtime.
 `setup-jira` also captures the account name from the bound YAML's
 `server` URL (first DNS label, lowercased) and persists it on the
 entry as `account`, alongside `jira_config` and `api_token`. The
-on-disk identifier is the slug of that name (`jira-issues/{slug}/...`);
+on-disk identifier is the slug of that name (`jira/{slug}/...`);
 persisting the name lets the daemon and workspace machinery construct
 the account without reopening the jira-cli YAML.
 

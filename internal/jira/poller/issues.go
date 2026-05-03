@@ -165,13 +165,13 @@ func fetchAndWrite(
 			continue
 		}
 
-		file := projDir.IssueFile(ref.Key)
-		if err := s.AppendLine(file, issueLine); err != nil {
+		issueDir := projDir.Issue(ref.Key)
+		if err := s.AppendLine(issueDir.IssueFile(), issueLine); err != nil {
 			errs = append(errs, fmt.Errorf("write issue %s: %w", ref.Key, err))
 			continue
 		}
 		for _, cl := range commentLines {
-			if err := s.AppendLine(file, cl); err != nil {
+			if err := s.AppendLine(issueDir.CommentsFile(), cl); err != nil {
 				errs = append(errs, fmt.Errorf("write comment for %s: %w", ref.Key, err))
 			}
 		}
