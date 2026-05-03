@@ -231,7 +231,7 @@ not be interesting):
 |-------|------|-------------|
 | `type` | `"linear-issue"` | Storage discriminator (injected, not from CLI) |
 | `id` | string | Linear issue UUID (dedup key) |
-| `identifier` | string | Human-readable identifier (e.g. `ENG-142`) — used as filename |
+| `identifier` | string | Human-readable identifier (e.g. `ENG-142`) — used as the per-issue directory name |
 | `title` | string | Issue title |
 | `url` | string | Linear web URL |
 | `createdAt` | RFC 3339 | When the issue was created |
