@@ -237,25 +237,3 @@ func TestDriveFileDir_AttachmentFile(t *testing.T) {
 		t.Errorf("AttachmentFile() = %q, want %q", got, want)
 	}
 }
-
-func TestIsGWSFile(t *testing.T) {
-	tests := []struct {
-		path string
-		want bool
-	}{
-		{"/data/gws/user/gmail/2026-04-07.jsonl", true},
-		{"/data/gws/user/gcalendar/primary/2026-04-07.jsonl", true},
-		{"/data/gws/user/gdrive/doc-abc/comments.jsonl", true},
-		{"/data/linear/workspace/issues/PROJ-123/issue.jsonl", true},
-		{"/data/linear/workspace/issues/PROJ-123/comments.jsonl", true},
-		{"/data/slack/acme/issues/2026-04-07.jsonl", false},
-		{"/data/slack/acme/#general/2026-04-07.jsonl", false},
-		{"/data/slack/acme/#general/threads/P1.jsonl", false},
-		{"/data/slack/acme/identity/people.jsonl", false},
-	}
-	for _, tt := range tests {
-		if got := IsGWSFile(tt.path); got != tt.want {
-			t.Errorf("IsGWSFile(%q) = %v, want %v", tt.path, got, tt.want)
-		}
-	}
-}

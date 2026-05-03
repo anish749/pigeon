@@ -1,11 +1,5 @@
 # Bugs / Tech Debt
 
-## Implement maintenance in the daemon
-
-This needs to run per account because the in case of WhatsApp the daemon may hold a setup lock, like the db lock is n needed.
-So just think about the case when maintenance is running and there's a separate setup WhatsApp command running.
-This means like only one of the things, either the daemon or the one of the clients needs to first gain the lock on that account and then they can work.
-
 ## Slack mentions are not being delivered to Claude
 
 When someone mentions inside a thread uh or I don't know if it in case of other other states what happens, but plot didn't work.

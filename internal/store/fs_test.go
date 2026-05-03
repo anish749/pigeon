@@ -830,6 +830,90 @@ func TestMaintain_GWSDedup(t *testing.T) {
 	}
 }
 
+// TestMaintain_LinearDedup verifies that the Classify-based dispatch in
+// maintainFile routes Linear's split logs (issue.jsonl, comments.jsonl)
+// through DedupGWS — the same id-based dedup the rest of the GWS family
+// uses. Regression guard for the IsGWSFile → Classify refactor: if a
+// future paths kind lands without an explicit case, the maintainFile
+// type-switch fails loud rather than silently miscompacting.
+func TestMaintain_LinearDedup(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+	acct := account.New("linear", "my-team")
+	issueDir := root.AccountFor(acct).Linear().Issue("ENG-101")
+
+	issue := func(id, title, updatedAt string) modelv1.Line {
+		return modelv1.Line{
+			Type: modelv1.LineLinearIssue,
+			Issue: &modelv1.LinearIssue{
+				Runtime: modelv1.LinearIssueRuntime{
+					ID: id, Identifier: "ENG-101", UpdatedAt: updatedAt,
+				},
+				Serialized: map[string]any{
+					"id": id, "identifier": "ENG-101", "title": title, "updatedAt": updatedAt,
+				},
+			},
+		}
+	}
+	comment := func(id, body, createdAt string) modelv1.Line {
+		return modelv1.Line{
+			Type: modelv1.LineLinearComment,
+			LinearComment: &modelv1.LinearComment{
+				Runtime: modelv1.LinearCommentRuntime{ID: id, CreatedAt: createdAt},
+				Serialized: map[string]any{
+					"id": id, "body": body, "createdAt": createdAt,
+				},
+			},
+		}
+	}
+
+	// Two snapshots of the same issue (one stale, one current) and two
+	// fetches of the same comment (the second carries a body edit). After
+	// maintenance each file should keep only the last occurrence of each id.
+	for _, line := range []modelv1.Line{
+		issue("uuid-1", "Old title", "2026-04-01T10:00:00Z"),
+		issue("uuid-1", "New title", "2026-04-02T10:00:00Z"),
+	} {
+		if err := s.AppendLine(issueDir.IssueFile(), line); err != nil {
+			t.Fatalf("AppendLine issue: %v", err)
+		}
+	}
+	for _, line := range []modelv1.Line{
+		comment("c1", "first draft", "2026-04-01T11:00:00Z"),
+		comment("c1", "edited", "2026-04-01T11:00:00Z"),
+	} {
+		if err := s.AppendLine(issueDir.CommentsFile(), line); err != nil {
+			t.Fatalf("AppendLine comment: %v", err)
+		}
+	}
+
+	if err := s.Maintain(acct); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+
+	issueLines, err := s.ReadLines(issueDir.IssueFile())
+	if err != nil {
+		t.Fatalf("ReadLines issue.jsonl: %v", err)
+	}
+	if len(issueLines) != 1 {
+		t.Fatalf("issue.jsonl: got %d lines, want 1 (deduped)", len(issueLines))
+	}
+	if got := issueLines[0].Issue.Serialized["title"]; got != "New title" {
+		t.Errorf("issue.jsonl: title = %v, want %q (last occurrence kept)", got, "New title")
+	}
+
+	commentLines, err := s.ReadLines(issueDir.CommentsFile())
+	if err != nil {
+		t.Fatalf("ReadLines comments.jsonl: %v", err)
+	}
+	if len(commentLines) != 1 {
+		t.Fatalf("comments.jsonl: got %d lines, want 1 (deduped)", len(commentLines))
+	}
+	if got := commentLines[0].LinearComment.Serialized["body"]; got != "edited" {
+		t.Errorf("comments.jsonl: body = %v, want %q (last occurrence kept)", got, "edited")
+	}
+}
+
 func TestRemoveDriveFile_SluggedDir(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := NewFSStore(root)

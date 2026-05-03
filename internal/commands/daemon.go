@@ -181,6 +181,13 @@ func DaemonRun(version string) error {
 	jiraMgr := daemon.NewJiraManager(store, tracker)
 	go jiraMgr.Run(ctx, cfg.Jira)
 
+	// Background compaction for every configured account: one pass at
+	// start, then a periodic ticker. Until this manager existed only the
+	// Slack listener ran maintenance (eagerly after each sync), so logs
+	// for the other platforms grew unboundedly with duplicate snapshots.
+	maintMgr := daemon.NewMaintenanceManager(store)
+	go maintMgr.Run(ctx, cfg)
+
 	go apiServer.Start(ctx, paths.SocketPath())
 
 	// Periodic update check — re-execs the daemon when a new version is installed.

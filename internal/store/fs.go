@@ -831,6 +831,22 @@ func cleanupStaleDriveMeta(dir, keepName string) error {
 	return nil
 }
 
+// maintainFile compacts one JSONL log file in place. The compaction
+// strategy is selected by paths.Classify so the dispatch is type-checked
+// against the path registry — same pattern as LatestTs and listConvFor.
+//
+//   - ThreadFile         → messaging thread compaction (parent + replies +
+//     reactions/edits/deletes reconciled).
+//   - MessagingDateFile  → messaging date compaction (same pipeline, sorted
+//   - deduped + react/edit/delete applied).
+//   - Email/Calendar/Linear/Jira logs and Drive comments
+//     → ID-based dedup (keep last by id).
+//   - Other typed kinds  → explicit no-op (sidecars, queues, etc.).
+//   - Unrecognised paths → logged and skipped.
+//
+// A typed kind that lands in paths/ without an explicit case here is a
+// regression: the default arm fails loud rather than falling back to a
+// silent miscompaction.
 func (s *FSStore) maintainFile(path string) error {
 	mu := s.fileMu(path)
 	mu.Lock()
@@ -841,39 +857,61 @@ func (s *FSStore) maintainFile(path string) error {
 		return err
 	}
 
-	// Thread files live under <conversation>/threads/<ts>.jsonl. A date
-	// file for a conversation literally named "threads" has the same
-	// parent dir name but must be compacted as a date file.
-	if paths.IsThreadFile(path) {
-		tf, parseErr := modelv1.ParseThreadFile(data)
-		if parseErr != nil {
-			slog.Warn("skipping compaction: parse thread file failed", "file", path, "error", parseErr)
-			return nil
-		}
-		compacted := compact.CompactThread(tf)
-		if compacted == nil {
-			return os.Remove(path) // parent was deleted
-		}
-		newData, err := modelv1.MarshalThreadFile(compacted)
-		if err != nil {
-			return fmt.Errorf("marshal thread: %w", err)
-		}
-		if len(newData) == 0 {
-			slog.Warn("skipping compaction: would empty file", "file", path)
-			return nil
-		}
-		if string(newData) == string(data) {
-			return nil
-		}
-		return os.WriteFile(path, newData, 0644)
+	switch f := paths.Classify(path).(type) {
+	case paths.ThreadFile:
+		return s.compactThreadFile(path, data)
+	case paths.MessagingDateFile:
+		return s.compactMessagingDateFile(path, data)
+	case paths.EmailDateFile, paths.CalendarDateFile,
+		paths.LinearIssueFile, paths.LinearCommentsFile,
+		paths.JiraIssueFile, paths.CommentsFile:
+		return s.compactIDDedupedLog(path, data)
+	case paths.PeopleFile, paths.PollMetricsFile, paths.MaintenanceFile,
+		paths.SyncCursorsFile, paths.PendingDeletesFile,
+		paths.ConvMetaFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile,
+		paths.AttachmentFile, paths.TabFile, paths.SheetFile, paths.FormulaFile,
+		paths.DriveMetaFile:
+		// Sidecars, queues, identity, content files — not maintained.
+		return nil
+	case nil:
+		slog.Warn("maintainFile: skipping unrecognised file", "path", path)
+		return nil
+	default:
+		return fmt.Errorf("maintainFile: unhandled DataFile kind %T (paths registry extended without updating dispatch)", f)
 	}
+}
 
-	// GWS and Linear JSONL files use ID-based dedup instead of the
-	// messaging compaction pipeline (which only handles msg/react/edit/delete).
-	if paths.IsGWSFile(path) {
-		return s.maintainGWSFile(path, data)
+// compactThreadFile compacts a thread file: dedup by id, reconcile
+// reactions, apply edits and deletes. Returns nil after deleting the file
+// when the parent message has been deleted.
+func (s *FSStore) compactThreadFile(path string, data []byte) error {
+	tf, parseErr := modelv1.ParseThreadFile(data)
+	if parseErr != nil {
+		slog.Warn("skipping compaction: parse thread file failed", "file", path, "error", parseErr)
+		return nil
 	}
+	compacted := compact.CompactThread(tf)
+	if compacted == nil {
+		return os.Remove(path) // parent was deleted
+	}
+	newData, err := modelv1.MarshalThreadFile(compacted)
+	if err != nil {
+		return fmt.Errorf("marshal thread: %w", err)
+	}
+	if len(newData) == 0 {
+		slog.Warn("skipping compaction: would empty file", "file", path)
+		return nil
+	}
+	if string(newData) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, newData, 0644)
+}
 
+// compactMessagingDateFile compacts a messaging date file: dedup messages
+// by id, reconcile reactions, apply edits, drop deleted messages, then
+// sort by ts.
+func (s *FSStore) compactMessagingDateFile(path string, data []byte) error {
 	df, parseErr := modelv1.ParseDateFile(data)
 	if parseErr != nil {
 		slog.Warn("skipping compaction: parse date file failed", "file", path, "error", parseErr)
@@ -894,9 +932,11 @@ func (s *FSStore) maintainFile(path string) error {
 	return os.WriteFile(path, newData, 0644)
 }
 
-// maintainGWSFile compacts a GWS or Linear JSONL file by deduplicating
-// lines by ID (keeping the last occurrence of each).
-func (s *FSStore) maintainGWSFile(path string, data []byte) error {
+// compactIDDedupedLog compacts an append-only JSONL log by deduplicating
+// lines by id (keeping the last occurrence of each). Used for Gmail,
+// Calendar, Linear, Jira, and Drive comments — every shape that uses the
+// keep-last-by-id rule rather than messaging's react/edit/delete pipeline.
+func (s *FSStore) compactIDDedupedLog(path string, data []byte) error {
 	lines, parseErr := parseLines(data)
 	if parseErr != nil {
 		slog.Warn("skipping compaction: parse GWS file failed", "file", path, "error", parseErr)

@@ -79,3 +79,7 @@ The outbox review screen now supports toggling send mode with the `v` key before
 ## ~~Validate date where calendar events are attributed~~ — fixed in #261
 
 Multi-day events are now expanded to all spanned date files instead of only the start date.
+
+## ~~Implement maintenance in the daemon~~ — done
+
+The daemon now runs `FSStore.Maintain` per configured account: one immediate pass at startup, then every 24h via `MaintenanceManager`. Slack continues to run an eager pass after each sync; all other platforms get the periodic ticker. The original concern about WhatsApp setup locks does not apply — `Maintain` only walks JSONL log files, not the WhatsApp SQLite DB, so the CLI setup command and the daemon's maintenance loop don't compete for the same lock.
