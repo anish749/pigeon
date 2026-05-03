@@ -109,40 +109,12 @@ func (s *FS) DeleteWorkstream(id string) error {
 	return s.save(workstreamsFile, out)
 }
 
-// workstreamWithLegacyState is the on-disk shape used during the
-// state-removal migration: a Workstream plus a transitional `state`
-// field. New writes won't include it (the field is gone from the
-// canonical model), but existing files persisted before the migration
-// still carry it. When a stale "resolved" row is observed we drop it
-// (those were merge sources whose target absorbed the focus); other
-// values are ignored and the row keeps its other fields.
-type workstreamWithLegacyState struct {
-	models.Workstream
-	State string `json:"state,omitempty"`
-}
-
 func (s *FS) loadWorkstreams() ([]models.Workstream, error) {
-	var raw []workstreamWithLegacyState
-	if err := s.load(workstreamsFile, &raw); err != nil {
+	var list []models.Workstream
+	if err := s.load(workstreamsFile, &list); err != nil {
 		return nil, err
 	}
-	out := make([]models.Workstream, 0, len(raw))
-	rewrite := false
-	for _, e := range raw {
-		if e.State != "" {
-			rewrite = true
-		}
-		if e.State == "resolved" {
-			continue
-		}
-		out = append(out, e.Workstream)
-	}
-	if rewrite {
-		if err := s.save(workstreamsFile, out); err != nil {
-			return nil, fmt.Errorf("migrate workstreams: %w", err)
-		}
-	}
-	return out, nil
+	return list, nil
 }
 
 // --- Proposals ---

@@ -1,9 +1,6 @@
 package store
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -137,39 +134,4 @@ func TestFSRoundTrip(t *testing.T) {
 			t.Errorf("expected empty, got %d", len(props))
 		}
 	})
-}
-
-func TestFS_MigratesLegacyStateField(t *testing.T) {
-	dir := t.TempDir()
-	legacy := []byte(`[
-  {"id":"ws-keep","name":"Keep","workspace":"w","state":"active","focus":"keep me","created":"2026-04-01T00:00:00Z"},
-  {"id":"ws-dormant","name":"Dormant","workspace":"w","state":"dormant","focus":"still here","created":"2026-04-02T00:00:00Z"},
-  {"id":"ws-gone","name":"Gone","workspace":"w","state":"resolved","focus":"merged away","created":"2026-04-03T00:00:00Z"}
-]`)
-	if err := os.WriteFile(filepath.Join(dir, workstreamsFile), legacy, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	s := NewFS(dir)
-	got, err := s.ListWorkstreams()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 workstreams after migration (resolved dropped), got %d: %+v", len(got), got)
-	}
-	for _, w := range got {
-		if w.ID == "ws-gone" {
-			t.Errorf("resolved workstream should have been dropped: %+v", w)
-		}
-	}
-
-	// File should be rewritten without the state field.
-	rewritten, err := os.ReadFile(filepath.Join(dir, workstreamsFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(rewritten), `"state"`) {
-		t.Errorf("rewritten file still has state field:\n%s", rewritten)
-	}
 }
