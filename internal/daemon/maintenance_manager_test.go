@@ -14,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 // TestMaintenanceManager_RequestsSerializedThroughChannel fires Trigger
@@ -24,7 +25,7 @@ import (
 func TestMaintenanceManager_RequestsSerializedThroughChannel(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -88,7 +89,7 @@ func TestMaintenanceManager_RequestsSerializedThroughChannel(t *testing.T) {
 func TestMaintenanceManager_TriggerBlocksWhenBufferFull(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 
 	ctx := context.Background()
 
@@ -128,7 +129,7 @@ func TestMaintenanceManager_TriggerBlocksWhenBufferFull(t *testing.T) {
 func TestMaintenanceManager_TriggerReturnsOnContextCancel(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -157,7 +158,7 @@ func TestMaintenanceManager_TriggerReturnsOnContextCancel(t *testing.T) {
 func TestMaintenanceManager_IsStale(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 
 	acct := account.New("linear", "ws")
 
@@ -186,7 +187,7 @@ func TestMaintenanceManager_IsStale(t *testing.T) {
 func TestMaintenanceManager_SchedulerEnqueuesStale(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 	m.setAccounts(&config.Config{Linear: []config.LinearConfig{{Workspace: "alpha"}}})
 
 	// Scheduler tick logic, executed inline so we don't wait an hour.
@@ -214,7 +215,7 @@ func TestMaintenanceManager_SchedulerEnqueuesStale(t *testing.T) {
 func TestMaintenanceManager_SetAccountsReconciliation(t *testing.T) {
 	root := paths.NewDataRoot(t.TempDir())
 	s := store.NewFSStore(root)
-	m := NewMaintenanceManager(s, root)
+	m := NewMaintenanceManager(s, root, syncstatus.NewTracker())
 
 	keys := func() []string {
 		var out []string
@@ -257,5 +258,109 @@ func TestMaintenanceManager_SetAccountsReconciliation(t *testing.T) {
 	m.setAccounts(&config.Config{})
 	if got := keys(); len(got) != 0 {
 		t.Fatalf("after empty config: got %v, want []", got)
+	}
+}
+
+// TestMaintenanceManager_DefersWhenSyncing covers the wait-for-sync
+// behaviour: a Trigger arriving while the account is syncing must not
+// run Maintain immediately. The waiter holds onto the request and
+// re-Triggers once Tracker.Done fires for that account.
+//
+// The test drives the worker's dispatch logic inline rather than running
+// m.worker as a goroutine — the goroutine version would consume the
+// re-Triggered request before the test could observe it.
+func TestMaintenanceManager_DefersWhenSyncing(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	tracker := syncstatus.NewTracker()
+	m := NewMaintenanceManager(s, root, tracker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	acct := account.New("linear", "ws")
+	tracker.Start(acct.String(), syncstatus.KindPoll)
+	m.Trigger(ctx, acct)
+
+	// Worker step: pop, see syncing, defer.
+	popped := <-m.requests
+	done := tracker.WaitForDone(popped.String())
+	if done == nil {
+		t.Fatal("WaitForDone returned nil while account was syncing")
+	}
+	m.deferUntilSyncDone(ctx, popped, done)
+
+	// Nothing should land on m.requests while sync is in progress.
+	select {
+	case got := <-m.requests:
+		t.Fatalf("re-Triggered while syncing: %v", got)
+	case <-time.After(20 * time.Millisecond):
+		// expected
+	}
+
+	// Finish the sync — the waiter wakes up and re-Triggers.
+	tracker.Done(acct.String(), nil)
+	select {
+	case got := <-m.requests:
+		if got.String() != acct.String() {
+			t.Errorf("re-Triggered account = %q, want %q", got.String(), acct.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not re-Trigger after Tracker.Done")
+	}
+}
+
+// TestMaintenanceManager_DefersCoalesceWhileSyncing verifies multiple
+// Triggers arriving for one syncing account collapse into a single
+// requeue once sync finishes — otherwise N Triggers during one sync
+// would yield N back-to-back Maintain runs.
+func TestMaintenanceManager_DefersCoalesceWhileSyncing(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	tracker := syncstatus.NewTracker()
+	m := NewMaintenanceManager(s, root, tracker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	acct := account.New("linear", "ws")
+	tracker.Start(acct.String(), syncstatus.KindPoll)
+
+	// Drive the worker logic inline: 5 Triggers all pop and defer.
+	const N = 5
+	for i := 0; i < N; i++ {
+		m.Trigger(ctx, acct)
+	}
+	for i := 0; i < N; i++ {
+		popped := <-m.requests
+		done := tracker.WaitForDone(popped.String())
+		if done == nil {
+			t.Fatalf("call %d: WaitForDone returned nil while syncing", i)
+		}
+		m.deferUntilSyncDone(ctx, popped, done)
+	}
+
+	// All 5 deferrals collapse into a single waiter goroutine.
+	m.deferredMu.Lock()
+	pending := len(m.deferred)
+	m.deferredMu.Unlock()
+	if pending != 1 {
+		t.Errorf("deferred set has %d entries, want 1 (coalesced)", pending)
+	}
+
+	tracker.Done(acct.String(), nil)
+
+	// Exactly one re-Trigger lands.
+	select {
+	case <-m.requests:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not re-Trigger")
+	}
+	select {
+	case extra := <-m.requests:
+		t.Fatalf("second re-Trigger landed (%q); coalescing failed", extra.String())
+	case <-time.After(50 * time.Millisecond):
+		// expected
 	}
 }

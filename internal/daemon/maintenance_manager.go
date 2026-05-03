@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
 const (
@@ -40,8 +42,7 @@ const (
 // MaintenanceManager runs FSStore.Maintain serially across all configured
 // accounts. A single worker goroutine consumes a buffered channel; both
 // the periodic scheduler and external Trigger calls (e.g. slack post-sync)
-// send into the same channel. Two structural properties fall out of this
-// shape:
+// send into the same channel. Three structural properties fall out:
 //
 //   - At most one Maintain pass is in flight across the whole daemon, so
 //     parallel rewrites of the same files are impossible by construction.
@@ -49,6 +50,13 @@ const (
 //     (slack/sync, scheduler) wait for the worker to catch up; silently
 //     dropping requests would leave the writer thinking maintenance is
 //     queued when it isn't.
+//   - Maintain never runs while a sync is active for the same account.
+//     When the worker pops a request whose account is currently syncing,
+//     it spawns a waiter that subscribes to syncstatus.Tracker.WaitForDone
+//     and re-Triggers when the sync completes. The pending-deferral set
+//     coalesces concurrent triggers for the same syncing account into a
+//     single requeue, so eager (post-sync) and periodic compaction never
+//     contend with active writers.
 //
 // The scheduler uses the wall-clock mtime of `.maintenance.json` (which
 // FSStore.Maintain bumps on every successful run) as the staleness gate.
@@ -58,20 +66,34 @@ const (
 type MaintenanceManager struct {
 	store    *store.FSStore
 	root     paths.DataRoot
+	tracker  *syncstatus.Tracker
 	requests chan account.Account
 
 	// accounts is the live snapshot of configured accounts, refreshed
 	// on each config change. atomic so the scheduler reads without
 	// locking.
 	accounts atomic.Pointer[[]account.Account]
+
+	// deferred coalesces multiple Trigger arrivals for one account
+	// while it is syncing into a single waiter goroutine. Without this
+	// dedup, N triggers during one sync would each spawn a waiter and
+	// each requeue at sync completion — the worker would then run
+	// Maintain N times back-to-back (idempotent but wasted).
+	deferredMu sync.Mutex
+	deferred   map[string]struct{}
 }
 
-// NewMaintenanceManager creates a MaintenanceManager.
-func NewMaintenanceManager(s *store.FSStore, root paths.DataRoot) *MaintenanceManager {
+// NewMaintenanceManager creates a MaintenanceManager. The tracker is
+// consulted before each Maintain run; pass the same *syncstatus.Tracker
+// every other manager already gets so the syncing-account check sees
+// real state.
+func NewMaintenanceManager(s *store.FSStore, root paths.DataRoot, tracker *syncstatus.Tracker) *MaintenanceManager {
 	m := &MaintenanceManager{
 		store:    s,
 		root:     root,
+		tracker:  tracker,
 		requests: make(chan account.Account, triggerBuffer),
+		deferred: make(map[string]struct{}),
 	}
 	empty := []account.Account{}
 	m.accounts.Store(&empty)
@@ -120,16 +142,53 @@ func (m *MaintenanceManager) snapshotAccounts() []account.Account {
 }
 
 // worker drains the request channel serially. One Maintain at a time
-// across the whole daemon.
+// across the whole daemon. When the popped account is currently
+// syncing, the worker hands the request off to a waiter goroutine and
+// moves on to the next request — Maintain for that account will be
+// re-Triggered when its sync finishes.
 func (m *MaintenanceManager) worker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case acct := <-m.requests:
+			if done := m.tracker.WaitForDone(acct.String()); done != nil {
+				m.deferUntilSyncDone(ctx, acct, done)
+				continue
+			}
 			m.runOnce(ctx, acct)
 		}
 	}
+}
+
+// deferUntilSyncDone hands acct off to a waiter goroutine that will
+// re-Trigger when the account's current sync completes. Coalesces
+// duplicate deferrals: if a waiter is already pending for acct, no new
+// goroutine is spawned and the additional request is dropped (the
+// pending waiter will requeue once for all of them).
+func (m *MaintenanceManager) deferUntilSyncDone(ctx context.Context, acct account.Account, done <-chan struct{}) {
+	key := acct.String()
+	m.deferredMu.Lock()
+	if _, exists := m.deferred[key]; exists {
+		m.deferredMu.Unlock()
+		return
+	}
+	m.deferred[key] = struct{}{}
+	m.deferredMu.Unlock()
+
+	go func() {
+		defer func() {
+			m.deferredMu.Lock()
+			delete(m.deferred, key)
+			m.deferredMu.Unlock()
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return
+		}
+		m.Trigger(ctx, acct)
+	}()
 }
 
 func (m *MaintenanceManager) runOnce(ctx context.Context, acct account.Account) {

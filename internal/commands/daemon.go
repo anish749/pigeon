@@ -172,7 +172,7 @@ func DaemonRun(version string) error {
 	// post-sync compaction signal; routing every compaction through one
 	// worker is what guarantees eager (post-sync) and periodic passes
 	// never race on the same files.
-	maintMgr := daemon.NewMaintenanceManager(store, dataRoot)
+	maintMgr := daemon.NewMaintenanceManager(store, dataRoot, tracker)
 	go maintMgr.Run(ctx, cfg)
 
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
