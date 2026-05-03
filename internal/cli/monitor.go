@@ -10,7 +10,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/tailapi"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 )
 
 func newMonitorCmd() *cobra.Command {

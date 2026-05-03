@@ -15,7 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 	"github.com/anish749/pigeon/internal/workspace"
 )
 

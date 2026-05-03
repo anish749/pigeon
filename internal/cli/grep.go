@@ -9,7 +9,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/search"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 )
 
 func newGrepCmd() *cobra.Command {
