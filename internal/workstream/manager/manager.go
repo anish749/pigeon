@@ -47,8 +47,7 @@ type Manager struct {
 	recentSignals      []models.Signal // rolling buffer for focus context
 
 	// Stats
-	focusUpdates    int
-	dormancyChanges int
+	focusUpdates int
 }
 
 // New creates a workstream manager.
@@ -151,7 +150,6 @@ func (m *Manager) ProposeNew(_ context.Context, name, focus string, ws config.Wo
 			ID:        generateWorkstreamID(name),
 			Name:      name,
 			Workspace: ws,
-			State:     models.StateActive,
 			Focus:     focus,
 			Created:   proposedAt,
 		}
@@ -226,7 +224,6 @@ func (m *Manager) ApproveProposal(_ context.Context, id string) (string, error) 
 		ID:        generateWorkstreamID(p.SuggestedName),
 		Name:      p.SuggestedName,
 		Workspace: p.Workspace,
-		State:     models.StateActive,
 		Focus:     p.SuggestedFocus,
 		Created:   p.ProposedAt,
 	}
@@ -320,11 +317,6 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 		m.mu.Unlock()
 	}
 
-	// Dormancy check.
-	if err := m.detectDormancy(sig.Ts); err != nil {
-		errs = append(errs, err)
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("manager: %w", errs[0])
 	}
@@ -357,32 +349,6 @@ func (m *Manager) updateFocus(ctx context.Context, ws models.Workstream, recentS
 		"id", ws.ID,
 		"signals_reviewed", len(recentSignals),
 	)
-	return nil
-}
-
-func (m *Manager) detectDormancy(now time.Time) error {
-	all, err := m.store.ListWorkstreams()
-	if err != nil {
-		return err
-	}
-	for _, ws := range all {
-		if ws.IsDefault() || ws.State != models.StateActive {
-			continue
-		}
-		lastSig := m.sc.LastSignal(ws.ID)
-		if !lastSig.IsZero() && now.Sub(lastSig) > m.cfg.DormancyThreshold {
-			if err := m.store.PutWorkstream(ws.WithState(models.StateDormant)); err != nil {
-				return err
-			}
-			m.mu.Lock()
-			m.dormancyChanges++
-			m.mu.Unlock()
-			m.logger.Info("workstream marked dormant",
-				"workstream", ws.Name,
-				"last_signal", lastSig.Format("2006-01-02"),
-			)
-		}
-	}
 	return nil
 }
 
@@ -426,15 +392,13 @@ func generateWorkstreamID(name string) string {
 
 // Stats returns lifecycle management statistics.
 type Stats struct {
-	FocusUpdates    int
-	DormancyChanges int
+	FocusUpdates int
 }
 
 func (m *Manager) Stats() Stats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return Stats{
-		FocusUpdates:    m.focusUpdates,
-		DormancyChanges: m.dormancyChanges,
+		FocusUpdates: m.focusUpdates,
 	}
 }

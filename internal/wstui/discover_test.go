@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/anish749/pigeon/internal/workstream/discovery"
-	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // fakeManager satisfies the wstui.Manager interface with a configurable
@@ -240,6 +239,3 @@ func TestModeDiscovering_InCtrlCSurvey(t *testing.T) {
 		t.Errorf("expected QuitMsg, got %T", cmd())
 	}
 }
-
-// silence unused-import lint when models import is only used elsewhere.
-var _ = models.StateActive

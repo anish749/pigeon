@@ -12,8 +12,9 @@ type Store interface {
 	GetWorkstream(id string) (models.Workstream, bool, error)
 	// ListWorkstreams returns all workstreams.
 	ListWorkstreams() ([]models.Workstream, error)
-	// ActiveWorkstreams returns non-default workstreams in the active state.
-	ActiveWorkstreams() ([]models.Workstream, error)
+	// RoutableWorkstreams returns all non-default workstreams (those that
+	// signals can be classified into).
+	RoutableWorkstreams() ([]models.Workstream, error)
 	// PutWorkstream creates or updates a workstream.
 	PutWorkstream(models.Workstream) error
 	// DeleteWorkstream removes a workstream by ID. Returns nil if not found.

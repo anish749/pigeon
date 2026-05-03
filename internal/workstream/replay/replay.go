@@ -43,7 +43,6 @@ type WorkstreamReport struct {
 	ID           string
 	Name         string
 	Workspace    config.WorkspaceName
-	State        models.WorkstreamState
 	Focus        string
 	SignalCount  int
 	Participants []string
@@ -87,27 +86,27 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 		if err := mgr.EnsureDefaultWorkstream(wsName, signals[0].Ts); err != nil {
 			return nil, fmt.Errorf("ensure default workstream: %w", err)
 		}
-		active, err := st.ActiveWorkstreams()
+		routable, err := st.RoutableWorkstreams()
 		if err != nil {
 			return nil, fmt.Errorf("load persisted workstreams: %w", err)
 		}
-		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(active))
+		logger.Info("skipped discovery, loaded persisted workstreams", "count", len(routable))
 	} else {
 		if _, err := mgr.DiscoverAndProposeSignals(ctx, signals, time.Now()); err != nil {
 			return nil, fmt.Errorf("cold-start discovery: %w", err)
 		}
 	}
 
-	// Build semantic router from active workstreams.
-	active, err := st.ActiveWorkstreams()
+	// Build semantic router from non-default workstreams.
+	routable, err := st.RoutableWorkstreams()
 	if err != nil {
-		return nil, fmt.Errorf("list active workstreams: %w", err)
+		return nil, fmt.Errorf("list routable workstreams: %w", err)
 	}
 	sr := router.New(emb, threshold, models.DefaultWorkstreamID(wsName), logger)
-	if err := sr.LoadWorkstreams(ctx, active); err != nil {
+	if err := sr.LoadWorkstreams(ctx, routable); err != nil {
 		return nil, fmt.Errorf("load workstream embeddings: %w", err)
 	}
-	logger.Info("semantic router ready", "workstreams", len(active), "threshold", threshold)
+	logger.Info("semantic router ready", "workstreams", len(routable), "threshold", threshold)
 
 	// Route each signal independently.
 	for i, sig := range signals {
@@ -146,7 +145,6 @@ func buildReport(cfg Config, signals []models.Signal, startTime time.Time, mgr *
 			ID:           ws.ID,
 			Name:         ws.Name,
 			Workspace:    ws.Workspace,
-			State:        ws.State,
 			Focus:        ws.Focus,
 			SignalCount:  sc.SignalCount(ws.ID),
 			Participants: sc.Participants(ws.ID),

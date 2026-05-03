@@ -12,7 +12,7 @@ func TestFSRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 
 	t.Run("workstreams", func(t *testing.T) {
-		ws := models.Workstream{ID: "ws-alpha", Name: "Alpha", State: models.StateActive, Focus: "alpha focus", Created: ts}
+		ws := models.Workstream{ID: "ws-alpha", Name: "Alpha", Focus: "alpha focus", Created: ts}
 		if err := s.PutWorkstream(ws); err != nil {
 			t.Fatal(err)
 		}

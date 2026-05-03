@@ -51,20 +51,20 @@ func (s *FS) ListWorkstreams() ([]models.Workstream, error) {
 	return s.loadWorkstreams()
 }
 
-func (s *FS) ActiveWorkstreams() ([]models.Workstream, error) {
+func (s *FS) RoutableWorkstreams() ([]models.Workstream, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	all, err := s.loadWorkstreams()
 	if err != nil {
 		return nil, err
 	}
-	var active []models.Workstream
+	var routable []models.Workstream
 	for _, ws := range all {
-		if ws.State == models.StateActive && !ws.IsDefault() {
-			active = append(active, ws)
+		if !ws.IsDefault() {
+			routable = append(routable, ws)
 		}
 	}
-	return active, nil
+	return routable, nil
 }
 
 func (s *FS) PutWorkstream(ws models.Workstream) error {

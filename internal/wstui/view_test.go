@@ -42,8 +42,8 @@ func TestView_EmptyShowsCreateHint(t *testing.T) {
 func TestView_PopulatedRendersAllItems(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
 	m.items = []models.Workstream{
-		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha focus"},
-		{ID: "ws-b", Name: "Beta", Workspace: "personal", State: models.StateDormant, Focus: "beta focus"},
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal", Focus: "alpha focus"},
+		{ID: "ws-b", Name: "Beta", Workspace: "personal", Focus: "beta focus"},
 	}
 	out := stripAnsi(m.View())
 	for _, want := range []string{"Alpha", "Beta", "alpha focus"} {
@@ -79,7 +79,7 @@ func TestView_DefaultHelpIsLimited(t *testing.T) {
 func TestView_DeleteConfirmShowsName(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
 	m.items = []models.Workstream{
-		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive},
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal"},
 	}
 	m.mode = modeConfirmDelete
 	out := stripAnsi(m.View())
@@ -92,7 +92,7 @@ func TestView_FillsTerminalHeightWithFooterAtBottom(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
 	m.height = 12
 	m.items = []models.Workstream{
-		{ID: "ws-a", Name: "Alpha", Workspace: "personal", State: models.StateActive, Focus: "alpha focus"},
+		{ID: "ws-a", Name: "Alpha", Workspace: "personal", Focus: "alpha focus"},
 	}
 
 	lines := strings.Split(stripAnsi(m.View()), "\n")
@@ -112,7 +112,6 @@ func TestView_TrimsOverflowBeforeFooter(t *testing.T) {
 			ID:        "ws",
 			Name:      "Workstream",
 			Workspace: "personal",
-			State:     models.StateActive,
 		})
 	}
 

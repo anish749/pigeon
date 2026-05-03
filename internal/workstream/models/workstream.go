@@ -6,24 +6,14 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 )
 
-// WorkstreamState represents the lifecycle state of a workstream.
-type WorkstreamState string
-
-const (
-	StateActive   WorkstreamState = "active"
-	StateDormant  WorkstreamState = "dormant"
-	StateResolved WorkstreamState = "resolved"
-)
-
 // Workstream is an immutable definition of a coherent ongoing effort.
 // It carries no counters or derived stats — those are computed from the
-// RoutingLedger. State changes (focus update, dormancy) produce a new
-// Workstream value via the With* methods.
+// RoutingLedger. Mutations produce a new Workstream value via the With*
+// methods.
 type Workstream struct {
 	ID        string               `json:"id"`
 	Name      string               `json:"name"`
 	Workspace config.WorkspaceName `json:"workspace"`
-	State     WorkstreamState      `json:"state"`
 	Focus     string               `json:"focus"`
 	Created   time.Time            `json:"created"`
 }
@@ -40,7 +30,6 @@ func NewDefaultWorkstream(ws config.WorkspaceName, ts time.Time) Workstream {
 		ID:        DefaultWorkstreamID(ws),
 		Name:      "General",
 		Workspace: ws,
-		State:     StateActive,
 		Focus:     "Unclassified signals — general conversation, coordination that doesn't belong to a specific workstream.",
 		Created:   ts,
 	}
@@ -54,11 +43,5 @@ func (w Workstream) IsDefault() bool {
 // WithFocus returns a copy with an updated focus description.
 func (w Workstream) WithFocus(focus string) Workstream {
 	w.Focus = focus
-	return w
-}
-
-// WithState returns a copy with an updated state.
-func (w Workstream) WithState(state WorkstreamState) Workstream {
-	w.State = state
 	return w
 }
