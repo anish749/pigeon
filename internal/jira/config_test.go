@@ -142,8 +142,8 @@ func TestAccount(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Account: %v", err)
 			}
-			if acct.Platform != "jira-issues" {
-				t.Errorf("Platform = %q, want jira-issues", acct.Platform)
+			if acct.Platform != "jira" {
+				t.Errorf("Platform = %q, want jira", acct.Platform)
 			}
 			if acct.NameSlug() != c.wantSlug {
 				t.Errorf("NameSlug() = %q, want %q", acct.NameSlug(), c.wantSlug)
@@ -155,7 +155,7 @@ func TestAccount(t *testing.T) {
 func TestAccountMalformedServer(t *testing.T) {
 	// Cases where url.Parse "succeeds" with an empty Host (no scheme) or
 	// outright fails. Either way Account() must error rather than return
-	// an empty slug that would land issues at jira-issues//<project>/.
+	// an empty slug that would land issues at jira//<project>/.
 	cases := []string{
 		"acme.atlassian.net",         // missing scheme
 		"https://",                   // scheme only

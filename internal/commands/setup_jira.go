@@ -86,7 +86,7 @@ func RunSetupJira(args []string) error {
 	fmt.Printf("  Server:  %s\n", pjc.Server)
 	fmt.Printf("  Login:   %s (%s)\n", me.Name, me.Email)
 	fmt.Printf("  Project: %s\n", pjc.Project.Key)
-	fmt.Printf("  Account: %s (under jira-issues/%s/)\n", acct.NameSlug(), acct.NameSlug())
+	fmt.Printf("  Account: %s (under jira/%s/)\n", acct.NameSlug(), acct.NameSlug())
 	fmt.Println()
 
 	cfg, err := config.Load()

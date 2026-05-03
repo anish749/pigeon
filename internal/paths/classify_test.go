@@ -137,6 +137,23 @@ func TestClassify(t *testing.T) {
 			want: nil,
 		},
 
+		// Jira.
+		{
+			name: "jira issue snapshot log",
+			path: "/data/jira/acme/ENG/issues/ENG-142/issue.jsonl",
+			want: JiraIssueFile("/data/jira/acme/ENG/issues/ENG-142/issue.jsonl"),
+		},
+		{
+			name: "jira comments log",
+			path: "/data/jira/acme/ENG/issues/ENG-142/comments.jsonl",
+			want: JiraCommentsFile("/data/jira/acme/ENG/issues/ENG-142/comments.jsonl"),
+		},
+		{
+			name: "jira issue.jsonl under non-jira platform stays unclassified",
+			path: "/data/slack/acme/issues/ENG-142/issue.jsonl",
+			want: nil,
+		},
+
 		// Workstream router state.
 		{
 			name: "workstream list",
@@ -212,6 +229,8 @@ func TestClassify_RoundTripsConstructors(t *testing.T) {
 		{"CalendarDateFile", gwsAcct.Calendar("primary").DateFile("2026-04-07")},
 		{"LinearIssueFile", root.AccountFor(account.New("linear", "acme")).Linear().Issue("PROJ-123").IssueFile()},
 		{"LinearCommentsFile", root.AccountFor(account.New("linear", "acme")).Linear().Issue("PROJ-123").CommentsFile()},
+		{"JiraIssueFile", root.AccountFor(account.New(JiraPlatform, "acme")).Jira().Project("ENG").Issue("ENG-142").IssueFile()},
+		{"JiraCommentsFile", root.AccountFor(account.New(JiraPlatform, "acme")).Jira().Project("ENG").Issue("ENG-142").CommentsFile()},
 		{"WorkstreamsFile", root.Workspace("acme").WorkstreamStore().WorkstreamsFile()},
 		{"WorkstreamProposalsFile", root.Workspace("acme").WorkstreamStore().ProposalsFile()},
 	}

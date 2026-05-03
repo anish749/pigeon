@@ -151,11 +151,13 @@ func listConvFor(f paths.DataFile, root string) (listConv, bool, error) {
 		// gws/<acct>/gdrive/<doc>/{Notes.md,Sheet.csv,comments.jsonl,drive-meta-*.json}
 		// — per-doc dir.
 		return relativeConv(filepath.Dir(f.Path()), root), true, nil
-	case paths.LinearIssueFile, paths.LinearCommentsFile:
-		// linear/<acct>/issues/<id>/{issue,comments}.jsonl — each
-		// issue is its own conversation. Group at the per-issue dir so
-		// issue.jsonl and comments.jsonl collapse into one row; Display
-		// drops the redundant "issues" segment for readability.
+	case paths.LinearIssueFile, paths.LinearCommentsFile,
+		paths.JiraIssueFile, paths.JiraCommentsFile:
+		// linear/<acct>/issues/<id>/{issue,comments}.jsonl
+		// jira/<acct>/<project>/issues/<KEY>/{issue,comments}.jsonl
+		// — each issue is its own conversation. Group at the per-issue
+		// dir so issue.jsonl and comments.jsonl collapse into one row;
+		// Display drops the redundant "issues" segment for readability.
 		issueDir := filepath.Dir(v.Path())
 		display, err := filepath.Rel(root, issueDir)
 		if err != nil {
@@ -206,6 +208,11 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 	case paths.LinearCommentsFile:
 		// Comment lines carry "createdAt" (and sometimes "updatedAt" for edits).
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
+	case paths.JiraIssueFile, paths.JiraCommentsFile:
+		// Jira issue snapshots and comments both surface fields.updated /
+		// updated and created at the line root via the Serialized payload.
+		// Read whichever lands later — matches the Linear comments behaviour.
+		return scanLatestTs(v.Path(), "updated", "created")
 	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile:
 		// All Drive content shares the per-doc drive-meta-YYYY-MM-DD.json
 		// sidecar as its "when did this doc change" anchor. The Drive

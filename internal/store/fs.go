@@ -840,8 +840,8 @@ func cleanupStaleDriveMeta(dir, keepName string) error {
 //     edits applied, deletes dropped).
 //   - MessagingDateFile: messaging date compaction (same pipeline, sorted
 //     by ts).
-//   - Email, Calendar, Linear issue/comments, Jira issue, Drive comments:
-//     ID-based dedup, keeping the last occurrence of each id.
+//   - Email, Calendar, Linear issue/comments, Jira issue/comments, Drive
+//     comments: ID-based dedup, keeping the last occurrence of each id.
 //   - Sidecars, queues, identity, content files: explicit no-op.
 //
 // The default arm errors loud when paths/ grows a typed kind that this
@@ -864,7 +864,7 @@ func (s *FSStore) maintainFile(path string) error {
 		return s.compactMessagingDateFile(path, data)
 	case paths.EmailDateFile, paths.CalendarDateFile,
 		paths.LinearIssueFile, paths.LinearCommentsFile,
-		paths.JiraIssueFile, paths.CommentsFile:
+		paths.JiraIssueFile, paths.JiraCommentsFile, paths.CommentsFile:
 		return s.compactIDDedupedLog(path, data)
 	case paths.PeopleFile, paths.PollMetricsFile, paths.MaintenanceFile,
 		paths.SyncCursorsFile, paths.PendingDeletesFile,
