@@ -507,6 +507,69 @@ func TestExtractConversations_LinearIssueAndCommentsCollapse(t *testing.T) {
 	}
 }
 
+// TestLatestTs_JiraIssueFile_ReadsNestedFieldsUpdated is a regression for the
+// scanLatestTs approach: Jira issue lines nest the timestamp at fields.updated
+// (not top-level) and use a no-colon offset that time.Time JSON unmarshal
+// rejects. The dispatch must route Jira files through modelv1.Parse + Ts() so
+// neither footgun causes a silently zero LatestTime.
+func TestLatestTs_JiraIssueFile_ReadsNestedFieldsUpdated(t *testing.T) {
+	root := t.TempDir()
+	issueDir := paths.NewDataRoot(root).
+		AccountFor(account.New(paths.JiraPlatform, "acme")).
+		Jira().Project("ENG").Issue("ENG-101")
+	issueFile := issueDir.IssueFile()
+
+	if err := os.MkdirAll(filepath.Dir(issueFile.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Real Jira Cloud shape: top-level id/key/fields, updated nested under
+	// fields, with a no-colon "+0000" offset.
+	line := `{"type":"jira-issue","id":"10042","key":"ENG-101","fields":{"updated":"2026-04-14T18:00:41.387-0700"}}` + "\n"
+	if err := os.WriteFile(issueFile.Path(), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LatestTs(issueFile)
+	if err != nil {
+		t.Fatalf("LatestTs: %v", err)
+	}
+	if got.IsZero() {
+		t.Fatal("LatestTs returned zero — issue line's nested fields.updated was not read")
+	}
+	want, _ := time.Parse("2006-01-02T15:04:05.000-0700", "2026-04-14T18:00:41.387-0700")
+	if !got.Equal(want) {
+		t.Errorf("LatestTs = %v, want %v", got, want)
+	}
+}
+
+// TestLatestTs_JiraCommentsFile_HandlesNoColonOffset confirms comment files
+// (top-level created/updated) parse via modelv1.Parse, which knows about
+// jira.RFC3339MilliLayout. Direct json.Unmarshal into time.Time would fail
+// on the "-0700" form.
+func TestLatestTs_JiraCommentsFile_HandlesNoColonOffset(t *testing.T) {
+	root := t.TempDir()
+	issueDir := paths.NewDataRoot(root).
+		AccountFor(account.New(paths.JiraPlatform, "acme")).
+		Jira().Project("ENG").Issue("ENG-101")
+	commentsFile := issueDir.CommentsFile()
+
+	if err := os.MkdirAll(filepath.Dir(commentsFile.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"jira-comment","id":"10501","issueKey":"ENG-101","created":"2026-04-15T09:00:00.000-0700","updated":"2026-04-15T10:00:00.000-0700","body":"x"}` + "\n"
+	if err := os.WriteFile(commentsFile.Path(), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LatestTs(commentsFile)
+	if err != nil {
+		t.Fatalf("LatestTs: %v", err)
+	}
+	if got.IsZero() {
+		t.Fatal("LatestTs returned zero — Jira's no-colon offset was not parsed")
+	}
+}
+
 // TestDispatch_UnknownKindErrors verifies that both type-switch dispatchers
 // fail loud when handed a DataFile they do not enumerate. nil is the only
 // value that satisfies paths.DataFile but matches no concrete case (every

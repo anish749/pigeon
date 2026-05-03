@@ -14,6 +14,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/read"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/timeutil"
 	"github.com/anish749/pigeon/internal/workspace"
 )
@@ -209,10 +210,12 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 		// Comment lines carry "createdAt" (and sometimes "updatedAt" for edits).
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
 	case paths.JiraIssueFile, paths.JiraCommentsFile:
-		// Jira issue snapshots and comments both surface fields.updated /
-		// updated and created at the line root via the Serialized payload.
-		// Read whichever lands later — matches the Linear comments behaviour.
-		return scanLatestTs(v.Path(), "updated", "created")
+		// Jira issue lines nest the timestamp at fields.updated, not at the
+		// line root, and Jira's `+0000`/`-0700` offsets are not RFC 3339,
+		// so scanLatestTs (top-level keys + time.Time JSON unmarshal) won't
+		// work. Route through modelv1.Parse + Line.Ts(), which already
+		// knows the nesting and the jira.RFC3339MilliLayout fallback.
+		return scanLatestJiraTs(v.Path())
 	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile:
 		// All Drive content shares the per-doc drive-meta-YYYY-MM-DD.json
 		// sidecar as its "when did this doc change" anchor. The Drive
@@ -320,4 +323,49 @@ func latestDriveMetaDate(dir string) (time.Time, error) {
 		}
 	}
 	return latest, nil
+}
+
+// scanLatestJiraTs is the Jira variant of scanLatestTs. Jira's lines need a
+// proper parse instead of a top-level field lookup:
+//
+//   - Issue lines nest the timestamp at fields.updated.
+//   - Jira's REST API returns timestamps with a no-colon offset
+//     (e.g. "2026-04-14T18:00:41.387-0700") which is not RFC 3339, so
+//     `time.Time.UnmarshalJSON` rejects them.
+//
+// modelv1.Parse + Line.Ts() already handles both shapes (via
+// jira.RFC3339MilliLayout with an RFC 3339 fallback), so reuse that here
+// rather than duplicating the format knowledge.
+func scanLatestJiraTs(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	var latest time.Time
+	lineNum := 0
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lineNum++
+			trimmed := bytes.TrimRight(line, "\r\n")
+			if len(trimmed) > 0 {
+				parsed, err := modelv1.Parse(string(trimmed))
+				if err != nil {
+					return time.Time{}, fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
+				}
+				if t := parsed.Ts(); t.After(latest) {
+					latest = t
+				}
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return latest, nil
+			}
+			return time.Time{}, fmt.Errorf("read %s: %w", path, readErr)
+		}
+	}
 }
