@@ -39,3 +39,26 @@ func validateAccountInWorkspace(acct account.Account) error {
 	}
 	return nil
 }
+
+// validateAccountInScope checks that acct is reachable from the caller's
+// current scope:
+//   - With an active workspace, acct must belong to it.
+//   - Without an active workspace, acct must be present in the loaded
+//     pigeon config.
+//
+// Use this when accepting an explicit (--platform, --account) pair that
+// targets a live source (the daemon, a watcher) where a typo would
+// otherwise silently subscribe to nothing.
+func validateAccountInScope(acct account.Account) error {
+	if activeWorkspace != nil {
+		return validateAccountInWorkspace(acct)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if !workspace.IsConfigured(cfg, acct) {
+		return fmt.Errorf("account %s is not configured", acct.Display())
+	}
+	return nil
+}
