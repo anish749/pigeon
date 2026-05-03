@@ -40,6 +40,8 @@ var (
 	_ LogFile     = MessagingDateFile("")
 	_ LogFile     = EmailDateFile("")
 	_ LogFile     = CalendarDateFile("")
+	_ LogFile     = LinearIssueFile("")
+	_ LogFile     = LinearCommentsFile("")
 	_ LogFile     = ThreadFile("")
 	_ LogFile     = CommentsFile("")
 	_ ContentFile = TabFile("")

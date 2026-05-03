@@ -87,10 +87,11 @@ Each poll cycle:
 1. Load cursor (last `updatedAt` timestamp) from `.sync-cursors.yaml`.
 2. Run `linear issue query -j --all-teams --all-states --updated-after=<cursor> --limit=0`.
 3. For each returned issue:
-   a. Append the issue snapshot to `issues/{IDENTIFIER}.jsonl`.
+   a. Append the issue snapshot to `issues/{IDENTIFIER}/issue.jsonl`.
    b. Run `linear issue view <identifier> -j --no-download` to get the
       full issue with comments.
-   c. Append any new comments to the same file.
+   c. Append all returned comments to `issues/{IDENTIFIER}/comments.jsonl`
+      (dedup by `id` happens at read and maintenance time).
 4. Update the cursor to the maximum `updatedAt` from the batch.
 5. Save the cursor.
 
@@ -150,40 +151,46 @@ disk.
 
 ```
 ~/.local/share/pigeon/
-└── linear-issues/                          # platform
+└── linear/                          # platform
     └── {workspace-slug}/                   # e.g. my-team
         ├── .sync-cursors.yaml              # cursor state
         └── issues/
-            ├── ENG-101.jsonl               # all activity for ENG-101
-            ├── ENG-142.jsonl               # all activity for ENG-142
-            └── ENG-205.jsonl
+            ├── ENG-101/                    # one directory per issue
+            │   ├── issue.jsonl             # snapshot log (append)
+            │   └── comments.jsonl          # comments log (append)
+            ├── ENG-142/
+            │   ├── issue.jsonl
+            │   └── comments.jsonl
+            └── ENG-205/
+                ├── issue.jsonl
+                └── comments.jsonl
 ```
 
-### Why Per-Issue Files, Not Date Files
+### Why Per-Issue Directories With Split Logs
 
-Messaging data (Slack, WhatsApp) uses date files because messages are
-immutable events on a timeline — a message sent on April 11 belongs in
-`2026-04-11.txt` forever.
+Linear issues are mutable entities with stable identity, so each issue
+is its own directory keyed by the human-readable identifier. Within
+that directory:
 
-Linear issues are mutable entities. An issue created on March 1 gets
-reassigned April 5, state changes April 8, and receives comments
-April 10. Filing by `createdAt` produces stale snapshots. Filing by
-`updatedAt` moves the issue between date files on every change. Neither
-is natural.
+- **`issue.jsonl`** holds successive snapshots (one append per poll
+  cycle that detects a change).
+- **`comments.jsonl`** holds the comment stream (appends from each
+  poll cycle that fetched comments).
 
-Issues are more like Google Drive documents than messages — they have a
-stable identity and evolve over time. The natural organization is **one
-file per issue**, identified by the human-readable identifier (e.g.
-`ENG-101`), just as Drive uses one directory per document identified by
-the slugified title.
+Splitting the two streams keeps issue-level reads (state, assignee,
+labels, latest title) independent of comment volume — the issue file
+stays small even on issues with hundreds of comments. Both files use
+the keep-last-by-`id` dedup rule at read time, and the maintenance
+compaction pass (`Maintain`) physically rewrites each file with stale
+duplicates removed.
 
-This makes `pigeon read linear ENG-101` a direct file read, and
-`pigeon grep "deploy" --source=linear` a recursive grep across all
-issue files.
+This makes `pigeon read linear ENG-101` two file reads and
+`pigeon grep "deploy" --source=linear` a recursive grep across the
+issue tree.
 
 ### Multiple Workspaces
 
-Each Linear workspace is scoped under `linear-issues/{workspace-slug}/` with
+Each Linear workspace is scoped under `linear/{workspace-slug}/` with
 independent cursors. The poller iterates over all configured workspaces
 on each cycle.
 
@@ -195,7 +202,7 @@ slugs are already URL-safe.
 
 ### Cursor File
 
-Path: `linear-issues/{workspace-slug}/.sync-cursors.yaml`
+Path: `linear/{workspace-slug}/.sync-cursors.yaml`
 
 ```yaml
 issues:
@@ -263,24 +270,27 @@ Fields callers commonly rely on:
 
 ### Line Ordering Within a File
 
-Lines in an issue file are ordered chronologically by write time. A
-typical file looks like:
+Lines in each log are ordered chronologically by write time. A typical
+`issue.jsonl` looks like:
 
 ```jsonl
 {"type":"linear-issue",...,"updatedAt":"2026-04-02T15:14:52Z",...}
+{"type":"linear-issue",...,"updatedAt":"2026-04-08T14:37:10Z",...}
+```
+
+A typical `comments.jsonl` looks like:
+
+```jsonl
 {"type":"linear-comment",...,"createdAt":"2026-04-07T09:28:55Z",...}
 {"type":"linear-comment",...,"createdAt":"2026-04-07T10:36:38Z",...}
-{"type":"linear-comment",...,"createdAt":"2026-04-07T11:32:18Z",...}
-{"type":"linear-issue",...,"updatedAt":"2026-04-08T14:37:10Z",...}
 {"type":"linear-comment",...,"createdAt":"2026-04-08T14:04:31Z",...}
-{"type":"linear-comment",...,"createdAt":"2026-04-08T14:37:10Z",...}
 ```
 
 Issue snapshot lines appear whenever the poller detects a change (state
-transition, assignee change, label update, new comment, etc.). Comment
-lines appear interleaved at their write time. After dedup (keep last by
-ID), the file reduces to the latest issue snapshot and the full set of
-unique comments.
+transition, assignee change, label update, new comment, etc.). After
+dedup (keep last by `id`), each file reduces to the unique set of
+records — `issue.jsonl` to a single latest snapshot, `comments.jsonl`
+to the current set of comments.
 
 ## Go Type Definitions
 
@@ -364,9 +374,9 @@ Default when no filter: issues updated in the last 7 days.
 
 **Single issue** (`pigeon read linear ENG-101`):
 
-1. Read `issues/ENG-101.jsonl`.
-2. Deduplicate by `id` (keep last) — reduces to latest issue snapshot +
-   all unique comments.
+1. Read `issues/ENG-101/issue.jsonl` and `issues/ENG-101/comments.jsonl`.
+2. Deduplicate each by `id` (keep last) — reduces to the latest issue
+   snapshot plus the set of unique comments.
 3. Display: issue metadata (title, state, assignee, project, labels),
    then description (from the `issue view` data if available), then
    comments in chronological order. Threaded comments (those with
@@ -374,7 +384,7 @@ Default when no filter: issues updated in the last 7 days.
 
 **All issues** (`pigeon read linear --since=7d`):
 
-1. For each `issues/*.jsonl` file, read the last issue line.
+1. For each `issues/<identifier>/issue.jsonl`, read the last issue line.
 2. Filter by `updatedAt` within the requested time window.
 3. Sort by `updatedAt` descending (most recently active first).
 4. Display as a list: identifier, title, state, assignee, last update.
@@ -397,19 +407,21 @@ Standard text tools work directly on the JSONL files:
 
 ```bash
 # Find all issues mentioning "deploy"
-rg "deploy" ~/.local/share/pigeon/linear-issues/
+rg "deploy" ~/.local/share/pigeon/linear/
 
 # Find issues assigned to alice
-rg '"displayName":"alice"' ~/.local/share/pigeon/linear-issues/my-team/issues/
+rg '"displayName":"alice"' ~/.local/share/pigeon/linear/my-team/issues/
 
 # Find all In Progress issues
-rg '"name":"In Progress"' ~/.local/share/pigeon/linear-issues/my-team/issues/
+rg '"name":"In Progress"' ~/.local/share/pigeon/linear/my-team/issues/
 
 # Find comments by bob
-rg '"name":"Bob' ~/.local/share/pigeon/linear-issues/my-team/issues/
+rg '"name":"Bob' ~/.local/share/pigeon/linear/my-team/issues/
 
 # Count lines per issue (proxy for activity)
-wc -l ~/.local/share/pigeon/linear-issues/my-team/issues/*.jsonl
+for d in ~/.local/share/pigeon/linear/my-team/issues/*/; do
+    wc -l "$d"/*.jsonl
+done
 ```
 
 Because issues and comments are stored as raw CLI JSON, any field the
@@ -426,18 +438,22 @@ pigeon grep "deploy" --source=linear --since=7d
 
 ## Maintenance
 
-Issue files accumulate duplicate issue snapshots over time (one per poll
-cycle where the issue changed). Maintenance compacts each file:
+Both `issue.jsonl` and `comments.jsonl` accumulate duplicates over
+time — one snapshot per poll cycle that saw the issue change, and
+re-fetches of the full comment list whenever the parent issue changed.
+The shared maintenance pass (`FSStore.Maintain`) treats Linear files
+the same way it treats GWS files: it walks the account tree, finds
+each `*.jsonl` under a Linear `/issues/` segment, and rewrites the
+file with `compact.DedupGWS` (keep last by `id`).
 
-1. Deduplicate issue lines by `id` (keep last) — removes stale
+1. Deduplicate `issue.jsonl` by `id` (keep last) — removes stale
    snapshots, keeping only the latest.
-2. Deduplicate comment lines by `id` (keep last) — removes duplicates
-   from re-fetches.
-3. Rewrite the file with the deduplicated lines in chronological order.
+2. Deduplicate `comments.jsonl` by `id` (keep last) — removes
+   duplicates from comment re-fetches.
+3. Each file is rewritten only when its content actually changes.
 
-Maintenance is lightweight because individual issue files are small
-(tens to low hundreds of lines). It can run opportunistically without
-blocking reads or writes.
+Read-time dedup uses the same rule, so listings remain correct
+regardless of when maintenance last ran.
 
 ## Configuration
 

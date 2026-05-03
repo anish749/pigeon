@@ -151,16 +151,18 @@ func listConvFor(f paths.DataFile, root string) (listConv, bool, error) {
 		// gws/<acct>/gdrive/<doc>/{Notes.md,Sheet.csv,comments.jsonl,drive-meta-*.json}
 		// — per-doc dir.
 		return relativeConv(filepath.Dir(f.Path()), root), true, nil
-	case paths.IssueFile:
-		// linear-issues/<acct>/issues/<id>.jsonl — each issue is its own
-		// conversation. Dir is the file itself (no per-issue subdir);
-		// Display drops the redundant "issues" segment for readability.
-		display, err := filepath.Rel(root, v.Path())
+	case paths.LinearIssueFile, paths.LinearCommentsFile:
+		// linear/<acct>/issues/<id>/{issue,comments}.jsonl — each
+		// issue is its own conversation. Group at the per-issue dir so
+		// issue.jsonl and comments.jsonl collapse into one row; Display
+		// drops the redundant "issues" segment for readability.
+		issueDir := filepath.Dir(v.Path())
+		display, err := filepath.Rel(root, issueDir)
 		if err != nil {
-			display = v.Path()
+			display = issueDir
 		}
 		display = strings.Replace(display, string(filepath.Separator)+"issues"+string(filepath.Separator), string(filepath.Separator), 1)
-		return listConv{Dir: v.Path(), Display: display}, true, nil
+		return listConv{Dir: issueDir, Display: display}, true, nil
 	case paths.AttachmentFile, paths.ConvMetaFile, paths.PeopleFile,
 		paths.MaintenanceFile, paths.SyncCursorsFile, paths.PollMetricsFile,
 		paths.PendingDeletesFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile:
@@ -198,7 +200,11 @@ func LatestTs(f paths.DataFile) (time.Time, error) {
 		return scanLatestTs(f.Path(), "ts")
 	case paths.CalendarDateFile:
 		return scanLatestTs(v.Path(), "updated", "created")
-	case paths.IssueFile:
+	case paths.LinearIssueFile:
+		// Issue snapshot lines carry "updatedAt".
+		return scanLatestTs(v.Path(), "updatedAt")
+	case paths.LinearCommentsFile:
+		// Comment lines carry "createdAt" (and sometimes "updatedAt" for edits).
 		return scanLatestTs(v.Path(), "updatedAt", "createdAt")
 	case paths.TabFile, paths.SheetFile, paths.FormulaFile, paths.CommentsFile:
 		// All Drive content shares the per-doc drive-meta-YYYY-MM-DD.json

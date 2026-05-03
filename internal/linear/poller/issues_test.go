@@ -1,7 +1,6 @@
 package poller
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +78,7 @@ func TestIssueToLineMissingFields(t *testing.T) {
 func TestWriteIssuesCreateFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := paths.NewDataRoot(tmpDir)
-	acctDir := root.AccountFor(account.New("linear-issues", "test-ws"))
+	acctDir := root.AccountFor(account.New("linear", "test-ws"))
 	s := store.NewFSStore(root)
 	linearDir := acctDir.Linear()
 
@@ -98,34 +97,20 @@ func TestWriteIssuesCreateFiles(t *testing.T) {
 		},
 	}
 
-	// writeIssues will call fetchComments which shells out to the CLI.
-	// We can't mock that easily, so test with a cancelled context that
-	// still allows the first iteration but we'll use a different approach:
-	// just verify the issue lines are written correctly by checking
-	// what writeIssues does before fetching comments.
-
-	// For this test, use a context that's already cancelled after writing
-	// to prevent CLI calls. We accept the comment fetch errors.
-	ctx := context.Background()
-
-	// Temporarily override fetchComments by testing writeIssues indirectly.
-	// Since we can't mock runLinear, let's just test the file output
-	// by writing issue lines directly and verifying the file.
 	for _, issue := range issues {
 		line, err := issueToLine(issue)
 		if err != nil {
 			t.Fatalf("issueToLine: %v", err)
 		}
 		identifier := issue["identifier"].(string)
-		if err := s.AppendLine(linearDir.IssueFile(identifier), line); err != nil {
+		if err := s.AppendLine(linearDir.Issue(identifier).IssueFile(), line); err != nil {
 			t.Fatalf("AppendLine: %v", err)
 		}
 	}
 
-	// Verify files exist with correct content.
 	for _, issue := range issues {
 		identifier := issue["identifier"].(string)
-		path := linearDir.IssueFile(identifier).Path()
+		path := linearDir.Issue(identifier).IssueFile().Path()
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", identifier, err)
@@ -147,14 +132,12 @@ func TestWriteIssuesCreateFiles(t *testing.T) {
 			t.Errorf("Identifier = %q, want %q", parsed.Issue.Runtime.Identifier, identifier)
 		}
 	}
-
-	_ = ctx // used conceptually above
 }
 
 func TestWriteIssuesDirectoryLayout(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := paths.NewDataRoot(tmpDir)
-	acctDir := root.AccountFor(account.New("linear-issues", "my-team"))
+	acctDir := root.AccountFor(account.New("linear", "my-team"))
 	s := store.NewFSStore(root)
 	linearDir := acctDir.Linear()
 
@@ -163,29 +146,47 @@ func TestWriteIssuesDirectoryLayout(t *testing.T) {
 		"identifier": "ENG-99",
 		"updatedAt":  "2026-04-01T00:00:00Z",
 	}
-	line, err := issueToLine(issue)
+	issueLine, err := issueToLine(issue)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AppendLine(linearDir.IssueFile("ENG-99"), line); err != nil {
+	commentLine, err := commentToLine(map[string]any{
+		"id":        "comment-1",
+		"createdAt": "2026-04-01T11:00:00Z",
+		"body":      "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(linearDir.Issue("ENG-99").IssueFile(), issueLine); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLine(linearDir.Issue("ENG-99").CommentsFile(), commentLine); err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify the directory structure: linear-issues/my-team/issues/ENG-99.jsonl
-	wantPath := filepath.Join(tmpDir, "linear-issues", "my-team", "issues", "ENG-99.jsonl")
-	if _, err := os.Stat(wantPath); err != nil {
-		t.Errorf("expected file at %s: %v", wantPath, err)
+	// Verify the directory structure:
+	//   linear/my-team/issues/ENG-99/issue.jsonl
+	//   linear/my-team/issues/ENG-99/comments.jsonl
+	wantIssue := filepath.Join(tmpDir, "linear", "my-team", "issues", "ENG-99", "issue.jsonl")
+	if _, err := os.Stat(wantIssue); err != nil {
+		t.Errorf("expected issue file at %s: %v", wantIssue, err)
+	}
+	wantComments := filepath.Join(tmpDir, "linear", "my-team", "issues", "ENG-99", "comments.jsonl")
+	if _, err := os.Stat(wantComments); err != nil {
+		t.Errorf("expected comments file at %s: %v", wantComments, err)
 	}
 }
 
 func TestWriteIssuesDedup(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := paths.NewDataRoot(tmpDir)
-	acctDir := root.AccountFor(account.New("linear-issues", "test-ws"))
+	acctDir := root.AccountFor(account.New("linear", "test-ws"))
 	s := store.NewFSStore(root)
 	linearDir := acctDir.Linear()
 
-	// Write the same issue twice (simulating two poll cycles).
+	// Two poll cycles append two snapshots for the same issue. Read-time
+	// dedup (and the maintenance pass) collapses them down to one.
 	for i, updatedAt := range []string{"2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z"} {
 		issue := map[string]any{
 			"id":         "uuid-1",
@@ -197,22 +198,19 @@ func TestWriteIssuesDedup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.AppendLine(linearDir.IssueFile("ENG-50"), line); err != nil {
+		if err := s.AppendLine(linearDir.Issue("ENG-50").IssueFile(), line); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// File should have 2 lines (both snapshots appended).
-	data, err := os.ReadFile(linearDir.IssueFile("ENG-50").Path())
+	data, err := os.ReadFile(linearDir.Issue("ENG-50").IssueFile().Path())
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := splitNonEmpty(string(data))
 	if len(lines) != 2 {
-		t.Errorf("got %d lines, want 2 (dedup happens at read time)", len(lines))
+		t.Errorf("got %d lines, want 2 (dedup happens at read/maintenance time)", len(lines))
 	}
-
-	// Both should parse successfully with the same ID.
 	for i, line := range lines {
 		parsed, err := modelv1.Parse(line)
 		if err != nil {

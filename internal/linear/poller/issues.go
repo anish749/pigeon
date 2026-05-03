@@ -76,8 +76,11 @@ func backfillIssues(ctx context.Context, workspace string) ([]map[string]any, er
 	return append(active, closed...), nil
 }
 
-// writeIssues writes a batch of issues and their comments to disk. Returns
-// the count of issues processed, the maximum updatedAt seen, and any error.
+// writeIssues writes a batch of issues and their comments to disk. Issue
+// snapshots and comments live in separate append-only logs under each
+// issue's directory; readers and the maintenance compaction pass dedup by
+// id (keep last). Returns the count of issues processed, the maximum
+// updatedAt seen, and any error.
 func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDir, workspace string, issues []map[string]any) (int, string, error) {
 	var errs []error
 	var maxUpdatedAt string
@@ -93,19 +96,21 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 			errs = append(errs, fmt.Errorf("issue missing identifier"))
 			continue
 		}
+		issueDir := linearDir.Issue(identifier)
 
-		// Write the issue snapshot.
+		// Write the issue snapshot to <id>/issue.jsonl.
 		issueLine, err := issueToLine(issue)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("marshal issue %s: %w", identifier, err))
 			continue
 		}
-		if err := s.AppendLine(linearDir.IssueFile(identifier), issueLine); err != nil {
+		if err := s.AppendLine(issueDir.IssueFile(), issueLine); err != nil {
 			errs = append(errs, fmt.Errorf("write issue %s: %w", identifier, err))
 			continue
 		}
 
-		// Fetch the full issue view (includes comments).
+		// Fetch the full issue view (includes comments) and append to
+		// <id>/comments.jsonl.
 		comments, err := fetchComments(ctx, workspace, identifier)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fetch comments for %s: %w", identifier, err))
@@ -116,7 +121,7 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 				errs = append(errs, fmt.Errorf("marshal comment for %s: %w", identifier, err))
 				continue
 			}
-			if err := s.AppendLine(linearDir.IssueFile(identifier), commentLine); err != nil {
+			if err := s.AppendLine(issueDir.CommentsFile(), commentLine); err != nil {
 				errs = append(errs, fmt.Errorf("write comment for %s: %w", identifier, err))
 			}
 		}

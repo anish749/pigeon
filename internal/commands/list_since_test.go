@@ -439,12 +439,12 @@ func TestExtractConversations_PerCalendarGrouping(t *testing.T) {
 
 func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
 	root := t.TempDir()
-	linear := paths.NewDataRoot(root).AccountFor(account.New("linear-issues", "acme")).Linear()
-	issue1 := linear.IssueFile("PROJ-123")
-	issue2 := linear.IssueFile("PROJ-124")
+	linear := paths.NewDataRoot(root).AccountFor(account.New("linear", "acme")).Linear()
+	issue1 := linear.Issue("PROJ-123").IssueFile()
+	issue2 := linear.Issue("PROJ-124").IssueFile()
 
 	body := `{"updatedAt":"2026-04-07T10:00:00Z"}` + "\n"
-	for _, f := range []paths.IssueFile{issue1, issue2} {
+	for _, f := range []paths.LinearIssueFile{issue1, issue2} {
 		if err := os.MkdirAll(filepath.Dir(f.Path()), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -460,14 +460,50 @@ func TestExtractConversations_PerIssueLinearGrouping(t *testing.T) {
 	if len(convs) != 2 {
 		t.Fatalf("got %d conversations, want 2 (per-issue): %+v", len(convs), convs)
 	}
-	// Display should drop the redundant /issues/ segment.
+	// Display drops the redundant /issues/ segment and groups at the
+	// per-issue directory (no .jsonl suffix).
 	for _, c := range convs {
 		if !filepath.IsAbs(c.Dir) {
 			t.Errorf("Dir should be absolute, got %q", c.Dir)
 		}
-		if !(c.Display == "linear-issues/acme/PROJ-123.jsonl" || c.Display == "linear-issues/acme/PROJ-124.jsonl") {
+		if !(c.Display == "linear/acme/PROJ-123" || c.Display == "linear/acme/PROJ-124") {
 			t.Errorf("unexpected display: %q", c.Display)
 		}
+	}
+}
+
+// TestExtractConversations_LinearIssueAndCommentsCollapse verifies that the
+// issue.jsonl and comments.jsonl files for one issue surface as a single
+// listing row, with LatestTime taking the max across both files.
+func TestExtractConversations_LinearIssueAndCommentsCollapse(t *testing.T) {
+	root := t.TempDir()
+	linear := paths.NewDataRoot(root).AccountFor(account.New("linear", "acme")).Linear()
+	issueFile := linear.Issue("PROJ-123").IssueFile()
+	commentsFile := linear.Issue("PROJ-123").CommentsFile()
+
+	if err := os.MkdirAll(filepath.Dir(issueFile.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(issueFile.Path(), []byte(`{"updatedAt":"2026-04-06T10:00:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(commentsFile.Path(), []byte(`{"createdAt":"2026-04-07T15:30:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	convs, err := extractConversations([]paths.DataFile{issueFile, commentsFile}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("got %d conversations, want 1 (issue + comments collapse): %+v", len(convs), convs)
+	}
+	if convs[0].Display != "linear/acme/PROJ-123" {
+		t.Errorf("Display = %q, want linear/acme/PROJ-123", convs[0].Display)
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-04-07T15:30:00Z")
+	if !convs[0].LatestTime.Equal(want) {
+		t.Errorf("LatestTime = %v, want %v (newer comment wins over older snapshot)", convs[0].LatestTime, want)
 	}
 }
 

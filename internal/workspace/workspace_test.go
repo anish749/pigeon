@@ -136,7 +136,7 @@ func TestGetCurrentWorkspace_IncludesLinear(t *testing.T) {
 	}
 	want := []account.Account{
 		account.New("slack", "acme-corp"),
-		account.New("linear-issues", "eng"),
+		account.New("linear", "eng"),
 	}
 	if len(ws.Accounts) != len(want) {
 		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
@@ -259,7 +259,7 @@ func TestIsConfigured(t *testing.T) {
 		{"slack configured", account.New("slack", "acme-corp"), true},
 		{"gws configured", account.New("gws", "work@co.com"), true},
 		{"whatsapp configured", account.New("whatsapp", "+15551234567"), true},
-		{"linear configured", account.New("linear-issues", "eng"), true},
+		{"linear configured", account.New("linear", "eng"), true},
 		{"slack typo not configured", account.New("slack", "acme-crop"), false},
 		{"unknown platform", account.New("nope", "acme-corp"), false},
 		// NameSlug parity with Workspace.Contains: a display-name variant

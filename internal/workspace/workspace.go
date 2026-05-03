@@ -59,7 +59,7 @@ func resolve(cfg *config.Config, ws config.WorkspaceName, source string) (*Works
 		accounts = append(accounts, account.New("whatsapp", slug))
 	}
 	for _, slug := range wsCfg.Linear {
-		accounts = append(accounts, account.New("linear-issues", slug))
+		accounts = append(accounts, account.New("linear", slug))
 	}
 	for _, slug := range wsCfg.Jira {
 		accounts = append(accounts, account.New(paths.JiraPlatform, slug))
@@ -132,7 +132,7 @@ func allAccounts(cfg *config.Config) []account.Account {
 		accounts = append(accounts, account.New("whatsapp", w.Account))
 	}
 	for _, l := range cfg.Linear {
-		accounts = append(accounts, account.New("linear-issues", l.Workspace))
+		accounts = append(accounts, account.New("linear", l.Workspace))
 	}
 	for _, j := range cfg.Jira {
 		accounts = append(accounts, j.Account())
