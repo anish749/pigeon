@@ -14,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	wstui "github.com/anish749/pigeon/internal/tui/workstream"
 	"github.com/anish749/pigeon/internal/workspace"
 	"github.com/anish749/pigeon/internal/workstream/clients"
 	"github.com/anish749/pigeon/internal/workstream/manager"
@@ -22,7 +23,6 @@ import (
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
-	"github.com/anish749/pigeon/internal/wstui"
 )
 
 func newWorkstreamCmd() *cobra.Command {

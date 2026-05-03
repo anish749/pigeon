@@ -1,5 +1,5 @@
-// Package tui implements the outbox review terminal UI using Bubble Tea.
-package tui
+// Package review implements the outbox review terminal UI using Bubble Tea.
+package review
 
 import (
 	"bytes"

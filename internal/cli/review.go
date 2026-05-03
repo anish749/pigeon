@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/anish749/pigeon/internal/tui"
+	"github.com/anish749/pigeon/internal/tui/review"
 )
 
 func newReviewCmd() *cobra.Command {
@@ -19,7 +19,7 @@ the outbox for review instead of being sent immediately. Use this command to
 approve, reject, or provide feedback on pending messages.`,
 		PreRunE: ensureDaemon,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return tui.RunReview()
+			return review.RunReview()
 		},
 	}
 }

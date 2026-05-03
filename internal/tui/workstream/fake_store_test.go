@@ -1,4 +1,4 @@
-package wstui
+package workstream
 
 import (
 	"errors"
