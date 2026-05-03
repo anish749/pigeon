@@ -5,74 +5,33 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/compact"
 )
 
-// readWindow is a half-open time range [start, end) used to scope a read.
-// A zero-value window is unbounded — every message qualifies.
-type readWindow struct {
-	start, end time.Time
-}
-
-func (w readWindow) bounded() bool { return !w.start.IsZero() && !w.end.IsZero() }
-
-func (w readWindow) contains(t time.Time) bool {
-	if !w.bounded() {
-		return true
-	}
-	return !t.Before(w.start) && t.Before(w.end)
-}
-
-// windowFromOpts derives a [start, end) window from ReadOpts.
-//
-//	--date X  → [X 00:00 UTC, X+1 00:00 UTC)
-//	--since D → [now-D, now+1ns)
-//	else      → unbounded
-//
-// The "+1ns" on --since's end is so the post-filter accepts messages whose
-// ts equals "now"; readWindow.contains uses a half-open right edge.
-func windowFromOpts(opts ReadOpts) (readWindow, error) {
-	switch {
-	case opts.Date != "":
-		d, err := time.ParseInLocation("2006-01-02", opts.Date, time.UTC)
-		if err != nil {
-			return readWindow{}, fmt.Errorf("parse date %q: %w", opts.Date, err)
-		}
-		return readWindow{start: d, end: d.Add(24 * time.Hour)}, nil
-	case opts.Since > 0:
-		now := time.Now()
-		return readWindow{start: now.Add(-opts.Since), end: now.Add(time.Nanosecond)}, nil
-	}
-	return readWindow{}, nil
-}
-
 // ReadConversation pipeline:
 //
-//  1. Discover files. With a bounded window, use rg to pick only date and
-//     thread files that could carry an in-window message. Without a window,
-//     read every file in the conversation.
+//  1. Discover files. Date files are filtered by filename window (a directory-
+//     layout contract). Thread files are listed whole — pre-filtering by
+//     content would couple to MsgLine.Ts's JSON shape.
 //  2. Parse + resolve into standalone date-file messages and thread groups.
 //  3. Time-filter individually: each message and each thread member is checked
-//     against the window.
+//     against the window using typed time.Time comparisons.
 //  4. Thread completion: a thread with ≥ 1 surviving member is kept whole,
-//     dragging its other members back in regardless of the window. This is
-//     symmetric — parent-in-window pulls replies, reply-in-window pulls
-//     parent + sibling replies.
+//     dragging its other members back in regardless of the window. Symmetric
+//     — parent-in-window pulls replies, reply-in-window pulls parent.
 //  5. Dedupe by ID: a parent that's in both the date file and the thread
 //     file is dropped from the standalone list (the thread atom owns it).
 //  6. Sort by thread sort-ts (parent's ts, or earliest reply ts for orphans);
 //     standalones sort by own ts.
 //  7. Interleave: each thread atom emits parent first, replies in ts order.
-//  8. --last N positional tail trim.
+//  8. --last N positional tail trim. No filter at all returns the full
+//     conversation; defaults belong to callers, not this layer.
 func (s *FSStore) ReadConversation(acct account.Account, conversation string, opts ReadOpts) (*modelv1.ResolvedDateFile, error) {
 	conv := s.convDir(acct, conversation)
 
@@ -107,52 +66,26 @@ func (s *FSStore) ReadConversation(acct account.Account, conversation string, op
 
 	if opts.Last > 0 && len(result) > opts.Last {
 		result = result[len(result)-opts.Last:]
-	} else if opts.Last == 0 && opts.Date == "" && opts.Since == 0 {
-		// No filter specified: cap to the most recent 25 messages.
-		const defaultLast = 25
-		if len(result) > defaultLast {
-			result = result[len(result)-defaultLast:]
-		}
 	}
 
 	return &modelv1.ResolvedDateFile{Messages: result}, errors.Join(errs...)
 }
 
-// discoverFiles returns the set of date and thread file paths to read.
-// With a bounded window, rg-based selection skips files that can't contain an
-// in-window message. Unbounded reads (no --date, --since, or with --last) walk
-// the conversation directory.
-func (s *FSStore) discoverFiles(conv paths.ConversationDir, window readWindow) (dateFiles, threadFiles []string, err error) {
-	if window.bounded() {
-		return read.WindowFiles(conv.Path(), window.start, window.end)
-	}
-
-	dateFiles, err = listDateFiles(conv.Path())
-	if err != nil {
-		return nil, nil, err
-	}
-	threadFiles, err = listThreadFiles(conv.ThreadsDir())
-	if err != nil {
-		return nil, nil, err
-	}
-	return dateFiles, threadFiles, nil
-}
-
 // readDateFiles parses every path as a date file, merges them, then runs
 // compaction + reaction resolution as one batch so cross-file edits and
 // reactions resolve correctly.
-func (s *FSStore) readDateFiles(files []string) ([]modelv1.ResolvedMsg, error) {
+func (s *FSStore) readDateFiles(files []paths.MessagingDateFile) ([]modelv1.ResolvedMsg, error) {
 	merged := &modelv1.DateFile{}
 	var errs []error
 	for _, f := range files {
-		data, err := os.ReadFile(f)
+		data, err := os.ReadFile(f.Path())
 		if err != nil {
-			errs = append(errs, fmt.Errorf("read %s: %w", f, err))
+			errs = append(errs, fmt.Errorf("read %s: %w", f.Path(), err))
 			continue
 		}
 		df, parseErr := modelv1.ParseDateFile(data)
 		if parseErr != nil {
-			slog.Warn("parse date file: some lines skipped", "file", f, "error", parseErr)
+			slog.Warn("parse date file: some lines skipped", "file", f.Path(), "error", parseErr)
 		}
 		merged.Messages = append(merged.Messages, df.Messages...)
 		merged.Reactions = append(merged.Reactions, df.Reactions...)
@@ -167,18 +100,18 @@ func (s *FSStore) readDateFiles(files []string) ([]modelv1.ResolvedMsg, error) {
 // readThreadFiles parses each path as a thread file. Each file becomes one
 // ResolvedThreadFile; orphan files (parent line never written) come back with
 // Parent.ID == "" — sort and interleave fall back to the earliest reply ts.
-func (s *FSStore) readThreadFiles(files []string) ([]*modelv1.ResolvedThreadFile, error) {
+func (s *FSStore) readThreadFiles(files []paths.ThreadFile) ([]*modelv1.ResolvedThreadFile, error) {
 	var groups []*modelv1.ResolvedThreadFile
 	var errs []error
 	for _, f := range files {
-		data, err := os.ReadFile(f)
+		data, err := os.ReadFile(f.Path())
 		if err != nil {
-			errs = append(errs, fmt.Errorf("read %s: %w", f, err))
+			errs = append(errs, fmt.Errorf("read %s: %w", f.Path(), err))
 			continue
 		}
 		tf, parseErr := modelv1.ParseThreadFile(data)
 		if parseErr != nil {
-			slog.Warn("parse thread file: some lines skipped", "file", f, "error", parseErr)
+			slog.Warn("parse thread file: some lines skipped", "file", f.Path(), "error", parseErr)
 		}
 		resolved := modelv1.ResolveThread(compact.CompactThread(tf))
 		if resolved == nil {
@@ -186,7 +119,7 @@ func (s *FSStore) readThreadFiles(files []string) ([]*modelv1.ResolvedThreadFile
 		}
 		if resolved.Parent.ID == "" && len(resolved.Replies) > 0 {
 			slog.Warn("thread file missing parent line, surfacing replies as orphans",
-				"file", f, "replies", len(resolved.Replies))
+				"file", f.Path(), "replies", len(resolved.Replies))
 		}
 		groups = append(groups, resolved)
 	}
@@ -306,22 +239,4 @@ func threadSortTs(g *modelv1.ResolvedThreadFile) time.Time {
 		}
 	}
 	return earliest
-}
-
-func listThreadFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var files []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), paths.FileExt) {
-			continue
-		}
-		files = append(files, filepath.Join(dir, e.Name()))
-	}
-	return files, nil
 }

@@ -205,7 +205,7 @@ WORKFLOW — READING MESSAGES
     pigeon read --platform=whatsapp --account=+14155551234 --contact=Bob --date=2026-03-16
 
     Modes: --last=N (last N messages), --since=DURATION (e.g. 30m, 2h, 7d),
-           --date=YYYY-MM-DD (specific day). Default: today's messages.
+           --date=YYYY-MM-DD (specific day). Without filters: full conversation.
 
   Search across conversations (requires ripgrep):
 

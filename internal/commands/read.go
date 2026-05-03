@@ -50,6 +50,13 @@ func RunRead(p ReadParams) error {
 		}
 		opts.Since = d
 	}
+	// `pigeon read` with no filter defaults to the last 25 messages — a
+	// terminal-friendly tail. The store layer itself returns the full
+	// conversation; this default is a CLI/UX choice that lives here.
+	if opts.Date == "" && opts.Since == 0 && opts.Last == 0 {
+		const defaultLast = 25
+		opts.Last = defaultLast
+	}
 
 	printed := 0
 	var errs []error
@@ -91,7 +98,6 @@ func RunRead(p ReadParams) error {
 	}
 	return errors.Join(errs...)
 }
-
 
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {
@@ -141,4 +147,3 @@ func parseDisplayName(dirName string) string {
 	}
 	return dirName
 }
-

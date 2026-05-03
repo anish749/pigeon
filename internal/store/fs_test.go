@@ -822,10 +822,12 @@ func TestReadConversation_SinceAndLast(t *testing.T) {
 	}
 }
 
-func TestReadConversation_Default_Last25(t *testing.T) {
+// TestReadConversation_NoFilter_ReturnsEverything verifies that calling
+// ReadConversation with zero opts returns the full conversation. Defaulting
+// (e.g. capping to a recent N) is a caller concern, not a store concern.
+func TestReadConversation_NoFilter_ReturnsEverything(t *testing.T) {
 	s, acct := setup(t)
 
-	// Write 30 messages across multiple days
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 30; i++ {
@@ -841,36 +843,11 @@ func TestReadConversation_Default_Last25(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConversation: %v", err)
 	}
-	// Default should return last 25 messages
-	if len(df.Messages) != 25 {
-		t.Fatalf("messages = %d, want 25", len(df.Messages))
+	if len(df.Messages) != 30 {
+		t.Fatalf("messages = %d, want 30 (no filter = full conversation)", len(df.Messages))
 	}
-	// First returned message should be M05 (skipped M00-M04)
-	if df.Messages[0].ID != "M05" {
-		t.Errorf("first message = %q, want M05", df.Messages[0].ID)
-	}
-	if df.Messages[24].ID != "M29" {
-		t.Errorf("last message = %q, want M29", df.Messages[24].ID)
-	}
-}
-
-func TestReadConversation_Default_LessThan25(t *testing.T) {
-	s, acct := setup(t)
-
-	// Write only 3 messages — should return all of them
-	m1 := msgLine("A", ts(2026, 1, 10, 9, 0, 0), "Alice", "U1", "first")
-	m2 := msgLine("B", ts(2026, 1, 10, 12, 0, 0), "Bob", "U2", "second")
-	m3 := msgLine("C", ts(2026, 1, 11, 9, 0, 0), "Alice", "U1", "third")
-	s.Append(acct, "#general", m1)
-	s.Append(acct, "#general", m2)
-	s.Append(acct, "#general", m3)
-
-	df, err := s.ReadConversation(acct, "#general", ReadOpts{})
-	if err != nil {
-		t.Fatalf("ReadConversation: %v", err)
-	}
-	if len(df.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3 (all available)", len(df.Messages))
+	if df.Messages[0].ID != "M00" || df.Messages[29].ID != "M29" {
+		t.Errorf("got [%s..%s], want [M00..M29]", df.Messages[0].ID, df.Messages[29].ID)
 	}
 }
 
