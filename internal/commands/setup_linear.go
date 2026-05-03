@@ -10,12 +10,24 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
+	"github.com/anish749/pigeon/internal/linear/auth"
 )
 
 func RunSetupLinear(args []string) error {
-	// Verify linear CLI is installed and authenticated by querying for teams.
-	workspace, err := detectLinearWorkspace()
+	creds, err := auth.Load()
 	if err != nil {
+		return err
+	}
+	if len(creds.Workspaces) == 0 {
+		return fmt.Errorf("no Linear workspaces authenticated — run `linear auth login` first")
+	}
+
+	workspace, err := chooseWorkspace(creds)
+	if err != nil {
+		return err
+	}
+
+	if err := verifyLinearWorkspace(workspace); err != nil {
 		return err
 	}
 
@@ -65,11 +77,44 @@ func RunSetupLinear(args []string) error {
 	return nil
 }
 
-// detectLinearWorkspace probes the linear CLI to discover the current workspace slug.
-func detectLinearWorkspace() (string, error) {
-	out, err := exec.Command("linear", "api", `{ viewer { organization { urlKey } } }`).Output()
+// chooseWorkspace returns the only authenticated workspace when there is
+// one, or prompts the user to pick from the full list. The default workspace
+// (per the linear CLI) is highlighted and pre-selected.
+func chooseWorkspace(creds *auth.Credentials) (string, error) {
+	if len(creds.Workspaces) == 1 {
+		return creds.Workspaces[0], nil
+	}
+
+	labels := make([]string, len(creds.Workspaces))
+	cursor := 0
+	for i, w := range creds.Workspaces {
+		if w == creds.Default {
+			labels[i] = w + " (default)"
+			cursor = i
+		} else {
+			labels[i] = w
+		}
+	}
+
+	prompt := promptui.Select{
+		Label:     "Select Linear workspace",
+		Items:     labels,
+		CursorPos: cursor,
+	}
+	idx, _, err := prompt.Run()
 	if err != nil {
-		return "", fmt.Errorf("linear CLI not available or not authenticated — run `linear auth login` first: %w", err)
+		return "", fmt.Errorf("selection cancelled: %w", err)
+	}
+	return creds.Workspaces[idx], nil
+}
+
+// verifyLinearWorkspace confirms the linear CLI can talk to the chosen
+// workspace by issuing a no-op GraphQL query through `linear --workspace`.
+// Passing the slug explicitly avoids touching the CLI's stored default.
+func verifyLinearWorkspace(workspace string) error {
+	out, err := exec.Command("linear", "--workspace", workspace, "api", `{ viewer { organization { urlKey } } }`).Output()
+	if err != nil {
+		return fmt.Errorf("verify linear workspace %q: %w (run `linear auth login`?)", workspace, err)
 	}
 
 	var result struct {
@@ -82,13 +127,12 @@ func detectLinearWorkspace() (string, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(out, &result); err != nil {
-		return "", fmt.Errorf("parse linear api response: %w", err)
+		return fmt.Errorf("parse linear api response for %q: %w", workspace, err)
 	}
-	slug := result.Data.Viewer.Organization.URLKey
-	if slug == "" {
-		return "", fmt.Errorf("could not determine workspace — is your linear CLI authenticated?")
+	if got := result.Data.Viewer.Organization.URLKey; got != workspace {
+		return fmt.Errorf("linear returned urlKey %q, expected %q", got, workspace)
 	}
-	return slug, nil
+	return nil
 }
 
 func findLinear(cfg *config.Config, workspace string) *config.LinearConfig {
