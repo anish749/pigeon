@@ -79,3 +79,27 @@ The outbox review screen now supports toggling send mode with the `v` key before
 ## ~~Validate date where calendar events are attributed~~ — fixed in #261
 
 Multi-day events are now expanded to all spanned date files instead of only the start date.
+
+## ~~Slack: edits to messages aren't delivered to the agent in real time~~ — fixed in #351
+
+`handleEdit` now calls `onEvent(hub.NewEdit(...))` after persisting; the hub fans the edit out to connected sessions via the unified `RouteEvent` path.
+
+## ~~Slack: deletes to messages aren't delivered to the agent in real time~~ — fixed in #351
+
+Symmetric to the edit fix — `handleDelete` now calls `onEvent(hub.NewDelete(...))` after persisting.
+
+## ~~Slack: notification format doesn't carry thread context~~ — fixed in #340, #349
+
+`MsgLine` carries `ThreadTS` and emits it in notifications (#340); `EditLine` and `DeleteLine` gained matching `ThreadTS`/`ThreadID` fields (#349). Reactions on thread targets are routed and notified with thread context as well.
+
+## ~~Slack: edits/deletes on thread replies persisted to the wrong file~~ — fixed in #355
+
+`MessageStore.AppendEdit` and `AppendDelete` now route to `store.AppendThread(...)` when `threadTS` is set, so `CompactThread` applies them on read.
+
+## ~~Slack write phase: blocks stored even when identical to text fallback~~ — fixed in #292, #303
+
+#292 added a block/text equivalence check with a verification harness; #303 drops the redundant blocks at write time.
+
+## ~~WhatsApp edit and delete events~~ — fixed in #356
+
+WhatsApp listener now extracts `MESSAGE_EDIT` and `REVOKE` protocol messages and routes them through `handleEdit` / `handleRevoke`, mirroring the Slack edit/delete path.
