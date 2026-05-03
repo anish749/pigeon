@@ -118,4 +118,3 @@ func (w *Workspace) AccountsForPlatform(platform string) []account.Account {
 	}
 	return out
 }
-

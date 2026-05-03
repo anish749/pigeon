@@ -39,8 +39,9 @@ type MessageStore struct {
 	// closure. Routing through this hook (rather than calling Maintain
 	// directly) keeps eager post-sync compaction and the periodic
 	// scheduler serialised on the same worker so they never race on
-	// the same files.
-	triggerMaintain func(account.Account)
+	// the same files. Context lets the call return on shutdown rather
+	// than parking on a buffered channel after the worker has exited.
+	triggerMaintain func(context.Context, account.Account)
 	mu              gosync.Mutex
 	cursors         store.SlackCursors
 }
@@ -48,7 +49,7 @@ type MessageStore struct {
 // NewMessageStore creates a MessageStore, loading any existing cursors from
 // disk. triggerMaintain must be non-nil; daemon callers pass
 // MaintenanceManager.Trigger and tests pass a no-op closure.
-func NewMessageStore(acct account.Account, s *store.FSStore, triggerMaintain func(account.Account)) (*MessageStore, error) {
+func NewMessageStore(acct account.Account, s *store.FSStore, triggerMaintain func(context.Context, account.Account)) (*MessageStore, error) {
 	if triggerMaintain == nil {
 		return nil, fmt.Errorf("NewMessageStore: triggerMaintain is required")
 	}
@@ -370,7 +371,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 	// duplicates. Trigger funnels into the maintenance worker's queue
 	// and blocks when the queue is full — the resulting backpressure on
 	// sync is intentional.
-	ms.triggerMaintain(acct)
+	ms.triggerMaintain(ctx, acct)
 
 	return nil
 }

@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"os"
+	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -62,7 +64,7 @@ func TestMaintenanceManager_RequestsSerializedThroughChannel(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func(i int) {
 			defer wg.Done()
-			m.Trigger(account.New("linear", "ws"+string(rune('0'+i))))
+			m.Trigger(ctx, account.New("linear", "ws"+strconv.Itoa(i)))
 		}(i)
 	}
 	wg.Wait()
@@ -88,16 +90,18 @@ func TestMaintenanceManager_TriggerBlocksWhenBufferFull(t *testing.T) {
 	s := store.NewFSStore(root)
 	m := NewMaintenanceManager(s, root)
 
+	ctx := context.Background()
+
 	// Fill the buffer without starting a worker.
 	for i := 0; i < triggerBuffer; i++ {
-		m.Trigger(account.New("linear", "ws"))
+		m.Trigger(ctx, account.New("linear", "ws"))
 	}
 
 	// The next Trigger must block. Run it in a goroutine and assert it
 	// hasn't returned within a short timeout.
 	done := make(chan struct{})
 	go func() {
-		m.Trigger(account.New("linear", "ws"))
+		m.Trigger(ctx, account.New("linear", "ws"))
 		close(done)
 	}()
 
@@ -115,6 +119,37 @@ func TestMaintenanceManager_TriggerBlocksWhenBufferFull(t *testing.T) {
 		// expected
 	case <-time.After(time.Second):
 		t.Fatal("Trigger did not unblock after a slot was freed")
+	}
+}
+
+// TestMaintenanceManager_TriggerReturnsOnContextCancel ensures Trigger
+// does not park indefinitely on shutdown when the worker has already
+// exited and the buffer is full.
+func TestMaintenanceManager_TriggerReturnsOnContextCancel(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	m := NewMaintenanceManager(s, root)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Fill the buffer with no worker running.
+	for i := 0; i < triggerBuffer; i++ {
+		m.Trigger(ctx, account.New("linear", "ws"))
+	}
+
+	// The next call would block forever; cancellation must release it.
+	done := make(chan struct{})
+	go func() {
+		m.Trigger(ctx, account.New("linear", "ws"))
+		close(done)
+	}()
+
+	cancel()
+	select {
+	case <-done:
+		// expected: Trigger returned because ctx was cancelled.
+	case <-time.After(time.Second):
+		t.Fatal("Trigger did not return after ctx cancellation")
 	}
 }
 
@@ -155,9 +190,10 @@ func TestMaintenanceManager_SchedulerEnqueuesStale(t *testing.T) {
 	m.setAccounts(&config.Config{Linear: []config.LinearConfig{{Workspace: "alpha"}}})
 
 	// Scheduler tick logic, executed inline so we don't wait an hour.
+	ctx := context.Background()
 	for _, acct := range m.snapshotAccounts() {
 		if m.isStale(acct) {
-			m.Trigger(acct)
+			m.Trigger(ctx, acct)
 		}
 	}
 
@@ -168,5 +204,58 @@ func TestMaintenanceManager_SchedulerEnqueuesStale(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("scheduler did not enqueue the stale account")
+	}
+}
+
+// TestMaintenanceManager_SetAccountsReconciliation exercises the live
+// account snapshot the scheduler reads on every tick. A config change
+// must add new accounts and drop removed ones from the active set so a
+// subsequent tick targets the right list.
+func TestMaintenanceManager_SetAccountsReconciliation(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+	m := NewMaintenanceManager(s, root)
+
+	keys := func() []string {
+		var out []string
+		for _, a := range m.snapshotAccounts() {
+			out = append(out, a.String())
+		}
+		sort.Strings(out)
+		return out
+	}
+	equal := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	m.setAccounts(&config.Config{
+		Slack:  []config.SlackConfig{{Workspace: "acme"}},
+		Linear: []config.LinearConfig{{Workspace: "alpha"}},
+	})
+	if got, want := keys(), []string{"linear-alpha", "slack-acme"}; !equal(got, want) {
+		t.Fatalf("after first config: got %v, want %v", got, want)
+	}
+
+	// Drop slack, add gws — both directions in one tick.
+	m.setAccounts(&config.Config{
+		GWS:    []config.GWSConfig{{Email: "x@y.com"}},
+		Linear: []config.LinearConfig{{Workspace: "alpha"}},
+	})
+	if got, want := keys(), []string{"gws-xaty-com", "linear-alpha"}; !equal(got, want) {
+		t.Fatalf("after reconcile: got %v, want %v", got, want)
+	}
+
+	// Empty config — every account dropped.
+	m.setAccounts(&config.Config{})
+	if got := keys(); len(got) != 0 {
+		t.Fatalf("after empty config: got %v, want []", got)
 	}
 }

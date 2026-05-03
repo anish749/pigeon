@@ -30,7 +30,7 @@ type SlackManager struct {
 	idStore         identity.Store
 	dataRoot        paths.DataRoot
 	syncTracker     *syncstatus.Tracker
-	triggerMaintain func(account.Account)
+	triggerMaintain func(context.Context, account.Account)
 	running         map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -52,7 +52,7 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(account.Account)) *SlackManager {
+func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account)) *SlackManager {
 	return &SlackManager{
 		apiServer:       apiServer,
 		onEvent:         onEvent,

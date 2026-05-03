@@ -79,12 +79,18 @@ func NewMaintenanceManager(s *store.FSStore, root paths.DataRoot) *MaintenanceMa
 }
 
 // Trigger asks the worker to run Maintain for acct. Blocks if the queue
-// is full so callers feel backpressure when maintenance can't keep up.
-// Slack's post-sync hook is the canonical caller; routing through this
-// method (instead of calling FSStore.Maintain directly) keeps eager and
-// periodic compaction serialised on the single worker.
-func (m *MaintenanceManager) Trigger(acct account.Account) {
-	m.requests <- acct
+// is full so callers feel backpressure when maintenance can't keep up,
+// but returns immediately when ctx is cancelled — daemon shutdown must
+// not park slack/sync or the scheduler inside the channel send after
+// the worker has exited. Slack's post-sync hook is the canonical
+// caller; routing through this method (instead of calling
+// FSStore.Maintain directly) keeps eager and periodic compaction
+// serialised on the single worker.
+func (m *MaintenanceManager) Trigger(ctx context.Context, acct account.Account) {
+	select {
+	case m.requests <- acct:
+	case <-ctx.Done():
+	}
 }
 
 // Run starts the worker and scheduler, then watches config for changes.
@@ -155,7 +161,7 @@ func (m *MaintenanceManager) scheduler(ctx context.Context) {
 					return
 				}
 				if m.isStale(acct) {
-					m.Trigger(acct)
+					m.Trigger(ctx, acct)
 				}
 			}
 		}
@@ -175,4 +181,3 @@ func (m *MaintenanceManager) isStale(acct account.Account) bool {
 	}
 	return time.Since(info.ModTime()) >= maintenanceMinAge
 }
-
