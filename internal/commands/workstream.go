@@ -12,7 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/workspace"
-	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/claudecli"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
@@ -41,7 +41,7 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 		}
 	}
 
-	claude := clients.New(model, logger)
+	claude := claudecli.New(model, logger)
 
 	for _, ws := range workspaces {
 		if err := discoverWorkspace(ctx, claude, ws, since, until, logger, w); err != nil {
@@ -51,7 +51,7 @@ func RunWorkstreamDiscover(ctx context.Context, cfg *config.Config, workspaceFla
 	return nil
 }
 
-func discoverWorkspace(ctx context.Context, claude *clients.Client, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
+func discoverWorkspace(ctx context.Context, claude *claudecli.Client, ws *workspace.Workspace, since, until time.Time, logger *slog.Logger, w io.Writer) error {
 	root := paths.DefaultDataRoot()
 	storeDir := root.Workspace(string(ws.Name)).WorkstreamStore()
 	st := wsstore.NewFS(storeDir.Path())

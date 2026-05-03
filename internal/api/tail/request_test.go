@@ -1,4 +1,4 @@
-package tailapi
+package tail
 
 import (
 	"encoding/base64"

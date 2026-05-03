@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api/tail"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/tailapi"
 )
 
 // newTestHub builds a Hub rooted at a tmp data dir with no sessions.
@@ -38,7 +38,7 @@ func newTestHub(t *testing.T) (*Hub, store.Store, paths.DataRoot) {
 // collectFrames starts the tail handler against an httptest server,
 // reads until readFor elapses or ctx is cancelled, and returns the
 // decoded frames.
-func collectFrames(t *testing.T, h *Hub, req tailapi.Request, readFor time.Duration, onConnected func()) []map[string]any {
+func collectFrames(t *testing.T, h *Hub, req tail.Request, readFor time.Duration, onConnected func()) []map[string]any {
 	t.Helper()
 	srv := httptest.NewServer(h.TailHandler())
 	t.Cleanup(srv.Close)
@@ -97,7 +97,7 @@ func collectFrames(t *testing.T, h *Hub, req tailapi.Request, readFor time.Durat
 func TestTailHandler_EmitsConnectedFrame(t *testing.T) {
 	h, _, _ := newTestHub(t)
 
-	frames := collectFrames(t, h, tailapi.Request{}, 200*time.Millisecond, nil)
+	frames := collectFrames(t, h, tail.Request{}, 200*time.Millisecond, nil)
 	if len(frames) == 0 {
 		t.Fatal("expected at least the connected frame, got none")
 	}
@@ -126,7 +126,7 @@ func TestTailHandler_LiveEventsFlow(t *testing.T) {
 		}))
 	}
 
-	frames := collectFrames(t, h, tailapi.Request{}, 500*time.Millisecond, onConnect)
+	frames := collectFrames(t, h, tail.Request{}, 500*time.Millisecond, onConnect)
 
 	var gotMsg bool
 	for _, f := range frames {
@@ -162,7 +162,7 @@ func TestTailHandler_FilterScopesToAccount(t *testing.T) {
 		h.RouteEvent(NewMsg(other, "#b", modelv1.MsgLine{ID: "2", Ts: time.Now(), Text: "from other"}))
 	}
 
-	frames := collectFrames(t, h, tailapi.Request{
+	frames := collectFrames(t, h, tail.Request{
 		Accounts: []account.Account{acme},
 	}, 500*time.Millisecond, onConnect)
 
