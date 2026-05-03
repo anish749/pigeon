@@ -13,9 +13,9 @@ import (
 	"github.com/manifoldco/promptui"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/claude"
 	"github.com/anish749/pigeon/internal/config"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
+	"github.com/anish749/pigeon/internal/mcp/ccsession"
 )
 
 // errGoBack signals that the user wants to return to the account selector.
@@ -63,7 +63,7 @@ func RunClaudeSession(p ClaudeSessionParams) error {
 }
 
 func runSessionForAccount(acct account.Account) error {
-	sf, err := claude.OpenSession(acct)
+	sf, err := ccsession.OpenSession(acct)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func selectAccount() (account.Account, error) {
 	return options[idx].Acct, nil
 }
 
-func handleExistingSession(sf *claude.SessionFile, cwd string) error {
+func handleExistingSession(sf *ccsession.SessionFile, cwd string) error {
 	s := sf.Data()
 	acct := account.New(s.Platform, s.Account)
 	connected := isSessionConnected(s.SessionID)
@@ -185,7 +185,7 @@ func handleExistingSession(sf *claude.SessionFile, cwd string) error {
 	}
 }
 
-func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) error {
+func handleNewSession(sf *ccsession.SessionFile, acct account.Account, cwd string) error {
 	fmt.Printf("\n%sNew session for %s%s%s\n", bold, cyan, acct.Display(), reset)
 	fmt.Printf("  Working directory: %s%s%s\n\n", bold, cwd, reset)
 	fmt.Printf("  %s⚠  Everything in this directory will be accessible to pigeon%s\n", yellow, reset)
@@ -216,11 +216,11 @@ func handleNewSession(sf *claude.SessionFile, acct account.Account, cwd string) 
 	}
 }
 
-func createAndLaunchSession(sf *claude.SessionFile, acct account.Account, cwd string) error {
+func createAndLaunchSession(sf *ccsession.SessionFile, acct account.Account, cwd string) error {
 	sessionID := uuid.New().String()
 	now := time.Now()
 
-	s := &claude.Session{
+	s := &ccsession.Session{
 		Platform:      acct.Platform,
 		Account:       acct.Name,
 		SessionID:     sessionID,

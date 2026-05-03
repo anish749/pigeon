@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anish749/pigeon/internal/api/tail"
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
-	"github.com/anish749/pigeon/internal/tailapi"
 )
 
 // RunMonitor opens an SSE stream to the daemon's /api/tail endpoint and
@@ -21,7 +21,7 @@ import (
 // out is *os.File rather than io.Writer: os.File has no Go-level buffering,
 // so each Fprintln is a direct write syscall — events are never held in a
 // Go buffer before reaching the pipe consumer.
-func RunMonitor(ctx context.Context, req tailapi.Request, out *os.File) error {
+func RunMonitor(ctx context.Context, req tail.Request, out *os.File) error {
 	q, err := req.Encode()
 	if err != nil {
 		return fmt.Errorf("encode tail request: %w", err)

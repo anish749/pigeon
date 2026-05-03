@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/claudecli"
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
@@ -29,14 +29,14 @@ type llmWorkstream struct {
 //  2. Send all conversation summaries to the LLM in a single call and ask it to identify
 //     distinct workstreams that span conversations.
 type LLMDiscovery struct {
-	client    *clients.Client
+	client    *claudecli.Client
 	logger    *slog.Logger
 	longModel string // model for discovery (can use a more capable model than routing)
 }
 
 // NewLLMDiscovery creates a discovery instance backed by the Claude CLI.
 // longModel is optional — if empty, uses the same client model.
-func NewLLMDiscovery(client *clients.Client, logger *slog.Logger) *LLMDiscovery {
+func NewLLMDiscovery(client *claudecli.Client, logger *slog.Logger) *LLMDiscovery {
 	return &LLMDiscovery{client: client, logger: logger}
 }
 

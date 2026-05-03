@@ -1,6 +1,8 @@
-// Package claude manages Claude Code session files that bind a platform+account
-// to a persistent Claude Code session ID.
-package claude
+// Package ccsession manages Claude Code session files that bind a
+// platform+account to a persistent Claude Code session ID. The MCP server
+// (internal/mcp/server) writes the file when it starts; the daemon's hub
+// reads it to know which Claude Code session owns which account.
+package ccsession
 
 import (
 	"fmt"

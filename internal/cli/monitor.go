@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api/tail"
 	"github.com/anish749/pigeon/internal/commands"
-	"github.com/anish749/pigeon/internal/tailapi"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 )
 
 func newMonitorCmd() *cobra.Command {
@@ -117,7 +117,7 @@ func runMonitor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("get since flag: %w", err)
 	}
 
-	req := tailapi.Request{}
+	req := tail.Request{}
 
 	// Workspace resolves at the CLI layer. --platform/--account override
 	// the workspace account list if both are set.

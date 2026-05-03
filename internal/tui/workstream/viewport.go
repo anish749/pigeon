@@ -1,4 +1,4 @@
-package wstui
+package workstream
 
 // viewport returns the [start, end) item indices that fit within budget
 // while keeping cursor in view. offset is treated as a soft hint: it

@@ -16,7 +16,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
-	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/claudecli"
 	"github.com/anish749/pigeon/internal/workstream/discovery"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
@@ -31,7 +31,7 @@ type SignalReader interface {
 // that creates or modifies workstreams. Its single entry point is
 // ObserveRouting — call it after each routing decision is recorded.
 type Manager struct {
-	client *clients.Client
+	client *claudecli.Client
 	disc   discovery.WorkspaceDiscovery
 	reader SignalReader
 	sc     *StatCollector
@@ -51,7 +51,7 @@ type Manager struct {
 }
 
 // New creates a workstream manager.
-func New(client *clients.Client, signalReader SignalReader, sc *StatCollector, cfg models.Config, st wsstore.Store, logger *slog.Logger) *Manager {
+func New(client *claudecli.Client, signalReader SignalReader, sc *StatCollector, cfg models.Config, st wsstore.Store, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:             client,
 		disc:               discovery.NewLLMDiscovery(client, logger),

@@ -1,4 +1,4 @@
-// Package wstui implements the workstream management terminal UI used
+// Package workstream implements the workstream management terminal UI used
 // by `pigeon workstream tui`. It is a thin presentation layer on top of
 // the workstream FS store: lifecycle operations live in
 // internal/workstream/manager, persistence in internal/workstream/store,
@@ -12,7 +12,7 @@
 //   - actions.go  — store mutations and discovery expressed as tea.Cmds.
 //   - filter.go   — workspace-scope filtering and sorting.
 //   - styles.go   — lipgloss style values.
-package wstui
+package workstream
 
 import (
 	tea "github.com/charmbracelet/bubbletea"

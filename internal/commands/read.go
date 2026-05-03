@@ -10,7 +10,7 @@ import (
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 )
 
 type ReadParams struct {
@@ -92,7 +92,6 @@ func RunRead(p ReadParams) error {
 	return errors.Join(errs...)
 }
 
-
 // conversation holds directory and display info for a matched conversation.
 type conversation struct {
 	dirName     string
@@ -141,4 +140,3 @@ func parseDisplayName(dirName string) string {
 	}
 	return dirName
 }
-

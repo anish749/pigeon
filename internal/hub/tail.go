@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api/tail"
 	"github.com/anish749/pigeon/internal/store"
-	"github.com/anish749/pigeon/internal/tailapi"
 )
 
 // tailSubscriberBufferSize is the event-channel capacity for a single
@@ -23,7 +23,7 @@ const tailSubscriberBufferSize = 128
 // /api/tail SSE endpoint. Each `data:` frame is one Event.
 //
 // The request payload (accounts filter, since timestamp) is decoded
-// from query parameters via tailapi.Decode — see internal/tailapi for
+// from query parameters via tail.Decode — see internal/api/tail for
 // the wire contract.
 //
 // No cursor, no session binding, no server-side state.
@@ -35,7 +35,7 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 			return
 		}
 
-		req, err := tailapi.Decode(r.URL.Query())
+		req, err := tail.Decode(r.URL.Query())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

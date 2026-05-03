@@ -1,5 +1,6 @@
-// Package clients provides LLM clients for the affinity router.
-package clients
+// Package claudecli wraps the Claude CLI for non-interactive LLM calls
+// (text and structured JSON) used by the affinity router.
+package claudecli
 
 import (
 	"bytes"

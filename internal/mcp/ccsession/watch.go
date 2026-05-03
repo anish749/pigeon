@@ -1,4 +1,4 @@
-package claude
+package ccsession
 
 import (
 	"context"

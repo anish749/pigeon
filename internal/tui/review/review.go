@@ -1,5 +1,5 @@
-// Package tui implements the outbox review terminal UI using Bubble Tea.
-package tui
+// Package review implements the outbox review terminal UI using Bubble Tea.
+package review
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
-	"github.com/anish749/pigeon/internal/timeutil"
+	"github.com/anish749/pigeon/internal/utils/timeutil"
 )
 
 var (

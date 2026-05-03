@@ -12,7 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
-	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/claudecli"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
@@ -63,7 +63,7 @@ func Run(ctx context.Context, cfg Config, emb embedder.Embedder, threshold float
 	root := paths.DefaultDataRoot()
 	storeDir := root.Workspace(string(cfg.Workspace.Name)).WorkstreamStore()
 	st := arstore.NewFS(storeDir.Path())
-	claude := clients.New(cfg.Model, logger)
+	claude := claudecli.New(cfg.Model, logger)
 	signalReader := reader.New(store.NewFSStore(root), root)
 	sc := manager.NewStatCollector()
 	mgr := manager.New(claude, signalReader, sc, cfg, st, logger)

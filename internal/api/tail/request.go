@@ -1,8 +1,8 @@
-// Package tailapi defines the wire contract for the daemon's /api/tail
+// Package tail defines the wire contract for the daemon's /api/tail
 // streaming endpoint. Both the daemon handler (internal/hub) and the
 // CLI's monitor command (internal/commands) import this package so the
 // request type and its serialization live in exactly one place.
-package tailapi
+package tail
 
 import (
 	"encoding/base64"

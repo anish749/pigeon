@@ -14,15 +14,15 @@ import (
 	"github.com/anish749/pigeon/internal/embedder"
 	"github.com/anish749/pigeon/internal/paths"
 	"github.com/anish749/pigeon/internal/store"
+	wstui "github.com/anish749/pigeon/internal/tui/workstream"
 	"github.com/anish749/pigeon/internal/workspace"
-	"github.com/anish749/pigeon/internal/workstream/clients"
+	"github.com/anish749/pigeon/internal/workstream/claudecli"
 	"github.com/anish749/pigeon/internal/workstream/manager"
 	"github.com/anish749/pigeon/internal/workstream/models"
 	"github.com/anish749/pigeon/internal/workstream/reader"
 	"github.com/anish749/pigeon/internal/workstream/replay"
 	"github.com/anish749/pigeon/internal/workstream/reporter"
 	wsstore "github.com/anish749/pigeon/internal/workstream/store"
-	"github.com/anish749/pigeon/internal/wstui"
 )
 
 func newWorkstreamCmd() *cobra.Command {
@@ -69,7 +69,7 @@ the current workspace.`,
 			cfg := models.DefaultConfig()
 			cfg.Workspace = *ws
 			cfg.ApprovalMode = models.AutoApprove
-			claude := clients.New(cfg.Model, logger)
+			claude := claudecli.New(cfg.Model, logger)
 			signalReader := reader.New(store.NewFSStore(root), root)
 			mgr := manager.New(claude, signalReader, manager.NewStatCollector(), cfg, st, logger)
 

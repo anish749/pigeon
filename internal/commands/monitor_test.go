@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
+	"github.com/anish749/pigeon/internal/api/tail"
 	"github.com/anish749/pigeon/internal/paths"
-	"github.com/anish749/pigeon/internal/tailapi"
 )
 
 // startFakeDaemon brings up a Unix socket HTTP server at paths.SocketPath()
@@ -69,7 +69,7 @@ func TestRunMonitor_WritesFramesToOut(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := RunMonitor(ctx, tailapi.Request{}, w); err != nil {
+	if err := RunMonitor(ctx, tail.Request{}, w); err != nil {
 		t.Fatalf("RunMonitor: %v", err)
 	}
 	w.Close()
@@ -90,17 +90,17 @@ func TestRunMonitor_WritesFramesToOut(t *testing.T) {
 
 func TestRunMonitor_EncodesRequestIntoQuery(t *testing.T) {
 	// Capture the query the daemon sees.
-	var gotRequest tailapi.Request
+	var gotRequest tail.Request
 	var decodeErr error
 
 	startFakeDaemon(t, func(w http.ResponseWriter, r *http.Request) {
-		gotRequest, decodeErr = tailapi.Decode(r.URL.Query())
+		gotRequest, decodeErr = tail.Decode(r.URL.Query())
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.(http.Flusher).Flush()
 	})
 
 	acme := account.New("slack", "acme")
-	sent := tailapi.Request{
+	sent := tail.Request{
 		Accounts: []account.Account{acme},
 		Since:    time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC),
 	}
@@ -158,7 +158,7 @@ func TestRunMonitor_NonOKStatusReturnsError(t *testing.T) {
 				t.Fatalf("pipe: %v", err)
 			}
 			defer w.Close()
-			runErr := RunMonitor(context.Background(), tailapi.Request{}, w)
+			runErr := RunMonitor(context.Background(), tail.Request{}, w)
 			if runErr == nil {
 				t.Fatalf("expected error, got nil")
 			}
@@ -200,7 +200,7 @@ func TestRunMonitor_HandlesLargeFrame(t *testing.T) {
 		done <- out
 	}()
 
-	if err := RunMonitor(ctx, tailapi.Request{}, w); err != nil {
+	if err := RunMonitor(ctx, tail.Request{}, w); err != nil {
 		t.Fatalf("RunMonitor: %v", err)
 	}
 	w.Close()
@@ -236,7 +236,7 @@ func TestRunMonitor_SkipsNonDataLines(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	_ = RunMonitor(ctx, tailapi.Request{}, w)
+	_ = RunMonitor(ctx, tail.Request{}, w)
 	w.Close()
 	outBytes, _ := io.ReadAll(r)
 	r.Close()
