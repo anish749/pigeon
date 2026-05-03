@@ -31,28 +31,30 @@ const (
 	// triggerBuffer caps how many requests can sit in the queue before
 	// Trigger blocks. Sized so the scheduler firing for every configured
 	// account in one tick fits without blocking; once it's full, callers
-	// (slack post-sync, scheduler) wait for the worker to catch up. That
-	// natural backpressure is the goal — silently dropping requests
-	// would leave the writer thinking maintenance is queued when it
-	// isn't.
+	// wait for the worker to catch up. Backpressure is the goal —
+	// dropping requests on overflow would leave the writer thinking
+	// maintenance is queued when it isn't.
 	triggerBuffer = 16
 )
 
 // MaintenanceManager runs FSStore.Maintain serially across all configured
 // accounts. A single worker goroutine consumes a buffered channel; both
 // the periodic scheduler and external Trigger calls (e.g. slack post-sync)
-// send into the same channel. This guarantees only one Maintain pass is
-// in flight at a time across the whole daemon — no parallel rewrites of
-// the same files, no startup stampede with many accounts.
+// send into the same channel. Two structural properties fall out of this
+// shape:
 //
-// Trigger is a blocking channel send: when the buffer is full, the caller
-// waits. That gives the trigger source (slack/sync, scheduler) backpressure
-// proportional to maintenance throughput.
+//   - At most one Maintain pass is in flight across the whole daemon, so
+//     parallel rewrites of the same files are impossible by construction.
+//   - Trigger is a blocking channel send. When the buffer fills, callers
+//     (slack/sync, scheduler) wait for the worker to catch up; silently
+//     dropping requests would leave the writer thinking maintenance is
+//     queued when it isn't.
 //
-// The scheduler uses the existing `.maintenance.json` mtime (updated by
-// every successful Maintain) as the wall-clock anchor for "is this
-// account stale?". Wall-clock mtime survives laptop suspend correctly,
-// unlike a monotonic ticker.
+// The scheduler uses the wall-clock mtime of `.maintenance.json` (which
+// FSStore.Maintain bumps on every successful run) as the staleness gate.
+// Wall-clock so the gate survives laptop suspend — Go's monotonic clock
+// pauses during macOS sleep, which would leave a monotonic-ticker
+// scheduler stuck for an entire 28-hour suspend. mtime sidesteps that.
 type MaintenanceManager struct {
 	store    *store.FSStore
 	root     paths.DataRoot
@@ -78,9 +80,9 @@ func NewMaintenanceManager(s *store.FSStore, root paths.DataRoot) *MaintenanceMa
 
 // Trigger asks the worker to run Maintain for acct. Blocks if the queue
 // is full so callers feel backpressure when maintenance can't keep up.
-// Slack's post-sync hook is the canonical caller — replaces the previous
-// direct store.Maintain(acct) so sync and the periodic loop never race
-// on the same files.
+// Slack's post-sync hook is the canonical caller; routing through this
+// method (instead of calling FSStore.Maintain directly) keeps eager and
+// periodic compaction serialised on the single worker.
 func (m *MaintenanceManager) Trigger(acct account.Account) {
 	m.requests <- acct
 }
@@ -99,7 +101,7 @@ func (m *MaintenanceManager) Run(ctx context.Context, initial *config.Config) {
 }
 
 func (m *MaintenanceManager) setAccounts(cfg *config.Config) {
-	accounts := configuredAccounts(cfg)
+	accounts := cfg.AllAccounts()
 	m.accounts.Store(&accounts)
 }
 
@@ -133,7 +135,7 @@ func (m *MaintenanceManager) runOnce(ctx context.Context, acct account.Account) 
 		slog.Error("maintenance failed", "account", acct.Display(), "duration", time.Since(started), "error", err)
 		return
 	}
-	slog.Debug("maintenance complete", "account", acct.Display(), "duration", time.Since(started))
+	slog.Info("maintenance complete", "account", acct.Display(), "duration", time.Since(started))
 }
 
 // scheduler enqueues stale accounts every maintenanceCheckInterval. An
@@ -174,26 +176,3 @@ func (m *MaintenanceManager) isStale(acct account.Account) bool {
 	return time.Since(info.ModTime()) >= maintenanceMinAge
 }
 
-// configuredAccounts returns every account.Account derivable from cfg
-// across all platforms. Each per-platform manager iterates its own slice
-// of cfg directly; this is the only place in the daemon that needs to
-// know the cross-platform shape of Config.
-func configuredAccounts(cfg *config.Config) []account.Account {
-	var accounts []account.Account
-	for _, s := range cfg.Slack {
-		accounts = append(accounts, account.New("slack", s.Workspace))
-	}
-	for _, g := range cfg.GWS {
-		accounts = append(accounts, account.New("gws", g.Email))
-	}
-	for _, w := range cfg.WhatsApp {
-		accounts = append(accounts, account.New("whatsapp", w.Account))
-	}
-	for _, l := range cfg.Linear {
-		accounts = append(accounts, account.New("linear", l.Workspace))
-	}
-	for _, j := range cfg.Jira {
-		accounts = append(accounts, j.Account())
-	}
-	return accounts
-}

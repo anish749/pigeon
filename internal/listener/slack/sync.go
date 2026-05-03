@@ -33,11 +33,13 @@ type MessageStore struct {
 	acct       account.Account
 	accountDir paths.AccountDir
 	store      *store.FSStore
-	// triggerMaintain signals the daemon's MaintenanceManager that this
-	// account has fresh writes worth compacting. Replaces the previous
-	// direct `store.Maintain(acct)` call inside sync, which raced with
-	// the daemon's periodic maintenance loop. Required (non-nil) — tests
-	// pass a no-op closure.
+	// triggerMaintain asks the daemon's maintenance worker to compact
+	// this account's freshly written files. Required (non-nil): the
+	// daemon passes MaintenanceManager.Trigger, tests pass a no-op
+	// closure. Routing through this hook (rather than calling Maintain
+	// directly) keeps eager post-sync compaction and the periodic
+	// scheduler serialised on the same worker so they never race on
+	// the same files.
 	triggerMaintain func(account.Account)
 	mu              gosync.Mutex
 	cursors         store.SlackCursors
@@ -45,7 +47,7 @@ type MessageStore struct {
 
 // NewMessageStore creates a MessageStore, loading any existing cursors from
 // disk. triggerMaintain must be non-nil; daemon callers pass
-// MaintenanceManager.Trigger, tests pass a no-op closure.
+// MaintenanceManager.Trigger and tests pass a no-op closure.
 func NewMessageStore(acct account.Account, s *store.FSStore, triggerMaintain func(account.Account)) (*MessageStore, error) {
 	if triggerMaintain == nil {
 		return nil, fmt.Errorf("NewMessageStore: triggerMaintain is required")
@@ -360,12 +362,14 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
-	// Signal the daemon's MaintenanceManager that this account has fresh
-	// writes. Sync wrote user and bot DM messages to the same date files,
-	// potentially out of order and with duplicates; the daemon runs the
-	// actual compaction serially with any other pending account, so sync
-	// and maintenance never race on the same files. Trigger blocks if
-	// the queue is full — the resulting backpressure is intentional.
+	// Eager compaction: sync writes user and bot DM messages to the same
+	// date files, potentially out of order and with duplicates, so the
+	// files are visibly dirty at exactly this moment. Triggering here
+	// (rather than waiting for the periodic scheduler) tightens the
+	// window in which `pigeon read` / `grep` / `jq` would see the raw
+	// duplicates. Trigger funnels into the maintenance worker's queue
+	// and blocks when the queue is full — the resulting backpressure on
+	// sync is intentional.
 	ms.triggerMaintain(acct)
 
 	return nil

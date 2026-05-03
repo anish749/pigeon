@@ -45,11 +45,10 @@ type runningWorkspace struct {
 // Must be non-nil.
 //
 // triggerMaintain is invoked by each workspace's syncer after a successful
-// sync to ask the daemon's MaintenanceManager to compact the freshly
-// written files. Replaces the previous direct store.Maintain call so
-// sync and the periodic maintenance loop can never run concurrently.
-// May be nil if the caller does not run a MaintenanceManager (tests),
-// in which case post-sync compaction simply doesn't fire.
+// sync to compact the freshly written files. Routing through this hook
+// (instead of calling FSStore.Maintain directly) keeps eager post-sync
+// compaction and the periodic scheduler serialised on the daemon's
+// single maintenance worker. Required non-nil.
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.

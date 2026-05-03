@@ -166,12 +166,12 @@ func DaemonRun(version string) error {
 	tracker := syncstatus.NewTracker()
 	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
 
-	// MaintenanceManager owns the single Maintain worker for the daemon.
-	// Constructed first so listeners can pass its Trigger as their
-	// post-sync compaction signal — direct store.Maintain calls would
-	// race with the periodic loop on the same files. Without this
-	// manager, only Slack ran maintenance (eagerly after each sync), so
-	// Gmail / Calendar / Linear / Drive / Jira logs grew unboundedly.
+	// MaintenanceManager owns the single Maintain worker for the daemon
+	// and runs the periodic scheduler that picks up stale accounts.
+	// Constructed first so listeners can plumb its Trigger as their
+	// post-sync compaction signal; routing every compaction through one
+	// worker is what guarantees eager (post-sync) and periodic passes
+	// never race on the same files.
 	maintMgr := daemon.NewMaintenanceManager(store, dataRoot)
 	go maintMgr.Run(ctx, cfg)
 
