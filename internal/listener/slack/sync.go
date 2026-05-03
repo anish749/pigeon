@@ -33,22 +33,34 @@ type MessageStore struct {
 	acct       account.Account
 	accountDir paths.AccountDir
 	store      *store.FSStore
-	mu         gosync.Mutex
-	cursors    store.SlackCursors
+	// triggerMaintain signals the daemon's MaintenanceManager that this
+	// account has fresh writes worth compacting. Replaces the previous
+	// direct `store.Maintain(acct)` call inside sync, which raced with
+	// the daemon's periodic maintenance loop. Required (non-nil) — tests
+	// pass a no-op closure.
+	triggerMaintain func(account.Account)
+	mu              gosync.Mutex
+	cursors         store.SlackCursors
 }
 
-// NewMessageStore creates a MessageStore, loading any existing cursors from disk.
-func NewMessageStore(acct account.Account, s *store.FSStore) (*MessageStore, error) {
+// NewMessageStore creates a MessageStore, loading any existing cursors from
+// disk. triggerMaintain must be non-nil; daemon callers pass
+// MaintenanceManager.Trigger, tests pass a no-op closure.
+func NewMessageStore(acct account.Account, s *store.FSStore, triggerMaintain func(account.Account)) (*MessageStore, error) {
+	if triggerMaintain == nil {
+		return nil, fmt.Errorf("NewMessageStore: triggerMaintain is required")
+	}
 	accountDir := paths.DefaultDataRoot().AccountFor(acct)
 	cursors, err := s.LoadSlackCursors(accountDir)
 	if err != nil {
 		return nil, fmt.Errorf("load slack cursors: %w", err)
 	}
 	return &MessageStore{
-		acct:       acct,
-		accountDir: accountDir,
-		store:      s,
-		cursors:    cursors,
+		acct:            acct,
+		accountDir:      accountDir,
+		store:           s,
+		triggerMaintain: triggerMaintain,
+		cursors:         cursors,
 	}, nil
 }
 
@@ -348,18 +360,13 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 		slog.ErrorContext(ctx, "slack sync: bot DM sync failed", "account", acct, "error", err)
 	}
 
-	// Run maintenance after sync. Sync writes user messages and bot DM messages
-	// to the same date files, potentially out of order and with duplicates.
-	// Maintenance deduplicates, sorts, and compacts these files on disk.
-	//
-	// This is best-effort: if it fails, correctness is not affected because
-	// readers always dedup and sort in-memory. The periodic maintenance pass
-	// will also pick up any files missed here. We run it eagerly after sync
-	// because we know the files are dirty and it improves on-disk readability
-	// for grep/cat.
-	if err := ms.store.Maintain(acct); err != nil {
-		slog.WarnContext(ctx, "slack sync: maintenance failed", "account", acct, "error", err)
-	}
+	// Signal the daemon's MaintenanceManager that this account has fresh
+	// writes. Sync wrote user and bot DM messages to the same date files,
+	// potentially out of order and with duplicates; the daemon runs the
+	// actual compaction serially with any other pending account, so sync
+	// and maintenance never race on the same files. Trigger blocks if
+	// the queue is full — the resulting backpressure is intentional.
+	ms.triggerMaintain(acct)
 
 	return nil
 }

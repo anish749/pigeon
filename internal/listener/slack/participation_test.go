@@ -17,7 +17,7 @@ func newTestMessageStore(t *testing.T) (*MessageStore, *store.FSStore, account.A
 	root := paths.NewDataRoot(tmp)
 	s := store.NewFSStore(root)
 	acct := account.New("slack", "acme-corp")
-	ms, err := NewMessageStore(acct, s)
+	ms, err := NewMessageStore(acct, s, func(account.Account) {})
 	if err != nil {
 		t.Fatalf("NewMessageStore: %v", err)
 	}

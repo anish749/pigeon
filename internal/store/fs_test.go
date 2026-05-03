@@ -830,6 +830,34 @@ func TestMaintain_GWSDedup(t *testing.T) {
 	}
 }
 
+// TestMaintainFile_FailsOnUnknownKind exercises the default arm of
+// maintainFile's type switch. paths.Classify returns nil for any .jsonl
+// path that doesn't match a known shape; the dispatch must fail loud
+// rather than silently miscompacting. This is the regression guard that
+// catches a future paths kind landing without an explicit case.
+func TestMaintainFile_FailsOnUnknownKind(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := NewFSStore(root)
+
+	// A .jsonl path that does not match any shape paths.Classify knows
+	// about — Classify returns nil, dispatch hits default.
+	stray := filepath.Join(t.TempDir(), "stray.jsonl")
+	if err := os.WriteFile(stray, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if paths.Classify(stray) != nil {
+		t.Fatalf("test setup: expected Classify(%q) == nil", stray)
+	}
+
+	err := s.maintainFile(stray)
+	if err == nil {
+		t.Fatal("maintainFile returned nil for an unclassified .jsonl, want error")
+	}
+	if !strings.Contains(err.Error(), "unhandled DataFile kind") {
+		t.Errorf("error = %v, want it to mention 'unhandled DataFile kind'", err)
+	}
+}
+
 // TestMaintain_LinearDedup verifies that the Classify-based dispatch in
 // maintainFile routes Linear's split logs (issue.jsonl, comments.jsonl)
 // through DedupGWS — the same id-based dedup the rest of the GWS family

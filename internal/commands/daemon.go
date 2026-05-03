@@ -166,10 +166,19 @@ func DaemonRun(version string) error {
 	tracker := syncstatus.NewTracker()
 	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
 
+	// MaintenanceManager owns the single Maintain worker for the daemon.
+	// Constructed first so listeners can pass its Trigger as their
+	// post-sync compaction signal — direct store.Maintain calls would
+	// race with the periodic loop on the same files. Without this
+	// manager, only Slack ran maintenance (eagerly after each sync), so
+	// Gmail / Calendar / Linear / Drive / Jira logs grew unboundedly.
+	maintMgr := daemon.NewMaintenanceManager(store, dataRoot)
+	go maintMgr.Run(ctx, cfg)
+
 	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
+	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger)
 	go slackMgr.Run(ctx, cfg.Slack)
 
 	gwsMgr := daemon.NewGWSManager(apiServer, store, store, dataRoot, tracker)
@@ -180,13 +189,6 @@ func DaemonRun(version string) error {
 
 	jiraMgr := daemon.NewJiraManager(store, tracker)
 	go jiraMgr.Run(ctx, cfg.Jira)
-
-	// Background compaction for every configured account: one pass at
-	// start, then a periodic ticker. Until this manager existed only the
-	// Slack listener ran maintenance (eagerly after each sync), so logs
-	// for the other platforms grew unboundedly with duplicate snapshots.
-	maintMgr := daemon.NewMaintenanceManager(store)
-	go maintMgr.Run(ctx, cfg)
 
 	go apiServer.Start(ctx, paths.SocketPath())
 

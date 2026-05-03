@@ -835,18 +835,18 @@ func cleanupStaleDriveMeta(dir, keepName string) error {
 // strategy is selected by paths.Classify so the dispatch is type-checked
 // against the path registry — same pattern as LatestTs and listConvFor.
 //
-//   - ThreadFile         → messaging thread compaction (parent + replies +
-//     reactions/edits/deletes reconciled).
-//   - MessagingDateFile  → messaging date compaction (same pipeline, sorted
-//   - deduped + react/edit/delete applied).
-//   - Email/Calendar/Linear/Jira logs and Drive comments
-//     → ID-based dedup (keep last by id).
-//   - Other typed kinds  → explicit no-op (sidecars, queues, etc.).
-//   - Unrecognised paths → logged and skipped.
+// Per-kind routing:
+//   - ThreadFile: messaging thread compaction (dedup, reactions reconciled,
+//     edits applied, deletes dropped).
+//   - MessagingDateFile: messaging date compaction (same pipeline, sorted
+//     by ts).
+//   - Email, Calendar, Linear issue/comments, Jira issue, Drive comments:
+//     ID-based dedup, keeping the last occurrence of each id.
+//   - Sidecars, queues, identity, content files: explicit no-op.
 //
-// A typed kind that lands in paths/ without an explicit case here is a
-// regression: the default arm fails loud rather than falling back to a
-// silent miscompaction.
+// The default arm errors loud when paths/ grows a typed kind that this
+// switch does not enumerate — regression guard against silent
+// miscompaction. Tested via TestMaintainFile_FailsOnUnknownKind.
 func (s *FSStore) maintainFile(path string) error {
 	mu := s.fileMu(path)
 	mu.Lock()
@@ -871,13 +871,9 @@ func (s *FSStore) maintainFile(path string) error {
 		paths.ConvMetaFile, paths.WorkstreamsFile, paths.WorkstreamProposalsFile,
 		paths.AttachmentFile, paths.TabFile, paths.SheetFile, paths.FormulaFile,
 		paths.DriveMetaFile:
-		// Sidecars, queues, identity, content files — not maintained.
-		return nil
-	case nil:
-		slog.Warn("maintainFile: skipping unrecognised file", "path", path)
 		return nil
 	default:
-		return fmt.Errorf("maintainFile: unhandled DataFile kind %T (paths registry extended without updating dispatch)", f)
+		return fmt.Errorf("maintainFile: unhandled DataFile kind %T for %s (paths registry extended without updating dispatch)", f, path)
 	}
 }
 
