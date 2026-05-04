@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/platform/gws"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )

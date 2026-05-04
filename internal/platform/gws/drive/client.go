@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anish749/pigeon/internal/gws"
+	"github.com/anish749/pigeon/internal/platform/gws"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	drive "google.golang.org/api/drive/v3"
 )

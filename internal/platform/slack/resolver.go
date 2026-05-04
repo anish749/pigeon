@@ -8,14 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
-	"time"
 
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/identity"
-	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
+	"github.com/anish749/pigeon/internal/platform/slack/slackerr"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 

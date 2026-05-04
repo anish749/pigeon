@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anish749/pigeon/internal/gws"
+	"github.com/anish749/pigeon/internal/platform/gws"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	gcal "google.golang.org/api/calendar/v3"
 )

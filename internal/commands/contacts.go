@@ -8,7 +8,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
-	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
+	walistener "github.com/anish749/pigeon/internal/platform/whatsapp"
 )
 
 // loadAliases returns contact name aliases for a given account.
@@ -40,4 +40,3 @@ func loadAliases(acct account.Account) map[string][]string {
 	}
 	return nil
 }
-

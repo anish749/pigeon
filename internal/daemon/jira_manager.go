@@ -9,9 +9,9 @@ import (
 	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
 
 	"github.com/anish749/pigeon/internal/config"
-	jirapkg "github.com/anish749/pigeon/internal/jira"
-	jirapoller "github.com/anish749/pigeon/internal/jira/poller"
 	"github.com/anish749/pigeon/internal/paths"
+	jirapkg "github.com/anish749/pigeon/internal/platform/jira"
+	jirapoller "github.com/anish749/pigeon/internal/platform/jira/poller"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )

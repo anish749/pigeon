@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/anish749/pigeon/internal/gws"
+	"github.com/anish749/pigeon/internal/platform/gws"
 	"github.com/anish749/pigeon/internal/store"
 )
 

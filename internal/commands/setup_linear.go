@@ -10,7 +10,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
-	"github.com/anish749/pigeon/internal/linear/auth"
+	"github.com/anish749/pigeon/internal/platform/linear/auth"
 )
 
 func RunSetupLinear(args []string) error {

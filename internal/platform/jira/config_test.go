@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anish749/pigeon/internal/jira/poller"
+	"github.com/anish749/pigeon/internal/platform/jira/poller"
 )
 
 const sampleCloudYAMLPigeon = `

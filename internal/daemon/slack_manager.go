@@ -14,8 +14,8 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
-	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
 	"github.com/anish749/pigeon/internal/paths"
+	slacklistener "github.com/anish749/pigeon/internal/platform/slack"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )

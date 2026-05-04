@@ -16,11 +16,11 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
-	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
+	walistener "github.com/anish749/pigeon/internal/platform/whatsapp"
+	"github.com/anish749/pigeon/internal/platform/whatsapp/log"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
-	"github.com/anish749/pigeon/internal/walog"
 )
 
 // WhatsAppManager owns the lifecycle of all WhatsApp account listeners.
@@ -172,7 +172,7 @@ func (m *WhatsAppManager) runWhatsAppAccount(ctx context.Context, wa config.What
 // ConnectWhatsApp creates a whatsmeow client for a known device. Does not call Connect().
 func ConnectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsmeow.Client, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)", dbPath)
-	container, err := sqlstore.New(ctx, "sqlite", dsn, walog.New(ctx, "whatsapp-db"))
+	container, err := sqlstore.New(ctx, "sqlite", dsn, log.New(ctx, "whatsapp-db"))
 	if err != nil {
 		return nil, fmt.Errorf("create device store: %w", err)
 	}
@@ -185,7 +185,7 @@ func ConnectWhatsApp(ctx context.Context, dbPath string, jid types.JID) (*whatsm
 		return nil, fmt.Errorf("no device found for JID %s — run setup-whatsapp first", jid.String())
 	}
 
-	return whatsmeow.NewClient(device, walog.New(ctx, "whatsapp")), nil
+	return whatsmeow.NewClient(device, log.New(ctx, "whatsapp")), nil
 }
 
 // observeWhatsAppContacts loads contacts from the whatsmeow store and pushes

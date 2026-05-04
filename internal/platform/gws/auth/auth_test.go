@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	gwsauth "github.com/anish749/pigeon/internal/gws/auth"
+	gwsauth "github.com/anish749/pigeon/internal/platform/gws/auth"
 )
 
 // TestCurrentUserLive verifies CurrentUser returns the account logged into

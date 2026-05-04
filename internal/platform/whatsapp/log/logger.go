@@ -1,4 +1,5 @@
-package walog
+// Package log adapts the whatsmeow library's logger interface to slog.
+package log
 
 import (
 	"context"

@@ -7,8 +7,8 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
-	linearpoller "github.com/anish749/pigeon/internal/linear/poller"
 	"github.com/anish749/pigeon/internal/paths"
+	linearpoller "github.com/anish749/pigeon/internal/platform/linear/poller"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
 )

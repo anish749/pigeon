@@ -12,8 +12,8 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/platform/slack/slackerr"
 	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"

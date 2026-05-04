@@ -10,8 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anish749/pigeon/internal/account"
-	"github.com/anish749/pigeon/internal/jira/poller"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/platform/jira/poller"
 )
 
 // PigeonJiraConfig is the subset of a jira-cli YAML pigeon parses. The

@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/anish749/pigeon/internal/listener/slack/slackerr"
+	"github.com/anish749/pigeon/internal/platform/slack/slackerr"
 )
 
 // slackChannelNotFoundHint returns a human-friendly hint when a Slack API error
