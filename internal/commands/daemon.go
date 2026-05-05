@@ -20,6 +20,11 @@ import (
 	"github.com/anish749/pigeon/internal/logging"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
+	gwsmgr "github.com/anish749/pigeon/internal/platform/gws/manager"
+	jiramgr "github.com/anish749/pigeon/internal/platform/jira/manager"
+	linearmgr "github.com/anish749/pigeon/internal/platform/linear/manager"
+	slackmgr "github.com/anish749/pigeon/internal/platform/slack/manager"
+	wamgr "github.com/anish749/pigeon/internal/platform/whatsapp/manager"
 	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
@@ -175,20 +180,20 @@ func DaemonRun(version string) error {
 	maintMgr := daemon.NewMaintenanceManager(store, dataRoot, tracker)
 	go maintMgr.Run(ctx, cfg)
 
-	waMgr := daemon.NewWhatsAppManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
+	waMgr := wamgr.NewManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgr := daemon.NewSlackManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger)
-	go slackMgr.Run(ctx, cfg.Slack)
+	slackMgrInst := slackmgr.NewManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger)
+	go slackMgrInst.Run(ctx, cfg.Slack)
 
-	gwsMgr := daemon.NewGWSManager(apiServer, store, store, dataRoot, tracker)
-	go gwsMgr.Run(ctx, cfg.GWS)
+	gwsMgrInst := gwsmgr.NewManager(apiServer, store, store, dataRoot, tracker)
+	go gwsMgrInst.Run(ctx, cfg.GWS)
 
-	linearMgr := daemon.NewLinearManager(store, tracker)
-	go linearMgr.Run(ctx, cfg.Linear)
+	linearMgrInst := linearmgr.NewManager(store, tracker)
+	go linearMgrInst.Run(ctx, cfg.Linear)
 
-	jiraMgr := daemon.NewJiraManager(store, tracker)
-	go jiraMgr.Run(ctx, cfg.Jira)
+	jiraMgrInst := jiramgr.NewManager(store, tracker)
+	go jiraMgrInst.Run(ctx, cfg.Jira)
 
 	go apiServer.Start(ctx, paths.SocketPath())
 

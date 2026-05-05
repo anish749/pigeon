@@ -1,4 +1,4 @@
-package daemon
+package manager
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
@@ -20,10 +21,10 @@ import (
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
-// SlackManager owns the lifecycle of all Slack workspace listeners.
+// Manager owns the lifecycle of all Slack workspace listeners.
 // It starts initial workspaces, watches for config changes, and
 // starts/stops workspaces as they are added or removed.
-type SlackManager struct {
+type Manager struct {
 	apiServer       *api.Server
 	onEvent         hub.NotifyFunc
 	store           *store.FSStore
@@ -38,7 +39,7 @@ type runningWorkspace struct {
 	cancel context.CancelFunc
 }
 
-// NewSlackManager creates a manager that registers Slack senders with the
+// NewManager creates a manager that registers Slack senders with the
 // given API server. onEvent is the single hub callback used for every
 // routable platform event — messages, reactions, edits, deletes — built
 // at the listener call sites via hub.NewMsg / NewReact / NewEdit / NewDelete.
@@ -52,8 +53,8 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account)) *SlackManager {
-	return &SlackManager{
+func NewManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account)) *Manager {
+	return &Manager{
 		apiServer:       apiServer,
 		onEvent:         onEvent,
 		store:           s,
@@ -67,7 +68,7 @@ func NewSlackManager(apiServer *api.Server, s *store.FSStore, onEvent hub.Notify
 
 // Run starts listeners for the initial config, then watches for changes.
 // Blocks until ctx is cancelled.
-func (m *SlackManager) Run(ctx context.Context, initial []config.SlackConfig) {
+func (m *Manager) Run(ctx context.Context, initial []config.SlackConfig) {
 	for _, sl := range initial {
 		m.startWorkspace(ctx, sl)
 	}
@@ -78,13 +79,13 @@ func (m *SlackManager) Run(ctx context.Context, initial []config.SlackConfig) {
 }
 
 // Count returns the number of running workspaces.
-func (m *SlackManager) Count() int {
+func (m *Manager) Count() int {
 	return len(m.running)
 }
 
 // reconcile diffs the desired config against running workspaces,
 // starting new ones and stopping removed ones.
-func (m *SlackManager) reconcile(ctx context.Context, desired []config.SlackConfig) {
+func (m *Manager) reconcile(ctx context.Context, desired []config.SlackConfig) {
 	desiredIDs := make(map[string]config.SlackConfig)
 	for _, sl := range desired {
 		desiredIDs[sl.TeamID] = sl
@@ -108,7 +109,7 @@ func (m *SlackManager) reconcile(ctx context.Context, desired []config.SlackConf
 	}
 }
 
-func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig) {
+func (m *Manager) startWorkspace(ctx context.Context, sl config.SlackConfig) {
 	if sl.AppToken == "" || sl.BotToken == "" || sl.UserToken == "" {
 		slog.ErrorContext(ctx, "slack workspace missing required token(s), skipping",
 			"workspace", sl.Workspace,
@@ -121,14 +122,14 @@ func (m *SlackManager) startWorkspace(ctx context.Context, sl config.SlackConfig
 	wsCtx, cancel := context.WithCancel(ctx)
 	m.running[sl.TeamID] = &runningWorkspace{cancel: cancel}
 
-	go runWithRestart(wsCtx, "slack/"+sl.Workspace, func(ctx context.Context) error {
+	go daemon.RunWithRestart(wsCtx, "slack/"+sl.Workspace, func(ctx context.Context) error {
 		return m.runSlackWorkspace(ctx, sl)
 	})
 }
 
 // runSlackWorkspace creates a Socket Mode connection, resolver, listener, and
 // sync for a single workspace. It blocks until the connection or listener exits.
-func (m *SlackManager) runSlackWorkspace(ctx context.Context, sl config.SlackConfig) error {
+func (m *Manager) runSlackWorkspace(ctx context.Context, sl config.SlackConfig) error {
 	acct := account.New("slack", sl.Workspace)
 
 	botAPI := goslack.New(sl.BotToken, goslack.OptionAppLevelToken(sl.AppToken))

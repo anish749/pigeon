@@ -1,4 +1,4 @@
-package daemon
+package manager
 
 import (
 	"context"
@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	jira "github.com/ankitpokhrel/jira-cli/pkg/jira"
+	jiracli "github.com/ankitpokhrel/jira-cli/pkg/jira"
 
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/paths"
 	jirapkg "github.com/anish749/pigeon/internal/platform/jira"
 	jirapoller "github.com/anish749/pigeon/internal/platform/jira/poller"
@@ -19,34 +20,34 @@ import (
 // jiraPollInterval matches Linear and the Jira protocol spec.
 const jiraPollInterval = 30 * time.Second
 
-// JiraManager owns the lifecycle of one poller goroutine per pigeon
+// Manager owns the lifecycle of one poller goroutine per pigeon
 // jira: entry. Each entry binds one jira-cli config, which holds one
 // project (per jira-cli's own data model — pigeon does not invent
 // multi-project semantics on top). The goroutine reads the YAML on
 // every restart, so YAML edits and token rotations are picked up
 // without restarting the daemon.
-type JiraManager struct {
+type Manager struct {
 	store       *store.FSStore
 	syncTracker *syncstatus.Tracker
-	running     map[string]*runningJiraPoller // key = jira-cli config path
+	running     map[string]*runningPoller // key = jira-cli config path
 }
 
-type runningJiraPoller struct {
+type runningPoller struct {
 	cancel context.CancelFunc
 }
 
-// NewJiraManager creates a new JiraManager.
-func NewJiraManager(s *store.FSStore, syncTracker *syncstatus.Tracker) *JiraManager {
-	return &JiraManager{
+// NewManager creates a new Manager.
+func NewManager(s *store.FSStore, syncTracker *syncstatus.Tracker) *Manager {
+	return &Manager{
 		store:       s,
 		syncTracker: syncTracker,
-		running:     make(map[string]*runningJiraPoller),
+		running:     make(map[string]*runningPoller),
 	}
 }
 
 // Run starts pollers for the configured jira-cli configs and reconciles
 // on config changes. Blocks until ctx is cancelled.
-func (m *JiraManager) Run(ctx context.Context, initial []config.JiraConfig) {
+func (m *Manager) Run(ctx context.Context, initial []config.JiraConfig) {
 	m.reconcile(ctx, initial)
 	for updated := range config.Watch(ctx) {
 		m.reconcile(ctx, updated.Jira)
@@ -54,11 +55,11 @@ func (m *JiraManager) Run(ctx context.Context, initial []config.JiraConfig) {
 }
 
 // Count returns the number of running per-config pollers.
-func (m *JiraManager) Count() int {
+func (m *Manager) Count() int {
 	return len(m.running)
 }
 
-func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig) {
+func (m *Manager) reconcile(ctx context.Context, desired []config.JiraConfig) {
 	// Reconcile by the jira_config path the entry literally carries.
 	// Setup-jira writes absolute, fully-resolved paths and a non-empty
 	// APIToken; entries that miss either field are user-typed and the
@@ -104,11 +105,11 @@ func (m *JiraManager) reconcile(ctx context.Context, desired []config.JiraConfig
 	}
 }
 
-func (m *JiraManager) startPath(ctx context.Context, path string, entry config.JiraConfig) {
+func (m *Manager) startPath(ctx context.Context, path string, entry config.JiraConfig) {
 	child, cancel := context.WithCancel(ctx)
-	m.running[path] = &runningJiraPoller{cancel: cancel}
+	m.running[path] = &runningPoller{cancel: cancel}
 
-	go runWithRestart(child, "jira/"+path, func(ctx context.Context) error {
+	go daemon.RunWithRestart(child, "jira/"+path, func(ctx context.Context) error {
 		// LoadPigeonJiraConfig is called inside the restart loop so a
 		// YAML edit (server URL change, project rename) is picked up on
 		// the next backoff tick without needing a daemon restart.
@@ -122,7 +123,7 @@ func (m *JiraManager) startPath(ctx context.Context, path string, entry config.J
 			return fmt.Errorf("build jira client config: %w", err)
 		}
 
-		client := jira.NewClient(jcfg)
+		client := jiracli.NewClient(jcfg)
 		acct := entry.Account()
 		projDir := paths.DefaultDataRoot().AccountFor(acct).Jira().Project(cfg.Project.Key)
 

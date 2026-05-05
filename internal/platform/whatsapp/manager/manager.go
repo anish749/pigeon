@@ -1,4 +1,4 @@
-package daemon
+package manager
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/api"
 	"github.com/anish749/pigeon/internal/config"
+	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
 	"github.com/anish749/pigeon/internal/paths"
@@ -23,10 +24,10 @@ import (
 	"github.com/anish749/pigeon/internal/syncstatus"
 )
 
-// WhatsAppManager owns the lifecycle of all WhatsApp account listeners.
+// Manager owns the lifecycle of all WhatsApp account listeners.
 // It starts initial accounts, watches for config changes, and
 // starts/stops accounts as they are added or removed.
-type WhatsAppManager struct {
+type Manager struct {
 	apiServer   *api.Server
 	onEvent     hub.NotifyFunc
 	store       store.Store
@@ -41,14 +42,14 @@ type runningWAAccount struct {
 	lock   *os.File
 }
 
-// NewWhatsAppManager creates a manager that registers WhatsApp senders with
+// NewManager creates a manager that registers WhatsApp senders with
 // the given API server. onEvent is called when a routable platform event
 // has been written to disk (may be nil).
 //
 // Each WhatsApp account gets its own identity.Writer scoped to
 // whatsapp/<account-slug>/identity/people.jsonl.
-func NewWhatsAppManager(apiServer *api.Server, s store.Store, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *WhatsAppManager {
-	return &WhatsAppManager{
+func NewManager(apiServer *api.Server, s store.Store, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker) *Manager {
+	return &Manager{
 		apiServer:   apiServer,
 		onEvent:     onEvent,
 		store:       s,
@@ -61,7 +62,7 @@ func NewWhatsAppManager(apiServer *api.Server, s store.Store, onEvent hub.Notify
 
 // Run starts listeners for the initial config, then watches for changes.
 // Blocks until ctx is cancelled.
-func (m *WhatsAppManager) Run(ctx context.Context, initial []config.WhatsAppConfig) {
+func (m *Manager) Run(ctx context.Context, initial []config.WhatsAppConfig) {
 	for _, wa := range initial {
 		m.startAccount(ctx, wa)
 	}
@@ -72,13 +73,13 @@ func (m *WhatsAppManager) Run(ctx context.Context, initial []config.WhatsAppConf
 }
 
 // Count returns the number of running accounts.
-func (m *WhatsAppManager) Count() int {
+func (m *Manager) Count() int {
 	return len(m.running)
 }
 
 // reconcile diffs the desired config against running accounts,
 // starting new ones and stopping removed ones.
-func (m *WhatsAppManager) reconcile(ctx context.Context, desired []config.WhatsAppConfig) {
+func (m *Manager) reconcile(ctx context.Context, desired []config.WhatsAppConfig) {
 	desiredAccounts := make(map[string]config.WhatsAppConfig)
 	for _, wa := range desired {
 		desiredAccounts[wa.Account] = wa
@@ -103,14 +104,14 @@ func (m *WhatsAppManager) reconcile(ctx context.Context, desired []config.WhatsA
 	}
 }
 
-func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppConfig) {
+func (m *Manager) startAccount(ctx context.Context, wa config.WhatsAppConfig) {
 	jid, err := types.ParseJID(wa.DeviceJID)
 	if err != nil {
 		slog.ErrorContext(ctx, "invalid WhatsApp device JID, skipping", "jid", wa.DeviceJID, "error", err)
 		return
 	}
 
-	lock, err := LockDevice()
+	lock, err := daemon.LockDevice()
 	if err != nil {
 		slog.ErrorContext(ctx, "could not lock WhatsApp device, skipping", "account", wa.Account, "error", err)
 		return
@@ -119,7 +120,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 	acctCtx, cancel := context.WithCancel(ctx)
 	m.running[wa.Account] = &runningWAAccount{cancel: cancel, lock: lock}
 
-	go runWithRestart(acctCtx, "whatsapp/"+wa.Account, func(ctx context.Context) error {
+	go daemon.RunWithRestart(acctCtx, "whatsapp/"+wa.Account, func(ctx context.Context) error {
 		return m.runWhatsAppAccount(ctx, wa, jid)
 	})
 }
@@ -127,7 +128,7 @@ func (m *WhatsAppManager) startAccount(ctx context.Context, wa config.WhatsAppCo
 // runWhatsAppAccount creates a WhatsApp client, connects, registers the event
 // handler and API sender, then blocks until ctx is cancelled. On restart the
 // whole connection is re-established.
-func (m *WhatsAppManager) runWhatsAppAccount(ctx context.Context, wa config.WhatsAppConfig, jid types.JID) error {
+func (m *Manager) runWhatsAppAccount(ctx context.Context, wa config.WhatsAppConfig, jid types.JID) error {
 	client, err := ConnectWhatsApp(ctx, wa.DB, jid)
 	if err != nil {
 		return fmt.Errorf("create whatsapp client: %w", err)
