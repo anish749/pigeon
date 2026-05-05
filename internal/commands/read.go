@@ -1,13 +1,18 @@
 package commands
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/utils/timeutil"
@@ -28,6 +33,8 @@ func RunRead(p ReadParams) error {
 		return fmt.Errorf("read is not supported for gws accounts (data is organized by service, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search gws data")
 	case "linear":
 		return fmt.Errorf("read is not supported for linear accounts (data is organized by issue, not conversations)\nuse 'pigeon grep' or 'pigeon glob' to search linear data")
+	case paths.JiraPlatform:
+		return runReadJira(p)
 	}
 
 	s := store.NewFSStore(paths.DefaultDataRoot())
@@ -90,6 +97,93 @@ func RunRead(p ReadParams) error {
 		fmt.Println("No messages found.")
 	}
 	return errors.Join(errs...)
+}
+
+// runReadJira streams the issue snapshot log + comments log for one Jira
+// issue, parsing each line through modelv1 and re-marshalling it on the
+// way out. The round-trip validates structure (parse failures surface
+// with line-number context) without altering the on-disk shape — agent
+// callers consume the platform's native JSON unchanged.
+//
+// --date / --last / --since are rejected: each issue is one logical unit,
+// not a date-windowed conversation. Use `pigeon grep` for cross-issue
+// search.
+//
+// Missing comments.jsonl is tolerated (issues with zero comments leave the
+// file absent until the first comment lands). Missing issue.jsonl is an
+// error — FindJiraIssue would not return it without that file.
+func runReadJira(p ReadParams) error {
+	if p.Date != "" || p.Last != 0 || p.Since != "" {
+		return fmt.Errorf("read for jira does not support --date, --last, or --since (each issue is one file; use 'pigeon grep' to search across issues)")
+	}
+
+	acct := account.New(p.Platform, p.Account)
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
+
+	issueFile, err := read.FindJiraIssue(jd, p.Contact)
+	if err != nil {
+		return err
+	}
+	if err := streamModelLines(issueFile.Path(), false); err != nil {
+		return err
+	}
+	if err := streamModelLines(issueFile.CommentsFile().Path(), true); err != nil {
+		return err
+	}
+	return nil
+}
+
+// streamModelLines reads a JSONL file line by line, parses each line via
+// modelv1.Parse, and writes the canonical re-serialization to stdout.
+// Round-trips validate structure on read (parse failures surface with
+// line-number context) without changing the on-disk shape.
+//
+// When tolerateMissing is true, a non-existent file is treated as empty
+// (used for comments.jsonl, which only exists once a comment lands).
+func streamModelLines(path string, tolerateMissing bool) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if tolerateMissing && os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+
+	lineNum := 0
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lineNum++
+			trimmed := bytes.TrimRight(line, "\r\n")
+			if len(trimmed) > 0 {
+				l, err := modelv1.Parse(string(trimmed))
+				if err != nil {
+					return fmt.Errorf("parse line %d in %s: %w", lineNum, path, err)
+				}
+				marshalled, err := modelv1.Marshal(l)
+				if err != nil {
+					return fmt.Errorf("marshal line %d in %s: %w", lineNum, path, err)
+				}
+				if _, err := out.Write(marshalled); err != nil {
+					return fmt.Errorf("write stdout: %w", err)
+				}
+				if err := out.WriteByte('\n'); err != nil {
+					return fmt.Errorf("write stdout: %w", err)
+				}
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("read %s: %w", path, readErr)
+		}
+	}
 }
 
 // conversation holds directory and display info for a matched conversation.

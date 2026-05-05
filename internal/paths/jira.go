@@ -123,6 +123,33 @@ func (f JiraIssueFile) Path() string { return string(f) }
 func (JiraIssueFile) logFile()       {}
 func (JiraIssueFile) dataFile()      {}
 
+// Key returns the issue key (e.g. "ENG-142") encoded by the file's
+// per-issue directory. The layout fact "<KEY> is the per-issue dir name"
+// stays in this registry so callers do not parse paths themselves.
+func (f JiraIssueFile) Key() string { return filepath.Base(filepath.Dir(string(f))) }
+
+// CommentsFile returns the sibling comments log path. issue.jsonl and
+// comments.jsonl always live in the same per-issue directory.
+func (f JiraIssueFile) CommentsFile() JiraCommentsFile {
+	return JiraCommentsFile(filepath.Join(filepath.Dir(string(f)), jiraCommentsFilename))
+}
+
+// JiraIssueFileGlobs returns the rg --glob patterns that match every
+// per-issue snapshot log under a JiraDir. Patterns are relative to
+// JiraDir.Path(). The leading ** anchors the search to the layout
+// (project key segment is opaque) without matching stray issue.jsonl
+// files outside the issues/<KEY>/ shape.
+func JiraIssueFileGlobs() []string {
+	return []string{"**/" + jiraIssuesSubdir + "/*/" + jiraIssueFilename}
+}
+
+// JiraIssueFileGlobsForKey returns the rg --glob patterns that match the
+// snapshot log for one specific issue key under a JiraDir. Patterns are
+// relative to JiraDir.Path().
+func JiraIssueFileGlobsForKey(key string) []string {
+	return []string{"**/" + jiraIssuesSubdir + "/" + key + "/" + jiraIssueFilename}
+}
+
 // JiraCommentsFile is a path to a Jira issue's comments log:
 // <base>/jira/<account>/<project>/issues/<KEY>/comments.jsonl. Lines carry
 // the comment created/updated timestamps and the injected issueKey field
