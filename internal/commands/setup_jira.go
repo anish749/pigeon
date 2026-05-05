@@ -10,7 +10,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
-	jirapkg "github.com/anish749/pigeon/internal/jira"
+	jirapkg "github.com/anish749/pigeon/internal/platform/jira"
 )
 
 // atlassianAPITokenURL is the user-facing URL where Atlassian Cloud

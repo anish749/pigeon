@@ -8,7 +8,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
-	gwsauth "github.com/anish749/pigeon/internal/gws/auth"
+	gwsauth "github.com/anish749/pigeon/internal/platform/gws/auth"
 )
 
 func RunSetupGWS(args []string) error {

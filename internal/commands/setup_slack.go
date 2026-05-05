@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/anish749/pigeon/internal/config"
-	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
+	slacklistener "github.com/anish749/pigeon/internal/platform/slack"
 )
 
 func RunSetupSlack(args []string) error {

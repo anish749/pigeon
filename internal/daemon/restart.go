@@ -15,14 +15,14 @@ const (
 	restartStableAfter  = 30 * time.Second
 )
 
-// runWithRestart runs fn in a loop, restarting it with exponential backoff
+// RunWithRestart runs fn in a loop, restarting it with exponential backoff
 // when it exits with an error or unexpectedly returns nil. If fn panics,
 // the panic is recovered and treated as a restartable error. The loop exits
 // when ctx is cancelled.
 //
 // The delay starts at 5s and doubles up to 5min. It resets after fn has been
 // running for 30+ seconds (indicating a stable run rather than a crash loop).
-func runWithRestart(ctx context.Context, label string, fn func(context.Context) error) {
+func RunWithRestart(ctx context.Context, label string, fn func(context.Context) error) {
 	bo := backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(restartInitialDelay),
 		backoff.WithMaxInterval(restartMaxDelay),

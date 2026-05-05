@@ -13,6 +13,7 @@ import (
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/paths"
+	wamgr "github.com/anish749/pigeon/internal/platform/whatsapp/manager"
 )
 
 // RunUnlinkWhatsApp unpairs the WhatsApp device, deletes message data,
@@ -61,7 +62,7 @@ func RunUnlinkWhatsApp(account string) error {
 	if err != nil {
 		slog.WarnContext(ctx, "invalid device JID, skipping logout", "jid", wa.DeviceJID, "error", err)
 	} else {
-		client, err := daemon.ConnectWhatsApp(ctx, wa.DB, jid)
+		client, err := wamgr.ConnectWhatsApp(ctx, wa.DB, jid)
 		if err != nil {
 			slog.WarnContext(ctx, "could not connect to WhatsApp, skipping logout", "error", err)
 		} else {

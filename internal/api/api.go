@@ -23,10 +23,10 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
-	slacklistener "github.com/anish749/pigeon/internal/listener/slack"
-	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
+	slacklistener "github.com/anish749/pigeon/internal/platform/slack"
+	walistener "github.com/anish749/pigeon/internal/platform/whatsapp"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/syncstatus"

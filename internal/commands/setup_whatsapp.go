@@ -18,11 +18,11 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/daemon"
-	walistener "github.com/anish749/pigeon/internal/listener/whatsapp"
 	"github.com/anish749/pigeon/internal/paths"
+	walistener "github.com/anish749/pigeon/internal/platform/whatsapp"
+	"github.com/anish749/pigeon/internal/platform/whatsapp/log"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
-	"github.com/anish749/pigeon/internal/walog"
 )
 
 func RunSetupWhatsApp(dbPath string) error {
@@ -40,13 +40,13 @@ func RunSetupWhatsApp(dbPath string) error {
 	ctx := context.Background()
 	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)", dbPath)
 
-	container, err := sqlstore.New(ctx, "sqlite", dsn, walog.New(ctx, "whatsapp-db"))
+	container, err := sqlstore.New(ctx, "sqlite", dsn, log.New(ctx, "whatsapp-db"))
 	if err != nil {
 		return fmt.Errorf("create device store: %w", err)
 	}
 
 	device := container.NewDevice()
-	client := whatsmeow.NewClient(device, walog.New(ctx, "whatsapp"))
+	client := whatsmeow.NewClient(device, log.New(ctx, "whatsapp"))
 
 	qrChan, err := client.GetQRChannel(ctx)
 	if err != nil {
