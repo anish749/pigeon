@@ -8,9 +8,14 @@ import Foundation
 /// model's own EOU prediction (which doesn't fire reliably under low-level
 /// mic noise — fan, HVAC, breath). Each input buffer is resampled to the
 /// 16 kHz mono Float32 the VAD model expects, accumulated into 4096-sample
-/// chunks (256 ms), and fed to the streaming state machine. When the state
-/// machine emits a `speechEnd` event, the gate returns `true` for that
-/// observe call.
+/// chunks (256 ms), and fed to the streaming state machine. The gate
+/// surfaces `speechStart` / `speechEnd` events so the caller can gate
+/// downstream ASR work on whether speech is currently active.
+public enum VadEvent: Sendable {
+    case speechStart
+    case speechEnd
+}
+
 actor VadGate {
     private static let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
@@ -30,26 +35,29 @@ actor VadGate {
         self.state = await m.makeStreamState()
     }
 
-    /// Returns true if the streaming VAD emitted at least one `speechEnd`
-    /// event while consuming this buffer's audio.
-    func observe(_ buffer: AVAudioPCMBuffer) async throws -> Bool {
-        guard let manager = manager else { return false }
+    /// Returns the events the streaming VAD emitted while consuming this
+    /// buffer (in order). Most calls return an empty array; transitions are
+    /// rare relative to chunk frequency.
+    func observe(_ buffer: AVAudioPCMBuffer) async throws -> [VadEvent] {
+        guard let manager = manager else { return [] }
 
         let conv = try ensureConverter(for: buffer.format)
         let resampled = try resample(buffer, with: conv)
         pending.append(contentsOf: resampled)
 
-        var sawSpeechEnd = false
+        var events: [VadEvent] = []
         while pending.count >= VadManager.chunkSize {
             let chunk = Array(pending.prefix(VadManager.chunkSize))
             pending.removeFirst(VadManager.chunkSize)
             let result = try await manager.processStreamingChunk(chunk, state: state)
             state = result.state
-            if result.event?.kind == .speechEnd {
-                sawSpeechEnd = true
+            switch result.event?.kind {
+            case .speechStart: events.append(.speechStart)
+            case .speechEnd: events.append(.speechEnd)
+            case nil: break
             }
         }
-        return sawSpeechEnd
+        return events
     }
 
     private func ensureConverter(for inputFormat: AVAudioFormat) throws -> AVAudioConverter {

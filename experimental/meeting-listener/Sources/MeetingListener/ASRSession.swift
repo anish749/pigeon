@@ -7,15 +7,21 @@ import Foundation
 /// Drives a single FluidAudio streaming ASR pipeline and emits transcripts to
 /// the console.
 ///
-/// - **Partial** transcripts go to stderr on a single self-overwriting line —
-///   a live preview of what the model is currently hearing. Sized to the
-///   live terminal width via `ioctl(TIOCGWINSZ)` so the line never wraps.
-/// - **Committed** transcripts go to stdout, prefixed by the session's tag,
-///   on their own line, when our `VadGate` (FluidAudio's Silero VAD) reports a
-///   speech-end event. We deliberately do not use FluidAudio's
-///   `setEouCallback` — on real microphones with low-level background noise
-///   the model keeps emitting tokens through "silence" and the EOU debounce
-///   never confirms. A trained VAD is the right tool.
+/// The flow is gated on FluidAudio's Silero VAD. Audio only reaches the
+/// Parakeet streaming manager between `speechStart` and `speechEnd` events;
+/// during silence we hold the manager idle so its loopback encoder cache
+/// can't drift into a degenerate state across long pauses (which manifests
+/// as missing words at the start of the next utterance, or whole utterances
+/// returning no tokens at all).
+///
+/// To preserve the ~100 ms of audio that arrives *before* VAD's `speechStart`
+/// (Silero needs the probability to cross threshold before reporting speech),
+/// we keep a small rolling pre-buffer of the most recent silence-side audio
+/// and flush it into the manager on `speechStart`.
+///
+/// On `speechEnd` we feed an extra ~500 ms of silence so Parakeet's streaming
+/// encoder has the future-context lookahead it needs to emit tokens for the
+/// last word, then `finish()` and `reset()`.
 actor ASRSession {
     /// 16 kHz mono Float32 — the format Parakeet's streaming pipeline ingests.
     /// Used to manufacture trailing-silence buffers in `commit()` so the
@@ -27,9 +33,15 @@ actor ASRSession {
         interleaved: false
     )!
 
+    /// How much pre-`speechStart` audio to retain so the onset isn't clipped.
+    private static let preBufferMs: Int = 300
+
     private let tag: String
     private let manager: StreamingEouAsrManager
     private let vad: VadGate
+
+    private var inSpeech = false
+    private var preBuffer: [AVAudioPCMBuffer] = []
 
     init(tag: String, chunkSize: StreamingChunkSize = .ms160) {
         self.tag = tag
@@ -59,10 +71,26 @@ actor ASRSession {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) async throws {
-        let speechEnded = try await vad.observe(buffer)
-        try await manager.appendAudio(buffer)
-        try await manager.processBufferedAudio()
-        if speechEnded {
+        let events = try await vad.observe(buffer)
+
+        // Order matters: handle speechStart before feeding the current buffer
+        // so the pre-buffer flushes first, and handle speechEnd after feeding
+        // the buffer so the audio that triggered the end-of-speech detection
+        // is decoded before commit.
+        for event in events where event == .speechStart {
+            try await flushPreBufferIntoManager()
+            inSpeech = true
+        }
+
+        if inSpeech {
+            try await manager.appendAudio(buffer)
+            try await manager.processBufferedAudio()
+        } else {
+            stashInPreBuffer(buffer)
+        }
+
+        for event in events where event == .speechEnd {
+            inSpeech = false
             try await commit()
         }
     }
@@ -70,7 +98,10 @@ actor ASRSession {
     /// Flush whatever is buffered and reset. Call at end-of-stream (e.g. after
     /// reading a file or on Ctrl-C) so a trailing utterance isn't lost.
     func finish() async throws {
-        try await commit()
+        if inSpeech {
+            inSpeech = false
+            try await commit()
+        }
     }
 
     private func commit() async throws {
@@ -107,6 +138,25 @@ actor ASRSession {
             channel[i] = 0
         }
         try await manager.appendAudio(buffer)
+        try await manager.processBufferedAudio()
+    }
+
+    private func stashInPreBuffer(_ buffer: AVAudioPCMBuffer) {
+        preBuffer.append(buffer)
+        let sampleRate = buffer.format.sampleRate
+        let maxFrames = Int(sampleRate * Double(ASRSession.preBufferMs) / 1000)
+        var total = preBuffer.reduce(0) { $0 + Int($1.frameLength) }
+        while total > maxFrames, !preBuffer.isEmpty {
+            let dropped = preBuffer.removeFirst()
+            total -= Int(dropped.frameLength)
+        }
+    }
+
+    private func flushPreBufferIntoManager() async throws {
+        for buffer in preBuffer {
+            try await manager.appendAudio(buffer)
+        }
+        preBuffer.removeAll()
         try await manager.processBufferedAudio()
     }
 
