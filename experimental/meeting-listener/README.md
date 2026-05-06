@@ -11,14 +11,27 @@ pipeline end-to-end before adding the system-audio leg or wiring into pigeon.
 
 ```
 cd experimental/meeting-listener
-swift run MeetingListener
+make run
 ```
 
-First run downloads the Parakeet EOU model from HuggingFace (~120 MB). Subsequent
-runs reuse the cached model.
+`make run` is `swift run -c release MeetingListener`. Use the release config
+rather than the default debug build — FluidAudio's logger mirrors every
+`debug` and `info` line to stderr in debug builds, which clobbers the live
+preview. In release builds only warnings and above print.
 
-Speak into the default input device. Partial transcripts print prefixed with
-`[MIC]`. Press `Ctrl-C` to stop.
+Other targets: `make build`, `make run-debug`, `make build-debug`, `make clean`.
+
+First run downloads the Parakeet EOU model from HuggingFace (~120 MB) into
+`~/Library/Application Support/FluidAudio/Models/`. Subsequent runs reuse the
+cache.
+
+Speak into the default input device. Output:
+
+- **stderr** — single self-overwriting line of the partial transcript (live
+  preview).
+- **stdout** — `[MIC] <text>` per finalized utterance, after a ~1.3 s pause.
+
+Press `Ctrl-C` to stop.
 
 ## Permissions
 
