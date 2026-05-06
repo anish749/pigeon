@@ -75,13 +75,13 @@ func runFile(path: String, session: ASRSession) async {
 
 @MainActor
 func run() async {
-    warn("Loading Parakeet model (first run downloads ~120 MB)...")
+    warn("Loading Parakeet + VAD models (first run downloads ~120 MB)...")
 
     let session = ASRSession(tag: "MIC")
     do {
         try await session.loadModels()
     } catch {
-        warn("Failed to load model: \(error)")
+        warn("Failed to load models: \(error)")
         exit(1)
     }
 
