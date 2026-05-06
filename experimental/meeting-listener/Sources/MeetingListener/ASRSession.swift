@@ -1,30 +1,50 @@
 import AVFoundation
+@preconcurrency import CoreML
 import FluidAudio
 import Foundation
 
-/// Drives a single FluidAudio streaming ASR pipeline and prints partial
-/// transcripts to stdout, prefixed by the session's tag.
+/// Drives a single FluidAudio streaming ASR pipeline and emits transcripts to
+/// the console.
 ///
-/// One source = one session. Concurrent calls to `append(_:)` are safe: they
-/// fan out to the underlying actor, which processes buffered audio in order.
+/// - **Partial** transcripts go to stderr on a single self-overwriting line —
+///   a live preview of what the model is currently hearing.
+/// - **End-of-utterance** transcripts go to stdout, prefixed by the session's
+///   tag, on their own line. The session resets after each EOU so the next
+///   utterance starts with empty state instead of appending forever.
 actor ASRSession {
     private let tag: String
-    private let manager: any StreamingAsrManager
-    private var lastPrinted = ""
+    private let manager: StreamingEouAsrManager
 
-    init(tag: String, variant: StreamingModelVariant = .parakeetEou160ms) {
+    init(tag: String, chunkSize: StreamingChunkSize = .ms160) {
         self.tag = tag
-        self.manager = variant.createManager()
+        self.manager = StreamingEouAsrManager(
+            configuration: MLModelConfiguration(),
+            chunkSize: chunkSize
+        )
     }
 
     func loadModels() async throws {
         try await manager.loadModels()
-        await manager.setPartialTranscriptCallback { [tag] partial in
-            // Print whenever the partial transcript grows. The callback runs on
-            // FluidAudio's actor; printing from here is fine.
+
+        let tag = self.tag
+        await manager.setPartialCallback { partial in
             let trimmed = partial.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            print("[\(tag)] \(trimmed)")
+            // \r returns to start of line, \u{1B}[K clears to end of line so a
+            // shrinking partial doesn't leave stale tail characters on screen.
+            let line = "\r[\(tag) …] \(trimmed)\u{1B}[K"
+            FileHandle.standardError.write(Data(line.utf8))
+        }
+
+        await manager.setEouCallback { [weak self] final in
+            // Clear the live-preview line, then write the committed transcript.
+            FileHandle.standardError.write(Data("\r\u{1B}[K".utf8))
+            let trimmed = final.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                print("[\(tag)] \(trimmed)")
+            }
+            // EOU leaves accumulated state in place; reset for the next
+            // utterance. The actor serializes this against in-flight appends.
+            Task { await self?.resetAfterEou() }
         }
     }
 
@@ -35,11 +55,15 @@ actor ASRSession {
 
     func finish() async throws {
         let final = try await manager.finish()
+        FileHandle.standardError.write(Data("\r\u{1B}[K".utf8))
         let trimmed = final.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && trimmed != lastPrinted {
+        if !trimmed.isEmpty {
             print("[\(tag)] \(trimmed)")
         }
-        lastPrinted = trimmed
-        try await manager.reset()
+        await manager.reset()
+    }
+
+    private func resetAfterEou() async {
+        await manager.reset()
     }
 }
