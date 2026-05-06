@@ -128,8 +128,11 @@ actor ASRSession {
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: ASRSession.silenceFormat,
             frameCapacity: frames
-        ), let channel = buffer.floatChannelData?[0] else {
-            return
+        ) else {
+            throw ASRSessionError.bufferAllocFailed
+        }
+        guard let channel = buffer.floatChannelData?[0] else {
+            throw ASRSessionError.noFloatChannelData
         }
         buffer.frameLength = frames
         // Explicitly zero — AVAudioPCMBuffer's backing memory isn't guaranteed
@@ -174,5 +177,19 @@ actor ASRSession {
             return Int(ws.ws_col)
         }
         return 120
+    }
+}
+
+enum ASRSessionError: Error, CustomStringConvertible {
+    case bufferAllocFailed
+    case noFloatChannelData
+
+    var description: String {
+        switch self {
+        case .bufferAllocFailed:
+            return "Failed to allocate AVAudioPCMBuffer for trailing-silence flush."
+        case .noFloatChannelData:
+            return "AVAudioPCMBuffer for trailing-silence flush has no float channel data."
+        }
     }
 }

@@ -17,79 +17,64 @@ func argValue(_ flag: String) -> String? {
 }
 
 @MainActor
-func runMic(session: ASRSession) async {
+func runMic(session: ASRSession) async throws {
     warn("Model ready. Starting microphone capture (Ctrl-C to stop).")
 
-    let mic = MicCapture { buffer in
-        Task {
-            do {
-                try await session.append(buffer)
-            } catch {
-                warn("append error: \(error)")
-            }
-        }
-    }
+    let mic = MicCapture()
+    let stream = try mic.start()
 
-    do {
-        try mic.start()
-    } catch {
-        warn("Failed to start mic: \(error)")
-        exit(1)
-    }
-
-    // Block on SIGINT, then flush before exit.
+    // SIGINT closes the audio stream; the for-await loop below exits naturally
+    // and runMic continues to flush a final transcript before returning.
     let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
     signal(SIGINT, SIG_IGN)
-
-    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-        signalSource.setEventHandler {
-            continuation.resume()
-        }
-        signalSource.resume()
+    signalSource.setEventHandler {
+        warn("\nStopping...")
+        mic.stop()
     }
+    signalSource.resume()
 
-    warn("\nStopping...")
-    mic.stop()
     do {
-        try await session.finish()
+        for await buffer in stream {
+            try await session.append(buffer)
+        }
     } catch {
-        warn("finish error: \(error)")
+        // Stop the engine before re-throwing so we don't leave the audio
+        // hardware running on the way out.
+        mic.stop()
+        throw error
     }
+
+    try await session.finish()
 }
 
 @MainActor
-func runFile(path: String, session: ASRSession) async {
+func runFile(path: String, session: ASRSession) async throws {
     let url = URL(fileURLWithPath: path)
     warn("Replaying \(url.path) through ASR session...")
     let source = FileSource(url: url)
-    do {
-        try await source.play { buffer in
-            try await session.append(buffer)
-        }
-        try await session.finish()
-    } catch {
-        warn("File replay failed: \(error)")
-        exit(1)
+    try await source.play { buffer in
+        try await session.append(buffer)
     }
+    try await session.finish()
 }
 
 @MainActor
-func run() async {
+func run() async throws {
     warn("Loading Parakeet + VAD models (first run downloads ~120 MB)...")
 
     let session = ASRSession(tag: "MIC")
-    do {
-        try await session.loadModels()
-    } catch {
-        warn("Failed to load models: \(error)")
-        exit(1)
-    }
+    try await session.loadModels()
 
     if let filePath = argValue("file") {
-        await runFile(path: filePath, session: session)
+        try await runFile(path: filePath, session: session)
     } else {
-        await runMic(session: session)
+        try await runMic(session: session)
     }
 }
 
-await run()
+do {
+    try await run()
+} catch {
+    warn("fatal: \(error)")
+    exit(1)
+}

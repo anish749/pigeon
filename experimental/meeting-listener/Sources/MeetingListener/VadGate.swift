@@ -39,7 +39,9 @@ actor VadGate {
     /// buffer (in order). Most calls return an empty array; transitions are
     /// rare relative to chunk frequency.
     func observe(_ buffer: AVAudioPCMBuffer) async throws -> [VadEvent] {
-        guard let manager = manager else { return [] }
+        guard let manager = manager else {
+            throw VadGateError.modelNotLoaded
+        }
 
         let conv = try ensureConverter(for: buffer.format)
         let resampled = try resample(buffer, with: conv)
@@ -95,8 +97,8 @@ actor VadGate {
             statusPtr.pointee = .haveData
             return input
         }
-        if let error = error { throw error }
-        if status == .error { throw VadGateError.convertFailed }
+        if let error = error { throw VadGateError.convertFailed(underlying: error) }
+        if status == .error { throw VadGateError.convertFailed(underlying: nil) }
         guard let channel = output.floatChannelData?[0] else {
             throw VadGateError.noOutputData
         }
@@ -105,17 +107,27 @@ actor VadGate {
 }
 
 enum VadGateError: Error, CustomStringConvertible {
+    case modelNotLoaded
     case converterCreateFailed
     case bufferAllocFailed
-    case convertFailed
+    case convertFailed(underlying: NSError?)
     case noOutputData
 
     var description: String {
         switch self {
-        case .converterCreateFailed: return "Failed to create AVAudioConverter for VAD."
-        case .bufferAllocFailed: return "Failed to allocate AVAudioPCMBuffer for VAD."
-        case .convertFailed: return "AVAudioConverter reported an error during VAD resampling."
-        case .noOutputData: return "VAD resample produced no float channel data."
+        case .modelNotLoaded:
+            return "VadGate.observe() called before loadModel() succeeded."
+        case .converterCreateFailed:
+            return "Failed to create AVAudioConverter for VAD."
+        case .bufferAllocFailed:
+            return "Failed to allocate AVAudioPCMBuffer for VAD."
+        case .convertFailed(let underlying):
+            if let underlying = underlying {
+                return "AVAudioConverter failed during VAD resample: \(underlying)"
+            }
+            return "AVAudioConverter reported an error during VAD resampling."
+        case .noOutputData:
+            return "VAD resample produced no float channel data."
         }
     }
 }
