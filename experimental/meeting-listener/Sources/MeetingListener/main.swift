@@ -62,7 +62,10 @@ func runFile(path: String, session: ASRSession) async throws {
 func run() async throws {
     warn("Loading Parakeet + VAD models (first run downloads ~120 MB)...")
 
-    let session = ASRSession(tag: "MIC")
+    let session = ASRSession(
+        tag: "MIC",
+        vadThreshold: argValue("vad-threshold").flatMap(Float.init)
+    )
     try await session.loadModels()
 
     if let filePath = argValue("file") {

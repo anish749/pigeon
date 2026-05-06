@@ -24,13 +24,28 @@ actor VadGate {
         interleaved: false
     )!
 
+    /// Probability above which the streaming VAD fires `speechStart`. Lower =
+    /// more sensitive (catches short words like "yes"/"okay"/"no"), higher =
+    /// less false-positive on background noise. FluidAudio's library default
+    /// is 0.85, which is too strict for our use case — single-word utterances
+    /// often peak below it and silently miss. 0.5 matches the threshold used
+    /// in most Silero VAD integrations and is the single source of truth for
+    /// the default; upper layers pass `nil` through unless the user overrides.
+    static let defaultThreshold: Float = 0.5
+
+    private let threshold: Float
     private var manager: VadManager?
     private var state: VadStreamState = .initial()
     private var pending: [Float] = []
     private var converter: AVAudioConverter?
 
+    init(threshold: Float? = nil) {
+        self.threshold = threshold ?? VadGate.defaultThreshold
+    }
+
     func loadModel() async throws {
-        let m = try await VadManager()
+        let config = VadConfig(defaultThreshold: threshold)
+        let m = try await VadManager(config: config)
         self.manager = m
         self.state = await m.makeStreamState()
     }

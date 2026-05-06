@@ -43,13 +43,10 @@ actor ASRSession {
     private var inSpeech = false
     private var preBuffer: [AVAudioPCMBuffer] = []
 
-    init(tag: String, chunkSize: StreamingChunkSize = .ms160) {
+    init(tag: String, vadThreshold: Float? = nil) {
         self.tag = tag
-        self.manager = StreamingEouAsrManager(
-            configuration: MLModelConfiguration(),
-            chunkSize: chunkSize
-        )
-        self.vad = VadGate()
+        self.manager = StreamingEouAsrManager(configuration: MLModelConfiguration())
+        self.vad = VadGate(threshold: vadThreshold)
     }
 
     func loadModels() async throws {
