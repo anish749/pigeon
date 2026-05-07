@@ -83,12 +83,8 @@ func checkAudioRecordingPermission() throws -> AudioRecordingPermissionStatus {
     guard let preflight = TCC.preflight else {
         throw AudioRecordingPermissionError.symbolMissing("TCCAccessPreflight")
     }
-    let raw = preflight(TCC.service, nil)
-    FileHandle.standardError.write(Data(
-        "[Permission] TCCAccessPreflight raw=\(raw)\n".utf8
-    ))
     // Per AudioCap: 0 = authorized, 1 = denied, anything else = unknown.
-    switch raw {
+    switch preflight(TCC.service, nil) {
     case 0: return .authorized
     case 1: return .denied
     default: return .unknown
@@ -104,9 +100,6 @@ func requestAudioRecordingPermission() async throws -> Bool {
     }
     return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
         request(TCC.service, nil) { granted in
-            FileHandle.standardError.write(Data(
-                "[Permission] TCCAccessRequest callback granted=\(granted)\n".utf8
-            ))
             cont.resume(returning: granted)
         }
     }

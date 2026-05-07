@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>MeetingListener</string>
+    <string>PigeonListener</string>
     <key>CFBundleIdentifier</key>
     <string>com.anish749.pigeon.meeting-listener</string>
     <key>CFBundleInfoDictionaryVersion</key>

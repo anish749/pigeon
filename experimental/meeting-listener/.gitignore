@@ -3,4 +3,4 @@
 *.xcodeproj/
 DerivedData/
 test/fixtures/
-app/MeetingListener.app/
+app/Pigeon.app/

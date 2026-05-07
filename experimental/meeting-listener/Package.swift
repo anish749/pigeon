@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MeetingListener",
+    name: "PigeonListener",
     // Core Audio Process Tap APIs (`AudioHardwareCreateProcessTap`,
     // `CATapDescription`, etc.) require macOS 14.2; we pin to 14.4 because
     // that's when the API stabilized and matches the bundle's
@@ -13,7 +13,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "MeetingListener",
+            name: "PigeonListener",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ],
