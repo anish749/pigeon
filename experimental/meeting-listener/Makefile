@@ -1,4 +1,4 @@
-.PHONY: run run-debug build build-debug clean test-fixture test-file
+.PHONY: run run-debug build build-debug clean test-fixture test-file reset-tcc
 
 # --- Build artifact: the bundled .app -----------------------------------------
 # macOS keys system-audio capture permission to a stable bundle identifier,
@@ -11,16 +11,26 @@ APP_BIN := $(APP)/Contents/MacOS/MeetingListener
 INFO_PLIST := app/Info.plist
 ENTITLEMENTS := app/MeetingListener.entitlements
 
-# Default: build the release .app and run it. First launch triggers TCC
-# prompts for mic + system-audio recording; accept both. Subsequent runs
-# reuse the granted permissions because the bundle id is stable.
+# Default: build the release .app and run it.
+#
+# The launch goes through `open`, not direct exec. This matters: when you
+# exec the binary inside a bundle directly, macOS attributes TCC requests to
+# the parent shell (Terminal), so the system-audio prompt either never fires
+# or gets attributed to Terminal's identity instead of MeetingListener's,
+# and the bundle never appears under "Screen & System Audio Recording".
+# `open -W -n -a` makes LaunchServices broker the launch with the bundle's
+# Info.plist as the identity, which is what TCC keys permission to.
+#
+# stdout/stderr are wired back to the controlling tty so log output stays
+# visible in the terminal that ran make. Ctrl-C kills `open`; the bundled
+# app keeps running detached, so quit it via `tccutil reset SystemAudioRecording
+# com.anish749.pigeon.meeting-listener` and `pkill MeetingListener` if you
+# need a clean state. (Better Ctrl-C handling is on the iter-2 polish list.)
 run: build
-	$(APP_BIN)
+	@open -W -n -a "$$(pwd)/$(APP)" --stdout=$$(tty) --stderr=$$(tty)
 
-# Same, but with FluidAudio's chunk-level debug/info logs visible. Use when
-# diagnosing VAD timing or encoder behavior.
 run-debug: build-debug
-	$(APP_BIN)
+	@open -W -n -a "$$(pwd)/$(APP)" --stdout=$$(tty) --stderr=$$(tty)
 
 # Build the bundle without running it (CI / inspection / signing audit).
 build:
@@ -60,5 +70,15 @@ test-fixture:
 	@say $(FIXTURE_TEXT) -o $(FIXTURE)
 	@echo "Done."
 
+# File replay is the one place where direct exec is fine — there's no live
+# capture, no TCC permission needed, and we want stdout/stderr to behave
+# normally for the diff-based tests.
 test-file: test-fixture build
 	$(APP_BIN) --file $(FIXTURE)
+
+# If TCC has cached a denied (or otherwise stuck) state for the bundle, this
+# clears it so the next `make run` triggers a fresh prompt.
+reset-tcc:
+	tccutil reset SystemAudioRecording com.anish749.pigeon.meeting-listener || true
+	tccutil reset Microphone com.anish749.pigeon.meeting-listener || true
+	@echo "TCC state cleared for com.anish749.pigeon.meeting-listener."

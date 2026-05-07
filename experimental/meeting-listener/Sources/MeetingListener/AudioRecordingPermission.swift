@@ -1,16 +1,21 @@
 import AppKit
 import Foundation
 
-/// Checks and requests system-audio recording permission via the private TCC
-/// SPIs (`TCCAccessPreflight` / `TCCAccessRequest`). This is the same path
-/// AudioCap uses; no public API exists to programmatically request the
+/// Checks and requests system-audio recording permission.
+///
+/// macOS does not expose a public API to programmatically request the
 /// `kTCCServiceAudioCapture` permission, but `AudioHardwareCreateProcessTap`
 /// silently delivers zero-filled buffers when permission is missing — i.e.
-/// the bug we hit. We dlopen TCC and call the SPIs ourselves to make the
-/// failure mode loud and to actually surface the system prompt.
+/// "running but transcribing nothing." We use the private TCC SPIs that
+/// AudioCap demonstrates (`TCCAccessPreflight` and `TCCAccessRequest`) so
+/// the failure mode is loud and the OS prompt actually surfaces.
 ///
-/// Apple discourages SPI use in App Store apps; this is a prototype, so we
-/// accept that trade-off.
+/// The SPI usage is gated behind the compile-time flag `ENABLE_TCC_SPI` so
+/// a hypothetical App Store distribution can drop it. When the flag is off,
+/// `checkAudioRecordingPermission` reports `.authorized` and
+/// `requestAudioRecordingPermission` is a no-op — the caller's code path
+/// still works, it just relies on the OS to prompt organically (which on
+/// macOS 14.4+ does not happen for direct-exec CLI invocations).
 enum AudioRecordingPermissionStatus: String {
     case authorized
     case denied
@@ -33,10 +38,15 @@ enum AudioRecordingPermissionError: Error, CustomStringConvertible {
                 System-audio recording permission denied.
                 Open System Settings → Privacy & Security → Screen & System Audio Recording,
                 enable MeetingListener, and re-run.
+                If MeetingListener does not appear there, run:
+                    tccutil reset SystemAudioRecording com.anish749.pigeon.meeting-listener
+                then `make run` again.
                 """
         }
     }
 }
+
+#if ENABLE_TCC_SPI
 
 private typealias TCCPreflightFn = @convention(c) (CFString, CFDictionary?) -> Int
 private typealias TCCRequestFn = @convention(c) (
@@ -66,7 +76,6 @@ private enum TCC {
     }()
 }
 
-/// Returns the current permission status without prompting.
 func checkAudioRecordingPermission() throws -> AudioRecordingPermissionStatus {
     guard TCC.handle != nil else {
         throw AudioRecordingPermissionError.tccFrameworkUnavailable
@@ -74,16 +83,18 @@ func checkAudioRecordingPermission() throws -> AudioRecordingPermissionStatus {
     guard let preflight = TCC.preflight else {
         throw AudioRecordingPermissionError.symbolMissing("TCCAccessPreflight")
     }
+    let raw = preflight(TCC.service, nil)
+    FileHandle.standardError.write(Data(
+        "[Permission] TCCAccessPreflight raw=\(raw)\n".utf8
+    ))
     // Per AudioCap: 0 = authorized, 1 = denied, anything else = unknown.
-    switch preflight(TCC.service, nil) {
+    switch raw {
     case 0: return .authorized
     case 1: return .denied
     default: return .unknown
     }
 }
 
-/// Asks macOS to prompt the user for permission. Returns true if the user
-/// granted, false if denied. Blocks until the user dismisses the dialog.
 func requestAudioRecordingPermission() async throws -> Bool {
     guard TCC.handle != nil else {
         throw AudioRecordingPermissionError.tccFrameworkUnavailable
@@ -93,14 +104,29 @@ func requestAudioRecordingPermission() async throws -> Bool {
     }
     return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
         request(TCC.service, nil) { granted in
+            FileHandle.standardError.write(Data(
+                "[Permission] TCCAccessRequest callback granted=\(granted)\n".utf8
+            ))
             cont.resume(returning: granted)
         }
     }
 }
 
+#else // ENABLE_TCC_SPI
+
+func checkAudioRecordingPermission() throws -> AudioRecordingPermissionStatus {
+    return .authorized
+}
+
+func requestAudioRecordingPermission() async throws -> Bool {
+    return true
+}
+
+#endif // ENABLE_TCC_SPI
+
 /// Opens System Settings → Privacy & Security → Screen & System Audio Recording.
-/// On macOS 14+ Apple still honors the legacy `Privacy_AudioCapture` URL
-/// fragment and routes it to the merged audio/screen pane.
+/// On macOS 14+ the legacy `Privacy_AudioCapture` URL fragment still routes
+/// to the merged audio/screen-recording pane.
 func openAudioRecordingSettings() {
     let url = URL(
         string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
@@ -110,12 +136,10 @@ func openAudioRecordingSettings() {
 
 /// Ensures permission is granted before the caller proceeds.
 ///
-/// - If already authorized, returns immediately.
+/// - If already authorized, returns.
 /// - If undetermined, triggers the OS prompt; opens Settings on denial.
-/// - If already denied (the user previously said no, or revoked it), opens
-///   Settings without re-prompting (the OS will not prompt twice in the same
-///   bundle lifetime) and throws so the caller can surface the message and
-///   exit cleanly.
+/// - If already denied, opens Settings without re-prompting and throws
+///   (the OS will not prompt twice for the same bundle once denied).
 func ensureAudioRecordingPermission() async throws {
     let status = try checkAudioRecordingPermission()
     switch status {

@@ -16,6 +16,16 @@ let package = Package(
             name: "MeetingListener",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
+            ],
+            // Compile in the private TCC SPIs that programmatically request
+            // `kTCCServiceAudioCapture` permission. macOS does not expose a
+            // public API for this and the tap silently delivers zero buffers
+            // when permission is missing, so without the SPI the failure
+            // mode is invisible. A hypothetical App Store distribution can
+            // drop this define; the permission code falls back to assuming
+            // authorized when the flag is off.
+            swiftSettings: [
+                .define("ENABLE_TCC_SPI"),
             ]
         ),
     ]
