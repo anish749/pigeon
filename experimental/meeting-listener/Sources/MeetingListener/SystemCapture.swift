@@ -118,9 +118,11 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
                 queue
             ) { _, inInputData, _, _, _ in
                 if firstCallback.fireOnce() {
-                    let frames = inInputData.pointee.mBuffers.mDataByteSize / 4
+                    let firstBuffer = inInputData.pointee.mBuffers
                     SystemCapture.diag(
-                        "first IO callback — frames=\(frames) channels=\(inInputData.pointee.mNumberBuffers)"
+                        "first IO callback — bufferCount=\(inInputData.pointee.mNumberBuffers)"
+                        + " firstBuffer.mNumberChannels=\(firstBuffer.mNumberChannels)"
+                        + " firstBuffer.mDataByteSize=\(firstBuffer.mDataByteSize)"
                     )
                 }
                 let owned = SystemCapture.copyOwnedFromBufferList(
@@ -141,7 +143,9 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
             }
 
             Self.diag(
-                "started — tap=\(tap) aggregate=\(device) sampleRate=\(format.sampleRate) channels=\(format.channelCount)"
+                "started — tap=\(tap) aggregate=\(device) sampleRate=\(format.sampleRate)"
+                + " channels=\(format.channelCount) interleaved=\(format.isInterleaved)"
+                + " bytesPerFrame=\(format.streamDescription.pointee.mBytesPerFrame)"
             )
             return stream
         } catch {
@@ -232,23 +236,21 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
         return uid as String
     }
 
-    /// Wraps the borrowed `AudioBufferList` in a temporary no-copy buffer to
-    /// read its frame count, allocates a fresh owned buffer of the same size,
-    /// and copies the audio over so consumers may hold it across actor hops.
+    /// Allocates a fresh owned `AVAudioPCMBuffer` and `memcpy`s the audio
+    /// payload from the borrowed list into it. Iterates over the source
+    /// `AudioBufferList` via `UnsafeMutableAudioBufferListPointer`, which
+    /// works for both interleaved (one buffer holding all channels packed)
+    /// and non-interleaved (one buffer per channel) layouts. The previous
+    /// implementation used `floatChannelData`, which is nil for interleaved
+    /// buffers and silently produced empty audio for stereo taps.
     private static func copyOwnedFromBufferList(
         _ ptr: UnsafePointer<AudioBufferList>,
         format: AVAudioFormat
     ) -> AVAudioPCMBuffer {
-        guard let temp = AVAudioPCMBuffer(
-            pcmFormat: format,
-            bufferListNoCopy: ptr,
-            deallocator: nil
-        ) else {
-            preconditionFailure(
-                "AVAudioPCMBuffer(bufferListNoCopy:) failed in system tap IO proc"
-            )
-        }
-        let frameCount = temp.frameLength
+        let bytesPerFrame = max(format.streamDescription.pointee.mBytesPerFrame, 1)
+        let firstBuffer = ptr.pointee.mBuffers
+        let frameCount = AVAudioFrameCount(firstBuffer.mDataByteSize / bytesPerFrame)
+
         guard let dst = AVAudioPCMBuffer(
             pcmFormat: format,
             frameCapacity: frameCount
@@ -259,20 +261,24 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
         }
         dst.frameLength = frameCount
 
-        let frames = Int(frameCount)
-        let channels = Int(format.channelCount)
-        guard let srcChannels = temp.floatChannelData,
-              let dstChannels = dst.floatChannelData else {
-            preconditionFailure(
-                "Tap delivered non-Float32 data; expected Float32, got \(format)"
-            )
-        }
-        for ch in 0..<channels {
-            memcpy(
-                dstChannels[ch],
-                srcChannels[ch],
-                frames * MemoryLayout<Float>.size
-            )
+        let mutablePtr = UnsafeMutablePointer(mutating: ptr)
+        let srcList = UnsafeMutableAudioBufferListPointer(mutablePtr)
+        let dstList = UnsafeMutableAudioBufferListPointer(dst.mutableAudioBufferList)
+        precondition(
+            srcList.count == dstList.count,
+            "AudioBufferList layout mismatch: src has \(srcList.count) buffer(s), dst has \(dstList.count)"
+        )
+
+        for i in 0..<srcList.count {
+            let srcBuf = srcList[i]
+            let dstBuf = dstList[i]
+            guard let srcData = srcBuf.mData, let dstData = dstBuf.mData else {
+                preconditionFailure(
+                    "AudioBuffer #\(i) missing mData pointer in system tap IO proc"
+                )
+            }
+            let copyBytes = Int(min(srcBuf.mDataByteSize, dstBuf.mDataByteSize))
+            memcpy(dstData, srcData, copyBytes)
         }
         return dst
     }
