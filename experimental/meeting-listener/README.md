@@ -11,28 +11,30 @@ its own line, prefixed `[MIC] …` (you) or `[SYS] …` (everyone else).
 
 ## Build & run
 
-For day-to-day use, run the bundled app — system-audio capture needs the
-stable bundle identifier macOS keys TCC permission to:
-
 ```
 cd experimental/meeting-listener
-make run-app
+make run
 ```
 
-`make run-app` builds a release binary, wraps it in a minimal `.app` at
-`app/MeetingListener.app/` (ad-hoc codesigned with our entitlements), and
-launches it. The first run triggers two macOS permission prompts — one for
-the mic, one for system audio recording. Accept both. Subsequent runs reuse
-the granted permission as long as the bundle identifier
-(`com.anish749.pigeon.meeting-listener`) doesn't change.
+`make run` builds the release binary, assembles it into a minimal `.app`
+bundle at `app/MeetingListener.app/` (ad-hoc codesigned with our
+entitlements), and launches the bundled binary. There is no "bare CLI" mode
+— macOS keys TCC permission to a stable bundle identifier, so running
+outside a bundle is broken-by-default for system audio.
 
-For iteration on code that doesn't depend on system audio:
+The first launch triggers two TCC prompts (mic and system-audio recording).
+Accept both. Subsequent runs reuse the granted permission as long as the
+bundle identifier (`com.anish749.pigeon.meeting-listener`) doesn't change.
 
-```
-make run             # plain CLI, mic + system; system audio TCC less stable
-make run-debug       # same, with FluidAudio's chunk-level debug logs
-make test-file       # deterministic file replay (no mic, no system audio)
-```
+Other targets:
+
+| Target | Purpose |
+|---|---|
+| `make run` | Build release bundle and launch. Default workflow. |
+| `make run-debug` | Same, with FluidAudio's chunk-level logs visible. |
+| `make build` | Build the bundle without launching (CI / inspection). |
+| `make test-file` | Replay `test/fixtures/utterances.aiff` through the bundled binary — deterministic, no mic, no TCC. |
+| `make clean` | Wipe `.build/`, `test/fixtures/`, and `app/MeetingListener.app/`. |
 
 First run downloads the Parakeet EOU model (~120 MB) and the Silero VAD model
 (~1.6 MB) from HuggingFace into `~/Library/Application Support/FluidAudio/Models/`.

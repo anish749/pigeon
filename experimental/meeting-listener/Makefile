@@ -1,55 +1,55 @@
-.PHONY: run build build-debug run-debug clean test-fixture test-file app run-app
+.PHONY: run run-debug build build-debug clean test-fixture test-file
 
-# Default: build and run in release mode (silences FluidAudio debug/info logs).
-# This runs the bare CLI binary — TCC permissions for system audio are not
-# stable here. Use `make run-app` for that.
-run:
-	swift run -c release MeetingListener
-
-build:
-	swift build -c release
-
-# Debug variants — useful when you want to see FluidAudio's chunk-level logs.
-run-debug:
-	swift run MeetingListener
-
-build-debug:
-	swift build
-
-clean:
-	swift package clean
-	rm -rf .build
-	rm -rf test/fixtures
-	rm -rf app/MeetingListener.app
-
-# --- App bundle for stable TCC permissions -----------------------------------
-# macOS keys system-audio capture permission to a stable bundle identifier.
-# A bare `swift run` binary doesn't have one, so the kernel re-prompts (or
-# silently denies) on every rebuild. Wrap the release binary in a minimal
-# .app and ad-hoc codesign it with our entitlements file; permission grants
-# then persist as long as the bundle id stays the same.
+# --- Build artifact: the bundled .app -----------------------------------------
+# macOS keys system-audio capture permission to a stable bundle identifier,
+# so we always build the release binary into a minimal .app, ad-hoc
+# codesigned with our entitlements. There is no separate "bare CLI" target —
+# the bundle is the artifact.
 
 APP := app/MeetingListener.app
 APP_BIN := $(APP)/Contents/MacOS/MeetingListener
 INFO_PLIST := app/Info.plist
 ENTITLEMENTS := app/MeetingListener.entitlements
 
-app: build
+# Default: build the release .app and run it. First launch triggers TCC
+# prompts for mic + system-audio recording; accept both. Subsequent runs
+# reuse the granted permissions because the bundle id is stable.
+run: build
+	$(APP_BIN)
+
+# Same, but with FluidAudio's chunk-level debug/info logs visible. Use when
+# diagnosing VAD timing or encoder behavior.
+run-debug: build-debug
+	$(APP_BIN)
+
+# Build the bundle without running it (CI / inspection / signing audit).
+build:
+	@swift build -c release
+	@$(MAKE) -s _bundle BIN=.build/release/MeetingListener
+
+build-debug:
+	@swift build
+	@$(MAKE) -s _bundle BIN=.build/debug/MeetingListener
+
+# Internal helper — assembles the bundle from whatever BIN you point it at.
+_bundle:
 	@mkdir -p $(APP)/Contents/MacOS
 	@cp $(INFO_PLIST) $(APP)/Contents/Info.plist
-	@cp .build/release/MeetingListener $(APP_BIN)
-	@codesign --force --sign - --entitlements $(ENTITLEMENTS) $(APP) 2>&1
+	@cp $(BIN) $(APP_BIN)
+	@codesign --force --sign - --entitlements $(ENTITLEMENTS) $(APP)
 	@echo "Built $(APP)"
 
-run-app: app
-	$(APP_BIN)
+clean:
+	swift package clean
+	rm -rf .build
+	rm -rf test/fixtures
+	rm -rf $(APP)
 
 # --- Deterministic file-mode smoke test --------------------------------------
 # Generates an audio fixture from `say` with explicit 1.5 s silences between
-# sentences, then replays it through the same ASRSession used at runtime.
-# Use this when you suspect EOU isn't firing on the live mic — if EOU works
-# here but not on mic, the issue is mic noise / acoustic environment, not the
-# pipeline.
+# sentences, then replays it through the bundled binary. Useful when you
+# suspect a code regression — if this fails, the pipeline is broken; if it
+# passes, any remaining issue is environmental (mic noise, route, etc.).
 
 FIXTURE := test/fixtures/utterances.aiff
 FIXTURE_TEXT := "Hello there. [[slnc 1500]] How are you doing today? [[slnc 1500]] This is a test. [[slnc 1500]] Goodbye."
@@ -61,4 +61,4 @@ test-fixture:
 	@echo "Done."
 
 test-file: test-fixture build
-	swift run -c release MeetingListener --file $(FIXTURE)
+	$(APP_BIN) --file $(FIXTURE)
