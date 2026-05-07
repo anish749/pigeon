@@ -7,71 +7,82 @@ func warn(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
 }
 
-/// Returns the value following `--<flag>` on the command line, or nil.
-func argValue(_ flag: String) -> String? {
-    let args = CommandLine.arguments
-    guard let idx = args.firstIndex(of: "--" + flag), idx + 1 < args.count else {
-        return nil
+/// One source bound to one ASR session, ready to be driven by `runPipeline`.
+struct Pipeline: Sendable {
+    let spec: SourceSpec
+    let source: any AudioSource
+    let session: ASRSession
+}
+
+func makeSource(spec: SourceSpec) -> any AudioSource {
+    switch spec {
+    case .mic: return MicCapture()
+    case .system: return SystemCapture()
+    case .file(let url): return FileSource(url: url)
     }
-    return args[idx + 1]
 }
 
 @MainActor
-func runMic(session: ASRSession) async throws {
-    warn("Model ready. Starting microphone capture (Ctrl-C to stop).")
-
-    let mic = MicCapture()
-    let stream = try mic.start()
-
-    // SIGINT closes the audio stream; the for-await loop below exits naturally
-    // and runMic continues to flush a final transcript before returning.
-    let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-    signal(SIGINT, SIG_IGN)
-    signalSource.setEventHandler {
-        warn("\nStopping...")
-        mic.stop()
+func loadPipelines(config: Config) async throws -> [Pipeline] {
+    var pipelines: [Pipeline] = []
+    for spec in config.sources {
+        let source = makeSource(spec: spec)
+        let session = ASRSession(tag: spec.tag, config: config)
+        try await session.loadModels()
+        pipelines.append(Pipeline(spec: spec, source: source, session: session))
     }
-    signalSource.resume()
+    return pipelines
+}
 
+/// Drains a single source's stream into its session. Exits when the stream
+/// ends (Ctrl-C / EOF) or rethrows on stream error.
+@Sendable
+func runPipeline(source: any AudioSource, session: ASRSession) async throws {
+    let stream = try source.start()
     do {
-        for await buffer in stream {
+        for try await buffer in stream {
             try await session.append(buffer)
         }
     } catch {
-        // Stop the engine before re-throwing so we don't leave the audio
-        // hardware running on the way out.
-        mic.stop()
+        source.stop()
         throw error
-    }
-
-    try await session.finish()
-}
-
-@MainActor
-func runFile(path: String, session: ASRSession) async throws {
-    let url = URL(fileURLWithPath: path)
-    warn("Replaying \(url.path) through ASR session...")
-    let source = FileSource(url: url)
-    try await source.play { buffer in
-        try await session.append(buffer)
     }
     try await session.finish()
 }
 
 @MainActor
 func run() async throws {
+    let config = Config.parse(Array(CommandLine.arguments.dropFirst()))
     warn("Loading Parakeet + VAD models (first run downloads ~120 MB)...")
 
-    let session = ASRSession(
-        tag: "MIC",
-        vadThreshold: argValue("vad-threshold").flatMap(Float.init)
-    )
-    try await session.loadModels()
+    let pipelines = try await loadPipelines(config: config)
+    let tags = pipelines.map(\.spec.tag).joined(separator: ", ")
+    warn("Models ready. Sources: \(tags). Ctrl-C to stop.")
 
-    if let filePath = argValue("file") {
-        try await runFile(path: filePath, session: session)
-    } else {
-        try await runMic(session: session)
+    // SIGINT closes every source; each pipeline's stream finishes naturally
+    // and the for-try-await loops exit. `session.finish()` then flushes any
+    // in-flight utterance before runPipeline returns.
+    let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    signal(SIGINT, SIG_IGN)
+    let sources = pipelines.map(\.source)
+    signalSource.setEventHandler {
+        warn("\nStopping...")
+        for source in sources {
+            source.stop()
+        }
+    }
+    signalSource.resume()
+
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for pipeline in pipelines {
+            group.addTask {
+                try await runPipeline(
+                    source: pipeline.source,
+                    session: pipeline.session
+                )
+            }
+        }
+        try await group.waitForAll()
     }
 }
 

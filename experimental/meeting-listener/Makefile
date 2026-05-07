@@ -1,6 +1,8 @@
-.PHONY: run build build-debug run-debug clean test-fixture test-file
+.PHONY: run build build-debug run-debug clean test-fixture test-file app run-app
 
 # Default: build and run in release mode (silences FluidAudio debug/info logs).
+# This runs the bare CLI binary — TCC permissions for system audio are not
+# stable here. Use `make run-app` for that.
 run:
 	swift run -c release MeetingListener
 
@@ -18,6 +20,29 @@ clean:
 	swift package clean
 	rm -rf .build
 	rm -rf test/fixtures
+	rm -rf app/MeetingListener.app
+
+# --- App bundle for stable TCC permissions -----------------------------------
+# macOS keys system-audio capture permission to a stable bundle identifier.
+# A bare `swift run` binary doesn't have one, so the kernel re-prompts (or
+# silently denies) on every rebuild. Wrap the release binary in a minimal
+# .app and ad-hoc codesign it with our entitlements file; permission grants
+# then persist as long as the bundle id stays the same.
+
+APP := app/MeetingListener.app
+APP_BIN := $(APP)/Contents/MacOS/MeetingListener
+INFO_PLIST := app/Info.plist
+ENTITLEMENTS := app/MeetingListener.entitlements
+
+app: build
+	@mkdir -p $(APP)/Contents/MacOS
+	@cp $(INFO_PLIST) $(APP)/Contents/Info.plist
+	@cp .build/release/MeetingListener $(APP_BIN)
+	@codesign --force --sign - --entitlements $(ENTITLEMENTS) $(APP) 2>&1
+	@echo "Built $(APP)"
+
+run-app: app
+	$(APP_BIN)
 
 # --- Deterministic file-mode smoke test --------------------------------------
 # Generates an audio fixture from `say` with explicit 1.5 s silences between

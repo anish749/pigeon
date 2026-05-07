@@ -3,3 +3,4 @@
 *.xcodeproj/
 DerivedData/
 test/fixtures/
+app/MeetingListener.app/
