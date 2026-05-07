@@ -112,6 +112,11 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
             // for "log once". A relaxed dispatch_once via DispatchQueue
             // ensures the diag line fires exactly once even under contention.
             let firstCallback = FirstCallbackFlag()
+            // Per-callback level meter. Lets us tell "tap delivering real
+            // audio" (avg |sample| > 0) from "tap delivering zeros" (avg ≈ 0,
+            // which usually means TCC permission for system audio recording
+            // was not granted at first launch).
+            let levelMeter = LevelMeter()
             let procStatus = AudioDeviceCreateIOProcIDWithBlock(
                 &procID,
                 device,
@@ -125,6 +130,7 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
                         + " firstBuffer.mDataByteSize=\(firstBuffer.mDataByteSize)"
                     )
                 }
+                levelMeter.observe(inInputData)
                 let owned = SystemCapture.copyOwnedFromBufferList(
                     inInputData,
                     format: format
@@ -333,5 +339,48 @@ private final class FirstCallbackFlag: @unchecked Sendable {
         guard !fired else { return false }
         fired = true
         return true
+    }
+}
+
+/// Periodic average-absolute-amplitude meter. Reports a heartbeat to stderr
+/// every ~1 second so we can see whether the tap is delivering real audio
+/// or zero-filled buffers (the latter being the common signature of TCC
+/// "Audio Recording" permission not granted).
+private final class LevelMeter: @unchecked Sendable {
+    private var callbacks = 0
+    private var totalAbs: Double = 0
+    private var totalSamples: UInt64 = 0
+    /// Log every Nth callback. With ~21 ms callbacks, 50 ≈ once per second.
+    private let logEvery = 50
+
+    func observe(_ inputData: UnsafePointer<AudioBufferList>) {
+        callbacks += 1
+        let buffer = inputData.pointee.mBuffers
+        guard let mData = buffer.mData, buffer.mDataByteSize >= 4 else { return }
+        let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+        let floats = mData.bindMemory(to: Float.self, capacity: count)
+        // Sample stride 4 — every 4th sample is enough to see if the buffer
+        // is silent or active without iterating millions of samples.
+        var localSum: Double = 0
+        var localCount = 0
+        var i = 0
+        while i < count {
+            localSum += Double(abs(floats[i]))
+            localCount += 1
+            i += 4
+        }
+        totalAbs += localSum
+        totalSamples += UInt64(localCount)
+
+        if callbacks % logEvery == 0 {
+            let avg = totalSamples > 0 ? totalAbs / Double(totalSamples) : 0
+            let line = String(
+                format: "[SystemCapture] heartbeat — %d callbacks, avg|sample|=%.5f\n",
+                callbacks, avg
+            )
+            FileHandle.standardError.write(Data(line.utf8))
+            totalAbs = 0
+            totalSamples = 0
+        }
     }
 }
