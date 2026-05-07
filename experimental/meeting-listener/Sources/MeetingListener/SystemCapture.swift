@@ -31,6 +31,13 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
     private var deviceProcID: AudioDeviceIOProcID?
     private var continuation: AsyncThrowingStream<AVAudioPCMBuffer, Error>.Continuation?
 
+    /// Writes one line to stderr at startup and on the first IO callback so
+    /// we can distinguish "tap never created", "tap created but never
+    /// produces audio", and "tap producing audio but downstream rejects it".
+    private static func diag(_ message: String) {
+        FileHandle.standardError.write(Data("[SystemCapture] \(message)\n".utf8))
+    }
+
     func start() throws -> AsyncThrowingStream<AVAudioPCMBuffer, Error> {
         precondition(
             tapID == .unknownObjectID,
@@ -100,11 +107,22 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
             //    state, so concurrency between the audio thread and the main
             //    thread is bounded to start/stop sequencing on the device.
             var procID: AudioDeviceIOProcID?
+            // `Atomic` would be cleaner but Foundation doesn't ship it on
+            // macOS yet; pthread_once via a captured class flag is overkill
+            // for "log once". A relaxed dispatch_once via DispatchQueue
+            // ensures the diag line fires exactly once even under contention.
+            let firstCallback = FirstCallbackFlag()
             let procStatus = AudioDeviceCreateIOProcIDWithBlock(
                 &procID,
                 device,
                 queue
             ) { _, inInputData, _, _, _ in
+                if firstCallback.fireOnce() {
+                    let frames = inInputData.pointee.mBuffers.mDataByteSize / 4
+                    SystemCapture.diag(
+                        "first IO callback — frames=\(frames) channels=\(inInputData.pointee.mNumberBuffers)"
+                    )
+                }
                 let owned = SystemCapture.copyOwnedFromBufferList(
                     inInputData,
                     format: format
@@ -122,6 +140,9 @@ final class SystemCapture: AudioSource, @unchecked Sendable {
                 throw SystemCaptureError.deviceStartFailed(startStatus)
             }
 
+            Self.diag(
+                "started — tap=\(tap) aggregate=\(device) sampleRate=\(format.sampleRate) channels=\(format.channelCount)"
+            )
             return stream
         } catch {
             cleanup()
@@ -292,4 +313,19 @@ enum SystemCaptureError: Error, CustomStringConvertible {
 
 private extension AudioObjectID {
     static let unknownObjectID = AudioObjectID(kAudioObjectUnknown)
+}
+
+/// Lock-free single-shot flag, used by the IO proc block to log just the
+/// first callback that arrives. The IO proc runs on its own serial dispatch
+/// queue, so a plain `Bool` flipped under that queue is race-free against
+/// itself; we use the wrapping class so the flag escapes the local block
+/// scope by reference.
+private final class FirstCallbackFlag: @unchecked Sendable {
+    private var fired = false
+
+    func fireOnce() -> Bool {
+        guard !fired else { return false }
+        fired = true
+        return true
+    }
 }
