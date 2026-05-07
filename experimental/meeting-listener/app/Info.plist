@@ -9,7 +9,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>MeetingListener</string>
+    <string>Pigeon</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pigeon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -21,8 +23,8 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>MeetingListener captures audio output from other apps so it can transcribe meetings locally.</string>
+    <string>Pigeon captures audio output from other apps so it can transcribe meetings locally.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>MeetingListener listens to your microphone so it can transcribe what you say in meetings locally.</string>
+    <string>Pigeon listens to your microphone so it can transcribe what you say in meetings locally.</string>
 </dict>
 </plist>

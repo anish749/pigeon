@@ -37,9 +37,9 @@ enum AudioRecordingPermissionError: Error, CustomStringConvertible {
             return """
                 System-audio recording permission denied.
                 Open System Settings → Privacy & Security → Screen & System Audio Recording,
-                enable MeetingListener, and re-run.
-                If MeetingListener does not appear there, run:
-                    tccutil reset SystemAudioRecording com.anish749.pigeon.meeting-listener
+                enable Pigeon, and re-run.
+                If Pigeon does not appear there, run:
+                    make reset-tcc
                 then `make run` again.
                 """
         }
