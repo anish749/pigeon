@@ -53,6 +53,21 @@ func runPipeline(source: any AudioSource, session: ASRSession) async throws {
 @MainActor
 func run() async throws {
     let config = Config.parse(Array(CommandLine.arguments.dropFirst()))
+
+    // If the run includes a SystemCapture source, make sure TCC has granted
+    // audio capture permission before we spin anything up. Without this the
+    // tap silently delivers zero-filled buffers and nothing transcribes — a
+    // genuinely silent failure mode that wasted us a debugging round.
+    if config.sources.contains(where: { if case .system = $0 { return true } else { return false } }) {
+        let status = try checkAudioRecordingPermission()
+        warn("System-audio permission status: \(status.rawValue)")
+        if status != .authorized {
+            warn("Requesting system-audio recording permission...")
+            try await ensureAudioRecordingPermission()
+            warn("Permission granted.")
+        }
+    }
+
     warn("Loading Parakeet + VAD models (first run downloads ~120 MB)...")
 
     let pipelines = try await loadPipelines(config: config)
