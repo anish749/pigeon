@@ -1,11 +1,13 @@
 # meeting-listener (prototype)
 
-Captures microphone audio, streams it through Parakeet TDT (CoreML on the Apple
-Neural Engine via [FluidAudio](https://github.com/FluidInference/FluidAudio)),
-and prints transcripts to stdout as you speak.
+Captures both halves of a meeting — your microphone *and* the system audio mix
+(Zoom, Meet, Slack, music) — streams each through Parakeet TDT
+([FluidAudio](https://github.com/FluidInference/FluidAudio) CoreML on the
+Apple Neural Engine), and prints labeled transcripts to stdout as the
+conversation happens.
 
-This is iteration 1 of a larger experiment: validate the audio → Parakeet → text
-pipeline end-to-end before adding the system-audio leg or wiring into pigeon.
+By default both sources run simultaneously. Each finalized utterance lands on
+its own line, prefixed `[MIC] …` (you) or `[SYS] …` (everyone else).
 
 ## Build & run
 
@@ -14,39 +16,74 @@ cd experimental/meeting-listener
 make run
 ```
 
-`make run` is `swift run -c release MeetingListener`. Use the release config
-rather than the default debug build — FluidAudio's logger mirrors every
-`debug` and `info` line to stderr in debug builds, which clobbers the live
-preview. In release builds only warnings and above print.
+`make run` builds the release binary, assembles it into a minimal `.app`
+bundle at `app/MeetingListener.app/` (ad-hoc codesigned with our
+entitlements), and launches the bundled binary. There is no "bare CLI" mode
+— macOS keys TCC permission to a stable bundle identifier, so running
+outside a bundle is broken-by-default for system audio.
 
-Other targets: `make build`, `make run-debug`, `make build-debug`, `make clean`.
+The first launch triggers two TCC prompts (mic and system-audio recording).
+Accept both. Subsequent runs reuse the granted permission as long as the
+bundle identifier (`com.anish749.pigeon.meeting-listener`) doesn't change.
 
-First run downloads the Parakeet EOU model from HuggingFace (~120 MB) into
-`~/Library/Application Support/FluidAudio/Models/`. Subsequent runs reuse the
-cache.
+Other targets:
 
-Speak into the default input device. Output:
+| Target | Purpose |
+|---|---|
+| `make run` | Build release bundle and launch. Default workflow. |
+| `make run-debug` | Same, with FluidAudio's chunk-level logs visible. |
+| `make build` | Build the bundle without launching (CI / inspection). |
+| `make test-file` | Replay `test/fixtures/utterances.aiff` through the bundled binary — deterministic, no mic, no TCC. |
+| `make clean` | Wipe `.build/`, `test/fixtures/`, and `app/MeetingListener.app/`. |
+
+First run downloads the Parakeet EOU model (~120 MB) and the Silero VAD model
+(~1.6 MB) from HuggingFace into `~/Library/Application Support/FluidAudio/Models/`.
+Subsequent runs reuse the cache.
+
+## Output shape
+
+Each pipeline writes two channels to the terminal:
 
 - **stderr** — single self-overwriting line of the partial transcript (live
-  preview).
-- **stdout** — `[MIC] <text>` per finalized utterance, after a ~1.3 s pause.
+  preview, sized to terminal width).
+- **stdout** — `[MIC] <text>` or `[SYS] <text>` per finalized utterance,
+  committed when the VAD reports `speechEnd`.
 
-Press `Ctrl-C` to stop.
+Press `Ctrl-C` to stop. In-flight utterances are flushed before exit.
+
+## CLI flags
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--vad-threshold <float>` | `0.5` | Silero `defaultThreshold`. Lower → catches softer / shorter words; higher → fewer false-positives on noise. |
+| `--pre-buffer-ms <int>` | `300` | Audio retained before VAD's `speechStart` so the onset isn't clipped. |
+| `--trailing-silence-ms <int>` | `500` | Silence fed to Parakeet before `finish()` so the streaming encoder can resolve the last word. |
+| `--file <path>` | — | Replay an audio file through one ASR session instead of running mic + system. Useful for deterministic regression tests. |
+
+All defaults live in `Sources/MeetingListener/Config.swift`.
 
 ## Permissions
 
-The CLI inherits microphone permission from its parent process. The first run
-under a given Terminal will trigger macOS's TCC mic prompt — accept it, then
-re-run.
+The bundled `.app` declares two TCC strings in `app/Info.plist`:
+
+- `NSMicrophoneUsageDescription` — for the input mic.
+- `NSAudioCaptureUsageDescription` — for the system-audio process tap.
+
+Plus the entitlement `com.apple.security.device.audio-input` in
+`app/MeetingListener.entitlements`.
+
+If you ever revoke and need to re-grant, find them in:
+
+- System Settings → Privacy & Security → Microphone
+- System Settings → Privacy & Security → Audio Recording (or "System Recording")
 
 ## Requirements
 
-- macOS 14.0+
-- Apple Silicon (Parakeet runs on the Neural Engine)
+- macOS 14.4+ (Core Audio Process Tap)
+- Apple Silicon (Parakeet on the Neural Engine)
 - Swift 5.9+
 
-## What's not in this prototype
+## What's not yet here
 
-- System audio capture (the "what others say" stream) — iteration 2
-- Speaker diarization
+- Speaker diarization for `[SYS]` (next PR — `[SYS:spk0]`, `[SYS:spk1]`, …)
 - Pigeon channel integration

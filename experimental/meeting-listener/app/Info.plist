@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>PigeonListener</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.anish749.pigeon.meeting-listener</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Pigeon</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pigeon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Pigeon captures audio output from other apps so it can transcribe meetings locally.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Pigeon listens to your microphone so it can transcribe what you say in meetings locally.</string>
+</dict>
+</plist>

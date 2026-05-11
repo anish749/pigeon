@@ -33,20 +33,19 @@ actor ASRSession {
         interleaved: false
     )!
 
-    /// How much pre-`speechStart` audio to retain so the onset isn't clipped.
-    private static let preBufferMs: Int = 300
-
     private let tag: String
+    private let config: Config
     private let manager: StreamingEouAsrManager
     private let vad: VadGate
 
     private var inSpeech = false
     private var preBuffer: [AVAudioPCMBuffer] = []
 
-    init(tag: String, vadThreshold: Float? = nil) {
+    init(tag: String, config: Config) {
         self.tag = tag
+        self.config = config
         self.manager = StreamingEouAsrManager(configuration: MLModelConfiguration())
-        self.vad = VadGate(threshold: vadThreshold)
+        self.vad = VadGate(threshold: config.vadThreshold)
     }
 
     func loadModels() async throws {
@@ -105,9 +104,9 @@ actor ASRSession {
         // Parakeet's streaming encoder holds ~80 ms of audio per chunk in its
         // loopback cache as future-context lookahead — without a next chunk
         // it can't emit tokens for the very last word of an utterance. Push
-        // ~500 ms of silence (3 chunks at 160 ms) so the tail decodes before
-        // we read out the transcript.
-        try await flushTrailingSilence(durationMs: 500)
+        // a configurable burst of silence so the tail decodes before we
+        // read out the transcript.
+        try await flushTrailingSilence(durationMs: config.trailingSilenceMs)
 
         let final = try await manager.finish()
         FileHandle.standardError.write(Data("\r\u{1B}[K".utf8))
@@ -144,7 +143,7 @@ actor ASRSession {
     private func stashInPreBuffer(_ buffer: AVAudioPCMBuffer) {
         preBuffer.append(buffer)
         let sampleRate = buffer.format.sampleRate
-        let maxFrames = Int(sampleRate * Double(ASRSession.preBufferMs) / 1000)
+        let maxFrames = Int(sampleRate * Double(config.preBufferMs) / 1000)
         var total = preBuffer.reduce(0) { $0 + Int($1.frameLength) }
         while total > maxFrames, !preBuffer.isEmpty {
             let dropped = preBuffer.removeFirst()
