@@ -18,6 +18,12 @@ import AVFoundation
 ///   `bufferListNoCopy:` references to recycled Core Audio backing).
 /// - Make `stop()` idempotent and safe from any context — the SIGINT handler
 ///   calls it from the main dispatch queue.
+/// - Treat the stream as a contiguous sequence of audio whose **format may
+///   change buffer to buffer**. A mic capture that re-binds when the user
+///   plugs in headphones can legitimately yield 48 kHz mono samples followed
+///   by 44.1 kHz stereo samples in the same stream. Each yielded
+///   `AVAudioPCMBuffer` carries its `AVAudioFormat`; consumers must read it
+///   per buffer rather than caching at start.
 protocol AudioSource: Sendable {
     func start() throws -> AsyncThrowingStream<AVAudioPCMBuffer, Error>
     func stop()

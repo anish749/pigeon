@@ -13,12 +13,12 @@ final class MicCapture: AudioSource, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var continuation: AsyncThrowingStream<AVAudioPCMBuffer, Error>.Continuation?
     private var isRunning = false
+    private var configChangeObserver: NSObjectProtocol?
 
     func start() throws -> AsyncThrowingStream<AVAudioPCMBuffer, Error> {
         precondition(!isRunning, "MicCapture.start() called while already running")
 
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        let format = engine.inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else {
             throw MicCaptureError.noInputDevice
         }
@@ -28,29 +28,80 @@ final class MicCapture: AudioSource, @unchecked Sendable {
         )
         self.continuation = continuation
 
-        inputNode.installTap(
-            onBus: 0,
-            bufferSize: 1024,
-            format: format
-        ) { buffer, _ in
-            // Copy out of the engine-owned buffer; the tap may recycle it
-            // as soon as this closure returns.
-            let owned = MicCapture.copyOwned(of: buffer)
-            continuation.yield(owned)
+        try installTapAndStart(format: format)
+
+        // AVAudioEngine binds to whatever device is the default input at
+        // start() time. If the user plugs in headphones, unplugs the
+        // built-in mic, or switches default input in System Settings, the
+        // engine keeps pulling from the original device and the stream
+        // goes silent. macOS posts AVAudioEngineConfigurationChange on
+        // every such transition — we tear down the tap and rebind to the
+        // new default input. Downstream (VadGate's AVAudioConverter,
+        // FluidAudio's internal AudioConverter) resamples per buffer, so
+        // the new device's native format can differ freely.
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigChange()
         }
 
-        try engine.start()
         isRunning = true
         return stream
     }
 
     func stop() {
         guard isRunning else { return }
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         continuation?.finish()
         continuation = nil
         isRunning = false
+    }
+
+    private func installTapAndStart(format: AVAudioFormat) throws {
+        engine.inputNode.installTap(
+            onBus: 0,
+            bufferSize: 1024,
+            format: format
+        ) { [weak self] buffer, _ in
+            guard let cont = self?.continuation else { return }
+            // Copy out of the engine-owned buffer; the tap may recycle it
+            // as soon as this closure returns.
+            let owned = MicCapture.copyOwned(of: buffer)
+            cont.yield(owned)
+        }
+        try engine.start()
+    }
+
+    /// Re-bind the engine to whatever the new default input device is.
+    /// Yielded buffers afterward carry the new device's native format;
+    /// downstream consumers handle per-buffer format changes already.
+    /// The only real failure is "no input device at all" (e.g. only
+    /// device was disconnected with no fallback) — surface that as a
+    /// stream error rather than spinning silently.
+    private func handleConfigChange() {
+        guard isRunning, let continuation = continuation else { return }
+
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+
+        let newFormat = engine.inputNode.outputFormat(forBus: 0)
+        guard newFormat.sampleRate > 0 else {
+            continuation.finish(throwing: MicCaptureError.noInputDevice)
+            return
+        }
+
+        do {
+            try installTapAndStart(format: newFormat)
+        } catch {
+            continuation.finish(throwing: error)
+        }
     }
 
     /// Allocates a new `AVAudioPCMBuffer` in the same format as `src` and
