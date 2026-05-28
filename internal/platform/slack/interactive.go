@@ -14,6 +14,8 @@ type feedbackMeta struct {
 	OutboxID  string `json:"id"`
 	ChannelID string `json:"ch"`
 	MessageTS string `json:"ts"`
+	Message   string `json:"msg,omitempty"`
+	Target    string `json:"tgt,omitempty"`
 }
 
 // handleInteractive processes block_actions and view_submission events sent
@@ -48,10 +50,12 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 	msgTS := cb.Message.Timestamp
 	channelID := cb.Channel.ID
 
+	origBlocks := cb.Message.Blocks.BlockSet
+
 	item := l.obHandler.Get(outboxID)
 	if item == nil {
 		l.client.Ack(*evt.Request)
-		l.updateCCMessage(ctx, channelID, msgTS, "⚠️ Item no longer in outbox")
+		l.updateCCMessage(ctx, channelID, msgTS, "⚠️ Item no longer in outbox", origBlocks)
 		return
 	}
 
@@ -59,13 +63,14 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 	case "outbox_approve":
 		l.client.Ack(*evt.Request)
 		if err := l.obHandler.Approve(ctx, item); err != nil {
-			l.updateCCMessage(ctx, channelID, msgTS, fmt.Sprintf("✗ Send failed: %s", err))
+			l.updateCCMessage(ctx, channelID, msgTS, fmt.Sprintf("✗ Send failed: %s", err), origBlocks)
 		} else {
-			l.updateCCMessage(ctx, channelID, msgTS, "✓ Approved and sent")
+			l.updateCCMessage(ctx, channelID, msgTS, "✓ Approved and sent", origBlocks)
 		}
 
 	case "outbox_feedback":
-		modal, err := feedbackModal(outboxID, channelID, msgTS)
+		msgText, tgtText := extractCCText(origBlocks)
+		modal, err := feedbackModal(outboxID, channelID, msgTS, msgText, tgtText)
 		if err != nil {
 			slog.ErrorContext(ctx, "slack: failed to build feedback modal",
 				"error", err, "outbox_id", outboxID, "account", l.acct)
@@ -111,36 +116,44 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 	}
 	note := noteBlock["note"].Value
 
+	origBlocks := buildCCBlocks(meta.Message, meta.Target)
+
 	item := l.obHandler.Get(meta.OutboxID)
 	if item == nil {
 		slog.WarnContext(ctx, "slack: feedback submitted for missing outbox item",
 			"outbox_id", meta.OutboxID, "account", l.acct)
-		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Item no longer in outbox")
+		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Item no longer in outbox", origBlocks)
 		return
 	}
 
 	if err := l.obHandler.Feedback(item, note); err != nil {
 		slog.ErrorContext(ctx, "slack: feedback delivery failed",
 			"outbox_id", meta.OutboxID, "error", err, "account", l.acct)
-		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Feedback could not be delivered — session not connected")
+		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Feedback could not be delivered — session not connected", origBlocks)
 		return
 	}
 
-	l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "✓ Feedback sent")
+	l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "✓ Feedback sent", origBlocks)
 	slog.InfoContext(ctx, "slack: feedback delivered via C&C",
 		"outbox_id", meta.OutboxID, "account", l.acct)
 }
 
-// updateCCMessage replaces the original C&C message with a status line and no buttons.
-func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string) {
+// updateCCMessage strips action buttons from the original message and appends a status line.
+func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string, origBlocks []goslack.Block) {
+	var kept []goslack.Block
+	for _, b := range origBlocks {
+		if b.BlockType() == goslack.MBTAction {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	kept = append(kept, goslack.NewContextBlock("",
+		goslack.NewTextBlockObject("mrkdwn", status, false, false),
+	))
+
 	_, _, _, err := l.botAPI.UpdateMessageContext(ctx, channelID, ts,
 		goslack.MsgOptionText(status, false),
-		goslack.MsgOptionBlocks(
-			goslack.NewSectionBlock(
-				goslack.NewTextBlockObject("mrkdwn", status, false, false),
-				nil, nil,
-			),
-		),
+		goslack.MsgOptionBlocks(kept...),
 	)
 	if err != nil {
 		slog.ErrorContext(ctx, "slack: failed to update C&C message",
@@ -148,9 +161,51 @@ func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status st
 	}
 }
 
+// extractCCText pulls the message and target strings from the C&C message blocks.
+func extractCCText(blocks []goslack.Block) (message, target string) {
+	for _, b := range blocks {
+		switch blk := b.(type) {
+		case *goslack.SectionBlock:
+			if blk.Text != nil {
+				message = blk.Text.Text
+			}
+		case *goslack.ContextBlock:
+			if len(blk.ContextElements.Elements) > 0 {
+				if txt, ok := blk.ContextElements.Elements[0].(*goslack.TextBlockObject); ok {
+					target = txt.Text
+				}
+			}
+		}
+	}
+	return message, target
+}
+
+// buildCCBlocks reconstructs the non-action C&C blocks from stored text.
+func buildCCBlocks(message, target string) []goslack.Block {
+	var blocks []goslack.Block
+	if message != "" {
+		blocks = append(blocks, goslack.NewSectionBlock(
+			goslack.NewTextBlockObject("mrkdwn", message, false, false),
+			nil, nil,
+		))
+	}
+	if target != "" {
+		blocks = append(blocks, goslack.NewContextBlock("",
+			goslack.NewTextBlockObject("mrkdwn", target, false, false),
+		))
+	}
+	return blocks
+}
+
 // feedbackModal builds the modal shown when the user clicks "Feedback".
-func feedbackModal(outboxID, channelID, messageTS string) (goslack.ModalViewRequest, error) {
-	meta, err := json.Marshal(feedbackMeta{OutboxID: outboxID, ChannelID: channelID, MessageTS: messageTS})
+func feedbackModal(outboxID, channelID, messageTS, message, target string) (goslack.ModalViewRequest, error) {
+	meta, err := json.Marshal(feedbackMeta{
+		OutboxID:  outboxID,
+		ChannelID: channelID,
+		MessageTS: messageTS,
+		Message:   message,
+		Target:    target,
+	})
 	if err != nil {
 		return goslack.ModalViewRequest{}, fmt.Errorf("marshal feedback metadata: %w", err)
 	}
