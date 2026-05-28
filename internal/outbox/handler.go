@@ -99,6 +99,41 @@ func (h *Handler) Feedback(item *Item, note string) error {
 	return nil
 }
 
+// Dismiss removes the item from the outbox and notifies the originating
+// session (if any). Always succeeds.
+func (h *Handler) Dismiss(item *Item) {
+	h.outbox.Remove(item.ID)
+
+	if item.SessionID != "" {
+		msg := fmt.Sprintf("[outbox] Dismissed (ID: %s)", item.ID)
+		if err := h.notify(item.SessionID, msg); err != nil {
+			slog.Error("outbox: failed to notify session of dismissal", "id", item.ID, "session_id", item.SessionID, "error", err)
+		}
+	}
+
+	slog.Info("outbox item dismissed", "id", item.ID, "session_id", item.SessionID)
+}
+
+// SetVia updates the send mode (via field) in the item's payload.
+func (h *Handler) SetVia(item *Item, via string) error {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	viaJSON, err := json.Marshal(via)
+	if err != nil {
+		return fmt.Errorf("marshal via: %w", err)
+	}
+	payload["via"] = viaJSON
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	h.outbox.UpdatePayload(item.ID, updated)
+	slog.Info("outbox item via updated", "id", item.ID, "via", via)
+	return nil
+}
+
 // HandleList returns all pending outbox items as JSON.
 func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
 	items := h.outbox.List()
@@ -158,38 +193,15 @@ func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
 }
 
 func (h *Handler) dismiss(w http.ResponseWriter, item *Item) {
-	h.outbox.Remove(item.ID)
-
-	msg := fmt.Sprintf("[outbox] Dismissed (ID: %s)", item.ID)
-	if item.SessionID != "" {
-		if err := h.notify(item.SessionID, msg); err != nil {
-			slog.Error("outbox: failed to notify session of dismissal", "id", item.ID, "session_id", item.SessionID, "error", err)
-		}
-	}
-
-	slog.Info("outbox item dismissed", "id", item.ID, "session_id", item.SessionID)
+	h.Dismiss(item)
 	writeJSON(w, http.StatusOK, ActionResponse{OK: true})
 }
 
 func (h *Handler) setVia(w http.ResponseWriter, item *Item, via string) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(item.Payload, &payload); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: "parse payload: " + err.Error()})
+	if err := h.SetVia(item, via); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: err.Error()})
 		return
 	}
-	viaJSON, err := json.Marshal(via)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: "marshal via: " + err.Error()})
-		return
-	}
-	payload["via"] = viaJSON
-	updated, err := json.Marshal(payload)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: "marshal payload: " + err.Error()})
-		return
-	}
-	h.outbox.UpdatePayload(item.ID, updated)
-	slog.Info("outbox item via updated", "id", item.ID, "via", via)
 	writeJSON(w, http.StatusOK, ActionResponse{OK: true})
 }
 
