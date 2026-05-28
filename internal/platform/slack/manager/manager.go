@@ -15,6 +15,7 @@ import (
 	"github.com/anish749/pigeon/internal/daemon"
 	"github.com/anish749/pigeon/internal/hub"
 	"github.com/anish749/pigeon/internal/identity"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/paths"
 	slacklistener "github.com/anish749/pigeon/internal/platform/slack"
 	"github.com/anish749/pigeon/internal/store"
@@ -32,6 +33,7 @@ type Manager struct {
 	dataRoot        paths.DataRoot
 	syncTracker     *syncstatus.Tracker
 	triggerMaintain func(context.Context, account.Account)
+	obHandler       *outbox.Handler
 	running         map[string]*runningWorkspace // teamID → workspace
 }
 
@@ -53,7 +55,7 @@ type runningWorkspace struct {
 //
 // Each workspace gets its own identity.Writer scoped to
 // slack/<workspace>/identity/people.jsonl.
-func NewManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account)) *Manager {
+func NewManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc, idStore identity.Store, dataRoot paths.DataRoot, syncTracker *syncstatus.Tracker, triggerMaintain func(context.Context, account.Account), obHandler *outbox.Handler) *Manager {
 	return &Manager{
 		apiServer:       apiServer,
 		onEvent:         onEvent,
@@ -62,6 +64,7 @@ func NewManager(apiServer *api.Server, s *store.FSStore, onEvent hub.NotifyFunc,
 		dataRoot:        dataRoot,
 		syncTracker:     syncTracker,
 		triggerMaintain: triggerMaintain,
+		obHandler:       obHandler,
 		running:         make(map[string]*runningWorkspace),
 	}
 }
@@ -169,7 +172,7 @@ func (m *Manager) runSlackWorkspace(ctx context.Context, sl config.SlackConfig) 
 	if err != nil {
 		return fmt.Errorf("create message store for %s: %w", acct, err)
 	}
-	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, sl.AppDisplay(), m.onEvent, m.syncTracker)
+	listener := slacklistener.NewListener(smClient, resolver, messages, sl.UserToken, sl.BotToken, acct, sl.TeamID, botUserID, sl.AppDisplay(), m.onEvent, m.syncTracker, botAPI, m.obHandler)
 
 	m.apiServer.RegisterSlack(&api.SlackSender{
 		BotAPI:         botAPI,
