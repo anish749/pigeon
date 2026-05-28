@@ -267,6 +267,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		slog.Info("outbox item submitted", "id", item.ID, "session_id", req.SessionID)
 		resp := SendResponse{OK: true, OutboxID: item.ID}
 		if err := s.postCCMessage(r.Context(), item); err != nil {
+			slog.ErrorContext(r.Context(), "cc notification failed", "outbox_id", item.ID, "error", err)
 			resp.Warning = err.Error()
 		}
 		writeJSON(w, http.StatusOK, resp)
