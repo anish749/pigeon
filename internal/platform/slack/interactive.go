@@ -131,21 +131,52 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 		"outbox_id", meta.OutboxID, "account", l.acct)
 }
 
-// updateCCMessage replaces the original C&C message with a status line and no buttons.
+// updateCCMessage keeps the original message text, strips the action buttons,
+// and appends a status line.
 func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string) {
-	_, _, _, err := l.botAPI.UpdateMessageContext(ctx, channelID, ts,
+	blocks, err := l.fetchMessageBlocks(ctx, channelID, ts)
+	if err != nil {
+		slog.ErrorContext(ctx, "slack: failed to fetch original C&C message",
+			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
+		return
+	}
+
+	var kept []goslack.Block
+	for _, b := range blocks {
+		if b.BlockType() == goslack.MBTAction {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	kept = append(kept, goslack.NewContextBlock("",
+		goslack.NewTextBlockObject("mrkdwn", status, false, false),
+	))
+
+	_, _, _, err = l.botAPI.UpdateMessageContext(ctx, channelID, ts,
 		goslack.MsgOptionText(status, false),
-		goslack.MsgOptionBlocks(
-			goslack.NewSectionBlock(
-				goslack.NewTextBlockObject("mrkdwn", status, false, false),
-				nil, nil,
-			),
-		),
+		goslack.MsgOptionBlocks(kept...),
 	)
 	if err != nil {
 		slog.ErrorContext(ctx, "slack: failed to update C&C message",
 			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
 	}
+}
+
+// fetchMessageBlocks retrieves the block layout of a single message.
+func (l *Listener) fetchMessageBlocks(ctx context.Context, channelID, ts string) ([]goslack.Block, error) {
+	resp, err := l.botAPI.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
+		ChannelID: channelID,
+		Latest:    ts,
+		Limit:     1,
+		Inclusive: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("conversations.history: %w", err)
+	}
+	if len(resp.Messages) == 0 {
+		return nil, fmt.Errorf("message not found (channel=%s ts=%s)", channelID, ts)
+	}
+	return resp.Messages[0].Blocks.BlockSet, nil
 }
 
 // feedbackModal builds the modal shown when the user clicks "Feedback".
