@@ -21,17 +21,30 @@ If a session already exists for the platform+account, you'll be asked
 whether to continue it or create a new one.`,
 		Example: `  pigeon claude
   pigeon claude --platform slack --account acme-corp
-  pigeon claude -p whatsapp -a +14155551234`,
+  pigeon claude -p whatsapp -a +14155551234
+  pigeon claude --session <claude-code-session-id>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			platform, _ := cmd.Flags().GetString("platform")
-			account, _ := cmd.Flags().GetString("account")
+			platform, err := cmd.Flags().GetString("platform")
+			if err != nil {
+				return err
+			}
+			account, err := cmd.Flags().GetString("account")
+			if err != nil {
+				return err
+			}
+			sessionID, err := cmd.Flags().GetString("session")
+			if err != nil {
+				return err
+			}
 			return commands.RunClaudeSession(commands.ClaudeSessionParams{
-				Platform: platform,
-				Account:  account,
+				Platform:  platform,
+				Account:   account,
+				SessionID: sessionID,
 			})
 		},
 	}
 	cmd.Flags().StringP("platform", "p", "", "platform name (slack, whatsapp)")
 	cmd.Flags().StringP("account", "a", "", "account name (workspace or phone number)")
+	cmd.Flags().StringP("session", "s", "", "Claude Code session ID to resume")
 	return cmd
 }
