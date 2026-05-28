@@ -2,12 +2,19 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
+
+type feedbackMeta struct {
+	OutboxID  string `json:"id"`
+	ChannelID string `json:"ch"`
+	MessageTS string `json:"ts"`
+}
 
 // handleInteractive processes block_actions and view_submission events sent
 // over Socket Mode when the owner interacts with outbox review messages.
@@ -58,8 +65,14 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 		}
 
 	case "outbox_feedback":
-		modal := feedbackModal(outboxID)
-		_, err := l.botAPI.OpenViewContext(ctx, cb.TriggerID, modal)
+		modal, err := feedbackModal(outboxID, channelID, msgTS)
+		if err != nil {
+			slog.ErrorContext(ctx, "slack: failed to build feedback modal",
+				"error", err, "outbox_id", outboxID, "account", l.acct)
+			l.client.Ack(*evt.Request)
+			return
+		}
+		_, err = l.botAPI.OpenViewContext(ctx, cb.TriggerID, modal)
 		if err != nil {
 			slog.ErrorContext(ctx, "slack: failed to open feedback modal",
 				"error", err, "outbox_id", outboxID, "account", l.acct)
@@ -74,41 +87,48 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 }
 
 func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.InteractionCallback, evt *socketmode.Event) {
-	l.client.Ack(*evt.Request)
-
 	if cb.View.CallbackID != "outbox_feedback_modal" {
+		slog.ErrorContext(ctx, "slack: unhandled view submission",
+			"callback_id", cb.View.CallbackID, "account", l.acct)
+		l.client.Ack(*evt.Request)
 		return
 	}
 
-	outboxID := cb.View.PrivateMetadata
+	var meta feedbackMeta
+	if err := json.Unmarshal([]byte(cb.View.PrivateMetadata), &meta); err != nil {
+		slog.ErrorContext(ctx, "slack: failed to parse feedback modal metadata",
+			"error", err, "account", l.acct)
+		l.client.Ack(*evt.Request, goslack.NewErrorsViewSubmissionResponse(
+			map[string]string{"feedback_note": "Something went wrong — please try again"},
+		))
+		return
+	}
+	l.client.Ack(*evt.Request)
+
 	noteBlock, ok := cb.View.State.Values["feedback_note"]
 	if !ok {
 		return
 	}
 	note := noteBlock["note"].Value
 
-	item := l.obHandler.Get(outboxID)
+	item := l.obHandler.Get(meta.OutboxID)
 	if item == nil {
 		slog.WarnContext(ctx, "slack: feedback submitted for missing outbox item",
-			"outbox_id", outboxID, "account", l.acct)
+			"outbox_id", meta.OutboxID, "account", l.acct)
+		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Item no longer in outbox")
 		return
 	}
 
 	if err := l.obHandler.Feedback(item, note); err != nil {
 		slog.ErrorContext(ctx, "slack: feedback delivery failed",
-			"outbox_id", outboxID, "error", err, "account", l.acct)
-		dm, _, _, dmErr := l.botAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
-			Users: []string{cb.User.ID},
-		})
-		if dmErr == nil {
-			l.botAPI.PostMessageContext(ctx, dm.ID,
-				goslack.MsgOptionText(fmt.Sprintf("⚠️ Feedback for `%s` could not be delivered — session not connected.", outboxID), false))
-		}
+			"outbox_id", meta.OutboxID, "error", err, "account", l.acct)
+		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Feedback could not be delivered — session not connected")
 		return
 	}
 
+	l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "✓ Feedback sent")
 	slog.InfoContext(ctx, "slack: feedback delivered via C&C",
-		"outbox_id", outboxID, "account", l.acct)
+		"outbox_id", meta.OutboxID, "account", l.acct)
 }
 
 // updateCCMessage replaces the original C&C message with a status line and no buttons.
@@ -129,11 +149,15 @@ func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status st
 }
 
 // feedbackModal builds the modal shown when the user clicks "Feedback".
-func feedbackModal(outboxID string) goslack.ModalViewRequest {
+func feedbackModal(outboxID, channelID, messageTS string) (goslack.ModalViewRequest, error) {
+	meta, err := json.Marshal(feedbackMeta{OutboxID: outboxID, ChannelID: channelID, MessageTS: messageTS})
+	if err != nil {
+		return goslack.ModalViewRequest{}, fmt.Errorf("marshal feedback metadata: %w", err)
+	}
 	return goslack.ModalViewRequest{
 		Type:            "modal",
 		CallbackID:      "outbox_feedback_modal",
-		PrivateMetadata: outboxID,
+		PrivateMetadata: string(meta),
 		Title:           goslack.NewTextBlockObject("plain_text", "Feedback", false, false),
 		Submit:          goslack.NewTextBlockObject("plain_text", "Send feedback", false, false),
 		Close:           goslack.NewTextBlockObject("plain_text", "Cancel", false, false),
@@ -153,5 +177,5 @@ func feedbackModal(outboxID string) goslack.ModalViewRequest {
 				),
 			},
 		},
-	}
+	}, nil
 }
