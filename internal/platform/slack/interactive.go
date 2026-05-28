@@ -117,35 +117,24 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 	if item == nil {
 		slog.WarnContext(ctx, "slack: feedback submitted for missing outbox item",
 			"outbox_id", meta.OutboxID, "account", l.acct)
-		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Item no longer in outbox", nil)
+		l.postCCStatus(ctx, meta.ChannelID, "⚠️ Item no longer in outbox")
 		return
 	}
 
 	if err := l.obHandler.Feedback(item, note); err != nil {
 		slog.ErrorContext(ctx, "slack: feedback delivery failed",
 			"outbox_id", meta.OutboxID, "error", err, "account", l.acct)
-		l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "⚠️ Feedback could not be delivered — session not connected", nil)
+		l.postCCStatus(ctx, meta.ChannelID, "⚠️ Feedback could not be delivered — session not connected")
 		return
 	}
 
-	l.updateCCMessage(ctx, meta.ChannelID, meta.MessageTS, "✓ Feedback sent", nil)
+	l.postCCStatus(ctx, meta.ChannelID, "✓ Feedback sent")
 	slog.InfoContext(ctx, "slack: feedback delivered via C&C",
 		"outbox_id", meta.OutboxID, "account", l.acct)
 }
 
-// updateCCMessage strips action buttons from the original message and appends
-// a status line. origBlocks is the block layout from the interaction callback;
-// when nil (view_submission path) the message is fetched from the API.
+// updateCCMessage strips action buttons from the original message and appends a status line.
 func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string, origBlocks []goslack.Block) {
-	if origBlocks == nil {
-		fetched, err := l.fetchMessageBlocks(ctx, channelID, ts)
-		if err != nil {
-			slog.WarnContext(ctx, "slack: failed to fetch original C&C message, falling back to status-only",
-				"error", err, "channel", channelID, "ts", ts, "account", l.acct)
-		}
-		origBlocks = fetched
-	}
-
 	var kept []goslack.Block
 	for _, b := range origBlocks {
 		if b.BlockType() == goslack.MBTAction {
@@ -167,24 +156,15 @@ func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status st
 	}
 }
 
-// fetchMessageBlocks retrieves the block layout of a message by its timestamp.
-func (l *Listener) fetchMessageBlocks(ctx context.Context, channelID, ts string) ([]goslack.Block, error) {
-	resp, err := l.botAPI.GetConversationHistoryContext(ctx, &goslack.GetConversationHistoryParameters{
-		ChannelID: channelID,
-		Latest:    ts,
-		Oldest:    ts,
-		Limit:     1,
-		Inclusive: true,
-	})
+// postCCStatus posts a new status message in the channel.
+func (l *Listener) postCCStatus(ctx context.Context, channelID, status string) {
+	_, _, err := l.botAPI.PostMessageContext(ctx, channelID,
+		goslack.MsgOptionText(status, false),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("conversations.history: %w", err)
+		slog.ErrorContext(ctx, "slack: failed to post C&C status",
+			"error", err, "channel", channelID, "account", l.acct)
 	}
-	for _, m := range resp.Messages {
-		if m.Timestamp == ts {
-			return m.Blocks.BlockSet, nil
-		}
-	}
-	return nil, fmt.Errorf("message not found (channel=%s ts=%s)", channelID, ts)
 }
 
 // feedbackModal builds the modal shown when the user clicks "Feedback".
