@@ -8,6 +8,9 @@ import (
 
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+
+	"github.com/anish749/pigeon/internal/outbox"
+	"github.com/anish749/pigeon/internal/store/modelv1"
 )
 
 type feedbackMeta struct {
@@ -67,6 +70,21 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 		} else {
 			l.updateCCMessage(ctx, channelID, msgTS, "✓ Approved and sent", origBlocks)
 		}
+
+	case "outbox_dismiss":
+		l.client.Ack(*evt.Request)
+		l.obHandler.Dismiss(item)
+		l.updateCCMessage(ctx, channelID, msgTS, "✗ Dismissed", origBlocks)
+
+	case "outbox_sendmode":
+		l.client.Ack(*evt.Request)
+		nextVia := cycleVia(item)
+		if err := l.obHandler.SetVia(item, string(nextVia)); err != nil {
+			slog.ErrorContext(ctx, "slack: failed to update send mode",
+				"error", err, "outbox_id", outboxID, "account", l.acct)
+			return
+		}
+		l.refreshCCButtons(ctx, channelID, msgTS, item, origBlocks)
 
 	case "outbox_feedback":
 		msgText, tgtText := extractCCText(origBlocks)
@@ -159,6 +177,88 @@ func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status st
 		slog.ErrorContext(ctx, "slack: failed to update C&C message",
 			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
 	}
+}
+
+// refreshCCButtons replaces the C&C message with updated button labels (e.g. after
+// toggling send mode). The original text blocks are preserved.
+func (l *Listener) refreshCCButtons(ctx context.Context, channelID, ts string, item *outbox.Item, origBlocks []goslack.Block) {
+	msgText, tgtText := extractCCText(origBlocks)
+	via := parseVia(item)
+
+	buttons := []goslack.BlockElement{
+		&goslack.ButtonBlockElement{
+			Type: "button", ActionID: "outbox_approve", Value: item.ID,
+			Text:  goslack.NewTextBlockObject("plain_text", "Approve", false, false),
+			Style: goslack.StylePrimary,
+		},
+		&goslack.ButtonBlockElement{
+			Type: "button", ActionID: "outbox_dismiss", Value: item.ID,
+			Text:  goslack.NewTextBlockObject("plain_text", "Dismiss", false, false),
+			Style: goslack.StyleDanger,
+		},
+		&goslack.ButtonBlockElement{
+			Type: "button", ActionID: "outbox_sendmode", Value: item.ID,
+			Text: goslack.NewTextBlockObject("plain_text", sendModeLabel(via), false, false),
+		},
+	}
+	if item.SessionID != "" {
+		buttons = append(buttons, &goslack.ButtonBlockElement{
+			Type: "button", ActionID: "outbox_feedback", Value: item.ID,
+			Text: goslack.NewTextBlockObject("plain_text", "Feedback", false, false),
+		})
+	}
+
+	var blocks []goslack.Block
+	if msgText != "" {
+		blocks = append(blocks, goslack.NewSectionBlock(
+			goslack.NewTextBlockObject("mrkdwn", msgText, false, false), nil, nil,
+		))
+	}
+	if tgtText != "" {
+		blocks = append(blocks, goslack.NewContextBlock("",
+			goslack.NewTextBlockObject("mrkdwn", tgtText, false, false),
+		))
+	}
+	blocks = append(blocks, &goslack.ActionBlock{
+		Type: "actions", BlockID: "outbox_actions",
+		Elements: &goslack.BlockElements{ElementSet: buttons},
+	})
+
+	_, _, _, err := l.botAPI.UpdateMessageContext(ctx, channelID, ts,
+		goslack.MsgOptionText("Pending review", false),
+		goslack.MsgOptionBlocks(blocks...),
+	)
+	if err != nil {
+		slog.ErrorContext(ctx, "slack: failed to refresh C&C buttons",
+			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
+	}
+}
+
+// cycleVia returns the next send mode in the rotation.
+func cycleVia(item *outbox.Item) modelv1.Via {
+	via := parseVia(item)
+	switch via {
+	case "", modelv1.ViaPigeonAsBot:
+		return modelv1.ViaPigeonAsUser
+	default:
+		return modelv1.ViaPigeonAsBot
+	}
+}
+
+// parseVia extracts the via field from an outbox item payload.
+func parseVia(item *outbox.Item) modelv1.Via {
+	var p struct {
+		Via modelv1.Via `json:"via"`
+	}
+	json.Unmarshal(item.Payload, &p)
+	return p.Via
+}
+
+func sendModeLabel(via modelv1.Via) string {
+	if via == modelv1.ViaPigeonAsUser {
+		return "Send as: user"
+	}
+	return "Send as: bot"
 }
 
 // extractCCText pulls the message and target strings from the C&C message blocks.
