@@ -106,3 +106,7 @@ Symmetric to the edit fix — `handleDelete` now calls `onEvent(hub.NewDelete(..
 ## ~~WhatsApp edit and delete events~~ — fixed in #356
 
 WhatsApp listener now extracts `MESSAGE_EDIT` and `REVOKE` protocol messages and routes them through `handleEdit` / `handleRevoke`, mirroring the Slack edit/delete path.
+
+## ~~Platform directories `linear-issues` and `jira-issues` renamed to `linear` and `jira`~~ — fixed in #362, #365
+
+`linear-issues/` renamed to `linear/` (#362) and `jira-issues/` renamed to `jira/` (#365). Paths registry updated to use the shorter platform names.
