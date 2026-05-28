@@ -1,1 +1,9 @@
 pigeon.bin
+
+# Workspace-specific data for the focus-filter validation harnesses.
+# See experiments/focus-filter/workstreams.example.json for the schema.
+experiments/focus-filter/workstreams.json
+experiments/focus-filter/workstreams-haiku.json
+experiments/focus-filter/workstreams-sonnet.json
+experiments/focus-filter/workstreams-opus.json
+experiments/focus-filter/labels-*.json
