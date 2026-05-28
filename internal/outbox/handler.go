@@ -52,35 +52,30 @@ func (h *Handler) Get(id string) *Item {
 	return h.outbox.Get(id)
 }
 
-// Approve sends the item, removes it from the outbox, and notifies the
-// originating session.
-//
-// Returns (ok, errMsg, warning): ok is false when the send itself failed;
-// warning is non-empty when the send succeeded but session notification
-// failed (the message was still delivered).
-func (h *Handler) Approve(ctx context.Context, item *Item) (ok bool, errMsg string, warning string) {
-	sendOK, sendErr := h.send(ctx, item.Payload)
+// Approve sends the item and removes it from the outbox on success. If
+// the send fails the item stays in the outbox for retry and the returned
+// error describes what went wrong.
+func (h *Handler) Approve(ctx context.Context, item *Item) error {
+	ok, errMsg := h.send(ctx, item.Payload)
 
-	if !sendOK {
-		slog.Error("outbox: send failed on approve, item kept in outbox", "id", item.ID, "session_id", item.SessionID, "error", sendErr)
-		notifyMsg := fmt.Sprintf("[outbox] Send failed (ID: %s): %s — item kept in outbox for retry", item.ID, sendErr)
+	if !ok {
+		slog.Error("outbox: send failed on approve, item kept in outbox", "id", item.ID, "session_id", item.SessionID, "error", errMsg)
+		notifyMsg := fmt.Sprintf("[outbox] Send failed (ID: %s): %s — item kept in outbox for retry", item.ID, errMsg)
 		if err := h.notify(item.SessionID, notifyMsg); err != nil {
 			slog.Error("outbox: failed to notify session of send error", "id", item.ID, "session_id", item.SessionID, "error", err)
 		}
-		return false, sendErr, ""
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	h.outbox.Remove(item.ID)
 
 	msg := fmt.Sprintf("[outbox] Approved and sent (ID: %s)", item.ID)
-	var warn string
 	if err := h.notify(item.SessionID, msg); err != nil {
 		slog.Error("outbox: failed to notify session of approval", "id", item.ID, "session_id", item.SessionID, "error", err)
-		warn = "sent but could not notify session: " + err.Error()
 	}
 
 	slog.Info("outbox item approved and sent", "id", item.ID, "session_id", item.SessionID)
-	return true, "", warn
+	return nil
 }
 
 // Feedback delivers a note to the originating session and removes the item
@@ -142,12 +137,11 @@ func (h *Handler) HandleAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) approve(w http.ResponseWriter, r *http.Request, item *Item) {
-	ok, errMsg, warning := h.Approve(r.Context(), item)
-	if !ok {
-		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: errMsg})
+	if err := h.Approve(r.Context(), item); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, ActionResponse{OK: true, Warning: warning})
+	writeJSON(w, http.StatusOK, ActionResponse{OK: true})
 }
 
 func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {

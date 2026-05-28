@@ -51,11 +51,10 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 	switch action.ActionID {
 	case "outbox_approve":
 		l.client.Ack(*evt.Request)
-		ok, errMsg, _ := l.obHandler.Approve(ctx, item)
-		if ok {
-			l.updateCCMessage(ctx, channelID, msgTS, "✓ Approved and sent")
+		if err := l.obHandler.Approve(ctx, item); err != nil {
+			l.updateCCMessage(ctx, channelID, msgTS, fmt.Sprintf("✗ Send failed: %s", err))
 		} else {
-			l.updateCCMessage(ctx, channelID, msgTS, fmt.Sprintf("✗ Send failed: %s", errMsg))
+			l.updateCCMessage(ctx, channelID, msgTS, "✓ Approved and sent")
 		}
 
 	case "outbox_feedback":
