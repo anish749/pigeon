@@ -134,25 +134,29 @@ func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.Interact
 // updateCCMessage keeps the original message text, strips the action buttons,
 // and appends a status line.
 func (l *Listener) updateCCMessage(ctx context.Context, channelID, ts, status string) {
-	blocks, err := l.fetchMessageBlocks(ctx, channelID, ts)
-	if err != nil {
-		slog.ErrorContext(ctx, "slack: failed to fetch original C&C message",
+	kept := []goslack.Block{
+		goslack.NewSectionBlock(
+			goslack.NewTextBlockObject("mrkdwn", status, false, false),
+			nil, nil,
+		),
+	}
+	if blocks, err := l.fetchMessageBlocks(ctx, channelID, ts); err != nil {
+		slog.WarnContext(ctx, "slack: failed to fetch original C&C message, falling back to status-only",
 			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
-		return
-	}
-
-	var kept []goslack.Block
-	for _, b := range blocks {
-		if b.BlockType() == goslack.MBTAction {
-			continue
+	} else {
+		kept = kept[:0]
+		for _, b := range blocks {
+			if b.BlockType() == goslack.MBTAction {
+				continue
+			}
+			kept = append(kept, b)
 		}
-		kept = append(kept, b)
+		kept = append(kept, goslack.NewContextBlock("",
+			goslack.NewTextBlockObject("mrkdwn", status, false, false),
+		))
 	}
-	kept = append(kept, goslack.NewContextBlock("",
-		goslack.NewTextBlockObject("mrkdwn", status, false, false),
-	))
 
-	_, _, _, err = l.botAPI.UpdateMessageContext(ctx, channelID, ts,
+	_, _, _, err := l.botAPI.UpdateMessageContext(ctx, channelID, ts,
 		goslack.MsgOptionText(status, false),
 		goslack.MsgOptionBlocks(kept...),
 	)
