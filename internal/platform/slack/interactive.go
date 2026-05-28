@@ -49,11 +49,6 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 	channelID := cb.Channel.ID
 
 	origBlocks := cb.Message.Blocks.BlockSet
-	slog.DebugContext(ctx, "slack: block_action message info",
-		"message_blocks", len(origBlocks),
-		"message_text", cb.Message.Text,
-		"message_ts", cb.Message.Timestamp,
-		"account", l.acct)
 
 	item := l.obHandler.Get(outboxID)
 	if item == nil {
