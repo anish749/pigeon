@@ -12,6 +12,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/hub"
+	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 	"github.com/anish749/pigeon/internal/syncstatus"
@@ -32,6 +33,8 @@ type Listener struct {
 	pigeonBotUID string // Slack user ID of the Pigeon bot, used to detect @mentions and self-messages
 	appName      string
 	onEvent      hub.NotifyFunc
+	botAPI       *goslack.Client
+	obHandler    *outbox.Handler
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -42,7 +45,7 @@ type Listener struct {
 // hub callback used for every routable platform event — messages,
 // reactions, edits, deletes — built via hub.NewMsg / NewReact /
 // NewEdit / NewDelete at the call sites. Must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onEvent hub.NotifyFunc, syncTracker *syncstatus.Tracker) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onEvent hub.NotifyFunc, syncTracker *syncstatus.Tracker, botAPI *goslack.Client, obHandler *outbox.Handler) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
@@ -54,6 +57,8 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		pigeonBotUID: pigeonBotUID,
 		appName:      appName,
 		onEvent:      onEvent,
+		botAPI:       botAPI,
+		obHandler:    obHandler,
 		syncTracker:  syncTracker,
 	}
 }
@@ -83,6 +88,8 @@ func (l *Listener) Run(ctx context.Context) {
 				}
 				l.client.Ack(*evt.Request)
 				l.handleEvent(ctx, eventsAPIEvent)
+			case socketmode.EventTypeInteractive:
+				l.handleInteractive(ctx, &evt)
 			case socketmode.EventTypeErrorBadMessage:
 				slog.WarnContext(ctx, "slack: bad message", "account", l.acct)
 			case socketmode.EventTypeIncomingError:

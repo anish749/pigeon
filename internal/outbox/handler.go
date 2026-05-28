@@ -3,10 +3,15 @@ package outbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 )
+
+// ErrSessionDisconnected is returned by Feedback when the originating
+// session is not connected and the feedback cannot be delivered.
+var ErrSessionDisconnected = errors.New("session not connected — feedback not delivered, item kept in outbox")
 
 // SendFunc executes a send from a raw JSON payload (the stored SendRequest).
 // Returns true on success, or false with an error message.
@@ -40,6 +45,58 @@ type ActionResponse struct {
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
 	Warning string `json:"warning,omitempty"`
+}
+
+// Get returns a single outbox item by ID, or nil if not found.
+func (h *Handler) Get(id string) *Item {
+	return h.outbox.Get(id)
+}
+
+// Approve sends the item and removes it from the outbox on success. If
+// the send fails the item stays in the outbox for retry and the returned
+// error describes what went wrong.
+func (h *Handler) Approve(ctx context.Context, item *Item) error {
+	ok, errMsg := h.send(ctx, item.Payload)
+
+	if !ok {
+		slog.Error("outbox: send failed on approve, item kept in outbox", "id", item.ID, "session_id", item.SessionID, "error", errMsg)
+		notifyMsg := fmt.Sprintf("[outbox] Send failed (ID: %s): %s — item kept in outbox for retry", item.ID, errMsg)
+		if err := h.notify(item.SessionID, notifyMsg); err != nil {
+			slog.Error("outbox: failed to notify session of send error", "id", item.ID, "session_id", item.SessionID, "error", err)
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+
+	h.outbox.Remove(item.ID)
+
+	msg := fmt.Sprintf("[outbox] Approved and sent (ID: %s)", item.ID)
+	if err := h.notify(item.SessionID, msg); err != nil {
+		slog.Error("outbox: failed to notify session of approval", "id", item.ID, "session_id", item.SessionID, "error", err)
+	}
+
+	slog.Info("outbox item approved and sent", "id", item.ID, "session_id", item.SessionID)
+	return nil
+}
+
+// Feedback delivers a note to the originating session and removes the item
+// from the outbox.
+func (h *Handler) Feedback(item *Item, note string) error {
+	if note == "" {
+		return fmt.Errorf("note is required for feedback")
+	}
+	if item.SessionID == "" {
+		return fmt.Errorf("item has no session to deliver feedback to")
+	}
+
+	msg := fmt.Sprintf("[outbox] Feedback on message %s: %s", item.ID, note)
+	if err := h.notify(item.SessionID, msg); err != nil {
+		slog.Error("outbox: failed to notify session of feedback", "id", item.ID, "session_id", item.SessionID, "error", err)
+		return ErrSessionDisconnected
+	}
+
+	h.outbox.Remove(item.ID)
+	slog.Info("outbox feedback delivered", "id", item.ID, "session_id", item.SessionID)
+	return nil
 }
 
 // HandleList returns all pending outbox items as JSON.
@@ -80,52 +137,24 @@ func (h *Handler) HandleAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) approve(w http.ResponseWriter, r *http.Request, item *Item) {
-	ok, errMsg := h.send(r.Context(), item.Payload)
-
-	h.outbox.Remove(item.ID)
-
-	if !ok {
-		slog.Error("outbox: send failed on approve", "id", item.ID, "session_id", item.SessionID, "error", errMsg)
-		// Notify the session so Claude can see the error and retry.
-		notifyMsg := fmt.Sprintf("[outbox] Send failed (ID: %s): %s", item.ID, errMsg)
-		if err := h.notify(item.SessionID, notifyMsg); err != nil {
-			slog.Error("outbox: failed to notify session of send error", "id", item.ID, "session_id", item.SessionID, "error", err)
-		}
-		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: errMsg})
+	if err := h.Approve(r.Context(), item); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ActionResponse{Error: err.Error()})
 		return
 	}
-
-	msg := fmt.Sprintf("[outbox] Approved and sent (ID: %s)", item.ID)
-	if err := h.notify(item.SessionID, msg); err != nil {
-		slog.Error("outbox: failed to notify session of approval", "id", item.ID, "session_id", item.SessionID, "error", err)
-		writeJSON(w, http.StatusOK, ActionResponse{OK: true, Warning: "sent but could not notify session: " + err.Error()})
-		return
-	}
-
-	slog.Info("outbox item approved and sent", "id", item.ID, "session_id", item.SessionID)
 	writeJSON(w, http.StatusOK, ActionResponse{OK: true})
 }
 
 func (h *Handler) feedback(w http.ResponseWriter, item *Item, note string) {
-	if note == "" {
-		writeJSON(w, http.StatusBadRequest, ActionResponse{Error: "note is required for feedback"})
+	err := h.Feedback(item, note)
+	if err == nil {
+		writeJSON(w, http.StatusOK, ActionResponse{OK: true})
 		return
 	}
-	if item.SessionID == "" {
-		writeJSON(w, http.StatusBadRequest, ActionResponse{Error: "item has no session to deliver feedback to"})
-		return
+	status := http.StatusBadRequest
+	if errors.Is(err, ErrSessionDisconnected) {
+		status = http.StatusServiceUnavailable
 	}
-
-	msg := fmt.Sprintf("[outbox] Feedback on message %s: %s", item.ID, note)
-	if err := h.notify(item.SessionID, msg); err != nil {
-		slog.Error("outbox: failed to notify session of feedback", "id", item.ID, "session_id", item.SessionID, "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, ActionResponse{Error: "session not connected — feedback not delivered, item kept in outbox"})
-		return
-	}
-
-	h.outbox.Remove(item.ID)
-	slog.Info("outbox feedback delivered", "id", item.ID, "session_id", item.SessionID)
-	writeJSON(w, http.StatusOK, ActionResponse{OK: true})
+	writeJSON(w, status, ActionResponse{Error: err.Error()})
 }
 
 func (h *Handler) dismiss(w http.ResponseWriter, item *Item) {

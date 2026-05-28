@@ -61,6 +61,7 @@ type Server struct {
 	gws         map[string]struct{}        // account slug → present
 	hub         *hub.Hub
 	outbox      *outbox.Outbox
+	obHandler   *outbox.Handler
 	store       store.Store
 	syncTracker *syncstatus.Tracker
 	version     string
@@ -69,7 +70,7 @@ type Server struct {
 
 // NewServer creates a new API server.
 func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
-	return &Server{
+	srv := &Server{
 		whatsapp:    make(map[string]*WhatsAppSender),
 		slack:       make(map[string]*SlackSender),
 		gws:         make(map[string]struct{}),
@@ -80,6 +81,13 @@ func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syn
 		version:     version,
 		startedAt:   time.Now(),
 	}
+	srv.obHandler = outbox.NewHandler(ob, srv.executeSend, h.NotifySession)
+	return srv
+}
+
+// OutboxHandler returns the outbox handler for use by platform listeners.
+func (s *Server) OutboxHandler() *outbox.Handler {
+	return s.obHandler
 }
 
 // RegisterWhatsApp registers a WhatsApp client for sending.
@@ -122,16 +130,14 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 
-	obHandler := outbox.NewHandler(s.outbox, s.executeSend, s.hub.NotifySession)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/send", s.handleSend)
 	mux.HandleFunc("POST /api/react", s.handleReact)
 	mux.HandleFunc("POST /api/delete", s.handleDeleteMsg)
 	mux.HandleFunc("GET /api/events", s.hub.SSEHandler())
 	mux.HandleFunc("GET /api/tail", s.hub.TailHandler())
-	mux.HandleFunc("GET /api/outbox", obHandler.HandleList)
-	mux.HandleFunc("POST /api/outbox/action", obHandler.HandleAction)
+	mux.HandleFunc("GET /api/outbox", s.obHandler.HandleList)
+	mux.HandleFunc("POST /api/outbox/action", s.obHandler.HandleAction)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 
@@ -247,7 +253,19 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	resolved := ResolvedSendRequest{SendRequest: req, ResolvedSlack: resolvedSlack, ResolvedMessage: resolvedMessage}
 
-	// All real sends go through the outbox for human review. Dry-run is
+	// Owner-to-self sends (e.g. bot DMing its own installer) bypass the
+	// outbox — there's no one else to protect, so review is pointless.
+	if !req.DryRun && s.isOwnerTarget(req) {
+		resp := s.dispatchSend(r.Context(), resolved)
+		status := http.StatusOK
+		if !resp.OK {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, resp)
+		return
+	}
+
+	// All other sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
 	if !req.DryRun {
@@ -258,7 +276,14 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		}
 		item := s.outbox.Submit(req.SessionID, payload)
 		slog.Info("outbox item submitted", "id", item.ID, "session_id", req.SessionID)
-		writeJSON(w, http.StatusOK, SendResponse{OK: true, OutboxID: item.ID})
+		resp := SendResponse{OK: true, OutboxID: item.ID}
+		status := http.StatusOK
+		if err := s.postCCMessage(r.Context(), item); err != nil {
+			slog.ErrorContext(r.Context(), "cc notification failed", "outbox_id", item.ID, "error", err)
+			resp.Error = err.Error()
+			status = http.StatusMultiStatus // 207 — item queued but CC notification failed
+		}
+		writeJSON(w, status, resp)
 		return
 	}
 
