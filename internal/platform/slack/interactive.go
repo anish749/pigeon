@@ -83,7 +83,7 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 				"error", err, "outbox_id", outboxID, "account", l.acct)
 			return
 		}
-		l.refreshCCMessage(ctx, channelID, msgTS, view.WithItem(item))
+		l.refreshCCMessage(ctx, channelID, msgTS, ccview.FromItem(item, view.Message, view.Target))
 
 	case "outbox_feedback":
 		l.client.Ack(*evt.Request)

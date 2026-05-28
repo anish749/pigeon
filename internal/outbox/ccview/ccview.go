@@ -53,14 +53,6 @@ func FromBlocks(blocks []goslack.Block) View {
 	return v
 }
 
-// WithItem fills in the item-derived fields (ID, SessionID, Via).
-func (v View) WithItem(item *outbox.Item) View {
-	v.ItemID = item.ID
-	v.SessionID = item.SessionID
-	v.Via = item.Via()
-	return v
-}
-
 // Blocks returns the full message layout with action buttons.
 func (v View) Blocks() []goslack.Block {
 	blocks := v.textBlocks()
