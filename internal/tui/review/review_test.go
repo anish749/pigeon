@@ -110,8 +110,8 @@ func TestCycleVia(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item := itemFromReq(t, tt.req)
-			if got := cycleVia(item); got != tt.want {
-				t.Fatalf("cycleVia() = %q, want %q", got, tt.want)
+			if got := item.CycleVia(); got != tt.want {
+				t.Fatalf("CycleVia() = %q, want %q", got, tt.want)
 			}
 		})
 	}
