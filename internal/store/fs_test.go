@@ -498,6 +498,195 @@ func TestInterleaveThreads_MultipleThreads(t *testing.T) {
 	}
 }
 
+// --- Thread completion model ---
+//
+// Filtering is on individual messages (parent or reply). Thread completion
+// is a separate step: any thread with ≥1 surviving member is kept whole.
+
+// TestReadConversation_Date_NoFile_NoThreadActivity verifies that asking for
+// a date with no date file and no thread activity that day returns nothing,
+// even when the conversation has thread files from other days.
+func TestReadConversation_Date_NoFile_NoThreadActivity(t *testing.T) {
+	s, acct := setup(t)
+
+	parent := msgLine("P1", ts(2026, 3, 15, 9, 0, 0), "Alice", "U1", "thread on the 15th")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	reply := msgLine("R1", ts(2026, 3, 15, 9, 1, 0), "Bob", "U2", "reply on the 15th")
+	reply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", reply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	if len(df.Messages) != 0 {
+		var ids []string
+		for _, m := range df.Messages {
+			ids = append(ids, m.ID)
+		}
+		t.Errorf("got %d messages %v, want 0", len(df.Messages), ids)
+	}
+}
+
+// TestReadConversation_Date_ParentInWindow_PullsLaterReplies verifies that a
+// parent message in the requested date pulls in its later-day replies via
+// thread completion.
+func TestReadConversation_Date_ParentInWindow_PullsLaterReplies(t *testing.T) {
+	s, acct := setup(t)
+
+	parent := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "starting on 16th")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	laterReply := msgLine("R1", ts(2026, 3, 18, 9, 0, 0), "Bob", "U2", "two days later")
+	laterReply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", laterReply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	wantIDs := []string{"P1", "R1"}
+	gotIDs := messageIDs(df.Messages)
+	if !equalStrings(gotIDs, wantIDs) {
+		t.Errorf("got %v, want %v (later reply rides along with in-window parent)", gotIDs, wantIDs)
+	}
+}
+
+// TestReadConversation_Date_ReplyInWindow_PullsOlderParent verifies the
+// symmetric case: a reply in the requested date pulls the older-day parent
+// (and other replies) via thread completion.
+func TestReadConversation_Date_ReplyInWindow_PullsOlderParent(t *testing.T) {
+	s, acct := setup(t)
+
+	parent := msgLine("P1", ts(2026, 3, 10, 9, 0, 0), "Alice", "U1", "started a week earlier")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	replyOnTarget := msgLine("R1", ts(2026, 3, 16, 14, 0, 0), "Bob", "U2", "reply on 16th")
+	replyOnTarget.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", replyOnTarget); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+	siblingReply := msgLine("R2", ts(2026, 3, 11, 10, 0, 0), "Carol", "U3", "sibling reply on 11th")
+	siblingReply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", siblingReply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	wantIDs := []string{"P1", "R2", "R1"}
+	gotIDs := messageIDs(df.Messages)
+	if !equalStrings(gotIDs, wantIDs) {
+		t.Errorf("got %v, want %v (parent + sibling reply ride along; replies in ts order)", gotIDs, wantIDs)
+	}
+}
+
+// TestReadConversation_Date_ThreadAtomSortedByParentTs verifies that thread
+// atoms slot into the chronological output by their parent's ts, not by any
+// later reply, even when the parent is older than --date's window.
+func TestReadConversation_Date_ThreadAtomSortedByParentTs(t *testing.T) {
+	s, acct := setup(t)
+
+	// Standalone message at 09:00 on the requested date.
+	standalone := msgLine("S1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "standalone")
+	if err := s.Append(acct, "#general", standalone); err != nil {
+		t.Fatalf("Append standalone: %v", err)
+	}
+	// Thread parent on a previous day; reply on the requested date at 14:00.
+	parent := msgLine("P1", ts(2026, 3, 10, 8, 0, 0), "Alice", "U1", "older parent")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	reply := msgLine("R1", ts(2026, 3, 16, 14, 0, 0), "Bob", "U2", "reply on 16th")
+	reply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", reply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	// Thread atom sorts by parent ts (March 10), so it comes before the
+	// 09:00 standalone on the 16th.
+	wantIDs := []string{"P1", "R1", "S1"}
+	gotIDs := messageIDs(df.Messages)
+	if !equalStrings(gotIDs, wantIDs) {
+		t.Errorf("got %v, want %v (thread atom positioned by parent ts)", gotIDs, wantIDs)
+	}
+}
+
+// TestReadConversation_DedupsParentBetweenDateAndThreadFiles verifies that a
+// parent stored in both the date file and the thread file appears once.
+func TestReadConversation_DedupsParentBetweenDateAndThreadFiles(t *testing.T) {
+	s, acct := setup(t)
+
+	parent := msgLine("P1", ts(2026, 3, 16, 9, 0, 0), "Alice", "U1", "parent on the 16th")
+	if err := s.Append(acct, "#general", parent); err != nil {
+		t.Fatalf("Append parent: %v", err)
+	}
+	if err := s.AppendThread(acct, "#general", "P1", parent); err != nil {
+		t.Fatalf("AppendThread parent: %v", err)
+	}
+	reply := msgLine("R1", ts(2026, 3, 16, 9, 5, 0), "Bob", "U2", "reply")
+	reply.Msg.Reply = true
+	if err := s.AppendThread(acct, "#general", "P1", reply); err != nil {
+		t.Fatalf("AppendThread reply: %v", err)
+	}
+
+	df, err := s.ReadConversation(acct, "#general", ReadOpts{Date: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ReadConversation: %v", err)
+	}
+	wantIDs := []string{"P1", "R1"}
+	gotIDs := messageIDs(df.Messages)
+	if !equalStrings(gotIDs, wantIDs) {
+		t.Errorf("got %v, want %v (parent should appear exactly once)", gotIDs, wantIDs)
+	}
+}
+
+func messageIDs(msgs []modelv1.ResolvedMsg) []string {
+	ids := make([]string, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // --- ReadConversation options ---
 
 // setupMultiDay populates a conversation with messages across 5 days
@@ -635,10 +824,12 @@ func TestReadConversation_SinceAndLast(t *testing.T) {
 	}
 }
 
-func TestReadConversation_Default_Last25(t *testing.T) {
+// TestReadConversation_NoFilter_ReturnsEverything verifies that calling
+// ReadConversation with zero opts returns the full conversation. Defaulting
+// (e.g. capping to a recent N) is a caller concern, not a store concern.
+func TestReadConversation_NoFilter_ReturnsEverything(t *testing.T) {
 	s, acct := setup(t)
 
-	// Write 30 messages across multiple days
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 30; i++ {
@@ -654,36 +845,11 @@ func TestReadConversation_Default_Last25(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConversation: %v", err)
 	}
-	// Default should return last 25 messages
-	if len(df.Messages) != 25 {
-		t.Fatalf("messages = %d, want 25", len(df.Messages))
+	if len(df.Messages) != 30 {
+		t.Fatalf("messages = %d, want 30 (no filter = full conversation)", len(df.Messages))
 	}
-	// First returned message should be M05 (skipped M00-M04)
-	if df.Messages[0].ID != "M05" {
-		t.Errorf("first message = %q, want M05", df.Messages[0].ID)
-	}
-	if df.Messages[24].ID != "M29" {
-		t.Errorf("last message = %q, want M29", df.Messages[24].ID)
-	}
-}
-
-func TestReadConversation_Default_LessThan25(t *testing.T) {
-	s, acct := setup(t)
-
-	// Write only 3 messages — should return all of them
-	m1 := msgLine("A", ts(2026, 1, 10, 9, 0, 0), "Alice", "U1", "first")
-	m2 := msgLine("B", ts(2026, 1, 10, 12, 0, 0), "Bob", "U2", "second")
-	m3 := msgLine("C", ts(2026, 1, 11, 9, 0, 0), "Alice", "U1", "third")
-	s.Append(acct, "#general", m1)
-	s.Append(acct, "#general", m2)
-	s.Append(acct, "#general", m3)
-
-	df, err := s.ReadConversation(acct, "#general", ReadOpts{})
-	if err != nil {
-		t.Fatalf("ReadConversation: %v", err)
-	}
-	if len(df.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3 (all available)", len(df.Messages))
+	if df.Messages[0].ID != "M00" || df.Messages[29].ID != "M29" {
+		t.Errorf("got [%s..%s], want [M00..M29]", df.Messages[0].ID, df.Messages[29].ID)
 	}
 }
 
@@ -1763,10 +1929,10 @@ func TestReadConversation_OrphanThreadReply_Surfaced(t *testing.T) {
 	}
 }
 
-// TestReadConversation_ThreadReply_OldParentInDateFile verifies the realistic
-// production case: parent is in an old date file outside the Since window,
-// the thread file holds parent+reply, and a recent reply must surface alone
-// (the old parent is correctly filtered out by the Since cutoff).
+// TestReadConversation_ThreadReply_OldParentInDateFile verifies thread
+// completion: a recent reply pulls the old parent back in even though the
+// parent's ts is outside the Since window. Threads are atomic — any member
+// in the window keeps the whole thread.
 func TestReadConversation_ThreadReply_OldParentInDateFile(t *testing.T) {
 	s, acct := setup(t)
 	conv := "#general"
@@ -1789,12 +1955,24 @@ func TestReadConversation_ThreadReply_OldParentInDateFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConversation: %v", err)
 	}
-	if len(df.Messages) != 1 || df.Messages[0].ID != "1700000002.000002" {
+	wantIDs := []string{parentTS, "1700000002.000002"}
+	if len(df.Messages) != len(wantIDs) {
 		var ids []string
 		for _, m := range df.Messages {
 			ids = append(ids, m.ID)
 		}
-		t.Errorf("want only the fresh reply, got %d: %v", len(df.Messages), ids)
+		t.Fatalf("got %d messages %v, want %v (parent + reply)", len(df.Messages), ids, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if df.Messages[i].ID != want {
+			t.Errorf("messages[%d].ID = %q, want %q", i, df.Messages[i].ID, want)
+		}
+	}
+	if df.Messages[0].Reply {
+		t.Errorf("parent should not have Reply=true")
+	}
+	if !df.Messages[1].Reply {
+		t.Errorf("reply should have Reply=true")
 	}
 }
 
