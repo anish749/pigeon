@@ -277,11 +277,13 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		item := s.outbox.Submit(req.SessionID, payload)
 		slog.Info("outbox item submitted", "id", item.ID, "session_id", req.SessionID)
 		resp := SendResponse{OK: true, OutboxID: item.ID}
+		status := http.StatusOK
 		if err := s.postCCMessage(r.Context(), item); err != nil {
 			slog.ErrorContext(r.Context(), "cc notification failed", "outbox_id", item.ID, "error", err)
 			resp.Error = err.Error()
+			status = http.StatusMultiStatus // 207 — item queued but CC notification failed
 		}
-		writeJSON(w, http.StatusOK, resp)
+		writeJSON(w, status, resp)
 		return
 	}
 
