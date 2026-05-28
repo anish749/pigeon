@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"fmt"
 
 	goslack "github.com/slack-go/slack"
 
@@ -27,18 +27,18 @@ func (s *Server) isOwnerTarget(req SendRequest) bool {
 	return req.Slack.UserID == sender.UserID
 }
 
-// postCCMessage posts a review message to the owner's DM in Slack
-// when a new outbox item arrives. Non-Slack items are silently skipped.
-func (s *Server) postCCMessage(item *outbox.Item) {
+// postCCMessage posts a review message to the owner's DM in Slack when a
+// new outbox item arrives. Returns nil for non-Slack items (no notification
+// needed). Returns an error if the Slack API call fails so the caller can
+// surface it to the CLI user.
+func (s *Server) postCCMessage(ctx context.Context, item *outbox.Item) error {
 	var resolved ResolvedSendRequest
 	if err := json.Unmarshal(item.Payload, &resolved); err != nil {
-		slog.Error("cc: cannot parse outbox payload", "id", item.ID, "error", err)
-		return
+		return fmt.Errorf("cc: parse outbox payload: %w", err)
 	}
 
 	if resolved.Platform != "slack" {
-		slog.Debug("cc: skipping non-Slack outbox item", "platform", resolved.Platform, "id", item.ID)
-		return
+		return nil
 	}
 
 	acct := account.New(resolved.Platform, resolved.Account)
@@ -46,17 +46,14 @@ func (s *Server) postCCMessage(item *outbox.Item) {
 	sender, ok := s.slack[acct.NameSlug()]
 	s.mu.RUnlock()
 	if !ok {
-		slog.Error("cc: no sender for account", "account", acct)
-		return
+		return fmt.Errorf("cc: no sender for account %s", acct)
 	}
 
-	ctx := context.Background()
 	dm, _, _, err := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
 		Users: []string{sender.UserID},
 	})
 	if err != nil {
-		slog.Error("cc: failed to open owner DM", "error", err, "account", acct)
-		return
+		return fmt.Errorf("cc: open owner DM: %w", err)
 	}
 
 	message := resolved.FinalMessage()
@@ -95,6 +92,7 @@ func (s *Server) postCCMessage(item *outbox.Item) {
 		),
 	)
 	if err != nil {
-		slog.Error("cc: failed to post review message", "error", err, "outbox_id", item.ID, "account", acct)
+		return fmt.Errorf("cc: post review message: %w", err)
 	}
+	return nil
 }
