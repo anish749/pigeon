@@ -9,7 +9,7 @@ import (
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/outbox"
-	"github.com/anish749/pigeon/internal/store/modelv1"
+	"github.com/anish749/pigeon/internal/outbox/ccview"
 )
 
 // isOwnerTarget returns true if the send request targets the owner's own
@@ -57,69 +57,14 @@ func (s *Server) postCCMessage(ctx context.Context, item *outbox.Item) error {
 		return fmt.Errorf("cc: open owner DM: %w", err)
 	}
 
-	message := resolved.FinalMessage()
-	target := resolved.ResolvedTarget()
-
-	buttons := []goslack.BlockElement{
-		&goslack.ButtonBlockElement{
-			Type:     "button",
-			ActionID: "outbox_approve",
-			Value:    item.ID,
-			Text:     goslack.NewTextBlockObject("plain_text", "Approve", false, false),
-			Style:    goslack.StylePrimary,
-		},
-		&goslack.ButtonBlockElement{
-			Type:     "button",
-			ActionID: "outbox_dismiss",
-			Value:    item.ID,
-			Text:     goslack.NewTextBlockObject("plain_text", "Dismiss", false, false),
-			Style:    goslack.StyleDanger,
-		},
-		&goslack.ButtonBlockElement{
-			Type:     "button",
-			ActionID: "outbox_sendmode",
-			Value:    item.ID,
-			Text:     goslack.NewTextBlockObject("plain_text", sendModeLabel(resolved.Via), false, false),
-		},
-	}
-	if item.SessionID != "" {
-		buttons = append(buttons, &goslack.ButtonBlockElement{
-			Type:     "button",
-			ActionID: "outbox_feedback",
-			Value:    item.ID,
-			Text:     goslack.NewTextBlockObject("plain_text", "Feedback", false, false),
-		})
-	}
+	view := ccview.FromItem(item, resolved.FinalMessage(), "to "+resolved.ResolvedTarget())
 
 	_, _, err = sender.BotAPI.PostMessageContext(ctx, dm.ID,
-		goslack.MsgOptionText("Pending review: "+message, false),
-		goslack.MsgOptionBlocks(
-			goslack.NewSectionBlock(
-				goslack.NewTextBlockObject("mrkdwn", message, false, false),
-				nil, nil,
-			),
-			goslack.NewContextBlock("",
-				goslack.NewTextBlockObject("mrkdwn", "to "+target, false, false),
-			),
-			&goslack.ActionBlock{
-				Type:    "actions",
-				BlockID: "outbox_actions",
-				Elements: &goslack.BlockElements{
-					ElementSet: buttons,
-				},
-			},
-		),
+		goslack.MsgOptionText(view.FallbackText(), false),
+		goslack.MsgOptionBlocks(view.Blocks()...),
 	)
 	if err != nil {
 		return fmt.Errorf("cc: post review message: %w", err)
 	}
 	return nil
-}
-
-// sendModeLabel returns the button label for the current send mode.
-func sendModeLabel(via modelv1.Via) string {
-	if via == modelv1.ViaPigeonAsUser {
-		return "Send as: user"
-	}
-	return "Send as: bot"
 }

@@ -136,7 +136,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		if len(m.items) > 0 {
 			item := m.items[m.cursor]
-			nextVia := cycleVia(item)
+			nextVia := item.CycleVia()
 			m.setStatus(item.ID, dimStyle.Render("Updating send mode..."))
 			return m, m.setVia(item.ID, nextVia)
 		}
@@ -284,25 +284,6 @@ func (m model) dismissItem(id string) tea.Cmd {
 func (m model) sendFeedback(id, note string) tea.Cmd {
 	return func() tea.Msg {
 		return doAction(outbox.ActionRequest{ID: id, Action: "feedback", Note: note}, id, "Feedback sent to session")
-	}
-}
-
-// cycleVia parses the item payload and returns the next Via value in the
-// rotation: "" (bot) -> "pigeon-as-user" -> "pigeon-as-bot" -> "" -> ...
-// For whatsapp items, Via is always empty (user sends as themselves).
-func cycleVia(item *outbox.Item) modelv1.Via {
-	var req api.SendRequest
-	if err := json.Unmarshal(item.Payload, &req); err != nil {
-		return modelv1.ViaPigeonAsBot
-	}
-	if req.Platform == "whatsapp" {
-		return ""
-	}
-	switch req.Via {
-	case "", modelv1.ViaPigeonAsBot:
-		return modelv1.ViaPigeonAsUser
-	default:
-		return modelv1.ViaPigeonAsBot
 	}
 }
 
