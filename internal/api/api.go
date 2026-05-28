@@ -253,7 +253,19 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	resolved := ResolvedSendRequest{SendRequest: req, ResolvedSlack: resolvedSlack, ResolvedMessage: resolvedMessage}
 
-	// All real sends go through the outbox for human review. Dry-run is
+	// Owner-to-self sends (e.g. bot DMing its own installer) bypass the
+	// outbox — there's no one else to protect, so review is pointless.
+	if !req.DryRun && s.isOwnerTarget(req) {
+		resp := s.dispatchSend(r.Context(), resolved)
+		status := http.StatusOK
+		if !resp.OK {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, resp)
+		return
+	}
+
+	// All other sends go through the outbox for human review. Dry-run is
 	// the one exception — it validates targeting without sending, so
 	// queuing it for approval would be meaningless.
 	if !req.DryRun {
