@@ -73,14 +73,14 @@ func (h *Handler) Approve(ctx context.Context, item *Item) (ok bool, errMsg stri
 	h.outbox.Remove(item.ID)
 
 	msg := fmt.Sprintf("[outbox] Approved and sent (ID: %s)", item.ID)
+	var warn string
 	if err := h.notify(item.SessionID, msg); err != nil {
 		slog.Error("outbox: failed to notify session of approval", "id", item.ID, "session_id", item.SessionID, "error", err)
-		slog.Info("outbox item approved and sent", "id", item.ID, "session_id", item.SessionID)
-		return true, "", "sent but could not notify session: " + err.Error()
+		warn = "sent but could not notify session: " + err.Error()
 	}
 
 	slog.Info("outbox item approved and sent", "id", item.ID, "session_id", item.SessionID)
-	return true, "", ""
+	return true, "", warn
 }
 
 // Feedback delivers a note to the originating session and removes the item
