@@ -60,3 +60,35 @@ func TestJiraProjectKeyCasePreserved(t *testing.T) {
 		t.Errorf("project key case not preserved: %q", pd.Path())
 	}
 }
+
+func TestJiraIssueFileKey(t *testing.T) {
+	root := NewDataRoot("/data")
+	f := root.AccountFor(account.New(JiraPlatform, "acme")).Jira().Project("ENG").Issue("ENG-142").IssueFile()
+	if got := f.Key(); got != "ENG-142" {
+		t.Errorf("Key() = %q, want %q", got, "ENG-142")
+	}
+}
+
+func TestJiraIssueFileCommentsFile(t *testing.T) {
+	root := NewDataRoot("/data")
+	issue := root.AccountFor(account.New(JiraPlatform, "acme")).Jira().Project("ENG").Issue("ENG-142")
+	if got := issue.IssueFile().CommentsFile().Path(); got != issue.CommentsFile().Path() {
+		t.Errorf("IssueFile().CommentsFile() = %q, want %q", got, issue.CommentsFile().Path())
+	}
+}
+
+func TestJiraIssueFileGlobs(t *testing.T) {
+	got := JiraIssueFileGlobs()
+	want := []string{"**/issues/*/issue.jsonl"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("JiraIssueFileGlobs() = %v, want %v", got, want)
+	}
+}
+
+func TestJiraIssueFileGlobsForKey(t *testing.T) {
+	got := JiraIssueFileGlobsForKey("ENG-142")
+	want := []string{"**/issues/ENG-142/issue.jsonl"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("JiraIssueFileGlobsForKey() = %v, want %v", got, want)
+	}
+}

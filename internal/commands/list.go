@@ -8,6 +8,7 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 	"github.com/anish749/pigeon/internal/paths"
+	"github.com/anish749/pigeon/internal/read"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -126,8 +127,11 @@ func RunListScoped(accounts []account.Account, platform string) error {
 // listAccount prints a header and conversations (or GWS services) for a
 // single account.
 func listAccount(s *store.FSStore, acct account.Account) error {
-	if acct.Platform == "gws" {
+	switch acct.Platform {
+	case "gws":
 		return listGWSAccount(s, acct)
+	case paths.JiraPlatform:
+		return listJiraAccount(acct)
 	}
 
 	convs, err := s.ListConversations(acct)
@@ -150,6 +154,26 @@ func listAccount(s *store.FSStore, acct account.Account) error {
 			}
 		}
 		fmt.Printf("  %s\n", c)
+	}
+	return nil
+}
+
+// listJiraAccount prints one row per issue under the account, flat across
+// projects. The display is just the issue key — callers pipe the output to
+// `pigeon read` and care about the key, not the project subdir. Project
+// boundaries are still grep-able from the directory layout when needed.
+func listJiraAccount(acct account.Account) error {
+	jd := paths.DefaultDataRoot().AccountFor(acct).Jira()
+	files, err := read.ListJiraIssues(jd)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		fmt.Println("No issues found.")
+		return nil
+	}
+	for _, f := range files {
+		fmt.Printf("  %s\n", f.Key())
 	}
 	return nil
 }
