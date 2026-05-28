@@ -88,6 +88,8 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 
 func (l *Listener) handleViewSubmission(ctx context.Context, cb goslack.InteractionCallback, evt *socketmode.Event) {
 	if cb.View.CallbackID != "outbox_feedback_modal" {
+		slog.InfoContext(ctx, "slack: unhandled view submission",
+			"callback_id", cb.View.CallbackID, "account", l.acct)
 		l.client.Ack(*evt.Request)
 		return
 	}
