@@ -1,4 +1,6 @@
 // Package review implements the outbox review terminal UI using Bubble Tea.
+// It displays both outbox items (pending outgoing messages) and tool gate
+// items (Claude Code tool calls awaiting human approval) in a unified list.
 package review
 
 import (
@@ -12,7 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anish749/pigeon/internal/api"
-	"github.com/anish749/pigeon/internal/daemon/client"
+	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/utils/timeutil"
@@ -26,6 +28,7 @@ var (
 	successStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	toolTagStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208"))
 )
 
 // RunReview starts the outbox review TUI. Blocks until quit.
@@ -42,8 +45,96 @@ const (
 	modeFeedback
 )
 
+// listItem wraps either an outbox item or a tool gate item. Exactly one
+// field is non-nil.
+type listItem struct {
+	outboxItem   *outbox.Item
+	toolGateItem *toolGateListItem
+}
+
+func (li listItem) id() string {
+	if li.toolGateItem != nil {
+		return li.toolGateItem.ID
+	}
+	return li.outboxItem.ID
+}
+
+func (li listItem) createdAt() time.Time {
+	if li.toolGateItem != nil {
+		return li.toolGateItem.CreatedAt
+	}
+	return li.outboxItem.CreatedAt
+}
+
+func (li listItem) isToolGate() bool {
+	return li.toolGateItem != nil
+}
+
+// toolGateListItem mirrors the JSON returned by GET /api/toolgate.
+// Defined locally to avoid importing internal/toolgate (the TUI is a
+// separate process that talks to the daemon over HTTP).
+type toolGateListItem struct {
+	ID        string        `json:"id"`
+	SessionID string        `json:"session_id"`
+	Input     toolGateInput `json:"input"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+type toolGateInput struct {
+	ToolName  string          `json:"tool_name"`
+	CWD       string          `json:"cwd"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// toolGateCommand extracts a human-readable command from the tool input,
+// mirroring the Command() method on the server-side Item type.
+func toolGateCommand(tg *toolGateListItem) string {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(tg.Input.ToolInput, &m); err != nil {
+		return string(tg.Input.ToolInput)
+	}
+	switch tg.Input.ToolName {
+	case "Bash":
+		if v, ok := m["command"]; ok {
+			var s string
+			json.Unmarshal(v, &s)
+			return s
+		}
+	case "Read", "Edit", "Write":
+		if v, ok := m["file_path"]; ok {
+			var s string
+			json.Unmarshal(v, &s)
+			return s
+		}
+	case "Glob":
+		if v, ok := m["pattern"]; ok {
+			var s string
+			json.Unmarshal(v, &s)
+			return s
+		}
+	case "Grep":
+		if v, ok := m["pattern"]; ok {
+			var s string
+			json.Unmarshal(v, &s)
+			return s
+		}
+	}
+	raw := string(tg.Input.ToolInput)
+	if len(raw) > 80 {
+		return raw[:77] + "..."
+	}
+	return raw
+}
+
+// toolGateActionReq mirrors toolgate.ActionRequest.
+type toolGateActionReq struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Reason string `json:"reason,omitempty"`
+}
+
 type model struct {
-	items      []*outbox.Item
+	items      []listItem
 	cursor     int
 	mode       mode
 	feedback   string
@@ -55,7 +146,7 @@ type model struct {
 
 // Bubble Tea messages
 type (
-	itemsMsg       []*outbox.Item
+	itemsMsg       []listItem
 	actionDoneMsg  struct{ id, detail string }
 	actionFailMsg  struct{ id, detail string }
 	clearStatusMsg struct{ id string }
@@ -76,7 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case itemsMsg:
-		m.items = []*outbox.Item(msg)
+		m.items = []listItem(msg)
 		m.err = nil
 		if m.cursor >= len(m.items) {
 			m.cursor = max(0, len(m.items)-1)
@@ -118,27 +209,54 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "a":
 		if len(m.items) > 0 {
-			item := m.items[m.cursor]
-			m.setStatus(item.ID, dimStyle.Render("Approving..."))
-			return m, m.approveItem(item.ID)
+			li := m.items[m.cursor]
+			if li.isToolGate() {
+				m.setStatus(li.id(), dimStyle.Render("Allowing..."))
+				return m, m.toolGateAction(li.toolGateItem.ID, "allow", "Allowed")
+			}
+			m.setStatus(li.id(), dimStyle.Render("Approving..."))
+			return m, m.approveItem(li.outboxItem.ID)
+		}
+	case "d":
+		if len(m.items) > 0 {
+			li := m.items[m.cursor]
+			if li.isToolGate() {
+				m.setStatus(li.id(), dimStyle.Render("Denying..."))
+				return m, m.toolGateAction(li.toolGateItem.ID, "deny", "Denied")
+			}
+		}
+	case "s":
+		if len(m.items) > 0 {
+			li := m.items[m.cursor]
+			if li.isToolGate() {
+				m.setStatus(li.id(), dimStyle.Render("Deferring to terminal..."))
+				return m, m.toolGateAction(li.toolGateItem.ID, "ask", "Deferred to terminal")
+			}
 		}
 	case "f":
-		if len(m.items) > 0 && m.items[m.cursor].SessionID != "" {
-			m.mode = modeFeedback
-			m.feedback = ""
+		if len(m.items) > 0 {
+			li := m.items[m.cursor]
+			if !li.isToolGate() && li.outboxItem.SessionID != "" {
+				m.mode = modeFeedback
+				m.feedback = ""
+			}
 		}
 	case "x":
 		if len(m.items) > 0 {
-			item := m.items[m.cursor]
-			m.setStatus(item.ID, dimStyle.Render("Dismissing..."))
-			return m, m.dismissItem(item.ID)
+			li := m.items[m.cursor]
+			if !li.isToolGate() {
+				m.setStatus(li.id(), dimStyle.Render("Dismissing..."))
+				return m, m.dismissItem(li.outboxItem.ID)
+			}
 		}
 	case "v":
 		if len(m.items) > 0 {
-			item := m.items[m.cursor]
-			nextVia := item.CycleVia()
-			m.setStatus(item.ID, dimStyle.Render("Updating send mode..."))
-			return m, m.setVia(item.ID, nextVia)
+			li := m.items[m.cursor]
+			if !li.isToolGate() {
+				nextVia := li.outboxItem.CycleVia()
+				m.setStatus(li.id(), dimStyle.Render("Updating send mode..."))
+				return m, m.setVia(li.outboxItem.ID, nextVia)
+			}
 		}
 	}
 	return m, nil
@@ -152,12 +270,12 @@ func (m model) handleFeedbackKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.feedback = ""
 	case tea.KeyEnter:
 		if m.feedback != "" && len(m.items) > 0 {
-			item := m.items[m.cursor]
+			li := m.items[m.cursor]
 			note := m.feedback
 			m.mode = modeList
 			m.feedback = ""
-			m.setStatus(item.ID, dimStyle.Render("Sending feedback..."))
-			return m, m.sendFeedback(item.ID, note)
+			m.setStatus(li.id(), dimStyle.Render("Sending feedback..."))
+			return m, m.sendFeedback(li.outboxItem.ID, note)
 		}
 	case tea.KeyBackspace:
 		if len(m.feedback) > 0 {
@@ -174,7 +292,7 @@ func (m model) View() string {
 	var b strings.Builder
 
 	count := len(m.items)
-	b.WriteString(titleStyle.Render(fmt.Sprintf("  Pigeon Outbox  %s", dimStyle.Render(fmt.Sprintf("%d pending", count)))))
+	b.WriteString(titleStyle.Render(fmt.Sprintf("  Pigeon Review  %s", dimStyle.Render(fmt.Sprintf("%d pending", count)))))
 	b.WriteString("\n\n")
 
 	if m.err != nil {
@@ -191,9 +309,9 @@ func (m model) View() string {
 	}
 
 	// Item list
-	for i, item := range m.items {
-		age := time.Since(item.CreatedAt).Truncate(time.Second)
-		summary := itemSummary(item)
+	for i, li := range m.items {
+		age := time.Since(li.createdAt()).Truncate(time.Second)
+		summary := listItemSummary(li)
 		if i == m.cursor {
 			b.WriteString(selectedStyle.Render(fmt.Sprintf("● %s", summary)))
 			b.WriteString("  " + dimStyle.Render(timeutil.FormatAge(age)))
@@ -206,12 +324,17 @@ func (m model) View() string {
 
 	// Detail pane
 	if m.cursor < count {
-		b.WriteString(m.renderDetail(m.items[m.cursor]))
+		li := m.items[m.cursor]
+		if li.isToolGate() {
+			b.WriteString(m.renderToolGateDetail(li.toolGateItem))
+		} else {
+			b.WriteString(m.renderDetail(li.outboxItem))
+		}
 		b.WriteString("\n")
 	}
 
 	if m.cursor < count {
-		if s := m.itemStatus[m.items[m.cursor].ID]; s != "" {
+		if s := m.itemStatus[m.items[m.cursor].id()]; s != "" {
 			b.WriteString("  " + s + "\n")
 		}
 	}
@@ -220,9 +343,11 @@ func (m model) View() string {
 	if m.mode == modeFeedback {
 		b.WriteString("  " + titleStyle.Render("Feedback:") + " " + m.feedback + "█\n")
 		b.WriteString(helpStyle.Render("  enter send  esc cancel"))
+	} else if m.cursor < count && m.items[m.cursor].isToolGate() {
+		b.WriteString(helpStyle.Render("  a allow  d deny  s defer to terminal  j/k navigate  q quit"))
 	} else {
 		help := "  a approve  x dismiss  v send mode  f feedback  j/k navigate  q quit"
-		if m.cursor < count && m.items[m.cursor].SessionID == "" {
+		if m.cursor < count && !m.items[m.cursor].isToolGate() && m.items[m.cursor].outboxItem.SessionID == "" {
 			help = "  a approve  x dismiss  v send mode  j/k navigate  q quit  " + dimStyle.Render("(feedback unavailable — no session)")
 		}
 		b.WriteString(helpStyle.Render(help))
@@ -257,39 +382,75 @@ func (m model) renderDetail(item *outbox.Item) string {
 	return b.String()
 }
 
+func (m model) renderToolGateDetail(tg *toolGateListItem) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("  Tool: %s\n", tg.Input.ToolName))
+	if tg.Input.CWD != "" {
+		b.WriteString(fmt.Sprintf("  CWD:  %s\n", tg.Input.CWD))
+	}
+	b.WriteString("\n")
+
+	cmd := toolGateCommand(tg)
+	maxWidth := m.width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+	box := msgStyle.Width(maxWidth).Render(cmd)
+	for _, line := range strings.Split(box, "\n") {
+		b.WriteString("  " + line + "\n")
+	}
+	return b.String()
+}
+
 // --- Commands ---
 
 func (m model) fetchItems() tea.Cmd {
 	return func() tea.Msg {
-		items, err := doGet()
-		if err != nil {
-			return itemsMsg(nil)
+		var items []listItem
+
+		// Fetch tool gate items first (time-sensitive).
+		tgItems, _ := doGetToolGate()
+		for _, tg := range tgItems {
+			items = append(items, listItem{toolGateItem: tg})
 		}
+
+		// Fetch outbox items.
+		obItems, _ := doGetOutbox()
+		for _, ob := range obItems {
+			items = append(items, listItem{outboxItem: ob})
+		}
+
 		return itemsMsg(items)
 	}
 }
 
 func (m model) approveItem(id string) tea.Cmd {
 	return func() tea.Msg {
-		return doAction(outbox.ActionRequest{ID: id, Action: "approve"}, id, "Approved and sent")
+		return doOutboxAction(outbox.ActionRequest{ID: id, Action: "approve"}, id, "Approved and sent")
 	}
 }
 
 func (m model) dismissItem(id string) tea.Cmd {
 	return func() tea.Msg {
-		return doAction(outbox.ActionRequest{ID: id, Action: "dismiss"}, id, "Dismissed")
+		return doOutboxAction(outbox.ActionRequest{ID: id, Action: "dismiss"}, id, "Dismissed")
 	}
 }
 
 func (m model) sendFeedback(id, note string) tea.Cmd {
 	return func() tea.Msg {
-		return doAction(outbox.ActionRequest{ID: id, Action: "feedback", Note: note}, id, "Feedback sent to session")
+		return doOutboxAction(outbox.ActionRequest{ID: id, Action: "feedback", Note: note}, id, "Feedback sent to session")
 	}
 }
 
 func (m model) setVia(id string, via modelv1.Via) tea.Cmd {
 	return func() tea.Msg {
-		return doAction(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)}, id, "Send mode updated")
+		return doOutboxAction(outbox.ActionRequest{ID: id, Action: "set_via", Via: string(via)}, id, "Send mode updated")
+	}
+}
+
+func (m model) toolGateAction(id, action, successDetail string) tea.Cmd {
+	return func() tea.Msg {
+		return doToolGateAction(toolGateActionReq{ID: id, Action: action}, id, successDetail)
 	}
 }
 
@@ -310,7 +471,7 @@ func (m *model) setStatus(id, s string) {
 
 // --- HTTP helpers ---
 
-func doAction(req outbox.ActionRequest, id, successDetail string) tea.Msg {
+func doOutboxAction(req outbox.ActionRequest, id, successDetail string) tea.Msg {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return actionFailMsg{id, "marshal request: " + err.Error()}
@@ -325,7 +486,22 @@ func doAction(req outbox.ActionRequest, id, successDetail string) tea.Msg {
 	return actionFailMsg{id, resp.Error}
 }
 
-func doGet() ([]*outbox.Item, error) {
+func doToolGateAction(req toolGateActionReq, id, successDetail string) tea.Msg {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return actionFailMsg{id, "marshal request: " + err.Error()}
+	}
+	resp, err := doPost("http://pigeon/api/toolgate/action", body)
+	if err != nil {
+		return actionFailMsg{id, err.Error()}
+	}
+	if resp.OK {
+		return actionDoneMsg{id, successDetail}
+	}
+	return actionFailMsg{id, resp.Error}
+}
+
+func doGetOutbox() ([]*outbox.Item, error) {
 	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/outbox")
 	if err != nil {
 		return nil, err
@@ -336,17 +512,52 @@ func doGet() ([]*outbox.Item, error) {
 	return items, nil
 }
 
-func doPost(url string, body []byte) (*outbox.ActionResponse, error) {
+func doGetToolGate() ([]*toolGateListItem, error) {
+	resp, err := daemonclient.DefaultPgnHTTPClient.Get("http://pigeon/api/toolgate")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var items []*toolGateListItem
+	json.NewDecoder(resp.Body).Decode(&items)
+	return items, nil
+}
+
+func doPost(url string, body []byte) (*actionResp, error) {
 	resp, err := daemonclient.DefaultPgnHTTPClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	var result outbox.ActionResponse
+	var result actionResp
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 	return &result, nil
+}
+
+// actionResp is the common shape returned by both outbox and tool gate action
+// endpoints. Defined locally so doPost can be shared.
+type actionResp struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// listItemSummary returns a one-line display string for a list item.
+func listItemSummary(li listItem) string {
+	if li.isToolGate() {
+		return toolGateSummary(li.toolGateItem)
+	}
+	return itemSummary(li.outboxItem)
+}
+
+// toolGateSummary returns a one-line display string for a tool gate item.
+func toolGateSummary(tg *toolGateListItem) string {
+	cmd := toolGateCommand(tg)
+	if len(cmd) > 60 {
+		cmd = cmd[:57] + "..."
+	}
+	return fmt.Sprintf("%s %s: %s", toolTagStyle.Render("[TOOL]"), tg.Input.ToolName, cmd)
 }
 
 // itemSummary derives a one-line display string from the outbox item's payload.

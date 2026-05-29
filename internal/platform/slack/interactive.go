@@ -10,6 +10,8 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/anish749/pigeon/internal/outbox/ccview"
+	"github.com/anish749/pigeon/internal/toolgate"
+	tgccview "github.com/anish749/pigeon/internal/toolgate/ccview"
 )
 
 type feedbackMeta struct {
@@ -99,6 +101,42 @@ func (l *Listener) handleBlockAction(ctx context.Context, cb goslack.Interaction
 				"error", err, "outbox_id", outboxID, "account", l.acct)
 		}
 
+	case "toolgate_allow":
+		l.client.Ack(*evt.Request)
+		tgItem := l.tgHandler.Get(outboxID)
+		if tgItem == nil {
+			tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+			l.updateToolGateStatus(ctx, channelID, msgTS, "⚠️ Item no longer pending", tgView)
+			return
+		}
+		tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+		l.tgHandler.Gate().Resolve(tgItem.ID, toolgate.Decision{Action: "allow", Reason: "approved via slack"})
+		l.updateToolGateStatus(ctx, channelID, msgTS, "✓ Allowed", tgView)
+
+	case "toolgate_deny":
+		l.client.Ack(*evt.Request)
+		tgItem := l.tgHandler.Get(outboxID)
+		if tgItem == nil {
+			tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+			l.updateToolGateStatus(ctx, channelID, msgTS, "⚠️ Item no longer pending", tgView)
+			return
+		}
+		tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+		l.tgHandler.Gate().Resolve(tgItem.ID, toolgate.Decision{Action: "deny", Reason: "denied via slack"})
+		l.updateToolGateStatus(ctx, channelID, msgTS, "✗ Denied", tgView)
+
+	case "toolgate_ask":
+		l.client.Ack(*evt.Request)
+		tgItem := l.tgHandler.Get(outboxID)
+		if tgItem == nil {
+			tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+			l.updateToolGateStatus(ctx, channelID, msgTS, "⚠️ Item no longer pending", tgView)
+			return
+		}
+		tgView := tgccview.FromBlocks(cb.Message.Blocks.BlockSet)
+		l.tgHandler.Gate().Resolve(tgItem.ID, toolgate.Decision{Action: "ask", Reason: "deferred to terminal"})
+		l.updateToolGateStatus(ctx, channelID, msgTS, "↩ Deferred to terminal", tgView)
+
 	default:
 		slog.InfoContext(ctx, "slack: unhandled action_id",
 			"action_id", action.ActionID, "account", l.acct)
@@ -174,6 +212,19 @@ func (l *Listener) refreshCCMessage(ctx context.Context, channelID, ts string, v
 	)
 	if err != nil {
 		slog.ErrorContext(ctx, "slack: failed to refresh C&C message",
+			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
+	}
+}
+
+// updateToolGateStatus replaces a tool gate C&C message with text + status line, no buttons.
+func (l *Listener) updateToolGateStatus(ctx context.Context, channelID, ts, status string, view tgccview.View) {
+	blocks := view.StatusBlocks(status)
+	_, _, _, err := l.botAPI.UpdateMessageContext(ctx, channelID, ts,
+		goslack.MsgOptionText(status, false),
+		goslack.MsgOptionBlocks(blocks...),
+	)
+	if err != nil {
+		slog.ErrorContext(ctx, "tool gate cc status update failed",
 			"error", err, "channel", channelID, "ts", ts, "account", l.acct)
 	}
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/syncstatus"
+	"github.com/anish749/pigeon/internal/toolgate"
 )
 
 // WhatsAppSender holds everything needed to send a WhatsApp message.
@@ -62,6 +63,8 @@ type Server struct {
 	hub         *hub.Hub
 	outbox      *outbox.Outbox
 	obHandler   *outbox.Handler
+	toolGate    *toolgate.Gate
+	tgHandler   *toolgate.Handler
 	store       store.Store
 	syncTracker *syncstatus.Tracker
 	version     string
@@ -69,25 +72,32 @@ type Server struct {
 }
 
 // NewServer creates a new API server.
-func NewServer(h *hub.Hub, ob *outbox.Outbox, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
+func NewServer(h *hub.Hub, ob *outbox.Outbox, tg *toolgate.Gate, s store.Store, version string, syncTracker *syncstatus.Tracker) *Server {
 	srv := &Server{
 		whatsapp:    make(map[string]*WhatsAppSender),
 		slack:       make(map[string]*SlackSender),
 		gws:         make(map[string]struct{}),
 		hub:         h,
 		outbox:      ob,
+		toolGate:    tg,
 		store:       s,
 		syncTracker: syncTracker,
 		version:     version,
 		startedAt:   time.Now(),
 	}
 	srv.obHandler = outbox.NewHandler(ob, srv.executeSend, h.NotifySession)
+	srv.tgHandler = toolgate.NewHandler(tg, srv.postToolGateCCMessage, 2*time.Minute)
 	return srv
 }
 
 // OutboxHandler returns the outbox handler for use by platform listeners.
 func (s *Server) OutboxHandler() *outbox.Handler {
 	return s.obHandler
+}
+
+// ToolGateHandler returns the tool gate handler for use by platform listeners.
+func (s *Server) ToolGateHandler() *toolgate.Handler {
+	return s.tgHandler
 }
 
 // RegisterWhatsApp registers a WhatsApp client for sending.
@@ -138,6 +148,9 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	mux.HandleFunc("GET /api/tail", s.hub.TailHandler())
 	mux.HandleFunc("GET /api/outbox", s.obHandler.HandleList)
 	mux.HandleFunc("POST /api/outbox/action", s.obHandler.HandleAction)
+	mux.HandleFunc("POST /api/hook/pretooluse", s.tgHandler.HandleHook)
+	mux.HandleFunc("GET /api/toolgate", s.tgHandler.HandleList)
+	mux.HandleFunc("POST /api/toolgate/action", s.tgHandler.HandleAction)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/session/connected", s.handleSessionConnected)
 

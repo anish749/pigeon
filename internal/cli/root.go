@@ -360,6 +360,9 @@ MAINTENANCE
 
 		// Workstream
 		newWorkstreamCmd(),
+
+		// Hooks (hidden — used by Claude Code, not humans)
+		newHookCmd(),
 	)
 
 	return root

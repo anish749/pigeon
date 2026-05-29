@@ -10,6 +10,8 @@ import (
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/outbox"
 	"github.com/anish749/pigeon/internal/outbox/ccview"
+	"github.com/anish749/pigeon/internal/toolgate"
+	tgccview "github.com/anish749/pigeon/internal/toolgate/ccview"
 )
 
 // isOwnerTarget returns true if the send request targets the owner's own
@@ -65,6 +67,39 @@ func (s *Server) postCCMessage(ctx context.Context, item *outbox.Item) error {
 	)
 	if err != nil {
 		return fmt.Errorf("cc: post review message: %w", err)
+	}
+	return nil
+}
+
+// postToolGateCCMessage posts a review message to the owner's DM in Slack
+// when a new tool gate item arrives. Tool calls are not platform-specific,
+// so we use any available Slack sender.
+func (s *Server) postToolGateCCMessage(ctx context.Context, item *toolgate.Item) error {
+	s.mu.RLock()
+	var sender *SlackSender
+	for _, ss := range s.slack {
+		sender = ss
+		break
+	}
+	s.mu.RUnlock()
+	if sender == nil {
+		return fmt.Errorf("no slack sender available")
+	}
+
+	dm, _, _, err := sender.BotAPI.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+		Users: []string{sender.UserID},
+	})
+	if err != nil {
+		return fmt.Errorf("open dm: %w", err)
+	}
+
+	view := tgccview.FromItem(item)
+	_, _, err = sender.BotAPI.PostMessageContext(ctx, dm.ID,
+		goslack.MsgOptionText(view.FallbackText(), false),
+		goslack.MsgOptionBlocks(view.Blocks()...),
+	)
+	if err != nil {
+		return fmt.Errorf("post tool gate cc: %w", err)
 	}
 	return nil
 }
