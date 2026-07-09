@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	a "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 	"github.com/anish749/pigeon/internal/store/modelv1"
 )
@@ -133,6 +134,10 @@ func runSendSlack(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := validateAccountInScope(a.New("slack", account)); err != nil {
+		return err
+	}
+
 	if postAt != "" {
 		ts, err := parsePostAt(postAt)
 		if err != nil {
@@ -171,6 +176,10 @@ func runSendWhatsapp(cmd *cobra.Command, args []string) error {
 	}
 	contact, err := cmd.Flags().GetString("contact")
 	if err != nil {
+		return err
+	}
+
+	if err := validateAccountInScope(a.New("whatsapp", account)); err != nil {
 		return err
 	}
 
