@@ -94,7 +94,11 @@ func RunSend(p SendParams) error {
 	}
 
 	if result.OutboxID != "" {
-		fmt.Printf("Draft sent to owner for feedback\n")
+		if p.Platform == "slack" {
+			fmt.Printf("DM'd the owner, will send after approval on Slack\n")
+		} else {
+			fmt.Printf("Draft sent to owner for feedback\n")
+		}
 		return nil
 	}
 
