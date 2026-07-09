@@ -11,6 +11,7 @@ func newReviewCmd() *cobra.Command {
 		Use:     "review",
 		Short:   "Review pending outbox items in a TUI",
 		GroupID: groupSending,
+		Hidden:  true,
 		Long: `Open the outbox review panel — a terminal UI for reviewing and approving
 outgoing messages before they are sent.
 
