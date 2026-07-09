@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	a "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 )
 
@@ -65,6 +66,9 @@ func runDeleteSlack(cmd *cobra.Command, args []string) error {
 	}
 	channel, err := cmd.Flags().GetString("channel")
 	if err != nil {
+		return err
+	}
+	if err := validateAccountInScope(a.New("slack", account)); err != nil {
 		return err
 	}
 	return commands.RunDelete(commands.DeleteParams{

@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	a "github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/commands"
 )
 
@@ -100,6 +101,9 @@ func runReactSlack(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateAccountInScope(a.New("slack", account)); err != nil {
+		return err
+	}
 	return commands.RunReact(commands.ReactParams{
 		Platform:  "slack",
 		Account:   account,
@@ -130,6 +134,9 @@ func runReactWhatsapp(cmd *cobra.Command, args []string) error {
 	}
 	contact, err := cmd.Flags().GetString("contact")
 	if err != nil {
+		return err
+	}
+	if err := validateAccountInScope(a.New("whatsapp", account)); err != nil {
 		return err
 	}
 	return commands.RunReact(commands.ReactParams{
