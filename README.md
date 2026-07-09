@@ -18,7 +18,7 @@ This becomes powerful when combined with other agent-facing CLIs like [linear-cl
 
 **Channels** deliver messages to Claude Code in real time via MCP channel notifications. When a new message arrives, Claude gets pinged and can react immediately.
 
-**The Outbox** holds outgoing messages from Claude for human review. `pigeon review` opens a terminal UI to approve, reject, or provide feedback before anything is sent.
+**The Outbox** holds outgoing messages from Claude for human review. By default, review happens right in Slack: the daemon DMs you the pending message with buttons to approve, dismiss, or leave feedback. `pigeon review` opens a terminal UI for the same flow.
 
 ## Prerequisites
 

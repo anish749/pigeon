@@ -44,10 +44,10 @@ cmd/pigeon/main.go → cli.Execute()
        ↓
   internal/hub          Routes incoming messages to connected Claude Code sessions via SSE
        ↓
-  internal/listener/*   Platform-specific listeners (slack, whatsapp) — write to store, observe identity
-  internal/gws/*        Google Workspace pollers (drive, gmail, calendar)
-  internal/linear/*     Linear issue poller
-  internal/jira/*       Jira issue poller
+  internal/platform/*   Per-platform adapters, each with its own manager/poller/auth subpackages:
+                           slack, whatsapp   — listeners that write to store, observe identity
+                           gws               — Google Workspace pollers (drive, gmail, calendar)
+                           linear, jira      — issue pollers, split into issue.jsonl/comments.jsonl
        ↓
   internal/store        Store interface + JSONL protocol v1 implementation (modelv1/)
   internal/identity     Cross-platform contact identity (Observer/Resolver pattern)
@@ -66,7 +66,7 @@ cmd/pigeon/main.go → cli.Execute()
 
 - **MCP Server** (`internal/mcp/server`): Runs inside Claude Code as a channel server. Connects to the daemon's SSE endpoint and delivers messages as channel notifications.
 
-- **Outbox** (`internal/outbox`): Queues outgoing messages from Claude for human review. `pigeon review` opens a Bubble Tea TUI for approve/reject.
+- **Outbox** (`internal/outbox`): Queues outgoing messages from Claude for human review. By default, review happens as command-and-control in Slack — the daemon posts a message to the owner's DM with approve/dismiss/send-mode/feedback actions (`internal/platform/slack/interactive.go`). `pigeon review` (hidden from help, still functional) opens a Bubble Tea TUI for the same approve/reject flow.
 
 - **Paths** (`internal/paths`): XDG-compliant directory resolution. Env overrides: `PIGEON_CONFIG_DIR`, `PIGEON_DATA_DIR`, `PIGEON_STATE_DIR`. Defaults: `~/.config/pigeon/`, `~/.local/share/pigeon/`, `~/.local/state/pigeon/`.
 
@@ -111,7 +111,7 @@ Both are scoped by `read.SearchDirs(workspace, platform, account)` which resolve
 2. Pollers receive GWS/Linear/Jira updates → write JSONL/content files through the store and typed paths
 3. Hub picks up new messages → pushes to connected MCP sessions via SSE
 4. Claude Code receives channel notifications → can read/search/reply via CLI
-5. Outgoing replies go to the outbox → human approves via `pigeon review` → sent via `api.Send()`
+5. Outgoing replies go to the outbox → human approves via Slack command-and-control (or `pigeon review`) → sent via `api.Send()`
 
 ## Error Handling
 
