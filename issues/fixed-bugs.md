@@ -83,3 +83,38 @@ Multi-day events are now expanded to all spanned date files instead of only the 
 ## ~~Implement maintenance in the daemon~~ — done
 
 The daemon now runs `FSStore.Maintain` per configured account through a single-worker queue (`MaintenanceManager`). Two trigger sources push into the same channel: an hourly scheduler (enqueues accounts whose `.maintenance.json` mtime is missing or ≥24h old by wall clock — survives laptop suspend, unlike a monotonic ticker) and an explicit `Trigger(ctx, acct)` API used by the slack listener after each sync. The single consumer guarantees only one Maintain pass is in flight across the whole daemon, so eager and periodic compaction can never race on the same files. `Trigger` is a context-aware blocking send: backpressure flows back to the trigger source if the queue fills, and shutdown unblocks parked senders. Sync coordination: when the worker pops a request whose account is currently syncing (per `syncstatus.Tracker`), it spawns a waiter that subscribes to `Tracker.WaitForDone` and re-Triggers when the sync completes — Maintain never rewrites a file while an active syncer is still appending to it, and concurrent triggers during one sync coalesce into a single requeue. The original WhatsApp setup-lock concern does not apply — Maintain only walks JSONL log files, not the WhatsApp SQLite DB, so the CLI setup command and the daemon's maintenance loop don't compete for the same lock.
+## ~~Slack: edits to messages aren't delivered to the agent in real time~~ — fixed in #351
+
+`handleEdit` now calls `onEvent(hub.NewEdit(...))` after persisting; the hub fans the edit out to connected sessions via the unified `RouteEvent` path.
+
+## ~~Slack: deletes to messages aren't delivered to the agent in real time~~ — fixed in #351
+
+Symmetric to the edit fix — `handleDelete` now calls `onEvent(hub.NewDelete(...))` after persisting.
+
+## ~~Slack: notification format doesn't carry thread context~~ — fixed in #340, #349
+
+`MsgLine` carries `ThreadTS` and emits it in notifications (#340); `EditLine` and `DeleteLine` gained matching `ThreadTS`/`ThreadID` fields (#349). Reactions on thread targets are routed and notified with thread context as well.
+
+## ~~Slack: edits/deletes on thread replies persisted to the wrong file~~ — fixed in #355
+
+`MessageStore.AppendEdit` and `AppendDelete` now route to `store.AppendThread(...)` when `threadTS` is set, so `CompactThread` applies them on read.
+
+## ~~Slack write phase: blocks stored even when identical to text fallback~~ — fixed in #292, #303
+
+#292 added a block/text equivalence check with a verification harness; #303 drops the redundant blocks at write time.
+
+## ~~WhatsApp edit and delete events~~ — fixed in #356
+
+WhatsApp listener now extracts `MESSAGE_EDIT` and `REVOKE` protocol messages and routes them through `handleEdit` / `handleRevoke`, mirroring the Slack edit/delete path.
+
+## ~~Platform directories `linear-issues` and `jira-issues` renamed to `linear` and `jira`~~ — fixed in #362, #365
+
+`linear-issues/` renamed to `linear/` (#362) and `jira-issues/` renamed to `jira/` (#365). Paths registry updated to use the shorter platform names.
+
+## ~~Slack mentions are not being delivered to Claude~~ — fixed in #312, #332, #340
+
+Thread replies are now routed to the hub: the listener routes public-channel thread replies when the bot is mentioned or participates in the thread (#332), orphan thread replies are surfaced (#312), and `MsgLine` carries `ThreadTS` in notifications (#340).
+
+## ~~Jira: maintenance compaction~~ — fixed in #364
+
+`FSStore.maintainFile` routes `JiraIssueFile` and `JiraCommentsFile` (and their Linear counterparts) through `compactIDDedupedLog`; the daemon runs maintenance per configured account.

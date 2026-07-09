@@ -1,9 +1,5 @@
 # Bugs / Tech Debt
 
-## Slack mentions are not being delivered to Claude
-
-When someone mentions inside a thread uh or I don't know if it in case of other other states what happens, but plot didn't work.
-
 ## Thread files cannot be date-filtered without scanning content
 
 Thread files are stored at `<conversation>/threads/<ts>.jsonl` where `<ts>` is
@@ -60,4 +56,7 @@ The WhatsApp listener logs `Error reading from websocket: failed to read frame h
 
 When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), the listener fails to save a sender's push name and key material. This directly causes a subsequent decryption failure (`no sender key for ... in group`) — the group message is permanently lost because the key needed to decrypt it was never stored. This is a data-loss bug.
 
+## Pollers do not publish to the hub event bus
+
+`pigeon monitor` (`/api/tail`) streams every event that the listeners route through `hub.RouteEvent` — Slack and WhatsApp messages, reactions, edits, deletes. The pollers under `internal/gws/`, `internal/linear/`, and `internal/jira/` write to the store but do not call `hub.RouteEvent`, so calendar events, emails, Drive changes, Linear updates, and Jira updates never appear on the stream. Anything subscribed to `/api/tail` (including `pigeon monitor`) is silently incomplete for those sources.
 
