@@ -110,3 +110,11 @@ WhatsApp listener now extracts `MESSAGE_EDIT` and `REVOKE` protocol messages and
 ## ~~Platform directories `linear-issues` and `jira-issues` renamed to `linear` and `jira`~~ — fixed in #362, #365
 
 `linear-issues/` renamed to `linear/` (#362) and `jira-issues/` renamed to `jira/` (#365). Paths registry updated to use the shorter platform names.
+
+## ~~Slack mentions are not being delivered to Claude~~ — fixed in #312, #332, #340
+
+Thread replies are now routed to the hub: the listener routes public-channel thread replies when the bot is mentioned or participates in the thread (#332), orphan thread replies are surfaced (#312), and `MsgLine` carries `ThreadTS` in notifications (#340).
+
+## ~~Jira: maintenance compaction~~ — fixed in #364
+
+`FSStore.maintainFile` routes `JiraIssueFile` and `JiraCommentsFile` (and their Linear counterparts) through `compactIDDedupedLog`; the daemon runs maintenance per configured account.
