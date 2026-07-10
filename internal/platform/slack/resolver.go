@@ -194,9 +194,9 @@ func uniqueNames(names ...string) []string {
 }
 
 // Resolver resolves Slack user and channel names. User lookups are backed
-// by the per-workspace identity writer — both hot-path ID lookups (UserName)
-// and name-based searches (FindUserID) hit only this workspace's own file,
-// since a Slack user ID only ever lives in the workspace that discovered it.
+// by the per-workspace identity writer — hot-path ID lookups (UserName) and
+// mention resolution hit only this workspace's own file, since a Slack user
+// ID only ever lives in the workspace that discovered it.
 // Channel and membership state is cached locally.
 type Resolver struct {
 	api        *goslack.Client
@@ -486,75 +486,6 @@ func (r *Resolver) ChannelName(ctx context.Context, channelID string) (string, e
 	}
 	r.mu.Unlock()
 	return name, nil
-}
-
-// UserMatch represents a user that matched a search query.
-type UserMatch struct {
-	ID          string
-	DisplayName string
-	RealName    string
-	Email       string
-}
-
-// AmbiguousUserError is returned when a user query matches multiple users.
-type AmbiguousUserError struct {
-	Query   string
-	Matches []UserMatch
-}
-
-func (e *AmbiguousUserError) Error() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "multiple users match %q:\n", e.Query)
-	for _, m := range e.Matches {
-		fmt.Fprintf(&b, "  %s  %s", m.ID, m.DisplayName)
-		if m.RealName != "" && m.RealName != m.DisplayName {
-			fmt.Fprintf(&b, "  (%s)", m.RealName)
-		}
-		if m.Email != "" {
-			fmt.Fprintf(&b, "  <%s>", m.Email)
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("ask the user to confirm which person to send to, then use their user ID")
-	return b.String()
-}
-
-// FindUserID searches identity for a user matching the query.
-// Accepts exact user IDs (U...), or case-insensitive substring matches on
-// display name, real name, username, or email. Strips leading @ if present.
-func (r *Resolver) FindUserID(query string) (string, string, error) {
-	candidates, err := r.writer.SearchCandidates(query)
-	if err != nil {
-		return "", "", fmt.Errorf("search identity: %w", err)
-	}
-
-	// Filter to people with a Slack identity in this workspace.
-	var matches []UserMatch
-	for _, p := range candidates {
-		ws, ok := p.Slack[r.workspace]
-		if !ok {
-			continue
-		}
-		var email string
-		if len(p.Email) > 0 {
-			email = p.Email[0]
-		}
-		matches = append(matches, UserMatch{
-			ID:          ws.ID,
-			DisplayName: ws.DisplayName,
-			RealName:    ws.RealName,
-			Email:       email,
-		})
-	}
-
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("no user matching %q", query)
-	case 1:
-		return matches[0].ID, matches[0].DisplayName, nil
-	default:
-		return "", "", &AmbiguousUserError{Query: query, Matches: matches}
-	}
 }
 
 // FindChannelID resolves a channel for sending. Requires an exact match:
