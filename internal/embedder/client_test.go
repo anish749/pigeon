@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"gonum.org/v1/gonum/floats/scalar"
 )
 
 func newTestClient(t *testing.T) *Client {
@@ -65,6 +67,17 @@ func TestClient(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		// Cosine similarity is mathematically bounded to [-1, 1], but
+		// floating-point accumulation in the dot product and norms can land a
+		// few ULP outside that range (identical vectors yield 1.0000000000000002,
+		// just above 1.0). Tolerate that at the bounds via ULP comparison.
+		within := func(v, lo, hi float64) bool {
+			const ulp = 4
+			atLeast := v >= lo || scalar.EqualWithinULP(v, lo, ulp)
+			atMost := v <= hi || scalar.EqualWithinULP(v, hi, ulp)
+			return atLeast && atMost
+		}
+
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				embA, err := client.Embed(ctx, tt.a)
@@ -76,8 +89,8 @@ func TestClient(t *testing.T) {
 					t.Fatalf("Embed(%q): %v", tt.b, err)
 				}
 				sim := CosineSimilarity(embA, embB)
-				if sim < tt.minSim || sim > tt.maxSim {
-					t.Errorf("CosineSimilarity = %.3f, want [%.2f, %.2f]", sim, tt.minSim, tt.maxSim)
+				if !within(sim, tt.minSim, tt.maxSim) {
+					t.Errorf("CosineSimilarity = %g, want [%.2f, %.2f]", sim, tt.minSim, tt.maxSim)
 				}
 			})
 		}
