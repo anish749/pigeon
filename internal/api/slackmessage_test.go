@@ -42,3 +42,15 @@ func TestResolveSlackMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSlackMessage(t *testing.T) {
+	if err := ValidateSlackMessage("<@> deploy done"); err == nil {
+		t.Error("empty mention should be rejected")
+	}
+	if err := ValidateSlackMessage("<@U012ABC3DE> deploy done"); err != nil {
+		t.Errorf("valid mention rejected: %v", err)
+	}
+	if err := ValidateSlackMessage("plain text"); err != nil {
+		t.Errorf("plain text rejected: %v", err)
+	}
+}

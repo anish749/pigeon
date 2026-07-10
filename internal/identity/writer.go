@@ -110,7 +110,7 @@ func (w *Writer) SearchCandidates(query string) ([]Person, error) {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
 
-	return searchCandidates(w.people, query), nil
+	return searchCandidates(w.people, query, false), nil
 }
 
 // loadLocked loads people from disk if not already loaded. Must be called

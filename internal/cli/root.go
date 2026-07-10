@@ -342,6 +342,7 @@ MAINTENANCE
 		newReadCmd(),
 		newGlobCmd(),
 		newGrepCmd(),
+		newWhoisCmd(),
 		newMonitorCmd(),
 
 		// Sending

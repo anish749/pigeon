@@ -230,6 +230,10 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	var resolvedMessage string
 	if req.Platform == "slack" {
 		resolvedMessage = ResolveSlackMessage(req.Message)
+		if err := ValidateSlackMessage(resolvedMessage); err != nil {
+			writeJSON(w, http.StatusBadRequest, SendResponse{Error: err.Error()})
+			return
+		}
 	} else {
 		resolvedMessage = req.Message
 	}

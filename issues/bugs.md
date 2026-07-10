@@ -60,3 +60,27 @@ When the WhatsApp database is locked (`database is locked (5) (SQLITE_BUSY)`), t
 
 `pigeon monitor` (`/api/tail`) streams every event that the listeners route through `hub.RouteEvent` — Slack and WhatsApp messages, reactions, edits, deletes. The pollers under `internal/gws/`, `internal/linear/`, and `internal/jira/` write to the store but do not call `hub.RouteEvent`, so calendar events, emails, Drive changes, Linear updates, and Jira updates never appear on the stream. Anything subscribed to `/api/tail` (including `pigeon monitor`) is silently incomplete for those sources.
 
+
+## WhatsApp: identity stores E.164 numbers but messages carry LID JIDs
+
+The WhatsApp listener observes contacts into `identity/people.jsonl` with
+E.164 phone numbers (e.g. `"+15551234567"`), but message lines record the
+sender as a LID JID (e.g. `"from":"123456789012345@lid"`). The two
+identifier spaces share no substring, so nothing can join a person in
+people.jsonl to their WhatsApp messages — `pigeon whois` activity counts
+are always zero for WhatsApp contacts, and any identity-to-message lookup
+is impossible from the stored data alone. The phone↔LID mapping exists
+only inside the whatsmeow contact store.
+
+The WhatsApp listener needs to observe LID identifiers into people.jsonl
+alongside the phone number so identity and message data join on a shared
+identifier.
+
+## Identity: Slack bots are indistinguishable from humans in people.jsonl
+
+`createBotSignal` writes Slack bots into the same `people.jsonl` as human
+users, with no marker on the Person record. Name searches over identity
+match bots and humans alike (jirabot, workflow bots, the pigeon bot
+itself), and bot activity volume swamps human activity in any
+message-count aggregation. Readers cannot filter bots out because the
+write side never records that a person is a bot.
