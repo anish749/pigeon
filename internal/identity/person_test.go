@@ -520,3 +520,17 @@ func TestSearchCandidates(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchCandidates_EmailFragment(t *testing.T) {
+	people := []Person{
+		{Name: "Alice", Email: []string{"alice@company.com"}},
+		{Name: "Bob", Email: []string{"bob@company.com"}},
+	}
+	if got := searchCandidates(people, "company.com"); len(got) != 2 {
+		t.Errorf("email fragment matched %d people, want 2", len(got))
+	}
+	got := searchCandidates(people, "ALICE@")
+	if len(got) != 1 || got[0].Name != "Alice" {
+		t.Fatalf("case-insensitive email fragment: got %#v, want Alice", got)
+	}
+}

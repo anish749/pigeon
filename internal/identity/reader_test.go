@@ -236,3 +236,44 @@ func TestReader_SearchCandidatesCrossSource(t *testing.T) {
 		t.Errorf("cross-source merge lost Slack ID: %+v", got[0])
 	}
 }
+
+// TestReaderForRoots_ScopedDiscovery — a Reader rooted at one platform dir
+// must only see that platform's identity files; rooted at both, it merges.
+func TestReaderForRoots_ScopedDiscovery(t *testing.T) {
+	root := paths.NewDataRoot(t.TempDir())
+	s := store.NewFSStore(root)
+
+	slackAcct := root.AccountFor(account.New("slack", "acme-corp"))
+	gwsAcct := root.AccountFor(account.New("gws", "bob-at-company-com"))
+
+	if err := identity.NewWriter(s, slackAcct.Identity()).Observe(identity.Signal{
+		Name:  "Alice Smith",
+		Slack: &identity.SlackIdentity{Workspace: "acme-corp", ID: "U04ABCDEF"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.NewWriter(s, gwsAcct.Identity()).Observe(identity.Signal{
+		Email: "bob@company.com",
+		Name:  "Bob Jones",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	scoped := identity.NewReaderForRoots(s, []string{slackAcct.Path()})
+	people, err := scoped.People()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(people) != 1 || people[0].Name != "Alice Smith" {
+		t.Fatalf("scoped reader: got %+v, want only Alice Smith", people)
+	}
+
+	both := identity.NewReaderForRoots(s, []string{slackAcct.Path(), gwsAcct.Path()})
+	people, err = both.People()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(people) != 2 {
+		t.Fatalf("two-root reader: got %d people, want 2", len(people))
+	}
+}

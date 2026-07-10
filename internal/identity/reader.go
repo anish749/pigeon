@@ -22,14 +22,21 @@ import (
 // name searches (LookupBySlackID, SearchCandidates, People).
 type Reader struct {
 	store Store
-	base  string              // data root path for glob discovery; empty if paths is set
-	paths []paths.PeopleFile  // if non-nil, limit to these people.jsonl paths; else discover
+	roots []string           // dirs to glob for people files; empty if paths is set
+	paths []paths.PeopleFile // if non-nil, limit to these people.jsonl paths; else discover
 }
 
 // NewReader creates a Reader that discovers all identity files under the
 // data root at each read using a glob.
 func NewReader(store Store, dataRoot paths.DataRoot) *Reader {
-	return &Reader{store: store, base: dataRoot.Path()}
+	return &Reader{store: store, roots: []string{dataRoot.Path()}}
+}
+
+// NewReaderForRoots creates a Reader that discovers identity files under
+// each of the given directories at each read. A root may be the data root,
+// a platform dir, or an account dir — whatever scope the caller resolved.
+func NewReaderForRoots(store Store, roots []string) *Reader {
+	return &Reader{store: store, roots: roots}
 }
 
 // NewReaderForDirs creates a Reader that only merges the given identity
@@ -47,11 +54,13 @@ func NewReaderForDirs(store Store, dirs []paths.IdentityDir) *Reader {
 func (r *Reader) load() ([]Person, error) {
 	pp := r.paths
 	if pp == nil {
-		found, err := globPeopleFiles(r.base)
-		if err != nil {
-			return nil, fmt.Errorf("discover identity files: %w", err)
+		for _, root := range r.roots {
+			found, err := globPeopleFiles(root)
+			if err != nil {
+				return nil, fmt.Errorf("discover identity files in %s: %w", root, err)
+			}
+			pp = append(pp, found...)
 		}
-		pp = found
 	}
 
 	var merged []Person
@@ -90,9 +99,9 @@ func (r *Reader) LookupBySlackID(workspace, userID string) (*Person, error) {
 
 // SearchCandidates returns people matching the trimmed query. If the query
 // equals a stable identifier (Slack user ID in any workspace, WhatsApp number,
-// or email), at most one person is returned. Otherwise names are matched with
-// case-insensitive substring comparison against Person.Name and each Slack
-// display name, real name, and username.
+// or email), at most one person is returned. Otherwise the query is matched
+// as a case-insensitive substring against Person.Name, each Slack display
+// name, real name, and username, and each email address.
 func (r *Reader) SearchCandidates(query string) ([]Person, error) {
 	people, err := r.load()
 	if err != nil {
