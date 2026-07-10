@@ -91,8 +91,10 @@ DATA LAYOUT
     │   │   │   ├── 2026-03-16.jsonl
     │   │   │   └── threads/              # thread replies
     │   │   │       └── 1711568940.789012.jsonl
-    │   │   └── @dave/                     # DM
-    │   │       └── 2026-03-16.jsonl
+    │   │   ├── @dave/                     # DM
+    │   │   │   └── 2026-03-16.jsonl
+    │   │   └── identity/
+    │   │       └── people.jsonl          # person records: name, IDs, emails
     ├── gws/
     │   ├── user-at-company-com/           # account (slugified email)
     │   │   ├── gmail/
@@ -201,6 +203,7 @@ WORKFLOW — READING MESSAGES
     pigeon list --platform=whatsapp         # accounts in a platform
     pigeon list --since=2h                  # conversations with recent activity
     pigeon glob --since=7d                  # find data files in a time window
+    pigeon whois alice                      # a person's IDs, emails, recent activity
 
   Read messages from a conversation:
 
@@ -249,6 +252,11 @@ WORKFLOW — SENDING MESSAGES
   pigeon send whatsapp -a +14155551234 -c Alice -m "hey!"
   pigeon send slack    -a acme-corp    -c '#engineering' -m "deploying now"
   pigeon send slack    -a acme-corp    --user-id U07HF6KQ7PY -m "quick question"
+
+  Resolve a user ID from a name with whois — with --id it prints exactly
+  one ID or fails with exit 2, so an ambiguous name never sends:
+
+    pigeon send slack -a acme-corp --user-id "$(pigeon whois alice --id -a acme-corp)" -m "quick question"
 
   Slack messages are sent as the bot by default. Use --via pigeon-as-user to
   send as the account owner who connected pigeon.

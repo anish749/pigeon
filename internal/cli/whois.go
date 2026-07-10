@@ -15,26 +15,20 @@ import (
 func newWhoisCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "whois <query>",
-		Short:   "Look up a person across synced platforms",
+		Short:   "Resolve a name or email to a person's user IDs and activity",
 		GroupID: groupReading,
 		Args:    cobra.ExactArgs(1),
-		Long: `Resolves a person across the synced identity files (people.jsonl).
+		Long: `Searches the synced identity files (people.jsonl) and prints one JSON
+line per matching person: name, emails, Slack user IDs per workspace,
+WhatsApp numbers, and an "activity" block (lastActive, events, most
+active conversations). Most recently active person first.
 
-The query is a name, Slack display name, handle, user ID, email, or
-email fragment. Exact stable identifiers (Slack user ID, full email,
-phone) return one person; anything else is a case-insensitive
-substring match.
+Names, handles, and emails match as case-insensitive substrings. An
+exact Slack user ID, email, or phone number matches one person.
 
-Output is one JSON line per person, most recently active first. Each
-line carries the person's identifiers plus an "activity" block —
-lastActive, events (messages/emails authored in the window), and their
-most active conversations — so the right person is easy to pick when
-names collide.
-
-With --id, prints a single bare Slack user ID for use in command
-substitution. Requires exactly one match with one Slack identity in
-scope; otherwise prints nothing on stdout and lists the candidates on
-stderr.
+--id prints a single bare Slack user ID for command substitution. It
+requires exactly one match: otherwise it prints nothing on stdout,
+lists the candidates on stderr, and exits 2.
 
 Exit codes: 0 found, 1 no match, 2 ambiguous (--id only).`,
 		Example: `  pigeon whois alice
