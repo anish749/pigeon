@@ -122,19 +122,25 @@ func RunWhois(ws *workspace.Workspace, p WhoisParams, stdout, stderr io.Writer) 
 	return nil
 }
 
-// printSlackID prints the person's single in-scope Slack user ID. A person
-// with Slack identities in multiple workspaces is ambiguous until the caller
-// narrows the scope with --account.
+// printSlackID prints the person's single in-scope Slack user ID. Entries
+// without a user ID don't count. A person with Slack IDs in multiple
+// workspaces is ambiguous until the caller narrows the scope with --account.
 func printSlackID(person identity.Person, stdout io.Writer) error {
-	workspaces := slices.Sorted(maps.Keys(person.Slack))
+	var workspaces []string
+	for ws, s := range person.Slack {
+		if s.ID != "" {
+			workspaces = append(workspaces, ws)
+		}
+	}
+	slices.Sort(workspaces)
 	switch len(workspaces) {
 	case 0:
-		return fmt.Errorf("%s has no slack identity in scope", person.Name)
+		return fmt.Errorf("%s has no slack user ID in scope", person.Name)
 	case 1:
 		fmt.Fprintln(stdout, person.Slack[workspaces[0]].ID)
 		return nil
 	default:
-		return fmt.Errorf("%w: %s has slack identities in %d workspaces (%s) — narrow with --platform slack --account <workspace>",
+		return fmt.Errorf("%w: %s has slack IDs in %d workspaces (%s) — narrow with --platform slack --account <workspace>",
 			ErrAmbiguous, person.Name, len(workspaces), strings.Join(workspaces, ", "))
 	}
 }

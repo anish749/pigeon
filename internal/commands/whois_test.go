@@ -200,3 +200,38 @@ func TestRunWhois_AccountRequiresPlatform(t *testing.T) {
 		t.Errorf("stdout = %q, want bare ID", stdout)
 	}
 }
+
+func TestPrintSlackID_EmptyID(t *testing.T) {
+	// An entry without a user ID must not satisfy the "exactly one ID"
+	// contract with a blank line.
+	var buf bytes.Buffer
+	err := printSlackID(identity.Person{
+		Name:  "Carol",
+		Slack: map[string]identity.PersonSlack{"acme-corp": {DisplayName: "Carol"}},
+	}, &buf)
+	if err == nil {
+		t.Fatal("empty slack ID must be an error")
+	}
+	if errors.Is(err, ErrAmbiguous) {
+		t.Error("missing ID is not-found, not ambiguous")
+	}
+	if buf.String() != "" {
+		t.Errorf("stdout = %q, must be empty", buf.String())
+	}
+
+	// With one ID-less entry and one real ID, the real ID is unambiguous.
+	buf.Reset()
+	err = printSlackID(identity.Person{
+		Name: "Dan",
+		Slack: map[string]identity.PersonSlack{
+			"acme-corp": {ID: "U04DAN1111"},
+			"vendor-ws": {DisplayName: "dan"},
+		},
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "U04DAN1111\n" {
+		t.Errorf("stdout = %q, want bare ID", buf.String())
+	}
+}
