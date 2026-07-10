@@ -173,3 +173,30 @@ func TestRunWhois_ExactIDShortCircuits(t *testing.T) {
 		t.Errorf("stdout = %q, want bare ID", stdout)
 	}
 }
+
+func TestRunWhois_AccountRequiresPlatform(t *testing.T) {
+	whoisFixture(t)
+
+	_, _, err := runWhois(t, WhoisParams{Query: "alice", Account: "acme-corp"})
+	if err == nil || !strings.Contains(err.Error(), "--account requires --platform") {
+		t.Fatalf("err = %v, want --account requires --platform", err)
+	}
+
+	// With the platform set, the account scope applies.
+	stdout, _, err := runWhois(t, WhoisParams{Query: "alice", Platform: "slack", Account: "acme-corp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "U04ALICE1") {
+		t.Errorf("scoped lookup missing result: %q", stdout)
+	}
+
+	// --id is slack-only, so a bare --account names a slack workspace.
+	stdout, _, err = runWhois(t, WhoisParams{Query: "alice", Account: "acme-corp", IDOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "U04ALICE1\n" {
+		t.Errorf("stdout = %q, want bare ID", stdout)
+	}
+}

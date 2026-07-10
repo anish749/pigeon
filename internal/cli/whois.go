@@ -59,13 +59,6 @@ Exit codes: 0 found, 1 no match, 2 ambiguous (--id only).`,
 				return fmt.Errorf("get id flag: %w", err)
 			}
 
-			if idOnly && platform != "" && platform != "slack" {
-				return fmt.Errorf("--id is only supported for slack")
-			}
-			if idOnly && account != "" && platform == "" {
-				platform = "slack"
-			}
-
 			var sinceDur time.Duration
 			if since != "" {
 				d, err := timeutil.ParseDuration(since)

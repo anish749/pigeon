@@ -44,7 +44,7 @@ type WhoisResult struct {
 // WhoisActivity summarizes a person's synced activity within the window.
 type WhoisActivity struct {
 	LastActive    string   `json:"lastActive,omitempty"` // RFC 3339 UTC of most recent event
-	Events        int      `json:"events"`               // messages, emails, comments authored
+	Events        int      `json:"events"`               // messages and emails authored
 	Conversations []string `json:"conversations,omitempty"`
 
 	lastActive time.Time
@@ -55,6 +55,19 @@ type WhoisActivity struct {
 // it prints the single Slack user ID of the single match, or fails with
 // ErrAmbiguous when the query or the workspace is not unique.
 func RunWhois(ws *workspace.Workspace, p WhoisParams, stdout, stderr io.Writer) error {
+	if p.IDOnly && p.Platform != "" && p.Platform != "slack" {
+		return fmt.Errorf("--id is only supported for slack")
+	}
+	// SearchDirs ignores the account filter when no platform is set, which
+	// would make --account a silent no-op.
+	if p.Account != "" && p.Platform == "" {
+		if !p.IDOnly {
+			return fmt.Errorf("--account requires --platform")
+		}
+		// --id is slack-only, so a bare --account names a slack workspace.
+		p.Platform = "slack"
+	}
+
 	dirs, err := read.SearchDirs(ws, p.Platform, p.Account)
 	if err != nil {
 		return err
