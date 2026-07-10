@@ -18,9 +18,6 @@ func newWhoisCmd() *cobra.Command {
 		Short:   "Look up a person across synced platforms",
 		GroupID: groupReading,
 		Args:    cobra.ExactArgs(1),
-		// A lookup miss is an expected outcome, not a usage error — don't
-		// bury the "no person matching" message under the help text.
-		SilenceUsage: true,
 		Long: `Resolves a person across the synced identity files (people.jsonl).
 
 The query is a name, Slack display name, handle, user ID, email, or
@@ -46,6 +43,11 @@ Exit codes: 0 found, 1 no match, 2 ambiguous (--id only).`,
   pigeon whois alice --id -p slack -a acme-corp
   pigeon send slack -a acme-corp --channel "#eng" -m "<@$(pigeon whois alice --id -a acme-corp)> deploy done"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flag and args validation has already passed — every error
+			// from here on is a runtime result (a lookup miss), not
+			// misuse, so don't bury it under the usage text.
+			cmd.SilenceUsage = true
+
 			platform, err := cmd.Flags().GetString("platform")
 			if err != nil {
 				return fmt.Errorf("get platform flag: %w", err)

@@ -38,6 +38,14 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
+	// Reject empty mentions before anything reaches the daemon — a failed
+	// inline identity lookup must fail here, not after queueing for review.
+	if p.Platform == "slack" {
+		if err := api.ValidateSlackMessage(p.Message); err != nil {
+			return err
+		}
+	}
+
 	// Validate thread parent exists locally before sending.
 	if p.Thread != "" && !p.Force {
 		accountDir := paths.DefaultDataRoot().AccountFor(account.New(p.Platform, p.Account)).Path()
