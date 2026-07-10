@@ -107,7 +107,7 @@ func (r *Reader) SearchCandidates(query string) ([]Person, error) {
 	if err != nil {
 		return nil, err
 	}
-	return searchCandidates(people, query, true), nil
+	return searchCandidates(people, query), nil
 }
 
 // People returns all known people with cross-source merging applied.

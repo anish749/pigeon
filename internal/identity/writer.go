@@ -100,8 +100,8 @@ func (w *Writer) LookupBySlackID(workspace, userID string) (*Person, error) {
 
 // SearchCandidates returns people in this source matching the trimmed query.
 // If the query equals a stable identifier (Slack user ID, email, or phone),
-// at most one person is returned. Otherwise names are matched
-// case-insensitively.
+// at most one person is returned. Otherwise names and email addresses are
+// matched as case-insensitive substrings.
 func (w *Writer) SearchCandidates(query string) ([]Person, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -110,7 +110,7 @@ func (w *Writer) SearchCandidates(query string) ([]Person, error) {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
 
-	return searchCandidates(w.people, query, false), nil
+	return searchCandidates(w.people, query), nil
 }
 
 // loadLocked loads people from disk if not already loaded. Must be called

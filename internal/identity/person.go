@@ -113,11 +113,9 @@ func (p *Person) nameMatchesSubstring(q string) bool {
 
 // searchCandidates returns people matching the trimmed query. If the query
 // equals a stable identifier (Slack user ID, email, or phone), at most one
-// person is returned. Otherwise names — and, when matchEmails is set, email
-// addresses — are matched as case-insensitive substrings. The per-source
-// Writer keeps name-only semantics so mention resolution in the send path
-// is unchanged; the cross-source Reader matches email fragments too.
-func searchCandidates(people []Person, query string, matchEmails bool) []Person {
+// person is returned. Otherwise names and email addresses are matched as
+// case-insensitive substrings.
+func searchCandidates(people []Person, query string) []Person {
 	q := strings.TrimSpace(strings.TrimPrefix(query, "@"))
 	if q == "" {
 		return nil
@@ -130,7 +128,7 @@ func searchCandidates(people []Person, query string, matchEmails bool) []Person 
 	}
 	var out []Person
 	for i := range people {
-		if people[i].nameMatchesSubstring(q) || (matchEmails && people[i].emailMatchesSubstring(q)) {
+		if people[i].nameMatchesSubstring(q) || people[i].emailMatchesSubstring(q) {
 			p := people[i]
 			out = append(out, p)
 		}

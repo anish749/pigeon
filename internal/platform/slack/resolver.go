@@ -521,7 +521,7 @@ func (e *AmbiguousUserError) Error() string {
 
 // FindUserID searches identity for a user matching the query.
 // Accepts exact user IDs (U...), or case-insensitive substring matches on
-// display name, real name, or username. Strips leading @ if present.
+// display name, real name, username, or email. Strips leading @ if present.
 func (r *Resolver) FindUserID(query string) (string, string, error) {
 	candidates, err := r.writer.SearchCandidates(query)
 	if err != nil {

@@ -493,7 +493,7 @@ func TestSearchCandidates(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := searchCandidates(tc.people, tc.query, false)
+			got := searchCandidates(tc.people, tc.query)
 			if len(got) != tc.wantLen {
 				t.Fatalf("len(got) = %d, want %d (got %#v)", len(got), tc.wantLen, got)
 			}
@@ -526,13 +526,10 @@ func TestSearchCandidates_EmailFragment(t *testing.T) {
 		{Name: "Alice", Email: []string{"alice@company.com"}},
 		{Name: "Bob", Email: []string{"bob@company.com"}},
 	}
-	if got := searchCandidates(people, "company.com", false); len(got) != 0 {
-		t.Errorf("name-only search matched %d people by email fragment, want 0", len(got))
-	}
-	if got := searchCandidates(people, "company.com", true); len(got) != 2 {
+	if got := searchCandidates(people, "company.com"); len(got) != 2 {
 		t.Errorf("email fragment matched %d people, want 2", len(got))
 	}
-	got := searchCandidates(people, "ALICE@", true)
+	got := searchCandidates(people, "ALICE@")
 	if len(got) != 1 || got[0].Name != "Alice" {
 		t.Fatalf("case-insensitive email fragment: got %#v, want Alice", got)
 	}
