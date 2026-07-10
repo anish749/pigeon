@@ -38,8 +38,7 @@ type SendParams struct {
 }
 
 func RunSend(p SendParams) error {
-	// Reject empty mentions before anything reaches the daemon — a failed
-	// inline identity lookup must fail here, not after queueing for review.
+	// Reject malformed mentions before the daemon queues anything for review.
 	if p.Platform == "slack" {
 		if err := api.ValidateSlackMessage(p.Message); err != nil {
 			return err

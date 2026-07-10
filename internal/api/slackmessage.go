@@ -17,11 +17,10 @@ func ResolveSlackMessage(raw string) string {
 }
 
 // ValidateSlackMessage rejects outbound text containing an empty mention
-// <@> — the artifact of an inline identity lookup that produced no output
-// (e.g. an ambiguous $(pigeon whois --id) substitution).
+// <@>, which Slack would render as literal text.
 func ValidateSlackMessage(msg string) error {
 	if strings.Contains(msg, "<@>") {
-		return fmt.Errorf("message contains an empty mention <@> — an inline identity lookup (e.g. $(pigeon whois --id)) produced no output")
+		return fmt.Errorf("message contains an empty mention <@> — a mention needs a user ID, e.g. <@U012ABC3DE>")
 	}
 	return nil
 }
