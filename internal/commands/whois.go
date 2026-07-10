@@ -199,6 +199,12 @@ func whoisActivity(dirs []string, person identity.Person, since time.Duration, s
 	var act WhoisActivity
 	convEvents := make(map[string]int)
 	root := paths.DefaultDataRoot().Path()
+	// Thread files are selected whole-file when any reply falls within the
+	// window, so individual matches still need per-line windowing.
+	var cutoff time.Time
+	if since > 0 {
+		cutoff = time.Now().Add(-since)
+	}
 	for _, dir := range dirs {
 		out, err := read.Grep(dir, read.GrepOpts{
 			Query:           pattern,
@@ -214,6 +220,9 @@ func whoisActivity(dirs []string, person identity.Person, since time.Duration, s
 			fmt.Fprintf(stderr, "warning: some lines failed to parse: %v\n", parseErr)
 		}
 		for _, m := range matches {
+			if since > 0 && m.Line.Ts().Before(cutoff) {
+				continue
+			}
 			act.Events++
 			if ts := m.Line.Ts(); ts.After(act.lastActive) {
 				act.lastActive = ts
