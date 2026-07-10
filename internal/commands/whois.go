@@ -180,10 +180,11 @@ func stableID(p identity.Person) string {
 }
 
 // whoisActivity greps the scoped dirs for events authored by any of the
-// person's identifiers within the window. WhatsApp messages carry LID JIDs
-// in their from field, which people.jsonl does not store yet (see
-// issues/bugs.md), so WhatsApp activity counts as zero until the listener
-// observes LIDs.
+// person's identifiers within the window. Only sendable sources count:
+// Slack messages and email, since whois resolves send targets. WhatsApp
+// messages carry LID JIDs in their from field, which people.jsonl does
+// not store yet (see issues/bugs.md), so WhatsApp activity counts as
+// zero until the listener observes LIDs.
 func whoisActivity(dirs []string, person identity.Person, since time.Duration, stderr io.Writer) (WhoisActivity, error) {
 	ids := identifiers(person)
 	if len(ids) == 0 {
