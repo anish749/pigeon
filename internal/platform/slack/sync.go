@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	gosync "sync"
 	"time"
@@ -171,7 +172,7 @@ func Sync(ctx context.Context, userToken, botToken string, resolver *Resolver, a
 	api := goslack.New(userToken)
 	gate := &rateLimitGate{workspace: acct.Name}
 	activityCutoff := time.Now().AddDate(0, 0, -activityDays)
-	defaultOldest := fmt.Sprintf("%d", time.Now().AddDate(0, 0, -syncDays).Unix())
+	defaultOldest := strconv.FormatInt(time.Now().AddDate(0, 0, -syncDays).Unix(), 10)
 
 	allConversations, err := listUserConversations(ctx, api, gate)
 	if err != nil {
@@ -656,10 +657,7 @@ func syncThreads(ctx context.Context, api *goslack.Client, gate *rateLimitGate, 
 		// Write surrounding channel context: the next N messages after the parent
 		if idx, ok := msgIndex[msg.Timestamp]; ok {
 			contextStart := idx + 1
-			contextEnd := contextStart + contextMessages
-			if contextEnd > len(msgs) {
-				contextEnd = len(msgs)
-			}
+			contextEnd := min(contextStart+contextMessages, len(msgs))
 			if contextStart < contextEnd {
 				if err := ms.EnsureThreadContextSeparator(channelName, msg.Timestamp); err != nil {
 					slog.WarnContext(ctx, "slack sync: thread context separator failed", "error", err)

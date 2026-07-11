@@ -109,10 +109,7 @@ func (h *Hub) TailHandler() http.HandlerFunc {
 // collected and returned as a single joined error — the caller can
 // surface that to the client. Write failures short-circuit the walk.
 func (h *Hub) replayHistory(w http.ResponseWriter, flusher http.Flusher, filter Filter, sinceTime time.Time) error {
-	since := time.Since(sinceTime)
-	if since < 0 {
-		since = 0
-	}
+	since := max(time.Since(sinceTime), 0)
 
 	accounts := filter.Accounts
 	var errs []error

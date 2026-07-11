@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
@@ -68,7 +70,7 @@ func TestRenderMergePicker_ScrollsLongCandidateList(t *testing.T) {
 
 	upd, _ := m.Update(keyRune('m'))
 	m = upd.(Model)
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	rendered := strings.Count(out, "Candidate")
 	if rendered >= 30 {
 		t.Errorf("expected truncated render, got %d candidate rows for 30 items", rendered)
@@ -102,7 +104,7 @@ func TestRenderMergePicker_KeepsCursorInView(t *testing.T) {
 		t.Fatalf("invalid mergeCursor %d", m.mergeCursor)
 	}
 	cursorName := m.items[m.mergeCursor].Name
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, cursorName) {
 		t.Errorf("cursor %q not visible after scroll:\n%s", cursorName, out)
 	}
@@ -136,7 +138,7 @@ func TestRenderMergePicker_ScrollsBackWhenCursorMovesUp(t *testing.T) {
 		m = upd.(Model)
 	}
 	cursorName := m.items[m.mergeCursor].Name
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "→ "+cursorName) {
 		t.Errorf("cursor marker missing after scrolling back up to %q:\n%s", cursorName, out)
 	}

@@ -5,32 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
-// stripAnsi removes ANSI escape sequences so substring assertions on
-// the rendered View aren't fooled by lipgloss color codes.
-func stripAnsi(s string) string {
-	var b strings.Builder
-	skip := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			skip = true
-		case skip && (r == 'm' || r == 'K' || r == 'H'):
-			skip = false
-		case skip:
-			// drop
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 func TestView_EmptyShowsCreateHint(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "No workstreams in this workspace") {
 		t.Errorf("missing empty header: %q", out)
 	}
@@ -45,7 +27,7 @@ func TestView_PopulatedRendersAllItems(t *testing.T) {
 		{ID: "ws-a", Name: "Alpha", Workspace: "personal", Focus: "alpha focus"},
 		{ID: "ws-b", Name: "Beta", Workspace: "personal", Focus: "beta focus"},
 	}
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	for _, want := range []string{"Alpha", "Beta", "alpha focus"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered view missing %q in:\n%s", want, out)
@@ -57,7 +39,7 @@ func TestView_DefaultRowGetsLabel(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	m.items = []models.Workstream{def}
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "(default)") {
 		t.Errorf("missing default marker: %q", out)
 	}
@@ -67,7 +49,7 @@ func TestView_DefaultHelpIsLimited(t *testing.T) {
 	m := NewModel(newFakeStore(), testCfg("personal"), nil)
 	def := models.NewDefaultWorkstream("personal", time.Time{})
 	m.items = []models.Workstream{def}
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "default workstream: limited actions") {
 		t.Errorf("default help should call out limited actions: %q", out)
 	}
@@ -82,7 +64,7 @@ func TestView_DeleteConfirmShowsName(t *testing.T) {
 		{ID: "ws-a", Name: "Alpha", Workspace: "personal"},
 	}
 	m.mode = modeConfirmDelete
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	if !strings.Contains(out, `Delete "Alpha"?`) {
 		t.Errorf("missing confirm prompt: %q", out)
 	}
@@ -95,7 +77,7 @@ func TestView_FillsTerminalHeightWithFooterAtBottom(t *testing.T) {
 		{ID: "ws-a", Name: "Alpha", Workspace: "personal", Focus: "alpha focus"},
 	}
 
-	lines := strings.Split(stripAnsi(m.View()), "\n")
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	if got := len(lines); got != m.height {
 		t.Fatalf("rendered lines = %d, want %d:\n%s", got, m.height, strings.Join(lines, "\n"))
 	}
@@ -115,7 +97,7 @@ func TestView_TrimsOverflowBeforeFooter(t *testing.T) {
 		})
 	}
 
-	lines := strings.Split(stripAnsi(m.View()), "\n")
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	if got := len(lines); got != m.height {
 		t.Fatalf("rendered lines = %d, want %d:\n%s", got, m.height, strings.Join(lines, "\n"))
 	}

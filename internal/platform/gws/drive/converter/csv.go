@@ -16,9 +16,7 @@ func ToCSV(values [][]string) ([]byte, error) {
 	// Find max row width.
 	maxCols := 0
 	for _, row := range values {
-		if len(row) > maxCols {
-			maxCols = len(row)
-		}
+		maxCols = max(maxCols, len(row))
 	}
 
 	var buf bytes.Buffer

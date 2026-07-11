@@ -1,6 +1,7 @@
 package poller_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,17 +79,15 @@ func TestLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
-	// Extract documentId from JSON output.
-	var docID string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, `"documentId"`) {
-			docID = strings.Trim(strings.TrimPrefix(line, `"documentId": `), `",`)
-			break
-		}
+	var resp struct {
+		DocumentID string `json:"documentId"`
 	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("parse create doc response: %v\nraw: %s", err, string(out)[:min(len(out), 200)])
+	}
+	docID := resp.DocumentID
 	if docID == "" {
-		t.Fatalf("could not extract documentId from: %s", string(out)[:200])
+		t.Fatalf("empty documentId in response: %s", string(out)[:min(len(out), 200)])
 	}
 	t.Logf("created doc: %s", docID)
 	t.Cleanup(func() {

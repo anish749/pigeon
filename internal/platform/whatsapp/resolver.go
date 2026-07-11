@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -46,14 +47,8 @@ func (r *Resolver) ContactName(ctx context.Context, jid types.JID) string {
 
 	info, err := r.client.Store.Contacts.GetContact(ctx, jid)
 	if err == nil && info.Found {
-		if info.FullName != "" {
-			return info.FullName
-		}
-		if info.PushName != "" {
-			return info.PushName
-		}
-		if info.BusinessName != "" {
-			return info.BusinessName
+		if name := cmp.Or(info.FullName, info.PushName, info.BusinessName); name != "" {
+			return name
 		}
 	}
 	return "+" + jid.User
@@ -144,13 +139,7 @@ func (r *Resolver) FindJID(ctx context.Context, query string) (types.JID, error)
 			containsLower(info.PushName, q) ||
 			containsLower(info.BusinessName, q) ||
 			containsLower(phone, q) {
-			name := info.FullName
-			if name == "" {
-				name = info.PushName
-			}
-			if name == "" {
-				name = info.BusinessName
-			}
+			name := cmp.Or(info.FullName, info.PushName, info.BusinessName)
 			matches = append(matches, ContactMatch{
 				JID:   jid,
 				Name:  name,

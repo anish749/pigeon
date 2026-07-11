@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
@@ -406,7 +407,7 @@ func TestMergePicker_DefaultNotRendered(t *testing.T) {
 	m := newSeededModel()
 	m.mode = modeMergePick
 	m.mergeCursor = 1
-	out := stripAnsi(m.renderMergePicker())
+	out := ansi.Strip(m.renderMergePicker())
 	if strings.Contains(out, "General") {
 		t.Errorf("merge picker should not list the default workstream:\n%s", out)
 	}

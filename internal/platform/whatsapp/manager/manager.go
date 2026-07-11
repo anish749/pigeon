@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -205,13 +206,7 @@ func observeWhatsAppContacts(ctx context.Context, client *whatsmeow.Client, id i
 		}
 		phone := "+" + jid.User
 
-		name := info.FullName
-		if name == "" {
-			name = info.PushName
-		}
-		if name == "" {
-			name = info.BusinessName
-		}
+		name := cmp.Or(info.FullName, info.PushName, info.BusinessName)
 		if name == "" {
 			continue
 		}

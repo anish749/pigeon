@@ -193,9 +193,7 @@ func mergePerson(dst, src Person) Person {
 		}
 	}
 
-	if src.Seen > dst.Seen {
-		dst.Seen = src.Seen
-	}
+	dst.Seen = max(dst.Seen, src.Seen)
 
 	return dst
 }

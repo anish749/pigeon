@@ -17,16 +17,7 @@ func viewport(n, cursor, offset, budget int, itemHeight func(i int) int) (start,
 		return 0, n
 	}
 
-	start = offset
-	if start < 0 {
-		start = 0
-	}
-	if start > cursor {
-		start = cursor
-	}
-	if start >= n {
-		start = n - 1
-	}
+	start = min(max(offset, 0), cursor, n-1)
 
 	for {
 		used := 0

@@ -101,9 +101,7 @@ func (m Model) columnWidths() (left, right int) {
 		total = defaultWidth
 	}
 	avail := total - 2*bodyMargin - bodyGap
-	if avail < minListWidth+minDetailWidth {
-		avail = minListWidth + minDetailWidth
-	}
+	avail = max(avail, minListWidth+minDetailWidth)
 	left = avail / 3
 	if left < minListWidth {
 		left = minListWidth
@@ -112,9 +110,7 @@ func (m Model) columnWidths() (left, right int) {
 		left = maxListWidth
 	}
 	right = avail - left
-	if right < minDetailWidth {
-		right = minDetailWidth
-	}
+	right = max(right, minDetailWidth)
 	return left, right
 }
 
@@ -125,15 +121,11 @@ func (m Model) columnWidths() (left, right int) {
 // hierarchy stays clear. When the list is taller than the available
 // height, only the slice that includes the cursor is rendered.
 func (m Model) renderListColumn(width int) string {
-	if width < minListWidth {
-		width = minListWidth
-	}
+	width = max(width, minListWidth)
 	const markerWidth = 2
 	const continuationIndent = "  "
 	nameWidth := width - markerWidth
-	if nameWidth < 4 {
-		nameWidth = 4
-	}
+	nameWidth = max(nameWidth, 4)
 
 	start, end := m.visibleRange(nameWidth)
 
@@ -171,9 +163,7 @@ func (m Model) renderListColumn(width int) string {
 // viewport helper with the per-item line counter that wraps names to
 // nameWidth.
 func (m Model) visibleRange(nameWidth int) (start, end int) {
-	if nameWidth < 4 {
-		nameWidth = 4
-	}
+	nameWidth = max(nameWidth, 4)
 	itemHeight := func(i int) int {
 		return len(wrapName(m.items[i].Name, nameWidth, "  "))
 	}
@@ -195,19 +185,14 @@ func (m Model) listLineBudget() int {
 		reserved++
 	}
 	budget := m.height - reserved
-	if budget < 1 {
-		return 1
-	}
-	return budget
+	return max(budget, 1)
 }
 
 // renderDetailBox renders the right-hand panel showing the selected
 // workstream's name and focus, with reserved blank space at the bottom
 // for future fields.
 func (m Model) renderDetailBox(w models.Workstream, width int) string {
-	if width < minDetailWidth {
-		width = minDetailWidth
-	}
+	width = max(width, minDetailWidth)
 	name := w.Name
 	if w.IsDefault() {
 		name += " (default)"
@@ -332,9 +317,7 @@ func (m Model) mergeNameWidth() int {
 	}
 	const markerWidth = 4 // "  → " or four spaces
 	nameWidth := width - markerWidth
-	if nameWidth < 4 {
-		nameWidth = 4
-	}
+	nameWidth = max(nameWidth, 4)
 	return nameWidth
 }
 
@@ -404,10 +387,7 @@ func (m Model) mergeLineBudget() int {
 		return 1 << 30
 	}
 	budget := m.listLineBudget() - 1 // room for the title line
-	if budget < 1 {
-		return 1
-	}
-	return budget
+	return max(budget, 1)
 }
 
 func emptyOr(s, fallback string) string {
@@ -437,10 +417,7 @@ func (m Model) renderFullScreen(content, footer string) string {
 		footerLines = footerLines[len(footerLines)-m.height:]
 	}
 
-	contentHeight := m.height - len(footerLines)
-	if contentHeight < 0 {
-		contentHeight = 0
-	}
+	contentHeight := max(m.height-len(footerLines), 0)
 	if len(contentLines) > contentHeight {
 		contentLines = contentLines[:contentHeight]
 	}

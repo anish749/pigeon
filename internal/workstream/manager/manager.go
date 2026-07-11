@@ -6,6 +6,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -318,7 +319,7 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("manager: %w", errs[0])
+		return fmt.Errorf("manager: %w", errors.Join(errs...))
 	}
 	return nil
 }
