@@ -4,6 +4,8 @@ package reporter
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -37,11 +39,7 @@ func Print(w io.Writer, r *replay.Report) {
 	}
 
 	// Sort workspace names.
-	var workspaces []config.WorkspaceName
-	for ws := range byWorkspace {
-		workspaces = append(workspaces, ws)
-	}
-	sort.Slice(workspaces, func(i, j int) bool { return workspaces[i] < workspaces[j] })
+	workspaces := slices.Sorted(maps.Keys(byWorkspace))
 
 	for _, workspace := range workspaces {
 		wsList := byWorkspace[workspace]
@@ -103,8 +101,7 @@ func limitSlice(s []string, max int) []string {
 	if len(s) <= max {
 		return s
 	}
-	result := make([]string, max)
-	copy(result, s[:max])
+	result := slices.Clone(s[:max])
 	result[max-1] = fmt.Sprintf("... +%d more", len(s)-max+1)
 	return result
 }

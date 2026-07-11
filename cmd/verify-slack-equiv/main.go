@@ -17,10 +17,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	goslack "github.com/slack-go/slack"
@@ -252,9 +253,15 @@ func cloneBlocks(bs goslack.Blocks) goslack.Blocks {
 	return cp
 }
 
-func ablateBold(rt *goslack.RichTextBlock)   { mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Bold = false }) }
-func ablateItalic(rt *goslack.RichTextBlock) { mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Italic = false }) }
-func ablateStrike(rt *goslack.RichTextBlock) { mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Strike = false }) }
+func ablateBold(rt *goslack.RichTextBlock) {
+	mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Bold = false })
+}
+func ablateItalic(rt *goslack.RichTextBlock) {
+	mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Italic = false })
+}
+func ablateStrike(rt *goslack.RichTextBlock) {
+	mutateStyles(rt, func(s *goslack.RichTextSectionTextStyle) { s.Strike = false })
+}
 
 func mutateStyles(rt *goslack.RichTextBlock, fn func(*goslack.RichTextSectionTextStyle)) {
 	for _, el := range rt.Elements {
@@ -304,15 +311,15 @@ func matchAgainstStored(rendered, stored string) bool {
 // non-empty resolved value.
 func matchesWithMentions(stored, placeholder string) bool {
 	parts := strings.Split(placeholder, mentionPlaceholder)
-	if !strings.HasPrefix(stored, parts[0]) {
+	stored, ok := strings.CutPrefix(stored, parts[0])
+	if !ok {
 		return false
 	}
-	stored = stored[len(parts[0]):]
 	last := parts[len(parts)-1]
-	if !strings.HasSuffix(stored, last) {
+	stored, ok = strings.CutSuffix(stored, last)
+	if !ok {
 		return false
 	}
-	stored = stored[:len(stored)-len(last)]
 	middle := parts[1 : len(parts)-1]
 	for _, lit := range middle {
 		idx := strings.Index(stored, lit)
@@ -445,12 +452,7 @@ func pct(n, d int) float64 {
 }
 
 func sortedKeys(m map[string]int) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
+	return slices.Sorted(maps.Keys(m))
 }
 
 func truncate(s string, n int) string {

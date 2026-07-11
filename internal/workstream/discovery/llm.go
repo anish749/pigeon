@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/anish749/pigeon/internal/workstream/claudecli"
@@ -122,10 +124,7 @@ func (d *LLMDiscovery) buildDigests(signals []models.Signal) []conversationDiges
 		}
 
 		// Collect participants.
-		var participants []string
-		for p := range cd.participants {
-			participants = append(participants, p)
-		}
+		participants := slices.Collect(maps.Keys(cd.participants))
 
 		// Build date range.
 		first := cd.signals[0].Ts

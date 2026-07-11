@@ -148,12 +148,13 @@ func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
 			continue
 		}
 
 		var notification ClaudeChannelNotification
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &notification); err != nil {
+		if err := json.Unmarshal([]byte(data), &notification); err != nil {
 			slog.Warn("sse parse error", "error", err)
 			ds.notify(NewClaudeChannelErrorNotification(fmt.Errorf("failed to parse daemon event: %w", err)))
 			continue

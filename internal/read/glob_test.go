@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/anish749/pigeon/internal/paths"
 )
 
 func TestMain(m *testing.M) {
@@ -117,13 +120,7 @@ func TestGlob_SinceIncludesRecentThread(t *testing.T) {
 		t.Fatalf("Glob: %v", err)
 	}
 
-	hasThread := false
-	for _, f := range files {
-		if filepath.Base(f.Path()) == "1742100000.jsonl" {
-			hasThread = true
-			break
-		}
-	}
+	hasThread := slices.ContainsFunc(files, func(f paths.DataFile) bool { return filepath.Base(f.Path()) == "1742100000.jsonl" })
 	if !hasThread {
 		t.Errorf("Glob did not return recent thread file, got: %v", files)
 	}

@@ -119,8 +119,8 @@ func stripCodeFences(s string) string {
 		return s
 	}
 	// Remove opening fence (```json or ```)
-	if idx := strings.Index(s, "\n"); idx != -1 {
-		s = s[idx+1:]
+	if _, after, ok := strings.Cut(s, "\n"); ok {
+		s = after
 	}
 	// Remove closing fence
 	s = strings.TrimSuffix(s, "```")

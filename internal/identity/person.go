@@ -37,9 +37,8 @@ func (p *Person) matchesEmail(email string) bool {
 // hasExactEmail reports whether this person already has the given email
 // stored verbatim (case-insensitive).
 func (p *Person) hasExactEmail(email string) bool {
-	lower := strings.ToLower(email)
 	return slices.ContainsFunc(p.Email, func(e string) bool {
-		return strings.ToLower(e) == lower
+		return strings.EqualFold(e, email)
 	})
 }
 

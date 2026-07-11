@@ -4,6 +4,8 @@ package gmail
 import (
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strconv"
 	"time"
 
@@ -116,12 +118,8 @@ func (c *Client) ListHistory(startHistoryId string) (added []string, deleted []s
 		delete(addedSet, id)
 	}
 
-	for id := range addedSet {
-		added = append(added, id)
-	}
-	for id := range deletedSet {
-		deleted = append(deleted, id)
-	}
+	added = slices.Collect(maps.Keys(addedSet))
+	deleted = slices.Collect(maps.Keys(deletedSet))
 	return added, deleted, newHistoryId, nil
 }
 

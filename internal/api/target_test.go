@@ -31,7 +31,7 @@ func TestSlackTargetValidate(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
 			}
-			if got := err.Error(); !contains(got, tt.wantErr) {
+			if got := err.Error(); !strings.Contains(got, tt.wantErr) {
 				t.Fatalf("error %q does not contain %q", got, tt.wantErr)
 			}
 		})
@@ -88,7 +88,7 @@ func TestValidateTarget(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
 			}
-			if got := err.Error(); !contains(got, tt.wantErr) {
+			if got := err.Error(); !strings.Contains(got, tt.wantErr) {
 				t.Fatalf("error %q does not contain %q", got, tt.wantErr)
 			}
 		})
@@ -137,8 +137,4 @@ func TestResolvedSendRequestFinalMessage(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

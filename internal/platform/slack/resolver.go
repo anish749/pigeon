@@ -510,7 +510,11 @@ func (r *Resolver) FindChannelID(ctx context.Context, query string) (string, str
 			return id, name, nil
 		}
 		// Match without prefix: "engineering" matches "#engineering"
-		if len(lower) > 0 && (lower[0] == '#' || lower[0] == '@') && lower[1:] == q {
+		if after, ok := strings.CutPrefix(lower, "#"); ok && after == q {
+			r.mu.RUnlock()
+			return id, name, nil
+		}
+		if after, ok := strings.CutPrefix(lower, "@"); ok && after == q {
 			r.mu.RUnlock()
 			return id, name, nil
 		}
@@ -576,12 +580,12 @@ func FormatChannelName(ch goslack.Channel) string {
 
 // ParseTimestamp converts a Slack timestamp ("1234567890.123456") to time.Time.
 func ParseTimestamp(ts string) time.Time {
-	parts := strings.SplitN(ts, ".", 2)
-	sec, err := strconv.ParseInt(parts[0], 10, 64)
+	sec, _, _ := strings.Cut(ts, ".")
+	secInt, err := strconv.ParseInt(sec, 10, 64)
 	if err != nil {
 		return time.Now()
 	}
-	return time.Unix(sec, 0)
+	return time.Unix(secInt, 0)
 }
 
 // createSignal builds an identity signal from a Slack user API response.

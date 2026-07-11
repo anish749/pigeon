@@ -3,6 +3,7 @@ package modelv1
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -28,9 +29,7 @@ func ParseDateFile(data []byte) (*DateFile, error) {
 // in chronological order by timestamp.
 func MarshalDateFile(f *DateFile) ([]byte, error) {
 	lines := collectDateFileLines(f)
-	sort.SliceStable(lines, func(i, j int) bool {
-		return lines[i].Ts().Before(lines[j].Ts())
-	})
+	slices.SortStableFunc(lines, func(a, b Line) int { return a.Ts().Compare(b.Ts()) })
 
 	var b []byte
 	for _, l := range lines {
@@ -163,18 +162,7 @@ func MarshalThreadFile(f *ThreadFile) ([]byte, error) {
 // --- helpers ---
 
 func splitLines(data []byte) []string {
-	s := string(data)
-	if s == "" {
-		return nil
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	var out []string
-	for _, l := range lines {
-		if l != "" {
-			out = append(out, l)
-		}
-	}
-	return out
+	return strings.FieldsFunc(string(data), func(r rune) bool { return r == '\n' })
 }
 
 func classifyIntoDateFile(f *DateFile, line Line) {

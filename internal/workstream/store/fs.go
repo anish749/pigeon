@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/anish749/pigeon/internal/workstream/models"
@@ -37,10 +38,8 @@ func (s *FS) GetWorkstream(id string) (models.Workstream, bool, error) {
 	if err != nil {
 		return models.Workstream{}, false, err
 	}
-	for _, ws := range all {
-		if ws.ID == id {
-			return ws, true, nil
-		}
+	if i := slices.IndexFunc(all, func(ws models.Workstream) bool { return ws.ID == id }); i >= 0 {
+		return all[i], true, nil
 	}
 	return models.Workstream{}, false, nil
 }
@@ -75,15 +74,9 @@ func (s *FS) PutWorkstream(ws models.Workstream) error {
 	if err != nil {
 		return err
 	}
-	found := false
-	for i, existing := range all {
-		if existing.ID == ws.ID {
-			all[i] = ws
-			found = true
-			break
-		}
-	}
-	if !found {
+	if i := slices.IndexFunc(all, func(w models.Workstream) bool { return w.ID == ws.ID }); i >= 0 {
+		all[i] = ws
+	} else {
 		all = append(all, ws)
 	}
 	return s.save(workstreamsFile, all)
@@ -97,12 +90,7 @@ func (s *FS) DeleteWorkstream(id string) error {
 	if err != nil {
 		return err
 	}
-	out := make([]models.Workstream, 0, len(all))
-	for _, w := range all {
-		if w.ID != id {
-			out = append(out, w)
-		}
-	}
+	out := slices.DeleteFunc(all, func(w models.Workstream) bool { return w.ID == id })
 	if len(out) == len(all) {
 		return nil
 	}
@@ -131,12 +119,11 @@ func (s *FS) GetProposal(id string) (*models.Proposal, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	for _, p := range pf.Proposals {
-		if p.ID == id {
-			return p, true, nil
-		}
+	i := slices.IndexFunc(pf.Proposals, func(p *models.Proposal) bool { return p.ID == id })
+	if i < 0 {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	return pf.Proposals[i], true, nil
 }
 
 func (s *FS) ListProposals() ([]*models.Proposal, error) {
@@ -156,16 +143,11 @@ func (s *FS) DeleteProposal(id string) error {
 	if err != nil {
 		return err
 	}
-	out := pf.Proposals[:0]
-	for _, p := range pf.Proposals {
-		if p.ID != id {
-			out = append(out, p)
-		}
-	}
-	if len(out) == len(pf.Proposals) {
+	before := len(pf.Proposals)
+	pf.Proposals = slices.DeleteFunc(pf.Proposals, func(p *models.Proposal) bool { return p.ID == id })
+	if len(pf.Proposals) == before {
 		return nil
 	}
-	pf.Proposals = out
 	return s.save(proposalsFile, pf)
 }
 
@@ -177,15 +159,9 @@ func (s *FS) PutProposal(p *models.Proposal) error {
 	if err != nil {
 		return err
 	}
-	found := false
-	for i, existing := range pf.Proposals {
-		if existing.ID == p.ID {
-			pf.Proposals[i] = p
-			found = true
-			break
-		}
-	}
-	if !found {
+	if i := slices.IndexFunc(pf.Proposals, func(e *models.Proposal) bool { return e.ID == p.ID }); i >= 0 {
+		pf.Proposals[i] = p
+	} else {
 		pf.Proposals = append(pf.Proposals, p)
 	}
 	return s.save(proposalsFile, pf)

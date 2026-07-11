@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -166,7 +167,7 @@ func (f *fakeSignalReader) ReadAccounts(_ context.Context, accounts []account.Ac
 	f.gotAccounts = append([]account.Account(nil), accounts...)
 	f.gotSince = since
 	f.gotUntil = until
-	return append([]models.Signal(nil), f.signals...), f.err
+	return slices.Clone(f.signals), f.err
 }
 
 type fakeDiscovery struct {
@@ -176,8 +177,8 @@ type fakeDiscovery struct {
 }
 
 func (f *fakeDiscovery) Discover(_ context.Context, signals []models.Signal) ([]discovery.DiscoveredWorkstream, error) {
-	f.gotSignals = append([]models.Signal(nil), signals...)
-	return append([]discovery.DiscoveredWorkstream(nil), f.discovered...), f.err
+	f.gotSignals = slices.Clone(signals)
+	return slices.Clone(f.discovered), f.err
 }
 
 func TestDiscoverAndProposeReadsWorkspaceSignals(t *testing.T) {

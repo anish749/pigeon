@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -183,12 +184,10 @@ func (h *Hub) Register(s *Session) error {
 	if err != nil {
 		return fmt.Errorf("validate session: %w", err)
 	}
+	idx := slices.IndexFunc(sessions, func(cs *ccsession.Session) bool { return cs.SessionID == s.SessionID })
 	var found *ccsession.Session
-	for _, cs := range sessions {
-		if cs.SessionID == s.SessionID {
-			found = cs
-			break
-		}
+	if idx >= 0 {
+		found = sessions[idx]
 	}
 	if found == nil {
 		return &RegistrationError{

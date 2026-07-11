@@ -1,10 +1,11 @@
 package slack
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,8 +45,8 @@ func prioritizeChannels(ctx context.Context, api slackPrioritizer, gate *rateLim
 	conversations = filterMuted(ctx, api, conversations)
 
 	// Sort all conversations: DMs first, then group IMs, private, public.
-	sort.SliceStable(conversations, func(i, j int) bool {
-		return channelPriority(conversations[i]) < channelPriority(conversations[j])
+	slices.SortStableFunc(conversations, func(a, b goslack.Channel) int {
+		return cmp.Compare(channelPriority(a), channelPriority(b))
 	})
 
 	activeSet := discoverActiveChannels(ctx, api, gate, cursors, conversations)

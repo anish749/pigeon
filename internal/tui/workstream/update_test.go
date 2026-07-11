@@ -299,7 +299,7 @@ func TestMergePicker_EnterMerges(t *testing.T) {
 	if target.ID != "ws-b" {
 		t.Errorf("put should be target ws-b, got %q", target.ID)
 	}
-	if !contains(target.Focus, "merged from Alpha") {
+	if !strings.Contains(target.Focus, "merged from Alpha") {
 		t.Errorf("target focus missing merge annotation: %q", target.Focus)
 	}
 	if len(st.deletes) != 1 || st.deletes[0] != "ws-a" {
@@ -497,15 +497,4 @@ func unwrapSequence(msg tea.Msg) ([]tea.Cmd, bool) {
 		out = append(out, c)
 	}
 	return out, true
-}
-
-// contains is a tiny strings.Contains shim so the test file doesn't
-// need a strings import for one usage.
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

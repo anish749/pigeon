@@ -1,7 +1,8 @@
 package manager
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -62,12 +63,7 @@ func (s *StatCollector) Participants(workstreamID string) []string {
 	for _, idx := range s.byWorkstream[workstreamID] {
 		seen[s.entries[idx].Sender] = struct{}{}
 	}
-	result := make([]string, 0, len(seen))
-	for name := range seen {
-		result = append(result, name)
-	}
-	sort.Strings(result)
-	return result
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // LastSignal returns the timestamp of the most recent signal routed to a workstream.

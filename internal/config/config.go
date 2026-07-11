@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 
@@ -176,54 +177,42 @@ func Save(cfg *Config) error {
 
 // AddWhatsApp upserts a WhatsApp configuration entry by account.
 func (c *Config) AddWhatsApp(entry WhatsAppConfig) {
-	for i, existing := range c.WhatsApp {
-		if existing.Account == entry.Account {
-			c.WhatsApp[i] = entry
-			return
-		}
+	if i := slices.IndexFunc(c.WhatsApp, func(w WhatsAppConfig) bool { return w.Account == entry.Account }); i >= 0 {
+		c.WhatsApp[i] = entry
+		return
 	}
 	c.WhatsApp = append(c.WhatsApp, entry)
 }
 
 // RemoveWhatsApp removes a WhatsApp configuration entry by account.
 func (c *Config) RemoveWhatsApp(account string) {
-	for i, existing := range c.WhatsApp {
-		if existing.Account == account {
-			c.WhatsApp = append(c.WhatsApp[:i], c.WhatsApp[i+1:]...)
-			return
-		}
-	}
+	c.WhatsApp = slices.DeleteFunc(c.WhatsApp, func(w WhatsAppConfig) bool { return w.Account == account })
 }
 
 // RemoveSlack removes a Slack configuration entry by workspace name.
 func (c *Config) RemoveSlack(workspace string) {
-	for i, existing := range c.Slack {
-		if existing.Workspace == workspace {
-			c.Slack = append(c.Slack[:i], c.Slack[i+1:]...)
-			return
-		}
+	if i := slices.IndexFunc(c.Slack, func(s SlackConfig) bool { return s.Workspace == workspace }); i >= 0 {
+		c.Slack = slices.Delete(c.Slack, i, i+1)
 	}
 }
 
 // AddSlack upserts a Slack configuration entry by team ID.
 // If a workspace with the same team ID already exists, it is overwritten.
 func (c *Config) AddSlack(entry SlackConfig) {
-	for i, existing := range c.Slack {
-		if existing.TeamID == entry.TeamID {
-			c.Slack[i] = entry
-			return
-		}
+	i := slices.IndexFunc(c.Slack, func(s SlackConfig) bool { return s.TeamID == entry.TeamID })
+	if i >= 0 {
+		c.Slack[i] = entry
+		return
 	}
 	c.Slack = append(c.Slack, entry)
 }
 
 // AddLinear upserts a Linear configuration entry by workspace.
 func (c *Config) AddLinear(entry LinearConfig) {
-	for i, existing := range c.Linear {
-		if existing.Workspace == entry.Workspace {
-			c.Linear[i] = entry
-			return
-		}
+	i := slices.IndexFunc(c.Linear, func(e LinearConfig) bool { return e.Workspace == entry.Workspace })
+	if i >= 0 {
+		c.Linear[i] = entry
+		return
 	}
 	c.Linear = append(c.Linear, entry)
 }
@@ -247,32 +236,27 @@ func (c *Config) AddLinear(entry LinearConfig) {
 // the setup command has the user's attention and an interactive prompt
 // to decide what to keep.
 func (c *Config) AddJira(entry JiraConfig) {
-	for i, existing := range c.Jira {
-		if existing.JiraConfig == entry.JiraConfig {
-			c.Jira[i] = entry
-			return
-		}
+	i := slices.IndexFunc(c.Jira, func(e JiraConfig) bool { return e.JiraConfig == entry.JiraConfig })
+	if i >= 0 {
+		c.Jira[i] = entry
+		return
 	}
 	c.Jira = append(c.Jira, entry)
 }
 
 // RemoveJira removes a Jira configuration entry by jira-cli config path.
 func (c *Config) RemoveJira(jiraConfig string) {
-	for i, existing := range c.Jira {
-		if existing.JiraConfig == jiraConfig {
-			c.Jira = append(c.Jira[:i], c.Jira[i+1:]...)
-			return
-		}
+	i := slices.IndexFunc(c.Jira, func(e JiraConfig) bool { return e.JiraConfig == jiraConfig })
+	if i >= 0 {
+		c.Jira = slices.Delete(c.Jira, i, i+1)
 	}
 }
 
 // AddGWS upserts a GWS configuration entry by email.
 func (c *Config) AddGWS(entry GWSConfig) {
-	for i, existing := range c.GWS {
-		if existing.Email == entry.Email {
-			c.GWS[i] = entry
-			return
-		}
+	if i := slices.IndexFunc(c.GWS, func(e GWSConfig) bool { return e.Email == entry.Email }); i >= 0 {
+		c.GWS[i] = entry
+		return
 	}
 	c.GWS = append(c.GWS, entry)
 }

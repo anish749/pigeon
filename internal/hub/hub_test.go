@@ -1,8 +1,9 @@
 package hub
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestConnectedClaudeSessions_MultipleSessions(t *testing.T) {
 	}
 
 	// Sort for deterministic comparison since map iteration is unordered.
-	sort.Slice(got, func(i, j int) bool { return got[i].SessionID < got[j].SessionID })
+	slices.SortFunc(got, func(a, b ClaudeSessionInfo) int { return cmp.Compare(a.SessionID, b.SessionID) })
 
 	if got[0].SessionID != "sess-1" || got[0].Account != "slack/Acme Corp" {
 		t.Errorf("session[0] = %+v, want sess-1 / slack/Acme Corp", got[0])

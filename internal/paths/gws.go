@@ -58,10 +58,14 @@ const DriveMetaFileGlob = driveMetaFilePrefix + "*" + driveMetaFileExt
 //     log this, since it means an unexpected filename shape.
 func ParseDriveMetaPath(path string) (DriveMetaFile, bool, error) {
 	base := filepath.Base(path)
-	if !strings.HasPrefix(base, driveMetaFilePrefix) || !strings.HasSuffix(base, driveMetaFileExt) {
+	after, ok := strings.CutPrefix(base, driveMetaFilePrefix)
+	if !ok {
 		return DriveMetaFile{}, false, nil
 	}
-	dateStr := strings.TrimSuffix(strings.TrimPrefix(base, driveMetaFilePrefix), driveMetaFileExt)
+	dateStr, ok := strings.CutSuffix(after, driveMetaFileExt)
+	if !ok {
+		return DriveMetaFile{}, false, nil
+	}
 	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
 		return DriveMetaFile{}, true, fmt.Errorf("invalid drive-meta date %q in %s: %w", dateStr, path, err)
 	}

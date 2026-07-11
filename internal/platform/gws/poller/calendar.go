@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/identity"
@@ -226,11 +227,5 @@ func removeRecurringIDs(existing, removals []string) []string {
 	for _, id := range removals {
 		remove[id] = true
 	}
-	var kept []string
-	for _, id := range existing {
-		if !remove[id] {
-			kept = append(kept, id)
-		}
-	}
-	return kept
+	return slices.DeleteFunc(existing, func(id string) bool { return remove[id] })
 }

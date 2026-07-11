@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	gosync "sync"
 	"time"
@@ -589,9 +590,7 @@ func fetchHistory(ctx context.Context, api *goslack.Client, gate *rateLimitGate,
 	}
 
 	// Reverse: API returns newest-first, we want chronological order
-	for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
-		all[i], all[j] = all[j], all[i]
-	}
+	slices.Reverse(all)
 	return all, nil
 }
 

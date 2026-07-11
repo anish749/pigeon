@@ -6,7 +6,7 @@ import "strings"
 // addressing apply. Google Workspace custom domains are NOT included
 // because dot and plus behavior varies by admin configuration.
 var gmailDomains = map[string]bool{
-	"gmail.com":     true,
+	"gmail.com":      true,
 	"googlemail.com": true,
 }
 
@@ -24,9 +24,7 @@ func normalizeEmail(email string) string {
 
 	if gmailDomains[domain] {
 		// Strip plus-addressed suffix: alice+tag → alice
-		if plus := strings.IndexByte(local, '+'); plus >= 0 {
-			local = local[:plus]
-		}
+		local, _, _ = strings.Cut(local, "+")
 		// Remove dots: a.li.ce → alice
 		local = strings.ReplaceAll(local, ".", "")
 	}

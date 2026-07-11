@@ -1,6 +1,7 @@
 package compact
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/anish749/pigeon/internal/store/modelv1"
@@ -202,9 +203,7 @@ func reconcileReactions(reactions []modelv1.ReactLine) []modelv1.ReactLine {
 
 	var out []modelv1.ReactLine
 	for _, events := range groups {
-		sort.SliceStable(events, func(i, j int) bool {
-			return events[i].Ts.Before(events[j].Ts)
-		})
+		slices.SortStableFunc(events, func(a, b modelv1.ReactLine) int { return a.Ts.Compare(b.Ts) })
 
 		var last *modelv1.ReactLine
 		for i := range events {
@@ -219,9 +218,7 @@ func reconcileReactions(reactions []modelv1.ReactLine) []modelv1.ReactLine {
 		}
 	}
 
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Ts.Before(out[j].Ts)
-	})
+	slices.SortStableFunc(out, func(a, b modelv1.ReactLine) int { return a.Ts.Compare(b.Ts) })
 
 	return out
 }
@@ -242,8 +239,7 @@ func applyEdits(msgs []modelv1.MsgLine, edits []modelv1.EditLine) []modelv1.MsgL
 		return msgs
 	}
 
-	out := make([]modelv1.MsgLine, len(msgs))
-	copy(out, msgs)
+	out := slices.Clone(msgs)
 	for i, m := range out {
 		if e, ok := latest[m.ID]; ok {
 			out[i].Text = e.Text
@@ -282,12 +278,7 @@ func applyDeletes(msgs []modelv1.MsgLine, reactions []modelv1.ReactLine, edits [
 }
 
 func cloneAttachments(a []modelv1.Attachment) []modelv1.Attachment {
-	if a == nil {
-		return nil
-	}
-	out := make([]modelv1.Attachment, len(a))
-	copy(out, a)
-	return out
+	return slices.Clone(a)
 }
 
 // DedupGWS removes duplicate GWS lines by ID (keep last occurrence).
