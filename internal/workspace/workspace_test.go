@@ -3,6 +3,8 @@ package workspace
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
 )
@@ -25,13 +27,8 @@ func TestGetCurrentWorkspace_FlagOverride(t *testing.T) {
 		account.New("slack", "acme-corp"),
 		account.New("gws", "work@co.com"),
 	}
-	if len(ws.Accounts) != len(want) {
-		t.Fatalf("got %d accounts, want %d", len(ws.Accounts), len(want))
-	}
-	for i, got := range ws.Accounts {
-		if got != want[i] {
-			t.Errorf("Accounts[%d] = %v, want %v", i, got, want[i])
-		}
+	if diff := cmp.Diff(want, ws.Accounts); diff != "" {
+		t.Errorf("%s", diff)
 	}
 }
 
@@ -138,13 +135,8 @@ func TestGetCurrentWorkspace_IncludesLinear(t *testing.T) {
 		account.New("slack", "acme-corp"),
 		account.New("linear", "eng"),
 	}
-	if len(ws.Accounts) != len(want) {
-		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
-	}
-	for i, got := range ws.Accounts {
-		if got != want[i] {
-			t.Errorf("Accounts[%d] = %v, want %v", i, got, want[i])
-		}
+	if diff := cmp.Diff(want, ws.Accounts); diff != "" {
+		t.Errorf("%s", diff)
 	}
 }
 
@@ -167,13 +159,8 @@ func TestGetCurrentWorkspace_IncludesJira(t *testing.T) {
 		account.New("slack", "acme-corp"),
 		account.New("jira", "acme"),
 	}
-	if len(ws.Accounts) != len(want) {
-		t.Fatalf("got %d accounts, want %d: %v", len(ws.Accounts), len(want), ws.Accounts)
-	}
-	for i, got := range ws.Accounts {
-		if got != want[i] {
-			t.Errorf("Accounts[%d] = %v, want %v", i, got, want[i])
-		}
+	if diff := cmp.Diff(want, ws.Accounts); diff != "" {
+		t.Errorf("%s", diff)
 	}
 }
 

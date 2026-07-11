@@ -87,15 +87,7 @@ func (m Model) scrollIntoView() Model {
 		m.listOffset = 0
 		return m
 	}
-	if m.listOffset > m.cursor {
-		m.listOffset = m.cursor
-	}
-	if m.listOffset < 0 {
-		m.listOffset = 0
-	}
-	if m.listOffset >= len(m.items) {
-		m.listOffset = len(m.items) - 1
-	}
+	m.listOffset = min(max(min(m.listOffset, m.cursor), 0), len(m.items)-1)
 	leftWidth, _ := m.columnWidths()
 	start, _ := m.visibleRange(leftWidth - 2)
 	m.listOffset = start

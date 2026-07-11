@@ -5,27 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
 
 // stripAnsi removes ANSI escape sequences so substring assertions on
 // the rendered View aren't fooled by lipgloss color codes.
 func stripAnsi(s string) string {
-	var b strings.Builder
-	skip := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			skip = true
-		case skip && (r == 'm' || r == 'K' || r == 'H'):
-			skip = false
-		case skip:
-			// drop
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return ansi.Strip(s)
 }
 
 func TestView_EmptyShowsCreateHint(t *testing.T) {

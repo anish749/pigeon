@@ -149,9 +149,7 @@ func fetchAndWrite(
 			if is404(err) {
 				slog.Warn("jira issue not found, advancing cursor past it",
 					"issue", ref.Key, "updated", ref.Updated)
-				if ref.Updated > maxUpdated {
-					maxUpdated = ref.Updated
-				}
+				maxUpdated = max(maxUpdated, ref.Updated)
 				skipped404++
 				continue
 			}
@@ -177,9 +175,7 @@ func fetchAndWrite(
 		}
 
 		written++
-		if updated > maxUpdated {
-			maxUpdated = updated
-		}
+		maxUpdated = max(maxUpdated, updated)
 	}
 
 	if skipped404 > 0 || len(errs) > 0 {

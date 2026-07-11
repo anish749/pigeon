@@ -2,6 +2,7 @@ package store
 
 import (
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,15 +84,11 @@ func wcLines(t *testing.T, file string) int {
 	if err != nil {
 		t.Fatalf("wc -l %s: %v", file, err)
 	}
-	var count int
-	for _, c := range strings.TrimSpace(string(out)) {
-		if c >= '0' && c <= '9' {
-			count = count*10 + int(c-'0')
-		} else {
-			break
-		}
+	n, err := strconv.Atoi(strings.Fields(string(out))[0])
+	if err != nil {
+		t.Fatalf("wc -l %s: parse %q: %v", file, out, err)
 	}
-	return count
+	return n
 }
 
 func dateFilePath(s *FSStore, acct account.Account) string {

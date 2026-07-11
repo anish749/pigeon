@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -254,7 +256,18 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 		return fmt.Errorf("resolve pigeon binary path: %w", err)
 	}
 
-	mcpConfig := fmt.Sprintf(`{"mcpServers":{"pigeon":{"command":%q,"args":["mcp"]}}}`, pigeonPath)
+	mcpConfigBytes, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"pigeon": map[string]any{
+				"command": pigeonPath,
+				"args":    []string{"mcp"},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal MCP config: %w", err)
+	}
+	mcpConfig := string(mcpConfigBytes)
 
 	var args []string
 	if resume {
@@ -284,14 +297,11 @@ func launchClaude(sessionID, name, cwd string, resume bool) error {
 }
 
 func findClaude() (string, error) {
-	pathDirs := strings.Split(os.Getenv("PATH"), ":")
-	for _, dir := range pathDirs {
-		full := dir + "/claude"
-		if info, err := os.Stat(full); err == nil && !info.IsDir() {
-			return full, nil
-		}
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return "", fmt.Errorf("claude not found in PATH — install Claude Code first")
 	}
-	return "", fmt.Errorf("claude not found in PATH — install Claude Code first")
+	return path, nil
 }
 
 func validateAccount(acct account.Account) error {
@@ -324,7 +334,7 @@ func validateAccount(acct account.Account) error {
 // SSE connection. Returns false if the daemon is unreachable.
 func isSessionConnected(sessionID string) bool {
 	client := daemonclient.DefaultPgnHTTPClient
-	resp, err := client.Get("http://pigeon/api/session/connected?session_id=" + sessionID)
+	resp, err := client.Get("http://pigeon/api/session/connected?" + url.Values{"session_id": {sessionID}}.Encode())
 	if err != nil {
 		return false
 	}

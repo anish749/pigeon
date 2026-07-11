@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -48,7 +49,7 @@ func Tail(n int, follow bool) error {
 	}
 	fmt.Println()
 
-	args := []string{"-n", fmt.Sprintf("%d", n)}
+	args := []string{"-n", strconv.Itoa(n)}
 	if follow {
 		args = append(args, "-f")
 	}
@@ -75,13 +76,5 @@ func InitFile(f LogFile, attrs ...slog.Attr) {
 		Level:     slog.LevelInfo,
 		AddSource: true,
 	})
-	if len(attrs) > 0 {
-		args := make([]any, len(attrs))
-		for i, a := range attrs {
-			args[i] = a
-		}
-		slog.SetDefault(slog.New(handler).With(args...))
-	} else {
-		slog.SetDefault(slog.New(handler))
-	}
+	slog.SetDefault(slog.New(handler.WithAttrs(attrs)))
 }

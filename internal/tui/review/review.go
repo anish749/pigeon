@@ -246,10 +246,7 @@ func (m model) renderDetail(item *outbox.Item) string {
 	}
 	b.WriteString("\n")
 
-	maxWidth := m.width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
+	maxWidth := max(m.width-6, 40)
 	box := msgStyle.Width(maxWidth).Render(resolved.FinalMessage())
 	for _, line := range strings.Split(box, "\n") {
 		b.WriteString("  " + line + "\n")

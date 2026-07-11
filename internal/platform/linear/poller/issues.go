@@ -126,9 +126,7 @@ func writeIssues(ctx context.Context, s *store.FSStore, linearDir paths.LinearDi
 			}
 		}
 
-		if updatedAt > maxUpdatedAt {
-			maxUpdatedAt = updatedAt
-		}
+		maxUpdatedAt = max(maxUpdatedAt, updatedAt)
 	}
 
 	return len(issues), maxUpdatedAt, errors.Join(errs...)

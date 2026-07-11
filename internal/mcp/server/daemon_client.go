@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
+
 	daemonclient "github.com/anish749/pigeon/internal/daemon/client"
 )
 
@@ -95,30 +97,26 @@ func (ds *pigeonDaemonStreamingClient) run(ctx context.Context) {
 		return
 	}
 
-	for {
+	bo := backoff.WithContext(backoff.NewConstantBackOff(2*time.Second), ctx)
+	_ = backoff.RetryNotify(func() error {
 		err := ds.connect(ctx)
 		if ctx.Err() != nil {
-			return
+			return backoff.Permanent(ctx.Err())
 		}
-
 		var rejected *rejectedError
 		if errors.As(err, &rejected) {
 			slog.Error("session rejected by daemon, stopping", "reason", rejected.reason)
 			ds.notify(NewClaudeChannelErrorNotification(fmt.Errorf("session rejected by daemon: %w", err)))
-			return
+			return backoff.Permanent(err)
 		}
-
+		return err
+	}, bo, func(err error, d time.Duration) {
 		slog.Warn("sse connection lost, reconnecting", "error", err)
-		select {
-		case <-time.After(2 * time.Second):
-		case <-ctx.Done():
-			return
-		}
-	}
+	})
 }
 
 func (ds *pigeonDaemonStreamingClient) connect(ctx context.Context) error {
-	reqURL := fmt.Sprintf("http://pigeon/api/events?session_id=%s&cwd=%s", url.QueryEscape(ds.sessionID), url.QueryEscape(ds.cwd))
+	reqURL := "http://pigeon/api/events?" + url.Values{"session_id": {ds.sessionID}, "cwd": {ds.cwd}}.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {

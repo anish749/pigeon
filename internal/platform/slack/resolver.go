@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -590,13 +591,7 @@ func ParseTimestamp(ts string) time.Time {
 
 // createSignal builds an identity signal from a Slack user API response.
 func (r *Resolver) createSignal(u goslack.User) identity.Signal { //nolint:gocritic // value receiver is fine for signal construction
-	name := u.Profile.DisplayName
-	if name == "" {
-		name = u.RealName
-	}
-	if name == "" {
-		name = u.Name
-	}
+	name := cmp.Or(u.Profile.DisplayName, u.RealName, u.Name)
 	return identity.Signal{
 		Email: u.Profile.Email,
 		Name:  name,
