@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anish749/pigeon/internal/workstream/models"
 )
@@ -83,7 +84,7 @@ func TestRenderListColumn_CursorMarker(t *testing.T) {
 		},
 		cursor: 1,
 	}
-	out := stripAnsi(m.renderListColumn(20))
+	out := ansi.Strip(m.renderListColumn(20))
 	lines := strings.Split(out, "\n")
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), lines)
@@ -104,7 +105,7 @@ func TestRenderListColumn_WrapsLongNameWithContinuationIndent(t *testing.T) {
 		},
 		cursor: 0,
 	}
-	out := stripAnsi(m.renderListColumn(18))
+	out := ansi.Strip(m.renderListColumn(18))
 	lines := strings.Split(out, "\n")
 	if len(lines) < 3 {
 		t.Fatalf("expected anchor + wrapped name spanning multiple lines, got %q", lines)
@@ -126,7 +127,7 @@ func TestRenderListColumn_DefaultLabelOnLastLine(t *testing.T) {
 			{ID: "_default_acme", Name: "General", Workspace: "acme"},
 		},
 	}
-	out := stripAnsi(m.renderListColumn(40))
+	out := ansi.Strip(m.renderListColumn(40))
 	if !strings.Contains(out, "General (default)") {
 		t.Errorf("default suffix missing from %q", out)
 	}
@@ -142,7 +143,7 @@ func TestRenderListColumn_DefaultLabelOnLastWrappedLine(t *testing.T) {
 			},
 		},
 	}
-	out := stripAnsi(m.renderListColumn(16))
+	out := ansi.Strip(m.renderListColumn(16))
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if !strings.Contains(lines[len(lines)-1], "(default)") {
 		t.Errorf("default suffix should land on last wrapped line, got lines=%q", lines)
@@ -157,7 +158,7 @@ func TestRenderListColumn_DefaultLabelOnLastWrappedLine(t *testing.T) {
 func TestRenderDetailBox_ShowsNameAndFocus(t *testing.T) {
 	m := Model{}
 	w := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "acme", Focus: "Some focus text"}
-	out := stripAnsi(m.renderDetailBox(w, minDetailWidth))
+	out := ansi.Strip(m.renderDetailBox(w, minDetailWidth))
 	if !strings.Contains(out, "Alpha") {
 		t.Errorf("box missing workstream name: %q", out)
 	}
@@ -169,7 +170,7 @@ func TestRenderDetailBox_ShowsNameAndFocus(t *testing.T) {
 func TestRenderDetailBox_OmitsWorkspaceName(t *testing.T) {
 	m := Model{}
 	w := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "acme", Focus: "Some focus"}
-	out := stripAnsi(m.renderDetailBox(w, minDetailWidth))
+	out := ansi.Strip(m.renderDetailBox(w, minDetailWidth))
 	if strings.Contains(out, "acme") {
 		t.Errorf("box should not include workspace name: %q", out)
 	}
@@ -181,7 +182,7 @@ func TestRenderDetailBox_OmitsWorkspaceName(t *testing.T) {
 func TestRenderDetailBox_NoFocusFallback(t *testing.T) {
 	m := Model{}
 	w := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "acme"}
-	out := stripAnsi(m.renderDetailBox(w, minDetailWidth))
+	out := ansi.Strip(m.renderDetailBox(w, minDetailWidth))
 	if !strings.Contains(out, "(no focus set)") {
 		t.Errorf("missing focus fallback: %q", out)
 	}
@@ -190,7 +191,7 @@ func TestRenderDetailBox_NoFocusFallback(t *testing.T) {
 func TestRenderDetailBox_DefaultLabel(t *testing.T) {
 	m := Model{}
 	w := models.Workstream{ID: "_default_acme", Name: "General", Workspace: "acme"}
-	out := stripAnsi(m.renderDetailBox(w, minDetailWidth))
+	out := ansi.Strip(m.renderDetailBox(w, minDetailWidth))
 	if !strings.Contains(out, "General (default)") {
 		t.Errorf("default suffix missing: %q", out)
 	}
@@ -199,7 +200,7 @@ func TestRenderDetailBox_DefaultLabel(t *testing.T) {
 func TestRenderDetailBox_ReservesTrailingSpace(t *testing.T) {
 	m := Model{}
 	w := models.Workstream{ID: "ws-a", Name: "Alpha", Workspace: "acme", Focus: "Some focus"}
-	out := stripAnsi(m.renderDetailBox(w, minDetailWidth))
+	out := ansi.Strip(m.renderDetailBox(w, minDetailWidth))
 	lines := strings.Split(out, "\n")
 	// The bottom border is the last line; the line above it should be
 	// blank content (interior of the box) reserving room for new fields.
@@ -281,7 +282,7 @@ func TestRenderListColumn_TruncatesToBudget(t *testing.T) {
 		height: 10,
 		width:  100,
 	}
-	out := stripAnsi(m.renderListColumn(20))
+	out := ansi.Strip(m.renderListColumn(20))
 	rendered := strings.Count(out, "\n") + 1
 	if rendered >= 30 {
 		t.Errorf("expected truncated render, got %d lines for 30 items", rendered)
@@ -299,7 +300,7 @@ func TestView_SideBySideKeepsNameAndFocusVisible(t *testing.T) {
 		{ID: "ws-a", Name: "Alpha", Workspace: "acme", Focus: "alpha focus"},
 		{ID: "ws-b", Name: "Beta", Workspace: "acme", Focus: "beta focus"},
 	}
-	out := stripAnsi(m.View())
+	out := ansi.Strip(m.View())
 	for _, want := range []string{"Alpha", "Beta", "alpha focus"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered view missing %q in:\n%s", want, out)
