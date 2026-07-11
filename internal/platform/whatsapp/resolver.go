@@ -18,12 +18,7 @@ func containsLower(s, substr string) bool {
 }
 
 func isDigits(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
+	return len(s) > 0 && !strings.ContainsFunc(s, func(r rune) bool { return r < '0' || r > '9' })
 }
 
 // Resolver provides consistent name resolution for WhatsApp contacts and groups.

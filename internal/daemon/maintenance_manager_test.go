@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -250,7 +251,7 @@ func TestMaintenanceManager_SchedulerPicksUpReconciledAccounts(t *testing.T) {
 	// Initial config: alpha only. Tick should enqueue alpha.
 	m.setAccounts(&config.Config{Linear: []config.LinearConfig{{Workspace: "alpha"}}})
 	tick()
-	if got, want := drain(), []string{"linear-alpha"}; !equalStrings(got, want) {
+	if got, want := drain(), []string{"linear-alpha"}; !slices.Equal(got, want) {
 		t.Fatalf("tick #1: got %v, want %v", got, want)
 	}
 
@@ -263,7 +264,7 @@ func TestMaintenanceManager_SchedulerPicksUpReconciledAccounts(t *testing.T) {
 		},
 	})
 	tick()
-	if got, want := drain(), []string{"linear-beta", "linear-gamma"}; !equalStrings(got, want) {
+	if got, want := drain(), []string{"linear-beta", "linear-gamma"}; !slices.Equal(got, want) {
 		t.Fatalf("tick #2: got %v, want %v", got, want)
 	}
 
@@ -273,18 +274,6 @@ func TestMaintenanceManager_SchedulerPicksUpReconciledAccounts(t *testing.T) {
 	if got := drain(); len(got) != 0 {
 		t.Fatalf("tick #3: got %v, want []", got)
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // TestMaintenanceManager_SetAccountsReconciliation exercises the live
@@ -304,23 +293,12 @@ func TestMaintenanceManager_SetAccountsReconciliation(t *testing.T) {
 		sort.Strings(out)
 		return out
 	}
-	equal := func(got, want []string) bool {
-		if len(got) != len(want) {
-			return false
-		}
-		for i := range got {
-			if got[i] != want[i] {
-				return false
-			}
-		}
-		return true
-	}
 
 	m.setAccounts(&config.Config{
 		Slack:  []config.SlackConfig{{Workspace: "acme"}},
 		Linear: []config.LinearConfig{{Workspace: "alpha"}},
 	})
-	if got, want := keys(), []string{"linear-alpha", "slack-acme"}; !equal(got, want) {
+	if got, want := keys(), []string{"linear-alpha", "slack-acme"}; !slices.Equal(got, want) {
 		t.Fatalf("after first config: got %v, want %v", got, want)
 	}
 
@@ -329,7 +307,7 @@ func TestMaintenanceManager_SetAccountsReconciliation(t *testing.T) {
 		GWS:    []config.GWSConfig{{Email: "x@y.com"}},
 		Linear: []config.LinearConfig{{Workspace: "alpha"}},
 	})
-	if got, want := keys(), []string{"gws-xaty-com", "linear-alpha"}; !equal(got, want) {
+	if got, want := keys(), []string{"gws-xaty-com", "linear-alpha"}; !slices.Equal(got, want) {
 		t.Fatalf("after reconcile: got %v, want %v", got, want)
 	}
 

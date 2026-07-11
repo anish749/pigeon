@@ -975,14 +975,11 @@ func parseLines(data []byte) ([]modelv1.Line, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	parts := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' })
 
 	var lines []modelv1.Line
 	var errs []error
 	for _, p := range parts {
-		if p == "" {
-			continue
-		}
 		l, err := modelv1.Parse(p)
 		if err != nil {
 			errs = append(errs, err)

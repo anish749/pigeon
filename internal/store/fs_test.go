@@ -1590,13 +1590,7 @@ func TestApplyPendingEmailDeletes_NoPendingFile(t *testing.T) {
 }
 
 func nonEmptyLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		if l != "" {
-			out = append(out, l)
-		}
-	}
-	return out
+	return strings.FieldsFunc(s, func(r rune) bool { return r == '\n' })
 }
 
 // TestInterleaveThreads_ParentNotInDateFiles verifies that thread replies are

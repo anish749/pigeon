@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/anish749/pigeon/internal/paths"
@@ -51,7 +52,7 @@ func Glob(dir string, since time.Duration) ([]paths.DataFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		reverseStrings(files) // most recent first
+		slices.Reverse(files) // most recent first
 		return classifyAndCollect(files), nil
 	}
 
@@ -61,8 +62,7 @@ func Glob(dir string, since time.Duration) ([]paths.DataFile, error) {
 		return nil, nil
 	}
 
-	allGlobs := append([]string{}, dateFileGlobs...)
-	allGlobs = append(allGlobs, metaGlobs...)
+	allGlobs := slices.Concat(dateFileGlobs, metaGlobs)
 
 	matched, err := rgFiles(dir, allGlobs)
 	if err != nil {
@@ -90,7 +90,7 @@ func Glob(dir string, since time.Duration) ([]paths.DataFile, error) {
 		}
 		driveMetas = append(driveMetas, meta)
 	}
-	reverseStrings(dateFiles)
+	slices.Reverse(dateFiles)
 
 	driveContent, err := expandDriveMetaMatches(driveMetas)
 	if err != nil {
@@ -104,9 +104,7 @@ func Glob(dir string, since time.Duration) ([]paths.DataFile, error) {
 		return nil, err
 	}
 
-	result := append([]string{}, dateFiles...)
-	result = append(result, driveContent...)
-	result = append(result, threadFiles...)
+	result := slices.Concat(dateFiles, driveContent, threadFiles)
 	return classifyAndCollect(result), nil
 }
 

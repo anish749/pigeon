@@ -75,11 +75,12 @@ func collectFrames(t *testing.T, h *Hub, req tail.Request, readFor time.Duration
 	connectedFired := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
 			continue
 		}
 		var f map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &f); err != nil {
+		if err := json.Unmarshal([]byte(data), &f); err != nil {
 			t.Fatalf("unmarshal frame: %v", err)
 		}
 		frames = append(frames, f)

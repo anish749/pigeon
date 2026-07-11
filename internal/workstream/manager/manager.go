@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -289,8 +290,7 @@ func (m *Manager) ObserveRouting(ctx context.Context, sig models.Signal, decisio
 			needsUpdate = append(needsUpdate, wsID)
 		}
 	}
-	recentSignals := make([]models.Signal, len(m.recentSignals))
-	copy(recentSignals, m.recentSignals)
+	recentSignals := slices.Clone(m.recentSignals)
 
 	m.mu.Unlock()
 

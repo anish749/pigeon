@@ -3,7 +3,7 @@ package modelv1
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -315,7 +315,7 @@ func formatReactions(reactions []ReactLine) string {
 	var parts []string
 	for _, emoji := range order {
 		g := groups[emoji]
-		sort.Strings(g.users)
+		slices.Sort(g.users)
 		parts = append(parts, g.emoji+" "+strings.Join(g.users, ", "))
 	}
 	return strings.Join(parts, " · ")

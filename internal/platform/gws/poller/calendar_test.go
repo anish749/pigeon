@@ -214,12 +214,7 @@ func readAllEvents(t *testing.T, s *store.FSStore, calDir string) []*modelv1.Cal
 }
 
 func hasEventWithSummary(events []*modelv1.CalendarEvent, summary string) bool {
-	for _, e := range events {
-		if e.Runtime.Summary == summary {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(events, func(e *modelv1.CalendarEvent) bool { return e.Runtime.Summary == summary })
 }
 
 func eventsWithPrefix(events []*modelv1.CalendarEvent, prefix string) []*modelv1.CalendarEvent {

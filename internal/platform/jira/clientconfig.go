@@ -66,7 +66,8 @@ func ResolveConfigPath(override string) (string, error) {
 // Returns an error only when "~" or "~/" appears but the home dir
 // can't be resolved.
 func expandHome(p string) (string, error) {
-	if p != "~" && !strings.HasPrefix(p, "~/") {
+	rest, ok := strings.CutPrefix(p, "~/")
+	if p != "~" && !ok {
 		return p, nil
 	}
 	home, err := os.UserHomeDir()
@@ -76,5 +77,5 @@ func expandHome(p string) (string, error) {
 	if p == "~" {
 		return home, nil
 	}
-	return filepath.Join(home, p[2:]), nil
+	return filepath.Join(home, rest), nil
 }

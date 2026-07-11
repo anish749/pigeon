@@ -2,7 +2,8 @@ package search
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -131,12 +132,7 @@ func PrintGroupedResults(matches []Match) {
 }
 
 func sortedKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 type timeBucket struct {
@@ -243,11 +239,7 @@ func formatMatchLine(l modelv1.Line, loc *time.Location) []string {
 }
 
 func formatSenders(senders map[string]struct{}, max int) string {
-	names := make([]string, 0, len(senders))
-	for name := range senders {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(senders))
 	if len(names) <= max {
 		return strings.Join(names, ", ")
 	}

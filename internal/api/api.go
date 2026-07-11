@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -578,7 +579,6 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 	if len(dates) == 0 {
 		return "", 0
 	}
-	sort.Strings(dates)
 
 	// Count lines across all files.
 	for _, e := range entries {
@@ -589,14 +589,10 @@ func convActivity(acct account.Account, conversation string) (lastDate string, t
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if line != "" {
-				totalLines++
-			}
-		}
+		totalLines += len(strings.FieldsFunc(string(data), func(r rune) bool { return r == '\n' }))
 	}
 
-	return dates[len(dates)-1], totalLines
+	return slices.Max(dates), totalLines
 }
 
 // checkMPDMBotAccess rejects bot-token sends to group DMs where the bot is

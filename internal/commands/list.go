@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 
@@ -72,9 +71,7 @@ func RunList(platform, accountName string) error {
 	for name := range cfg.Workspaces {
 		names = append(names, name)
 	}
-	slices.SortFunc(names, func(a, b config.WorkspaceName) int {
-		return cmp.Compare(a, b)
-	})
+	slices.Sort(names)
 
 	fmt.Println("workspaces:")
 	for _, name := range names {

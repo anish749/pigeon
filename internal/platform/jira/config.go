@@ -97,9 +97,7 @@ func (c *PigeonJiraConfig) Account() (account.Account, error) {
 	if err != nil {
 		return account.Account{}, err
 	}
-	if i := strings.IndexByte(host, '.'); i >= 0 {
-		host = host[:i]
-	}
+	host, _, _ = strings.Cut(host, ".")
 	return account.New(paths.JiraPlatform, strings.ToLower(host)), nil
 }
 

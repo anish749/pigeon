@@ -2,6 +2,7 @@ package workstream
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -359,11 +360,11 @@ func (m Model) renderMergePicker() string {
 		return b.String()
 	}
 
-	cursorPos := indexOfInt(candidates, m.mergeCursor)
+	cursorPos := slices.Index(candidates, m.mergeCursor)
 	if cursorPos < 0 {
 		cursorPos = 0
 	}
-	offsetPos := indexOfInt(candidates, m.mergeOffset)
+	offsetPos := slices.Index(candidates, m.mergeOffset)
 	if offsetPos < 0 {
 		offsetPos = cursorPos
 	}
@@ -452,12 +453,7 @@ func (m Model) renderFullScreen(content, footer string) string {
 	for i := len(contentLines); i < contentHeight; i++ {
 		b.WriteByte('\n')
 	}
-	for i, line := range footerLines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(line)
-	}
+	b.WriteString(strings.Join(footerLines, "\n"))
 	return b.String()
 }
 

@@ -2,6 +2,7 @@ package read
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -405,12 +406,7 @@ func TestExpandDriveMetaMatches(t *testing.T) {
 	}
 
 	hasExt := func(ext string) bool {
-		for _, f := range content {
-			if filepath.Ext(f) == ext {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(content, func(f string) bool { return filepath.Ext(f) == ext })
 	}
 	if !hasExt(".md") {
 		t.Error("missing .md")

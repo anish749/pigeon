@@ -6,6 +6,7 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/anish749/pigeon/internal/account"
 	"github.com/anish749/pigeon/internal/config"
@@ -83,12 +84,9 @@ func GetAllWorkspaces(cfg *config.Config) ([]*Workspace, error) {
 
 // Contains reports whether the workspace includes the given account.
 func (w *Workspace) Contains(acct account.Account) bool {
-	for _, a := range w.Accounts {
-		if a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug() {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(w.Accounts, func(a account.Account) bool {
+		return a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug()
+	})
 }
 
 // IsConfigured reports whether acct is present anywhere in cfg.
@@ -96,12 +94,9 @@ func (w *Workspace) Contains(acct account.Account) bool {
 // NameSlug — so a slug-equivalent display name resolves the same as it
 // does inside a workspace.
 func IsConfigured(cfg *config.Config, acct account.Account) bool {
-	for _, a := range cfg.AllAccounts() {
-		if a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug() {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(cfg.AllAccounts(), func(a account.Account) bool {
+		return a.Platform == acct.Platform && a.NameSlug() == acct.NameSlug()
+	})
 }
 
 // AccountsForPlatform returns the subset of workspace accounts matching the

@@ -2,6 +2,7 @@ package workstream
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -325,28 +326,18 @@ func (m Model) scrollMergeIntoView() Model {
 		m.mergeOffset = 0
 		return m
 	}
-	cursorPos := indexOfInt(candidates, m.mergeCursor)
+	cursorPos := slices.Index(candidates, m.mergeCursor)
 	if cursorPos < 0 {
 		cursorPos = 0
 		m.mergeCursor = candidates[0]
 	}
-	offsetPos := indexOfInt(candidates, m.mergeOffset)
+	offsetPos := slices.Index(candidates, m.mergeOffset)
 	if offsetPos < 0 || offsetPos > cursorPos {
 		offsetPos = cursorPos
 	}
 	startK, _ := m.mergeViewport(candidates, cursorPos, offsetPos)
 	m.mergeOffset = candidates[startK]
 	return m
-}
-
-// indexOfInt returns the position of target in s, or -1.
-func indexOfInt(s []int, target int) int {
-	for i, v := range s {
-		if v == target {
-			return i
-		}
-	}
-	return -1
 }
 
 // handleConfirmKey runs while the delete confirmation prompt is open.

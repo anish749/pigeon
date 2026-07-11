@@ -10,6 +10,7 @@ package outbox
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 )
@@ -92,11 +93,8 @@ func (o *Outbox) Remove(id string) {
 	o.mu.Lock()
 	if _, ok := o.items[id]; ok {
 		delete(o.items, id)
-		for i, oid := range o.order {
-			if oid == id {
-				o.order = append(o.order[:i], o.order[i+1:]...)
-				break
-			}
+		if i := slices.Index(o.order, id); i >= 0 {
+			o.order = slices.Delete(o.order, i, i+1)
 		}
 	}
 	o.mu.Unlock()

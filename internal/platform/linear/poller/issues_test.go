@@ -225,11 +225,5 @@ func TestWriteIssuesDedup(t *testing.T) {
 }
 
 func splitNonEmpty(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
+	return strings.FieldsFunc(s, func(r rune) bool { return r == '\n' })
 }

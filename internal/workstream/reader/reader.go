@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -48,9 +49,7 @@ func (r *Reader) ReadAccounts(ctx context.Context, accounts []account.Account, s
 		signals = append(signals, sigs...)
 	}
 
-	sort.Slice(signals, func(i, j int) bool {
-		return signals[i].Ts.Before(signals[j].Ts)
-	})
+	slices.SortFunc(signals, func(a, b models.Signal) int { return a.Ts.Compare(b.Ts) })
 
 	return signals, errors.Join(errs...)
 }
@@ -82,9 +81,7 @@ func (r *Reader) ReadAll(since, until time.Time) ([]models.Signal, error) {
 		}
 	}
 
-	sort.Slice(signals, func(i, j int) bool {
-		return signals[i].Ts.Before(signals[j].Ts)
-	})
+	slices.SortFunc(signals, func(a, b models.Signal) int { return a.Ts.Compare(b.Ts) })
 
 	return signals, errors.Join(errs...)
 }
@@ -469,7 +466,7 @@ func listDateFiles(dir string) ([]string, error) {
 			files = append(files, filepath.Join(dir, e.Name()))
 		}
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files, nil
 }
 
