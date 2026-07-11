@@ -143,3 +143,18 @@ Errors are the caller's decision — always propagate them, never hide them.
 
 5. **Skip useless nil checks.** Ranging over a nil slice is safe in Go — don't guard it.
    Only nil-check pointers and interfaces that can actually be nil.
+
+## Avoid Hand-Rolled Reimplementations
+
+Before writing a loop or helper, check `slices`, `strings`, `maps`, `cmp`, `strconv`, `net/url`,
+`encoding/json`, `crypto/rand`, and builtin `min`/`max`. Recurring patterns agents reinvent:
+- Manual contains/index/dedupe/sort/reverse/clone loops over slices → `slices.*`
+- `HasPrefix`/`HasSuffix` + manual slicing → `strings.CutPrefix`/`CutSuffix`/`Cut`
+- Hand-written if/else min/max/clamp → builtin `min`/`max`
+- Cascading empty-string fallback chains → `cmp.Or`
+- `fmt.Sprintf("%d", n)` → `strconv.Itoa`/`FormatInt`
+- Hand-assembled URL query strings → `url.Values{}.Encode()`
+- Hand-rolled JSON string building → `encoding/json.Marshal`
+- Manual retry/reconnect loops (`time.Sleep`/`time.After`) → `cenkalti/backoff` (see `internal/daemon/restart.go`)
+- Modulo-biased random token generation → `crypto/rand.Text()`
+- A function that's a pure one-line wrapper over another call → delete it, call the underlying function directly
