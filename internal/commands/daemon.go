@@ -28,6 +28,7 @@ import (
 	"github.com/anish749/pigeon/internal/selfupdate"
 	"github.com/anish749/pigeon/internal/store"
 	"github.com/anish749/pigeon/internal/syncstatus"
+	"github.com/anish749/pigeon/internal/toolgate"
 )
 
 func DaemonStart() error {
@@ -168,8 +169,9 @@ func DaemonRun(version string) error {
 	defer msgHub.Stop()
 
 	ob := outbox.New()
+	tg := toolgate.NewGate()
 	tracker := syncstatus.NewTracker()
-	apiServer := api.NewServer(msgHub, ob, store, version, tracker)
+	apiServer := api.NewServer(msgHub, ob, tg, store, version, tracker)
 
 	// MaintenanceManager owns the single Maintain worker for the daemon
 	// and runs the periodic scheduler that picks up stale accounts.
@@ -183,7 +185,7 @@ func DaemonRun(version string) error {
 	waMgr := wamgr.NewManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker)
 	go waMgr.Run(ctx, cfg.WhatsApp)
 
-	slackMgrInst := slackmgr.NewManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger, apiServer.OutboxHandler())
+	slackMgrInst := slackmgr.NewManager(apiServer, store, msgHub.RouteEvent, store, dataRoot, tracker, maintMgr.Trigger, apiServer.OutboxHandler(), apiServer.ToolGateHandler())
 	go slackMgrInst.Run(ctx, cfg.Slack)
 
 	gwsMgrInst := gwsmgr.NewManager(apiServer, store, store, dataRoot, tracker)

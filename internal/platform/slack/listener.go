@@ -16,6 +16,7 @@ import (
 	"github.com/anish749/pigeon/internal/store/modelv1"
 	"github.com/anish749/pigeon/internal/store/modelv1/slackraw"
 	"github.com/anish749/pigeon/internal/syncstatus"
+	"github.com/anish749/pigeon/internal/toolgate"
 )
 
 // Listener receives Slack Socket Mode events and writes messages to local text files.
@@ -35,6 +36,7 @@ type Listener struct {
 	onEvent      hub.NotifyFunc
 	botAPI       *goslack.Client
 	obHandler    *outbox.Handler
+	tgHandler    *toolgate.Handler
 	syncTracker  *syncstatus.Tracker
 }
 
@@ -45,7 +47,7 @@ type Listener struct {
 // hub callback used for every routable platform event — messages,
 // reactions, edits, deletes — built via hub.NewMsg / NewReact /
 // NewEdit / NewDelete at the call sites. Must be non-nil.
-func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onEvent hub.NotifyFunc, syncTracker *syncstatus.Tracker, botAPI *goslack.Client, obHandler *outbox.Handler) *Listener {
+func NewListener(client *socketmode.Client, resolver *Resolver, messages *MessageStore, userToken, botToken string, acct account.Account, teamID, pigeonBotUID, appName string, onEvent hub.NotifyFunc, syncTracker *syncstatus.Tracker, botAPI *goslack.Client, obHandler *outbox.Handler, tgHandler *toolgate.Handler) *Listener {
 	return &Listener{
 		client:       client,
 		resolver:     resolver,
@@ -59,6 +61,7 @@ func NewListener(client *socketmode.Client, resolver *Resolver, messages *Messag
 		onEvent:      onEvent,
 		botAPI:       botAPI,
 		obHandler:    obHandler,
+		tgHandler:    tgHandler,
 		syncTracker:  syncTracker,
 	}
 }
